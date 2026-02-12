@@ -1,0 +1,32 @@
+[Unit]
+Description=AgentGo Copilot - Personal Assistant
+After=network.target
+Documentation=https://github.com/jholhewres/goclaw
+
+[Service]
+Type=simple
+User=copilot
+Group=copilot
+WorkingDirectory=/opt/copilot
+ExecStart=/opt/copilot/copilot serve --config /etc/copilot/config.yaml
+Restart=on-failure
+RestartSec=5
+
+# Variáveis de ambiente (melhor usar EnvironmentFile)
+EnvironmentFile=-/etc/copilot/env
+
+# Segurança (hardening)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/copilot/sessions /opt/copilot/data
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+# Limites de recursos
+LimitNOFILE=65535
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

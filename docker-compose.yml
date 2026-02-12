@@ -1,0 +1,20 @@
+services:
+  copilot:
+    build: .
+    container_name: goclaw-copilot
+    restart: unless-stopped
+    volumes:
+      - ./sessions:/home/copilot/sessions
+      - ./data:/home/copilot/data
+      - ./config.yaml:/etc/copilot/config.yaml:ro
+    environment:
+      - TZ=America/Sao_Paulo
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    ports:
+      - "8080:8080"  # Health check e futuro web interface
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,68 @@
+# AgentGo Copilot - Configuração
+# Copie este arquivo para config.yaml e ajuste conforme necessário.
+
+assistant:
+  name: "Copilot"
+  trigger: "@copilot"
+  model: "gpt-4o-mini"
+  timezone: "America/Sao_Paulo"
+  language: "pt-BR"
+  instructions: |
+    You are a helpful personal assistant.
+    Be concise and practical in your responses.
+    Respond in Portuguese when the user writes in Portuguese.
+
+# Canais de comunicação
+channels:
+  whatsapp:
+    enabled: true
+    session_dir: "./sessions/whatsapp"
+    trigger: "@copilot"
+  discord:
+    enabled: false
+    token: ""
+    guild_id: ""
+  telegram:
+    enabled: false
+    token: ""
+
+# Memória e persistência
+memory:
+  type: "sqlite"
+  path: "./data/memory.db"
+  max_messages: 100
+  compression_strategy: "summarize"  # summarize, truncate, semantic
+
+# Segurança
+security:
+  max_input_length: 4096
+  rate_limit: 30  # mensagens por minuto por usuário
+  enable_pii_detection: false
+  enable_url_validation: true
+
+# Scheduler
+scheduler:
+  enabled: true
+  storage: "./data/scheduler.db"
+
+# Token budget (ajuste conforme o modelo)
+token_budget:
+  total: 128000
+  reserved: 4096
+  system: 500
+  skills: 2000
+  memory: 1000
+  history: 8000
+  tools: 4000
+
+# Skills habilitadas
+skills:
+  builtin:
+    - weather
+    - calculator
+    - websearch
+
+# Logging
+logging:
+  level: "info"  # debug, info, warn, error
+  format: "json"  # json, text

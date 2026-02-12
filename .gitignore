@@ -1,0 +1,44 @@
+# Binaries
+/bin/
+/dist/
+copilot
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go
+vendor/
+*.test
+*.out
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data & Sessions
+/data/
+/sessions/
+*.db
+*.db-shm
+*.db-wal
+
+# Config with secrets
+config.yaml
+config.local.yaml
+.env
+.env.*
+
+# Build
+/build/
+/tmp/
