@@ -94,7 +94,17 @@ func FormatForWhatsApp(text string) string {
 	text = regexp.MustCompile("(?m)^\\*\\s+").ReplaceAllString(text, "• ")
 
 	// Italic: *text* (single asterisk) → _text_
-	text = regexp.MustCompile("\\*([^*\n]+)\\*").ReplaceAllString(text, "_$1_")
+	// Only convert to underscore italic if the text doesn't contain hyphens,
+	// underscores, or other chars that break WhatsApp's italic rendering.
+	italicRe := regexp.MustCompile("\\*([^*\n]+)\\*")
+	text = italicRe.ReplaceAllStringFunc(text, func(m string) string {
+		inner := m[1 : len(m)-1]
+		// Skip conversion if text contains chars that break WhatsApp underscore italic.
+		if strings.ContainsAny(inner, "-_/\\@#.") {
+			return m // Leave as *text* — WhatsApp renders it as bold, which is acceptable.
+		}
+		return "_" + inner + "_"
+	})
 
 	// Strikethrough: ~~text~~ → ~text~
 	text = regexp.MustCompile("~~([^~]+)~~").ReplaceAllString(text, "~$1~")
