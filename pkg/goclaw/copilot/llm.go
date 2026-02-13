@@ -80,8 +80,16 @@ func detectProvider(baseURL string) string {
 	}
 }
 
+// isAnthropicAPI returns true if the provider uses the Anthropic Messages API format.
+func (c *LLMClient) isAnthropicAPI() bool {
+	return c.provider == "zai-anthropic" || c.provider == "anthropic"
+}
+
 // chatEndpoint returns the chat completions URL for the configured provider.
 func (c *LLMClient) chatEndpoint() string {
+	if c.isAnthropicAPI() {
+		return c.baseURL + "/v1/messages"
+	}
 	return c.baseURL + "/chat/completions"
 }
 
@@ -313,6 +321,270 @@ type chatResponse struct {
 		Message string `json:"message"`
 		Type    string `json:"type"`
 	} `json:"error"`
+}
+
+// ---------- Anthropic Messages API Types ----------
+
+// anthropicRequest is the Anthropic Messages API request format.
+type anthropicRequest struct {
+	Model       string             `json:"model"`
+	MaxTokens   int                `json:"max_tokens"`
+	System      string             `json:"system,omitempty"`
+	Messages    []anthropicMessage `json:"messages"`
+	Tools       []anthropicTool    `json:"tools,omitempty"`
+	Stream      bool               `json:"stream,omitempty"`
+	Temperature *float64           `json:"temperature,omitempty"`
+}
+
+// anthropicMessage is a message in the Anthropic format.
+type anthropicMessage struct {
+	Role    string `json:"role"`
+	Content any    `json:"content"` // string or []anthropicContent
+}
+
+// anthropicContent represents a content block in Anthropic format.
+type anthropicContent struct {
+	Type      string          `json:"type"`                 // "text", "tool_use", "tool_result", "image"
+	Text      string          `json:"text,omitempty"`       // for type=text
+	ID        string          `json:"id,omitempty"`         // for type=tool_use
+	Name      string          `json:"name,omitempty"`       // for type=tool_use
+	Input     json.RawMessage `json:"input,omitempty"`      // for type=tool_use
+	ToolUseID string          `json:"tool_use_id,omitempty"` // for type=tool_result
+	Content   string          `json:"content,omitempty"`    // for type=tool_result (string shorthand)
+	Source    *anthropicImage `json:"source,omitempty"`     // for type=image
+}
+
+// anthropicImage holds base64 image data for vision.
+type anthropicImage struct {
+	Type      string `json:"type"`       // "base64"
+	MediaType string `json:"media_type"` // "image/jpeg", "image/png"
+	Data      string `json:"data"`
+}
+
+// anthropicTool is a tool definition in the Anthropic format.
+type anthropicTool struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"input_schema"`
+}
+
+// anthropicResponse is the Anthropic Messages API response.
+type anthropicResponse struct {
+	ID         string             `json:"id"`
+	Type       string             `json:"type"`
+	Role       string             `json:"role"`
+	Model      string             `json:"model"`
+	Content    []anthropicContent `json:"content"`
+	StopReason string             `json:"stop_reason"` // "end_turn", "tool_use", "max_tokens"
+	Usage      struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
+	Error *struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+// anthropicStreamEvent is a Server-Sent Events chunk from the Anthropic streaming API.
+type anthropicStreamEvent struct {
+	Type         string           `json:"type"` // "message_start", "content_block_start", "content_block_delta", "content_block_stop", "message_delta", "message_stop"
+	Message      *anthropicResponse `json:"message,omitempty"`
+	Index        int              `json:"index,omitempty"`
+	ContentBlock *anthropicContent `json:"content_block,omitempty"`
+	Delta        *struct {
+		Type        string          `json:"type,omitempty"`
+		Text        string          `json:"text,omitempty"`
+		PartialJSON string          `json:"partial_json,omitempty"`
+		StopReason  string          `json:"stop_reason,omitempty"`
+	} `json:"delta,omitempty"`
+	Usage *struct {
+		OutputTokens int `json:"output_tokens,omitempty"`
+	} `json:"usage,omitempty"`
+}
+
+// convertToAnthropicRequest converts OpenAI-format messages and tools to Anthropic format.
+func convertToAnthropicRequest(model string, messages []chatMessage, tools []ToolDefinition, temp *float64, maxTokens *int) *anthropicRequest {
+	req := &anthropicRequest{
+		Model:       model,
+		MaxTokens:   8192,
+		Temperature: temp,
+	}
+	if maxTokens != nil && *maxTokens > 0 {
+		req.MaxTokens = *maxTokens
+	}
+
+	// Extract system message (Anthropic uses a top-level field, not a message).
+	var anthropicMsgs []anthropicMessage
+	for _, m := range messages {
+		if m.Role == "system" {
+			switch v := m.Content.(type) {
+			case string:
+				if req.System != "" {
+					req.System += "\n\n"
+				}
+				req.System += v
+			}
+			continue
+		}
+
+		if m.Role == "tool" {
+			// Tool results: merge into the previous user message or create a new one.
+			toolResult := anthropicContent{
+				Type:      "tool_result",
+				ToolUseID: m.ToolCallID,
+			}
+			switch v := m.Content.(type) {
+			case string:
+				toolResult.Content = v
+			}
+			// Wrap in a user message.
+			anthropicMsgs = append(anthropicMsgs, anthropicMessage{
+				Role:    "user",
+				Content: []anthropicContent{toolResult},
+			})
+			continue
+		}
+
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			// Assistant with tool calls → content blocks.
+			var blocks []anthropicContent
+			// Text content first (if any).
+			if content, ok := m.Content.(string); ok && content != "" {
+				blocks = append(blocks, anthropicContent{Type: "text", Text: content})
+			}
+			// Tool use blocks.
+			for _, tc := range m.ToolCalls {
+				blocks = append(blocks, anthropicContent{
+					Type:  "tool_use",
+					ID:    tc.ID,
+					Name:  tc.Function.Name,
+					Input: json.RawMessage(tc.Function.Arguments),
+				})
+			}
+			anthropicMsgs = append(anthropicMsgs, anthropicMessage{
+				Role:    "assistant",
+				Content: blocks,
+			})
+			continue
+		}
+
+		// Regular user or assistant message.
+		anthropicMsgs = append(anthropicMsgs, anthropicMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		})
+	}
+
+	// Anthropic requires alternating user/assistant. Merge consecutive same-role messages.
+	req.Messages = mergeConsecutiveAnthropicMessages(anthropicMsgs)
+
+	// Convert tools.
+	for _, t := range tools {
+		req.Tools = append(req.Tools, anthropicTool{
+			Name:        t.Function.Name,
+			Description: t.Function.Description,
+			InputSchema: t.Function.Parameters,
+		})
+	}
+
+	return req
+}
+
+// mergeConsecutiveAnthropicMessages merges consecutive messages with the same role.
+// Anthropic API requires strictly alternating user/assistant roles.
+func mergeConsecutiveAnthropicMessages(msgs []anthropicMessage) []anthropicMessage {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	result := []anthropicMessage{msgs[0]}
+	for i := 1; i < len(msgs); i++ {
+		last := &result[len(result)-1]
+		if msgs[i].Role == last.Role {
+			// Merge: convert both to content arrays and concatenate.
+			lastBlocks := toAnthropicContentBlocks(last.Content)
+			newBlocks := toAnthropicContentBlocks(msgs[i].Content)
+			last.Content = append(lastBlocks, newBlocks...)
+		} else {
+			result = append(result, msgs[i])
+		}
+	}
+	return result
+}
+
+// toAnthropicContentBlocks converts any content to []anthropicContent.
+func toAnthropicContentBlocks(content any) []anthropicContent {
+	switch v := content.(type) {
+	case string:
+		if v == "" {
+			return nil
+		}
+		return []anthropicContent{{Type: "text", Text: v}}
+	case []anthropicContent:
+		return v
+	default:
+		// Try JSON re-marshal for interface{} types from unmarshaling.
+		data, err := json.Marshal(content)
+		if err != nil {
+			return nil
+		}
+		var blocks []anthropicContent
+		if err := json.Unmarshal(data, &blocks); err != nil {
+			return []anthropicContent{{Type: "text", Text: string(data)}}
+		}
+		return blocks
+	}
+}
+
+// convertFromAnthropicResponse converts an Anthropic response to the internal LLMResponse format.
+func convertFromAnthropicResponse(resp *anthropicResponse) *LLMResponse {
+	var content string
+	var toolCalls []ToolCall
+
+	for _, block := range resp.Content {
+		switch block.Type {
+		case "text":
+			if content != "" {
+				content += "\n"
+			}
+			content += block.Text
+		case "tool_use":
+			args := string(block.Input)
+			if args == "" {
+				args = "{}"
+			}
+			toolCalls = append(toolCalls, ToolCall{
+				ID:   block.ID,
+				Type: "function",
+				Function: FunctionCall{
+					Name:      block.Name,
+					Arguments: args,
+				},
+			})
+		}
+	}
+
+	finishReason := resp.StopReason
+	switch finishReason {
+	case "end_turn":
+		finishReason = "stop"
+	case "tool_use":
+		finishReason = "tool_calls"
+	case "max_tokens":
+		finishReason = "length"
+	}
+
+	return &LLMResponse{
+		Content:      strings.TrimSpace(content),
+		ToolCalls:    toolCalls,
+		FinishReason: finishReason,
+		ModelUsed:    resp.Model,
+		Usage: LLMUsage{
+			PromptTokens:     resp.Usage.InputTokens,
+			CompletionTokens: resp.Usage.OutputTokens,
+			TotalTokens:      resp.Usage.InputTokens + resp.Usage.OutputTokens,
+		},
+	}
 }
 
 // ---------- Tool Calling Types ----------
@@ -577,6 +849,111 @@ func (c *LLMClient) TranscribeAudio(ctx context.Context, audioData []byte, filen
 // completeOnce performs a single chat completion request. Returns *apiError on HTTP errors
 // so the caller can classify and decide retry/fallback.
 func (c *LLMClient) completeOnce(ctx context.Context, model string, messages []chatMessage, tools []ToolDefinition) (*LLMResponse, error) {
+	if c.isAnthropicAPI() {
+		return c.completeOnceAnthropic(ctx, model, messages, tools)
+	}
+	return c.completeOnceOpenAI(ctx, model, messages, tools)
+}
+
+// completeOnceAnthropic performs a single request using the Anthropic Messages API.
+func (c *LLMClient) completeOnceAnthropic(ctx context.Context, model string, messages []chatMessage, tools []ToolDefinition) (*LLMResponse, error) {
+	defaults := getModelDefaults(model, c.provider)
+	var temp *float64
+	if defaults.SupportsTemperature && defaults.DefaultTemperature > 0 {
+		t := defaults.DefaultTemperature
+		temp = &t
+	}
+	maxTok := defaults.MaxOutputTokens
+	if maxTok == 0 {
+		maxTok = 8192
+	}
+
+	reqBody := convertToAnthropicRequest(model, messages, tools, temp, &maxTok)
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling request: %w", err)
+	}
+
+	endpoint := c.chatEndpoint()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", c.apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	c.logger.Debug("sending anthropic chat completion",
+		"model", model,
+		"messages", len(reqBody.Messages),
+		"tools", len(reqBody.Tools),
+		"endpoint", endpoint,
+		"system_len", len(reqBody.System),
+	)
+
+	start := time.Now()
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response: %w", err)
+	}
+
+	duration := time.Since(start)
+	bodyStr := string(respBody)
+
+	if resp.StatusCode != http.StatusOK {
+		apierr := &apiError{statusCode: resp.StatusCode, body: bodyStr}
+		if resp.StatusCode == 429 {
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				if sec, err := strconv.Atoi(ra); err == nil && sec > 0 {
+					apierr.retryAfterSec = sec
+				}
+			}
+		}
+		c.logger.Error("API error",
+			"model", model,
+			"status", resp.StatusCode,
+			"body", truncate(bodyStr, 500),
+		)
+		return nil, apierr
+	}
+
+	var anthResp anthropicResponse
+	if err := json.Unmarshal(respBody, &anthResp); err != nil {
+		return nil, fmt.Errorf("parsing anthropic response: %w (body: %s)", err, truncate(bodyStr, 200))
+	}
+
+	if anthResp.Error != nil {
+		kind := classifyAPIError(resp.StatusCode, anthResp.Error.Message)
+		if kind == LLMErrorContext {
+			return nil, &apiError{statusCode: 400, body: anthResp.Error.Message}
+		}
+		return nil, fmt.Errorf("API error: %s", anthResp.Error.Message)
+	}
+
+	result := convertFromAnthropicResponse(&anthResp)
+
+	c.logger.Info("anthropic chat completion done",
+		"model", model,
+		"duration_ms", duration.Milliseconds(),
+		"prompt_tokens", result.Usage.PromptTokens,
+		"completion_tokens", result.Usage.CompletionTokens,
+		"finish_reason", result.FinishReason,
+		"tool_calls", len(result.ToolCalls),
+	)
+
+	return result, nil
+}
+
+// completeOnceOpenAI performs a single request using the OpenAI chat completions API.
+func (c *LLMClient) completeOnceOpenAI(ctx context.Context, model string, messages []chatMessage, tools []ToolDefinition) (*LLMResponse, error) {
 	reqBody := chatRequest{
 		Model:    model,
 		Messages: messages,
@@ -736,6 +1113,195 @@ func (c *LLMClient) CompleteWithToolsStreamUsingModel(ctx context.Context, model
 
 // completeOnceStream performs a single streaming chat completion. Uses SSE parsing.
 func (c *LLMClient) completeOnceStream(ctx context.Context, model string, messages []chatMessage, tools []ToolDefinition, onChunk StreamCallback) (*LLMResponse, error) {
+	if c.isAnthropicAPI() {
+		return c.completeOnceStreamAnthropic(ctx, model, messages, tools, onChunk)
+	}
+	return c.completeOnceStreamOpenAI(ctx, model, messages, tools, onChunk)
+}
+
+// completeOnceStreamAnthropic handles Anthropic streaming with event types.
+func (c *LLMClient) completeOnceStreamAnthropic(ctx context.Context, model string, messages []chatMessage, tools []ToolDefinition, onChunk StreamCallback) (*LLMResponse, error) {
+	defaults := getModelDefaults(model, c.provider)
+	var temp *float64
+	if defaults.SupportsTemperature && defaults.DefaultTemperature > 0 {
+		t := defaults.DefaultTemperature
+		temp = &t
+	}
+	maxTok := defaults.MaxOutputTokens
+	if maxTok == 0 {
+		maxTok = 8192
+	}
+
+	reqBody := convertToAnthropicRequest(model, messages, tools, temp, &maxTok)
+	reqBody.Stream = true
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling request: %w", err)
+	}
+
+	endpoint := c.chatEndpoint()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", c.apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("Accept", "text/event-stream")
+
+	start := time.Now()
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("API request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, &apiError{statusCode: resp.StatusCode, body: string(body)}
+	}
+
+	var contentBuilder strings.Builder
+	toolCallsAccum := make(map[int]*ToolCall) // index -> tool call being built
+	toolArgsAccum := make(map[int]*strings.Builder) // index -> partial JSON args
+	finishReason := ""
+	var usage LLMUsage
+	blockIdx := 0
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+
+	var eventType string
+	for scanner.Scan() {
+		line := scanner.Text()
+
+		if strings.HasPrefix(line, "event: ") {
+			eventType = strings.TrimPrefix(line, "event: ")
+			continue
+		}
+
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		payload := strings.TrimPrefix(line, "data: ")
+		if payload == "[DONE]" {
+			break
+		}
+
+		var event anthropicStreamEvent
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			continue
+		}
+
+		// Use eventType from the "event:" line if the JSON type is empty.
+		evType := event.Type
+		if evType == "" {
+			evType = eventType
+		}
+
+		switch evType {
+		case "message_start":
+			if event.Message != nil {
+				usage.PromptTokens = event.Message.Usage.InputTokens
+			}
+
+		case "content_block_start":
+			if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
+				toolCallsAccum[blockIdx] = &ToolCall{
+					ID:   event.ContentBlock.ID,
+					Type: "function",
+					Function: FunctionCall{Name: event.ContentBlock.Name},
+				}
+				toolArgsAccum[blockIdx] = &strings.Builder{}
+			}
+			blockIdx = event.Index
+
+		case "content_block_delta":
+			if event.Delta != nil {
+				switch event.Delta.Type {
+				case "text_delta":
+					contentBuilder.WriteString(event.Delta.Text)
+					if onChunk != nil {
+						onChunk(event.Delta.Text)
+					}
+				case "input_json_delta":
+					if b, ok := toolArgsAccum[blockIdx]; ok {
+						b.WriteString(event.Delta.PartialJSON)
+					}
+				}
+			}
+
+		case "content_block_stop":
+			// Finalize tool args.
+			if tc, ok := toolCallsAccum[blockIdx]; ok {
+				if b, ok := toolArgsAccum[blockIdx]; ok {
+					tc.Function.Arguments = b.String()
+					if tc.Function.Arguments == "" {
+						tc.Function.Arguments = "{}"
+					}
+				}
+			}
+
+		case "message_delta":
+			if event.Delta != nil && event.Delta.StopReason != "" {
+				finishReason = event.Delta.StopReason
+			}
+			if event.Usage != nil {
+				usage.CompletionTokens = event.Usage.OutputTokens
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("reading stream: %w", err)
+	}
+
+	// Map Anthropic stop reasons to OpenAI finish reasons.
+	switch finishReason {
+	case "end_turn":
+		finishReason = "stop"
+	case "tool_use":
+		finishReason = "tool_calls"
+	case "max_tokens":
+		finishReason = "length"
+	}
+
+	// Build ordered tool calls.
+	indices := make([]int, 0, len(toolCallsAccum))
+	for k := range toolCallsAccum {
+		indices = append(indices, k)
+	}
+	sort.Ints(indices)
+	var toolCalls []ToolCall
+	for _, i := range indices {
+		if tc, ok := toolCallsAccum[i]; ok && (tc.ID != "" || tc.Function.Name != "") {
+			toolCalls = append(toolCalls, *tc)
+		}
+	}
+
+	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+
+	c.logger.Info("anthropic streaming done",
+		"model", model,
+		"duration_ms", time.Since(start).Milliseconds(),
+		"finish_reason", finishReason,
+		"tool_calls", len(toolCalls),
+	)
+
+	return &LLMResponse{
+		Content:      strings.TrimSpace(contentBuilder.String()),
+		ToolCalls:    toolCalls,
+		FinishReason: finishReason,
+		ModelUsed:    model,
+		Usage:        usage,
+	}, nil
+}
+
+// completeOnceStreamOpenAI performs streaming using the OpenAI SSE format.
+func (c *LLMClient) completeOnceStreamOpenAI(ctx context.Context, model string, messages []chatMessage, tools []ToolDefinition, onChunk StreamCallback) (*LLMResponse, error) {
 	reqBody := chatRequest{
 		Model:    model,
 		Messages: messages,
