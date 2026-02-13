@@ -13,8 +13,10 @@ package copilot
 import (
 	"fmt"
 	"log/slog"
+	"os"
 
 	"github.com/zalando/go-keyring"
+	"golang.org/x/term"
 )
 
 const (
@@ -65,11 +67,18 @@ func ResolveAPIKey(cfg *Config, logger *slog.Logger) {
 	vault := NewVault(VaultFile)
 	if vault.Exists() {
 		if !vault.IsUnlocked() {
-			password, err := ReadPassword("Vault password: ")
-			if err != nil {
-				logger.Warn("failed to read vault password", "error", err)
-			} else if err := vault.Unlock(password); err != nil {
-				logger.Warn("failed to unlock vault", "error", err)
+			// Only prompt for password if stdin is an interactive terminal.
+			// In non-interactive mode (PM2, systemd, Docker) skip vault and
+			// fall through to env vars / config.
+			if term.IsTerminal(int(os.Stdin.Fd())) {
+				password, err := ReadPassword("Vault password: ")
+				if err != nil {
+					logger.Warn("failed to read vault password", "error", err)
+				} else if err := vault.Unlock(password); err != nil {
+					logger.Warn("failed to unlock vault", "error", err)
+				}
+			} else {
+				logger.Info("vault exists but skipping (non-interactive mode), using env/config")
 			}
 		}
 
