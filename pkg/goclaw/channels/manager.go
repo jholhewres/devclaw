@@ -191,6 +191,22 @@ func (m *Manager) MarkRead(ctx context.Context, channelName, chatID string, mess
 	}
 }
 
+// SendReaction sends an emoji reaction to a message on the specified channel.
+// Silently does nothing if the channel doesn't support reactions.
+func (m *Manager) SendReaction(ctx context.Context, channelName, chatID, messageID, emoji string) {
+	m.mu.RLock()
+	ch, exists := m.channels[channelName]
+	m.mu.RUnlock()
+
+	if !exists {
+		return
+	}
+
+	if rc, ok := ch.(ReactionChannel); ok {
+		_ = rc.SendReaction(ctx, chatID, messageID, emoji)
+	}
+}
+
 // Channel returns a specific channel by name.
 func (m *Manager) Channel(name string) (Channel, bool) {
 	m.mu.RLock()

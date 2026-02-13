@@ -543,7 +543,9 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	logger.Info("message received, processing...",
 		"access_level", accessResult.Level)
 
-	// ── Step 3b: Send typing indicator and mark as read ──
+	// ── Step 3b: React, send typing indicator, and mark as read ──
+	// React with 👀 to acknowledge receipt (like OpenClaw).
+	a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "👀")
 	a.channelMgr.SendTyping(a.ctx, msg.Channel, msg.ChatID)
 	a.channelMgr.MarkRead(a.ctx, msg.Channel, msg.ChatID, []string{msg.ID})
 
@@ -594,6 +596,9 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	if blockStreamer == nil || !blockStreamer.HasSentBlocks() {
 		a.sendReply(msg, response)
 	}
+
+	// React with ✅ to signal processing is complete.
+	a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "✅")
 
 	logger.Info("message processed",
 		"duration_ms", time.Since(start).Milliseconds(),
