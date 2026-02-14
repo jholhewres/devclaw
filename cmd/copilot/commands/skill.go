@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/charmbracelet/huh"
 	"github.com/jholhewres/goclaw/pkg/goclaw/copilot"
 	"github.com/jholhewres/goclaw/pkg/goclaw/skills"
 	"github.com/spf13/cobra"
@@ -42,6 +43,7 @@ Other:
 		newSkillListCmd(),
 		newSkillSearchCmd(),
 		newSkillInstallCmd(),
+		newSkillDefaultsCmd(),
 		newSkillUpdateCmd(),
 		newSkillRemoveCmd(),
 		newSkillInfoCmd(),
@@ -86,6 +88,75 @@ func loadSkillRegistry(cmd *cobra.Command) (*skills.Registry, *copilot.Config, e
 
 	_ = registry.LoadAll(ctx)
 	return registry, cfg, nil
+}
+
+func newSkillDefaultsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "defaults",
+		Short: "Install recommended default skills (interactive or --all)",
+		Long: `Interactively select and install recommended default skills that come
+bundled with GoClaw. Use --all to install all of them at once.
+
+These are productivity-focused skills like web-search, weather, notes,
+reminders, timer, translate, and more — ready to use without any setup.`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			skillsDir := getSkillsDir(cmd)
+			allFlag, _ := cmd.Flags().GetBool("all")
+
+			defaults := skills.DefaultSkills()
+
+			var selectedNames []string
+
+			if allFlag {
+				// Install all defaults without prompting.
+				for _, d := range defaults {
+					selectedNames = append(selectedNames, d.Name)
+				}
+			} else {
+				// Interactive multi-select.
+				opts := make([]huh.Option[string], 0, len(defaults))
+				for _, d := range defaults {
+					opts = append(opts, huh.NewOption(d.Label, d.Name))
+				}
+
+				err := huh.NewForm(
+					huh.NewGroup(
+						huh.NewMultiSelect[string]().
+							Title("Default skills").
+							Description("Select skills to install (Space to toggle, Enter to confirm)").
+							Options(opts...).
+							Value(&selectedNames),
+					),
+				).WithTheme(huh.ThemeDracula()).Run()
+				if err != nil {
+					return err
+				}
+			}
+
+			if len(selectedNames) == 0 {
+				fmt.Println("No skills selected.")
+				return nil
+			}
+
+			fmt.Printf("Installing %d skill(s) to %s...\n\n", len(selectedNames), skillsDir)
+
+			installed, skipped, failed := skills.InstallDefaultSkills(skillsDir, selectedNames)
+
+			if failed > 0 {
+				fmt.Printf("\n%d installed, %d skipped, %d failed.\n", installed, skipped, failed)
+			} else if skipped > 0 {
+				fmt.Printf("\n%d installed, %d already existed.\n", installed, skipped)
+			} else {
+				fmt.Printf("\n%d skill(s) installed successfully.\n", installed)
+			}
+
+			fmt.Println("\nSkills are available on the next start of 'copilot serve' or 'copilot chat'.")
+			return nil
+		},
+	}
+
+	cmd.Flags().Bool("all", false, "install all default skills without prompting")
+	return cmd
 }
 
 func newSkillListCmd() *cobra.Command {

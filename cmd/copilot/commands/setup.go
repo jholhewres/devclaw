@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/jholhewres/goclaw/pkg/goclaw/copilot"
+	"github.com/jholhewres/goclaw/pkg/goclaw/skills"
 	"github.com/spf13/cobra"
 )
 
@@ -350,9 +351,9 @@ func runInteractiveSetup() error {
 	// ═══════════════════════════════════════════════
 	// Group 7: Default skills installation
 	// ═══════════════════════════════════════════════
-	templates := defaultSkillTemplates()
-	skillOpts := make([]huh.Option[string], 0, len(templates))
-	for _, t := range templates {
+	defaults := skills.DefaultSkills()
+	skillOpts := make([]huh.Option[string], 0, len(defaults))
+	for _, t := range defaults {
 		skillOpts = append(skillOpts, huh.NewOption(t.Label, t.Name))
 	}
 

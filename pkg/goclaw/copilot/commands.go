@@ -18,16 +18,21 @@
 //	/group allow             - Allow current group
 //	/group block             - Block current group
 //	/group assign <ws_id>    - Assign current group to workspace
+//	/skills list             - List installed skills
+//	/skills defaults         - List available default skills
+//	/skills install <n|all>  - Install default skills
 //	/status                  - Show bot status
 //	/help                    - Show available commands
 package copilot
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jholhewres/goclaw/pkg/goclaw/channels"
+	"github.com/jholhewres/goclaw/pkg/goclaw/skills"
 )
 
 // CommandResult contains the result of a command execution.
@@ -128,6 +133,10 @@ func (a *Assistant) HandleCommand(msg *channels.IncomingMessage) CommandResult {
 	case "/deny":
 		return CommandResult{Response: a.denyCommand(args, msg), Handled: true}
 
+	// Skill management commands.
+	case "/skills":
+		return CommandResult{Response: a.skillsCommand(args, msg), Handled: true}
+
 	// Session commands (require resolved workspace + session).
 	case "/stop":
 		return CommandResult{Response: a.stopCommand(msg), Handled: true}
@@ -180,6 +189,11 @@ func (a *Assistant) helpCommand(isAdmin bool) string {
 	b.WriteString("\n*Approval:*\n")
 	b.WriteString("/approve <id> - Approve a pending tool execution\n")
 	b.WriteString("/deny <id> - Deny a pending tool execution\n\n")
+
+	b.WriteString("*Skills:*\n")
+	b.WriteString("/skills list - List installed skills\n")
+	b.WriteString("/skills defaults - List available default skills\n")
+	b.WriteString("/skills install <names|all> - Install default skills\n\n")
 
 	b.WriteString("*Session:*\n")
 	b.WriteString("/stop - Stop active agent run\n")
@@ -605,6 +619,95 @@ func (a *Assistant) workspaceCommand(args []string, msg *channels.IncomingMessag
 
 	default:
 		return "Unknown workspace command. Use: create, delete, assign, list, info"
+	}
+}
+
+func (a *Assistant) skillsCommand(args []string, msg *channels.IncomingMessage) string {
+	if len(args) == 0 {
+		return "Usage: /skills <list|defaults|install> [args...]\n\n" +
+			"/skills list — installed skills\n" +
+			"/skills defaults — available default skills\n" +
+			"/skills install <name1> <name2> ... — install default skills\n" +
+			"/skills install all — install all default skills"
+	}
+
+	sub := strings.ToLower(args[0])
+	subArgs := args[1:]
+
+	// Resolve skills directory from config.
+	skillsDir := "./skills"
+	if len(a.config.Skills.ClawdHubDirs) > 0 {
+		skillsDir = a.config.Skills.ClawdHubDirs[0]
+	}
+
+	switch sub {
+	case "list":
+		allSkills := a.skillRegistry.List()
+		if len(allSkills) == 0 {
+			return "No skills installed.\n\nUse /skills install all to install defaults."
+		}
+
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("*Installed Skills (%d):*\n\n", len(allSkills)))
+		for _, meta := range allSkills {
+			desc := meta.Description
+			if len(desc) > 60 {
+				desc = desc[:57] + "..."
+			}
+			b.WriteString(fmt.Sprintf("• *%s* — %s\n", meta.Name, desc))
+		}
+		return b.String()
+
+	case "defaults":
+		defaults := skills.DefaultSkills()
+		installed := make(map[string]bool)
+		for _, m := range a.skillRegistry.List() {
+			installed[m.Name] = true
+		}
+
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("*Default Skills (%d):*\n\n", len(defaults)))
+		for _, d := range defaults {
+			status := ""
+			if installed[d.Name] {
+				status = " ✓"
+			}
+			b.WriteString(fmt.Sprintf("• *%s*%s — %s\n", d.Name, status, d.Description))
+		}
+		b.WriteString("\nUse /skills install <name> or /skills install all")
+		return b.String()
+
+	case "install":
+		if len(subArgs) == 0 {
+			return "Usage: /skills install <name1> <name2> ... or /skills install all"
+		}
+
+		names := subArgs
+		if len(names) == 1 && strings.ToLower(names[0]) == "all" {
+			names = skills.DefaultSkillNames()
+		}
+
+		installed, skipped, failed := skills.InstallDefaultSkills(skillsDir, names)
+
+		// Hot-reload registry.
+		reloadCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		reloaded, _ := a.skillRegistry.Reload(reloadCtx)
+
+		var b strings.Builder
+		b.WriteString("*Skills Installation:*\n")
+		b.WriteString(fmt.Sprintf("  Installed: %d\n", installed))
+		if skipped > 0 {
+			b.WriteString(fmt.Sprintf("  Already existed: %d\n", skipped))
+		}
+		if failed > 0 {
+			b.WriteString(fmt.Sprintf("  Failed: %d\n", failed))
+		}
+		b.WriteString(fmt.Sprintf("\nSkill catalog reloaded (%d skills).", reloaded))
+		return b.String()
+
+	default:
+		return "Unknown subcommand. Use: list, defaults, install"
 	}
 }
 

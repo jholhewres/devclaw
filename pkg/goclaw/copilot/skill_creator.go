@@ -354,6 +354,93 @@ metadata: %s
 		},
 	)
 
+	// skill_defaults_list — list available default skills.
+	executor.Register(
+		MakeToolDefinition("skill_defaults_list", "List all default skills bundled with GoClaw that can be installed instantly (no internet required).", map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		}),
+		func(_ context.Context, _ map[string]any) (any, error) {
+			defaults := skills.DefaultSkills()
+			installed := listUserSkillDirs(skillsDir)
+			installedSet := make(map[string]bool, len(installed))
+			for _, n := range installed {
+				installedSet[n] = true
+			}
+
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("Default skills available (%d):\n\n", len(defaults)))
+			for _, d := range defaults {
+				status := "not installed"
+				if installedSet[d.Name] {
+					status = "✓ installed"
+				}
+				sb.WriteString(fmt.Sprintf("- **%s** — %s [%s]\n", d.Name, d.Description, status))
+			}
+			sb.WriteString("\nUse skill_defaults_install to install one or more. Pass names: [\"web-search\",\"weather\"] or \"all\" for all.")
+			return sb.String(), nil
+		},
+	)
+
+	// skill_defaults_install — install default skills from the embedded catalog.
+	executor.Register(
+		MakeToolDefinition("skill_defaults_install", "Install one or more default skills bundled with GoClaw. Pass specific names or 'all' to install everything. No internet required.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"names": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Skill names to install, e.g. [\"web-search\",\"weather\"]. Use [\"all\"] to install all defaults.",
+				},
+			},
+			"required": []string{"names"},
+		}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			rawNames, _ := args["names"].([]any)
+			if len(rawNames) == 0 {
+				return nil, fmt.Errorf("names is required: pass skill names or [\"all\"]")
+			}
+
+			// Parse names.
+			var names []string
+			for _, v := range rawNames {
+				if s, ok := v.(string); ok {
+					names = append(names, s)
+				}
+			}
+
+			// Handle "all".
+			if len(names) == 1 && strings.ToLower(names[0]) == "all" {
+				names = skills.DefaultSkillNames()
+			}
+
+			installed, skipped, failed := skills.InstallDefaultSkills(skillsDir, names)
+
+			// Hot-reload the registry to pick up new skills.
+			reloadCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			reloaded, reloadErr := registry.Reload(reloadCtx)
+			reloadMsg := ""
+			if reloadErr != nil {
+				reloadMsg = fmt.Sprintf("\nWarning: catalog refresh failed: %v", reloadErr)
+			} else {
+				reloadMsg = fmt.Sprintf("\nSkill catalog refreshed (%d skills loaded).", reloaded)
+			}
+
+			var sb strings.Builder
+			sb.WriteString("Default skills installation complete.\n")
+			sb.WriteString(fmt.Sprintf("  Installed: %d\n", installed))
+			if skipped > 0 {
+				sb.WriteString(fmt.Sprintf("  Already existed: %d\n", skipped))
+			}
+			if failed > 0 {
+				sb.WriteString(fmt.Sprintf("  Failed: %d\n", failed))
+			}
+			sb.WriteString(reloadMsg)
+			return sb.String(), nil
+		},
+	)
+
 	// remove_skill — remove an installed skill.
 	executor.Register(
 		MakeToolDefinition("remove_skill", "Remove an installed skill by name.", map[string]any{
