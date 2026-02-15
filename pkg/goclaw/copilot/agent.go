@@ -410,83 +410,267 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 	}
 }
 
-// formatToolProgressMessage creates a concise user-facing message about which
-// tools the agent is executing. Used to give the user visibility during the
-// "thinking" phase between LLM turns.
+// formatToolProgressMessage creates a clean, user-facing message about which
+// tools the agent is executing. Designed for chat apps (WhatsApp, Telegram).
 func formatToolProgressMessage(toolCalls []ToolCall) string {
 	if len(toolCalls) == 0 {
 		return ""
 	}
 
-	// Map tool names to user-friendly descriptions.
-	icons := map[string]string{
-		"bash":          "🖥️",
-		"exec":          "🖥️",
-		"read_file":     "📄",
-		"write_file":    "✏️",
-		"edit_file":     "✏️",
-		"web_search":    "🔍",
-		"web_fetch":     "🌐",
-		"memory_save":   "💾",
-		"memory_search": "🧠",
-		"ssh":           "🔗",
-		"scp":           "📦",
-		"glob_files":    "📂",
-		"search_files":  "🔎",
-		"list_files":    "📂",
-	}
-
 	var parts []string
 	for _, tc := range toolCalls {
 		name := tc.Function.Name
-		icon := icons[name]
-		if icon == "" {
-			icon = "⚙️"
-		}
-
-		desc := icon + " " + name
-
-		// Add a hint from the args for key tools.
 		args, _ := parseToolArgs(tc.Function.Arguments)
-		switch name {
-		case "bash", "exec":
-			if cmd, ok := args["command"].(string); ok && cmd != "" {
-				if len(cmd) > 50 {
-					cmd = cmd[:50] + "..."
-				}
-				desc = icon + " `" + cmd + "`"
+		desc := describeToolAction(name, args)
+		if desc != "" {
+			parts = append(parts, desc)
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return strings.Join(parts, "\n")
+}
+
+// describeToolAction returns a human-friendly, emoji-prefixed description
+// of a tool call. Empty string means "skip this tool in progress output".
+func describeToolAction(name string, args map[string]any) string {
+	switch name {
+	// ── Shell / commands ──
+	case "bash", "exec":
+		cmd, _ := args["command"].(string)
+		if cmd == "" {
+			return "💻 Executando comando..."
+		}
+		if len(cmd) > 60 {
+			cmd = cmd[:60] + "..."
+		}
+		return "💻 `" + cmd + "`"
+
+	// ── File operations ──
+	case "read_file":
+		p, _ := args["path"].(string)
+		if p != "" {
+			return "📖 Lendo " + shortPath(p)
+		}
+		return "📖 Lendo arquivo..."
+
+	case "write_file":
+		p, _ := args["path"].(string)
+		if p != "" {
+			return "✍️ Escrevendo " + shortPath(p)
+		}
+		return "✍️ Escrevendo arquivo..."
+
+	case "edit_file":
+		p, _ := args["path"].(string)
+		if p != "" {
+			return "✏️ Editando " + shortPath(p)
+		}
+		return "✏️ Editando arquivo..."
+
+	case "list_files", "glob_files":
+		p, _ := args["path"].(string)
+		if p == "" {
+			p, _ = args["pattern"].(string)
+		}
+		if p != "" {
+			return "📂 Listando " + shortPath(p)
+		}
+		return "📂 Listando arquivos..."
+
+	case "search_files":
+		q, _ := args["query"].(string)
+		if q == "" {
+			q, _ = args["pattern"].(string)
+		}
+		if q != "" {
+			return "🔎 Buscando: " + q
+		}
+		return "🔎 Buscando nos arquivos..."
+
+	// ── Web ──
+	case "web_search", "brave-search_execute", "brave-search_run_search":
+		q, _ := args["query"].(string)
+		if q != "" {
+			if len(q) > 60 {
+				q = q[:60] + "..."
 			}
-		case "web_search":
-			if q, ok := args["query"].(string); ok && q != "" {
-				desc = icon + " Searching: " + q
+			return "🔍 Pesquisando: " + q
+		}
+		return "🔍 Pesquisando na web..."
+
+	case "web_fetch", "web-fetch_fetch_url":
+		u, _ := args["url"].(string)
+		if u != "" {
+			if len(u) > 55 {
+				u = u[:55] + "..."
 			}
-		case "web_fetch":
-			if u, ok := args["url"].(string); ok && u != "" {
-				if len(u) > 60 {
-					u = u[:60] + "..."
-				}
-				desc = icon + " " + u
+			return "🌐 Acessando " + u
+		}
+		return "🌐 Acessando página..."
+
+	// ── Memory ──
+	case "memory_save":
+		return "💾 Salvando na memória..."
+	case "memory_search":
+		q, _ := args["query"].(string)
+		if q != "" {
+			return "🧠 Lembrando: " + q
+		}
+		return "🧠 Buscando na memória..."
+	case "memory_list", "memory_index":
+		return "🧠 Organizando memórias..."
+
+	// ── Remote ──
+	case "ssh":
+		host, _ := args["host"].(string)
+		cmd, _ := args["command"].(string)
+		if host != "" && cmd != "" {
+			if len(cmd) > 40 {
+				cmd = cmd[:40] + "..."
 			}
-		case "read_file", "write_file", "edit_file":
-			if p, ok := args["path"].(string); ok && p != "" {
-				desc = icon + " " + p
+			return "🔗 " + host + ": `" + cmd + "`"
+		}
+		if host != "" {
+			return "🔗 Conectando em " + host + "..."
+		}
+		return "🔗 Conectando via SSH..."
+
+	case "scp":
+		src, _ := args["source"].(string)
+		dst, _ := args["destination"].(string)
+		if src != "" && dst != "" {
+			return "📤 Transferindo " + shortPath(src) + " → " + shortPath(dst)
+		}
+		return "📤 Transferindo arquivo..."
+
+	// ── Coding ──
+	case "claude-code_execute":
+		p, _ := args["prompt"].(string)
+		if p != "" {
+			if len(p) > 55 {
+				p = p[:55] + "..."
 			}
-		case "claude-code_execute":
-			if p, ok := args["prompt"].(string); ok && p != "" {
-				if len(p) > 60 {
-					p = p[:60] + "..."
-				}
-				desc = "🤖 Claude Code: " + p
+			return "🤖 Codificando: " + p
+		}
+		return "🤖 Executando Claude Code..."
+	case "claude-code_check":
+		return "🤖 Verificando Claude Code..."
+
+	// ── Images ──
+	case "describe_image":
+		return "👁️ Analisando imagem..."
+	case "image-gen_generate_image":
+		p, _ := args["prompt"].(string)
+		if p != "" {
+			if len(p) > 50 {
+				p = p[:50] + "..."
+			}
+			return "🎨 Gerando imagem: " + p
+		}
+		return "🎨 Gerando imagem..."
+
+	// ── Audio ──
+	case "transcribe_audio":
+		return "🎤 Transcrevendo áudio..."
+
+	// ── Scheduler ──
+	case "cron_add":
+		return "⏰ Criando agendamento..."
+	case "cron_list":
+		return "⏰ Listando agendamentos..."
+	case "cron_remove":
+		return "⏰ Removendo agendamento..."
+
+	// ── Vault ──
+	case "vault_save":
+		return "🔐 Salvando no cofre..."
+	case "vault_get":
+		return "🔐 Buscando no cofre..."
+	case "vault_list":
+		return "🔐 Listando cofre..."
+
+	// ── Skills ──
+	case "install_skill":
+		s, _ := args["name"].(string)
+		if s != "" {
+			return "📦 Instalando skill: " + s
+		}
+		return "📦 Instalando skill..."
+	case "list_skills", "search_skills":
+		return "📋 Listando skills..."
+
+	// ── Subagents ──
+	case "spawn_subagent":
+		label, _ := args["label"].(string)
+		if label == "" {
+			label, _ = args["task"].(string)
+			if len(label) > 40 {
+				label = label[:40] + "..."
 			}
 		}
+		if label != "" {
+			return "🧵 Iniciando subagente: " + label
+		}
+		return "🧵 Iniciando subagente..."
+	case "list_subagents":
+		return "🧵 Verificando subagentes..."
+	case "wait_subagent":
+		return "⏳ Aguardando subagente..."
+	case "stop_subagent":
+		return "🛑 Parando subagente..."
 
-		parts = append(parts, desc)
-	}
+	// ── Project Manager ──
+	case "project-manager_activate":
+		p, _ := args["name"].(string)
+		if p != "" {
+			return "📁 Ativando projeto: " + p
+		}
+		return "📁 Ativando projeto..."
+	case "project-manager_list":
+		return "📁 Listando projetos..."
+	case "project-manager_scan", "project-manager_tree":
+		return "📁 Escaneando projeto..."
+	case "project-manager_register":
+		return "📁 Registrando projeto..."
 
-	if len(parts) == 1 {
-		return "⏳ " + parts[0]
+	// ── Calculator / DateTime ──
+	case "calculator_calculate":
+		return "" // silent — too trivial
+	case "datetime_current_time":
+		return "" // silent
+
+	default:
+		// For skill tools (prefixed), make it cleaner.
+		if strings.Contains(name, "_execute") {
+			skillName := strings.TrimSuffix(name, "_execute")
+			skillName = strings.ReplaceAll(skillName, "_", " ")
+			skillName = strings.ReplaceAll(skillName, "-", " ")
+			return "⚡ Executando " + skillName + "..."
+		}
+		if strings.Contains(name, "_run_") {
+			parts := strings.SplitN(name, "_run_", 2)
+			skillName := strings.ReplaceAll(parts[0], "-", " ")
+			action := strings.ReplaceAll(parts[1], "_", " ")
+			return "⚡ " + skillName + ": " + action + "..."
+		}
+		return "⚙️ " + strings.ReplaceAll(name, "_", " ") + "..."
 	}
-	return "⏳ Executing:\n" + strings.Join(parts, "\n")
+}
+
+// shortPath returns the last 2 segments of a path for display.
+// "/home/user/projects/app/src/index.ts" → "src/index.ts"
+func shortPath(p string) string {
+	parts := strings.Split(p, "/")
+	if len(parts) <= 2 {
+		return p
+	}
+	return strings.Join(parts[len(parts)-2:], "/")
 }
 
 // isRecoverableToolError checks if a tool error is likely transient or due to
