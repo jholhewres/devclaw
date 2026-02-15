@@ -1,149 +1,273 @@
 package webui
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 )
 
-// handleDashboard renders the main dashboard overview.
-func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
+// ── Dashboard ──
+
+func (s *Server) handleAPIDashboard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
 
 	data := map[string]any{
-		"Page":     "dashboard",
-		"Sessions": s.api.ListSessions(),
-		"Usage":    s.api.GetUsageGlobal(),
-		"Channels": s.api.GetChannelHealth(),
-		"Jobs":     s.api.GetSchedulerJobs(),
+		"sessions": s.api.ListSessions(),
+		"usage":    s.api.GetUsageGlobal(),
+		"channels": s.api.GetChannelHealth(),
+		"jobs":     s.api.GetSchedulerJobs(),
 	}
-	s.renderTemplate(w, "dashboard.html", data)
+	writeJSON(w, http.StatusOK, data)
 }
 
-// handleChat renders the chat interface.
-func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
-	sessionID := r.URL.Query().Get("session")
+// ── Sessions ──
+
+func (s *Server) handleAPISessions(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.api.ListSessions())
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+func (s *Server) handleAPISessionDetail(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	parts := strings.SplitN(path, "/", 2)
+	sessionID := parts[0]
+
 	if sessionID == "" {
-		sessionID = "webui:default"
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing session ID"})
+		return
 	}
 
-	messages := s.api.GetSessionMessages(sessionID)
-
-	data := map[string]any{
-		"Page":      "chat",
-		"SessionID": sessionID,
-		"Messages":  messages,
+	// GET /api/sessions/{id}/messages
+	if len(parts) > 1 && parts[1] == "messages" {
+		if r.Method == http.MethodGet {
+			writeJSON(w, http.StatusOK, s.api.GetSessionMessages(sessionID))
+			return
+		}
 	}
-	s.renderTemplate(w, "chat.html", data)
+
+	// DELETE /api/sessions/{id}
+	if r.Method == http.MethodDelete {
+		if err := s.api.DeleteSession(sessionID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+		return
+	}
+
+	writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 }
 
-// handleChatSend processes a chat message submission (HTMX endpoint).
-func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request) {
+// ── Chat ──
+
+func (s *Server) handleAPIChat(w http.ResponseWriter, r *http.Request) {
+	// Parse: /api/chat/{sessionId}/{action}
+	path := strings.TrimPrefix(r.URL.Path, "/api/chat/")
+	parts := strings.SplitN(path, "/", 2)
+	sessionID := parts[0]
+
+	if sessionID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing session ID"})
+		return
+	}
+
+	action := ""
+	if len(parts) > 1 {
+		action = parts[1]
+	}
+
+	switch action {
+	case "send":
+		s.handleChatSend(w, r, sessionID)
+	case "history":
+		s.handleChatHistory(w, r, sessionID)
+	case "abort":
+		s.handleChatAbort(w, r, sessionID)
+	case "stream":
+		s.handleChatStream(w, r, sessionID)
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown action"})
+	}
+}
+
+// handleChatSend starts an agent run and returns a run_id for SSE streaming.
+func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request, sessionID string) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
 
-	r.ParseForm()
-	content := strings.TrimSpace(r.FormValue("message"))
-	sessionID := r.FormValue("session_id")
-	if content == "" {
-		http.Error(w, "Empty message", http.StatusBadRequest)
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Content == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing content"})
 		return
 	}
-	if sessionID == "" {
-		sessionID = "webui:default"
-	}
 
-	response, err := s.api.SendChatMessage(sessionID, content)
+	// Start a streaming agent run.
+	handle, err := s.api.StartChatStream(r.Context(), sessionID, body.Content)
 	if err != nil {
-		s.logger.Error("chat send failed", "error", err)
-		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(`<div class="p-3 bg-red-50 text-red-700 rounded-lg">Error: ` + err.Error() + `</div>`))
+		s.logger.Error("chat send failed", "session", sessionID, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
-	// Return the message pair as HTML partial for HTMX swap.
-	w.Header().Set("Content-Type", "text/html")
-	w.Write([]byte(`<div class="flex justify-end mb-4">
-  <div class="bg-blue-500 text-white rounded-lg py-2 px-4 max-w-[70%]">` + escapeHTML(content) + `</div>
-</div>
-<div class="flex justify-start mb-4">
-  <div class="bg-gray-100 text-gray-800 rounded-lg py-2 px-4 max-w-[70%] prose prose-sm">` + escapeHTML(response) + `</div>
-</div>`))
+	// Register the run so the /stream endpoint can find it.
+	s.registerRun(handle)
+
+	writeJSON(w, http.StatusOK, map[string]string{"run_id": handle.RunID})
 }
 
-// handleSessions renders the sessions list page.
-func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	data := map[string]any{
-		"Page":     "sessions",
-		"Sessions": s.api.ListSessions(),
+func (s *Server) handleChatHistory(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
 	}
-	s.renderTemplate(w, "sessions.html", data)
+	writeJSON(w, http.StatusOK, s.api.GetSessionMessages(sessionID))
 }
 
-// handleSessionDetail renders a single session's detail view.
-func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
-	// Extract session ID from path: /sessions/{id}
-	sessionID := strings.TrimPrefix(r.URL.Path, "/sessions/")
-	if sessionID == "" {
-		http.Redirect(w, r, "/sessions", http.StatusFound)
+func (s *Server) handleChatAbort(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
 
-	messages := s.api.GetSessionMessages(sessionID)
-
-	data := map[string]any{
-		"Page":      "sessions",
-		"SessionID": sessionID,
-		"Messages":  messages,
+	// Cancel via the webui's active stream registry (primary path for web UI runs).
+	stopped := false
+	s.activeStreamMu.Lock()
+	for runID, handle := range s.activeStreams {
+		if handle.SessionID == sessionID {
+			handle.Cancel()
+			delete(s.activeStreams, runID)
+			stopped = true
+			break
+		}
 	}
-	s.renderTemplate(w, "session_detail.html", data)
-}
+	s.activeStreamMu.Unlock()
 
-// handleConfig renders the configuration viewer.
-func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
-	data := map[string]any{
-		"Page":   "config",
-		"Config": s.api.GetConfigMap(),
+	// Fallback: try via the assistant's active runs (for channel-driven runs).
+	if !stopped {
+		stopped = s.api.AbortRun(sessionID)
 	}
-	s.renderTemplate(w, "config.html", data)
+
+	writeJSON(w, http.StatusOK, map[string]any{"stopped": stopped})
 }
 
-// handleSkills renders the skills management page.
-func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
-	data := map[string]any{
-		"Page":   "skills",
-		"Skills": s.api.ListSkills(),
+// handleChatStream serves SSE events for an active agent run.
+// The frontend connects here after receiving a run_id from /send.
+func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request, sessionID string) {
+	runID := r.URL.Query().Get("run_id")
+	if runID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing run_id"})
+		return
 	}
-	s.renderTemplate(w, "skills.html", data)
-}
 
-// handleUsage renders the token usage page.
-func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
-	data := map[string]any{
-		"Page":  "usage",
-		"Usage": s.api.GetUsageGlobal(),
+	// Look up the active run.
+	handle := s.getRun(runID)
+	if handle == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found or already completed"})
+		return
 	}
-	s.renderTemplate(w, "usage.html", data)
-}
 
-// handleJobs renders the scheduler jobs page.
-func (s *Server) handleJobs(w http.ResponseWriter, r *http.Request) {
-	data := map[string]any{
-		"Page": "jobs",
-		"Jobs": s.api.GetSchedulerJobs(),
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming not supported"})
+		return
 	}
-	s.renderTemplate(w, "jobs.html", data)
+
+	// Set SSE headers.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	// Stream events from the run handle until the channel is closed.
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			// Client disconnected — cancel the agent run and clean up.
+			s.logger.Debug("SSE client disconnected", "run_id", runID)
+			handle.Cancel()
+			s.unregisterRun(runID)
+			return
+
+		case event, ok := <-handle.Events:
+			if !ok {
+				// Channel closed — run completed. Clean up.
+				handle.Cancel() // Ensure context resources are released.
+				s.unregisterRun(runID)
+				return
+			}
+			writeSSE(w, flusher, event.Type, event.Data)
+		}
+	}
 }
 
-// escapeHTML escapes HTML special characters.
-func escapeHTML(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	s = strings.ReplaceAll(s, "\"", "&quot;")
-	return s
+// ── Skills ──
+
+func (s *Server) handleAPISkills(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.api.ListSkills())
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
 }
+
+// ── Channels ──
+
+func (s *Server) handleAPIChannels(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.api.GetChannelHealth())
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+// ── Config ──
+
+func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.api.GetConfigMap())
+	case http.MethodPut:
+		// TODO: implement config update
+		writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+// ── Usage ──
+
+func (s *Server) handleAPIUsage(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.api.GetUsageGlobal())
+}
+
+// ── Jobs ──
+
+func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, s.api.GetSchedulerJobs())
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+

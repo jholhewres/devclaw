@@ -61,6 +61,17 @@ CREATE TABLE IF NOT EXISTS session_facts (
 );
 CREATE INDEX IF NOT EXISTS idx_session_facts_sid ON session_facts(session_id);
 
+-- Active agent runs (for restart recovery).
+-- When a run starts, a row is inserted; when it completes, the row is deleted.
+-- On startup, any remaining rows indicate runs that were interrupted by a restart.
+CREATE TABLE IF NOT EXISTS active_runs (
+    session_id   TEXT PRIMARY KEY,
+    channel      TEXT NOT NULL,
+    chat_id      TEXT NOT NULL,
+    user_message TEXT NOT NULL,
+    started_at   TEXT NOT NULL
+);
+
 -- Tool execution audit log.
 CREATE TABLE IF NOT EXISTS audit_log (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,

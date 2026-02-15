@@ -1,5 +1,10 @@
 package webui
 
+import (
+	"context"
+	"errors"
+)
+
 // AssistantAdapter wraps a generic set of callbacks to satisfy the AssistantAPI
 // interface. This avoids a direct import cycle between copilot and webui.
 type AssistantAdapter struct {
@@ -11,6 +16,9 @@ type AssistantAdapter struct {
 	GetSchedulerJobsFn   func() []JobInfo
 	ListSkillsFn         func() []SkillInfo
 	SendChatMessageFn    func(sessionID, content string) (string, error)
+	StartChatStreamFn    func(ctx context.Context, sessionID, content string) (*RunHandle, error)
+	AbortRunFn           func(sessionID string) bool
+	DeleteSessionFn      func(sessionID string) error
 }
 
 func (a *AssistantAdapter) GetConfigMap() map[string]any {
@@ -67,4 +75,25 @@ func (a *AssistantAdapter) SendChatMessage(sessionID, content string) (string, e
 		return a.SendChatMessageFn(sessionID, content)
 	}
 	return "", nil
+}
+
+func (a *AssistantAdapter) StartChatStream(ctx context.Context, sessionID, content string) (*RunHandle, error) {
+	if a.StartChatStreamFn != nil {
+		return a.StartChatStreamFn(ctx, sessionID, content)
+	}
+	return nil, errors.New("streaming not available")
+}
+
+func (a *AssistantAdapter) AbortRun(sessionID string) bool {
+	if a.AbortRunFn != nil {
+		return a.AbortRunFn(sessionID)
+	}
+	return false
+}
+
+func (a *AssistantAdapter) DeleteSession(sessionID string) error {
+	if a.DeleteSessionFn != nil {
+		return a.DeleteSessionFn(sessionID)
+	}
+	return errors.New("not implemented")
 }

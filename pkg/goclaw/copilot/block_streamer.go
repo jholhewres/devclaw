@@ -139,21 +139,27 @@ func (bs *BlockStreamer) FlushNow() {
 }
 
 // Finish flushes any remaining buffer and marks the streamer as done.
-// Returns the full accumulated text (for session history).
 func (bs *BlockStreamer) Finish() {
 	bs.mu.Lock()
 	defer bs.mu.Unlock()
+
+	if bs.done {
+		return // Already finished — idempotent.
+	}
 
 	bs.done = true
 	if bs.idleTimer != nil {
 		bs.idleTimer.Stop()
 	}
-	bs.cancel()
 
-	// Flush remaining text.
+	// IMPORTANT: Flush remaining text BEFORE cancelling the context.
+	// The send operation uses bs.ctx, so cancelling first would silently
+	// drop the final message — causing the user to never receive the response.
 	if bs.buf.Len() > 0 {
 		bs.flushLocked()
 	}
+
+	bs.cancel()
 }
 
 // HasSentBlocks returns true if at least one block was sent progressively.

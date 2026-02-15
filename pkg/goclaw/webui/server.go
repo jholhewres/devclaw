@@ -1,23 +1,33 @@
-// Package webui implements a web-based dashboard for GoClaw.
-// Uses Go templates + HTMX + Tailwind CSS for a reactive server-side UI
-// with zero JavaScript build step.
+// Package webui implements the GoClaw web dashboard.
+// Serves a React SPA (embedded via embed.FS) with a JSON API backend.
+// Chat streaming uses Server-Sent Events (SSE) for real-time token delivery.
 package webui
 
 import (
 	"context"
 	"crypto/subtle"
-	"embed"
+	"encoding/json"
 	"fmt"
-	"html/template"
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"strings"
+	"sync"
 	"time"
 )
 
-//go:embed templates/*.html
-var templateFS embed.FS
+// StreamEvent is a typed SSE event sent to the frontend.
+type StreamEvent struct {
+	Type string `json:"type"` // delta, tool_use, tool_result, done, error
+	Data any    `json:"data"`
+}
+
+// RunHandle represents an active agent run that can stream events and be aborted.
+type RunHandle struct {
+	RunID     string
+	SessionID string
+	Events    chan StreamEvent // Backend pushes events here; handler writes SSE.
+	Cancel    context.CancelFunc
+}
 
 // AssistantAPI defines the interface the web UI uses to access assistant state.
 // This avoids a direct dependency on the copilot package.
@@ -43,61 +53,73 @@ type AssistantAPI interface {
 	// ListSkills returns available skills.
 	ListSkills() []SkillInfo
 
-	// SendChatMessage sends a message through the webui channel.
+	// SendChatMessage sends a message and blocks until the full response is ready.
+	// Used as fallback when streaming is not available.
 	SendChatMessage(sessionID, content string) (string, error)
+
+	// StartChatStream starts an agent run with streaming.
+	// Returns a RunHandle with an event channel and cancel function.
+	// The caller is responsible for reading from Events until it's closed.
+	StartChatStream(ctx context.Context, sessionID, content string) (*RunHandle, error)
+
+	// AbortRun cancels an active agent run by session ID.
+	AbortRun(sessionID string) bool
+
+	// DeleteSession removes a session.
+	DeleteSession(sessionID string) error
 }
 
 // SessionInfo contains session metadata for the UI.
 type SessionInfo struct {
-	ID            string
-	Channel       string
-	ChatID        string
-	MessageCount  int
-	LastMessageAt time.Time
-	CreatedAt     time.Time
+	ID            string    `json:"id"`
+	Channel       string    `json:"channel"`
+	ChatID        string    `json:"chat_id"`
+	MessageCount  int       `json:"message_count"`
+	LastMessageAt time.Time `json:"last_message_at"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // MessageInfo contains a single message for display.
 type MessageInfo struct {
-	Role      string // "user" or "assistant"
-	Content   string
-	Timestamp time.Time
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
 // UsageInfo contains token usage statistics.
 type UsageInfo struct {
-	TotalInputTokens  int64
-	TotalOutputTokens int64
-	TotalCost         float64
-	RequestCount      int64
+	TotalInputTokens  int64   `json:"total_input_tokens"`
+	TotalOutputTokens int64   `json:"total_output_tokens"`
+	TotalCost         float64 `json:"total_cost"`
+	RequestCount      int64   `json:"request_count"`
 }
 
 // ChannelHealthInfo contains channel health for display.
 type ChannelHealthInfo struct {
-	Name       string
-	Connected  bool
-	ErrorCount int
-	LastMsgAt  time.Time
+	Name       string    `json:"name"`
+	Connected  bool      `json:"connected"`
+	ErrorCount int       `json:"error_count"`
+	LastMsgAt  time.Time `json:"last_msg_at"`
 }
 
 // JobInfo contains scheduler job info for display.
 type JobInfo struct {
-	ID        string
-	Schedule  string
-	Type      string
-	Command   string
-	Enabled   bool
-	RunCount  int
-	LastRunAt time.Time
-	LastError string
+	ID        string    `json:"id"`
+	Schedule  string    `json:"schedule"`
+	Type      string    `json:"type"`
+	Command   string    `json:"command"`
+	Enabled   bool      `json:"enabled"`
+	RunCount  int       `json:"run_count"`
+	LastRunAt time.Time `json:"last_run_at"`
+	LastError string    `json:"last_error"`
 }
 
 // SkillInfo contains skill info for display.
 type SkillInfo struct {
-	Name        string
-	Description string
-	Enabled     bool
-	ToolCount   int
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
+	ToolCount   int    `json:"tool_count"`
 }
 
 // Config holds web UI configuration.
@@ -114,11 +136,20 @@ type Config struct {
 
 // Server is the web UI HTTP server.
 type Server struct {
-	cfg       Config
-	api       AssistantAPI
-	logger    *slog.Logger
-	templates *template.Template
-	server    *http.Server
+	cfg    Config
+	api    AssistantAPI
+	logger *slog.Logger
+	server *http.Server
+
+	// activeStreams tracks SSE connections waiting for events by runID.
+	activeStreams   map[string]*RunHandle
+	activeStreamMu sync.Mutex
+
+	// setupMode is true when the server runs without a full config (setup wizard only).
+	setupMode bool
+
+	// onSetupDone is called when the setup wizard completes (optional callback).
+	onSetupDone func()
 }
 
 // New creates a new web UI server.
@@ -130,58 +161,54 @@ func New(cfg Config, api AssistantAPI, logger *slog.Logger) *Server {
 		logger = slog.Default()
 	}
 
-	s := &Server{
-		cfg:    cfg,
-		api:    api,
-		logger: logger.With("component", "webui"),
+	return &Server{
+		cfg:            cfg,
+		api:            api,
+		logger:         logger.With("component", "webui"),
+		activeStreams:   make(map[string]*RunHandle),
 	}
-
-	// Parse templates.
-	funcMap := template.FuncMap{
-		"timeAgo":   timeAgo,
-		"truncate":  truncate,
-		"hasPrefix": strings.HasPrefix,
-		"lower":     strings.ToLower,
-	}
-	tmpl, err := template.New("").Funcs(funcMap).ParseFS(templateFS, "templates/*.html")
-	if err != nil {
-		logger.Error("failed to parse web UI templates", "error", err)
-		// Create a minimal fallback.
-		tmpl = template.Must(template.New("error").Parse("<html><body>Template error: {{.Error}}</body></html>"))
-	}
-	s.templates = tmpl
-
-	return s
 }
+
+// SetSetupMode enables setup-only mode (no assistant, only setup + auth endpoints).
+func (s *Server) SetSetupMode(enabled bool) { s.setupMode = enabled }
+
+// OnSetupDone registers a callback invoked when the setup wizard finishes.
+func (s *Server) OnSetupDone(fn func()) { s.onSetupDone = fn }
 
 // Start begins serving the web UI.
 func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 
-	// Static assets (embedded).
-	staticFS, err := fs.Sub(templateFS, "templates")
-	if err == nil {
-		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+	// ── Public routes (no auth required) ──
+	mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
+	mux.HandleFunc("/api/auth/logout", s.handleAuthLogout)
+	mux.HandleFunc("/api/auth/status", s.handleAuthStatus)
+	mux.HandleFunc("/api/setup/", s.handleAPISetup)
+
+	// ── Protected routes (require auth, require assistant) ──
+	mux.HandleFunc("/api/dashboard", s.authMiddleware(s.requireAssistant(s.handleAPIDashboard)))
+	mux.HandleFunc("/api/sessions", s.authMiddleware(s.requireAssistant(s.handleAPISessions)))
+	mux.HandleFunc("/api/sessions/", s.authMiddleware(s.requireAssistant(s.handleAPISessionDetail)))
+	mux.HandleFunc("/api/skills", s.authMiddleware(s.requireAssistant(s.handleAPISkills)))
+	mux.HandleFunc("/api/channels", s.authMiddleware(s.requireAssistant(s.handleAPIChannels)))
+	mux.HandleFunc("/api/config", s.authMiddleware(s.requireAssistant(s.handleAPIConfig)))
+	mux.HandleFunc("/api/usage", s.authMiddleware(s.requireAssistant(s.handleAPIUsage)))
+	mux.HandleFunc("/api/jobs", s.authMiddleware(s.requireAssistant(s.handleAPIJobs)))
+	mux.HandleFunc("/api/chat/", s.authMiddleware(s.requireAssistant(s.handleAPIChat)))
+
+	// ── SPA (React) fallback ──
+	sub, err := fs.Sub(distFS, "dist")
+	if err != nil {
+		s.logger.Warn("SPA dist not found, serving API only", "error", err)
+	} else {
+		mux.Handle("/", newSPAFileServer(sub))
 	}
-
-	// Page routes.
-	mux.HandleFunc("/", s.authMiddleware(s.handleDashboard))
-	mux.HandleFunc("/chat", s.authMiddleware(s.handleChat))
-	mux.HandleFunc("/sessions", s.authMiddleware(s.handleSessions))
-	mux.HandleFunc("/sessions/", s.authMiddleware(s.handleSessionDetail))
-	mux.HandleFunc("/config", s.authMiddleware(s.handleConfig))
-	mux.HandleFunc("/skills", s.authMiddleware(s.handleSkills))
-	mux.HandleFunc("/usage", s.authMiddleware(s.handleUsage))
-	mux.HandleFunc("/jobs", s.authMiddleware(s.handleJobs))
-
-	// HTMX API partials.
-	mux.HandleFunc("/api/chat/send", s.authMiddleware(s.handleChatSend))
 
 	s.server = &http.Server{
 		Addr:         s.cfg.Address,
-		Handler:      mux,
+		Handler:      corsMiddleware(mux),
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 0, // Disabled for SSE streams (long-lived connections)
 		IdleTimeout:  120 * time.Second,
 	}
 
@@ -205,6 +232,29 @@ func (s *Server) Stop() {
 	}
 }
 
+// registerRun stores a run handle so the SSE endpoint can find it.
+func (s *Server) registerRun(handle *RunHandle) {
+	s.activeStreamMu.Lock()
+	s.activeStreams[handle.RunID] = handle
+	s.activeStreamMu.Unlock()
+}
+
+// unregisterRun removes a run handle.
+func (s *Server) unregisterRun(runID string) {
+	s.activeStreamMu.Lock()
+	delete(s.activeStreams, runID)
+	s.activeStreamMu.Unlock()
+}
+
+// getRun looks up an active run by ID.
+func (s *Server) getRun(runID string) *RunHandle {
+	s.activeStreamMu.Lock()
+	defer s.activeStreamMu.Unlock()
+	return s.activeStreams[runID]
+}
+
+// ── Middleware ──
+
 // authMiddleware validates the bearer token if configured.
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -213,21 +263,9 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		// Check bearer token in header or query param.
-		token := r.Header.Get("Authorization")
-		token = strings.TrimPrefix(token, "Bearer ")
-		if token == "" {
-			token = r.URL.Query().Get("token")
-		}
-		// Also check cookie.
-		if token == "" {
-			if cookie, err := r.Cookie("goclaw_token"); err == nil {
-				token = cookie.Value
-			}
-		}
-
+		token := extractToken(r)
 		if subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.AuthToken)) != 1 {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 			return
 		}
 
@@ -235,16 +273,53 @@ func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// renderTemplate renders an HTML template with the given data.
-func (s *Server) renderTemplate(w http.ResponseWriter, name string, data any) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.templates.ExecuteTemplate(w, name, data); err != nil {
-		s.logger.Error("template render error", "template", name, "error", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+// requireAssistant rejects requests when the server is in setup-only mode.
+func (s *Server) requireAssistant(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.setupMode || s.api == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "server is in setup mode — complete the setup wizard first",
+			})
+			return
+		}
+		next(w, r)
 	}
 }
 
-// ---------- Template helpers ----------
+// corsMiddleware adds CORS headers for development (Vite dev server on :3000).
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// ── JSON helpers ──
+
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
+}
+
+// writeSSE writes a named SSE event to the response writer.
+func writeSSE(w http.ResponseWriter, flusher http.Flusher, eventType string, data any) {
+	b, _ := json.Marshal(data)
+	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, string(b))
+	flusher.Flush()
+}
+
+// ── Template helpers (kept for backward compat) ──
 
 func timeAgo(t time.Time) string {
 	if t.IsZero() {
@@ -263,9 +338,9 @@ func timeAgo(t time.Time) string {
 	}
 }
 
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
+func truncate(str string, maxLen int) string {
+	if len(str) <= maxLen {
+		return str
 	}
-	return s[:maxLen-3] + "..."
+	return str[:maxLen-3] + "..."
 }

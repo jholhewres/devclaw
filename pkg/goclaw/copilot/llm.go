@@ -1443,6 +1443,12 @@ func (c *LLMClient) completeOnceStreamAnthropic(ctx context.Context, model strin
 			}
 
 		case "content_block_start":
+			// IMPORTANT: update blockIdx FIRST so that the tool call and its
+			// args builder are stored at the correct index. Subsequent
+			// content_block_delta and content_block_stop events use blockIdx
+			// to look up the accumulator — if we update after storing, the
+			// indices mismatch and tool arguments are silently lost.
+			blockIdx = event.Index
 			if event.ContentBlock != nil && event.ContentBlock.Type == "tool_use" {
 				toolCallsAccum[blockIdx] = &ToolCall{
 					ID:   event.ContentBlock.ID,
@@ -1451,7 +1457,6 @@ func (c *LLMClient) completeOnceStreamAnthropic(ctx context.Context, model strin
 				}
 				toolArgsAccum[blockIdx] = &strings.Builder{}
 			}
-			blockIdx = event.Index
 
 		case "content_block_delta":
 			if event.Delta != nil {

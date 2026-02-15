@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"log/slog"
@@ -45,7 +44,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// ── Load config ──
 	cfg, configPath, err := resolveConfig(cmd)
 	if err != nil {
-		return err
+		// No config? Start in web setup mode.
+		return runWebSetupMode()
 	}
 
 	// ── Configure logger ──
@@ -236,44 +236,57 @@ func resolveConfig(cmd *cobra.Command) (*copilot.Config, string, error) {
 		return cfg, found, nil
 	}
 
-	// No config file — offer interactive setup before connecting.
-	fmt.Println()
-	fmt.Println("No configuration file found.")
-	fmt.Println("GoClaw requires a config.yaml before connecting to WhatsApp.")
-	fmt.Println()
-
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Run interactive setup now? (y/n) [y]: ")
-	answer := strings.TrimSpace(readInput(reader))
-
-	if answer != "" && strings.ToLower(answer) != "y" {
-		fmt.Println()
-		fmt.Println("Run 'copilot setup' or 'copilot config init' to create the configuration.")
-		return nil, "", fmt.Errorf("configuration required before starting")
-	}
-
-	// Run the interactive setup wizard.
-	if err := runInteractiveSetup(); err != nil {
-		return nil, "", fmt.Errorf("setup: %w", err)
-	}
-
-	// Try loading the freshly created config.
-	if found := copilot.FindConfigFile(); found != "" {
-		cfg, err := copilot.LoadConfigFromFile(found)
-		if err != nil {
-			return nil, "", fmt.Errorf("loading config from %s: %w", found, err)
-		}
-		slog.Info("config loaded after setup", "path", found)
-		return cfg, found, nil
-	}
-
-	return nil, "", fmt.Errorf("setup completado mas config.yaml não encontrado")
+	// No config file found — the caller (runServe) will fall back to
+	// web setup mode. CLI setup is still available via `copilot setup`.
+	return nil, "", fmt.Errorf("no configuration file found")
 }
 
-// readInput reads a line from stdin (used by resolveConfig prompt).
-func readInput(reader *bufio.Reader) string {
-	line, _ := reader.ReadString('\n')
-	return line
+// runWebSetupMode starts a minimal webui server in setup-only mode.
+// Blocks until the setup wizard completes or the user cancels.
+func runWebSetupMode() error {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	fmt.Println()
+	fmt.Println("╭────────────────────────────────────────╮")
+	fmt.Println("│  No configuration found.               │")
+	fmt.Println("│  Starting web setup wizard...          │")
+	fmt.Println("│                                        │")
+	fmt.Println("│  Open http://localhost:8090/setup       │")
+	fmt.Println("╰────────────────────────────────────────╯")
+	fmt.Println()
+
+	setupDone := make(chan struct{})
+
+	// Start a webui server in setup-only mode (no assistant needed).
+	webuiCfg := webui.Config{
+		Enabled: true,
+		Address: ":8090",
+	}
+	webServer := webui.New(webuiCfg, nil, logger)
+	webServer.SetSetupMode(true)
+	webServer.OnSetupDone(func() {
+		close(setupDone)
+	})
+
+	if err := webServer.Start(context.Background()); err != nil {
+		return fmt.Errorf("failed to start setup server: %w", err)
+	}
+
+	// Wait for setup completion or interrupt.
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case <-setupDone:
+		webServer.Stop()
+		fmt.Println()
+		fmt.Println("Setup complete! config.yaml saved.")
+		fmt.Println("Restart with: copilot serve")
+		return nil
+	case <-sigChan:
+		webServer.Stop()
+		return nil
+	}
 }
 
 // shouldEnable checks if a channel should be enabled.
@@ -408,8 +421,132 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config) *webui
 			return result
 		},
 		SendChatMessageFn: func(sessionID, content string) (string, error) {
-			// TODO: implement proper chat via webui channel
-			return "Web UI chat coming soon", nil
+			session := assistant.SessionStore().GetOrCreate("webui", sessionID)
+			prompt := assistant.ComposePrompt(session, content)
+			resp := assistant.ExecuteAgent(context.Background(), prompt, session, content)
+			session.AddMessage(content, resp)
+			return resp, nil
+		},
+		StartChatStreamFn: func(_ context.Context, sessionID, content string) (*webui.RunHandle, error) {
+			session := assistant.SessionStore().GetOrCreate("webui", sessionID)
+			prompt := assistant.ComposePrompt(session, content)
+
+			runID := fmt.Sprintf("run-%d", time.Now().UnixNano())
+			events := make(chan webui.StreamEvent, 256)
+
+			// FIX: Use context.Background() — the agent must outlive the POST /send
+			// request. The context is cancelled by handle.Cancel() when the SSE
+			// client disconnects or the user aborts.
+			runCtx, cancel := context.WithCancel(context.Background())
+
+			handle := &webui.RunHandle{
+				RunID:     runID,
+				SessionID: sessionID,
+				Events:    events,
+				Cancel:    cancel,
+			}
+
+			// Run the agent in a goroutine, streaming events via the channel.
+			go func() {
+				defer close(events)
+				defer cancel() // Ensure context is always cleaned up.
+
+				history := session.RecentHistory(10)
+				agent := copilot.NewAgentRunWithConfig(
+					assistant.LLMClient(),
+					assistant.ToolExecutor(),
+					cfg.Agent,
+					slog.Default(),
+				)
+
+				// Set caller context for access control.
+				assistant.ToolExecutor().SetCallerContext(copilot.AccessOwner, "webui")
+
+				// Stream text tokens to the SSE channel.
+				agent.SetStreamCallback(func(chunk string) {
+					select {
+					case events <- webui.StreamEvent{
+						Type: "delta",
+						Data: map[string]string{"content": chunk},
+					}:
+					case <-runCtx.Done():
+					}
+				})
+
+				// Record token usage.
+				if assistant.UsageTracker() != nil {
+					agent.SetUsageRecorder(func(model string, usage copilot.LLMUsage) {
+						assistant.UsageTracker().Record(session.ID, model, usage)
+					})
+				}
+
+				resp, usage, err := agent.RunWithUsage(runCtx, prompt, history, content)
+				if err != nil {
+					// FIX: Non-blocking sends to avoid deadlock when client is gone.
+					if runCtx.Err() != nil {
+						select {
+						case events <- webui.StreamEvent{
+							Type: "error",
+							Data: map[string]string{"message": "Execução cancelada"},
+						}:
+						default:
+						}
+						return
+					}
+					select {
+					case events <- webui.StreamEvent{
+						Type: "error",
+						Data: map[string]string{"message": err.Error()},
+					}:
+					case <-runCtx.Done():
+					}
+					return
+				}
+
+				// Persist the conversation.
+				session.AddMessage(content, resp)
+
+				if usage != nil {
+					session.AddTokenUsage(usage.PromptTokens, usage.CompletionTokens)
+				}
+
+				// Send done event with usage stats (non-blocking).
+				usageData := map[string]int{"input_tokens": 0, "output_tokens": 0}
+				if usage != nil {
+					usageData["input_tokens"] = usage.PromptTokens
+					usageData["output_tokens"] = usage.CompletionTokens
+				}
+				select {
+				case events <- webui.StreamEvent{
+					Type: "done",
+					Data: map[string]any{"usage": usageData},
+				}:
+				case <-runCtx.Done():
+				}
+			}()
+
+			return handle, nil
+		},
+		AbortRunFn: func(sessionID string) bool {
+			// First try to stop via the assistant's active runs (channel-driven).
+			if assistant.StopActiveRun("default", "webui:"+sessionID) {
+				return true
+			}
+			// Web UI runs are cancelled via RunHandle.Cancel() in the SSE handler.
+			// This path is a fallback — the primary abort is via the webui server
+			// which calls handle.Cancel() directly.
+			return false
+		},
+		DeleteSessionFn: func(sessionID string) error {
+			deleted := assistant.SessionStore().Delete("webui", sessionID)
+			if !deleted {
+				// Try with the raw ID (might include channel prefix already).
+				parts := strings.SplitN(sessionID, ":", 2)
+				if len(parts) == 2 {
+					assistant.SessionStore().Delete(parts[0], parts[1])
+				}
+			}
+			return nil
 		},
 	}
 }

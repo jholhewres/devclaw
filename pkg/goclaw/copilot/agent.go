@@ -21,9 +21,10 @@ import (
 
 const (
 	// DefaultRunTimeout is the maximum duration for an entire agent run.
-	// Aligned with OpenClaw's default of 600s (10 minutes).
+	// Set to 20 minutes to accommodate coding tasks that invoke Claude Code CLI
+	// (which itself can take 5-15 minutes for complex projects).
 	// This is the PRIMARY timeout — no per-turn limit.
-	DefaultRunTimeout = 600 * time.Second
+	DefaultRunTimeout = 1200 * time.Second
 
 	// DefaultLLMCallTimeout is the safety-net timeout for a single LLM API call.
 	// This only prevents hung HTTP connections — it should be generous enough
@@ -221,6 +222,12 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 	var totalUsage LLMUsage
 	totalTurns := 0
 
+	// Progress cooldown: avoid flooding the user with tool progress messages.
+	// OpenClaw's CLI backend sends zero progress; the embedded agent uses verbose levels.
+	// We send summarized progress at most every 15 seconds.
+	const progressCooldown = 15 * time.Second
+	var lastProgressAt time.Time
+
 	// ── Main agent loop (OpenClaw/pi-agent-core pattern) ──
 	// Loop until: (1) LLM produces no tool calls, (2) run timeout fires, or
 	// (3) optional soft turn limit is hit. No fixed turn limit by default.
@@ -375,10 +382,16 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 
 		// Send progress to the user so they see what the agent is doing
 		// while tools execute (especially for long-running tools).
+		// Uses a cooldown to avoid flooding: at most one message every 15 seconds.
+		// This mirrors OpenClaw's approach of summarized feedback (not step-by-step).
 		if ps := ProgressSenderFromContext(runCtx); ps != nil {
-			progressMsg := formatToolProgressMessage(resp.ToolCalls)
-			if progressMsg != "" {
-				ps(runCtx, progressMsg)
+			now := time.Now()
+			if now.Sub(lastProgressAt) >= progressCooldown {
+				progressMsg := formatToolProgressMessage(resp.ToolCalls)
+				if progressMsg != "" {
+					ps(runCtx, progressMsg)
+					lastProgressAt = now
+				}
 			}
 		}
 
@@ -410,30 +423,45 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 	}
 }
 
-// formatToolProgressMessage creates a clean, user-facing message about which
-// tools the agent is executing. Designed for chat apps (WhatsApp, Telegram).
+// formatToolProgressMessage creates a clean, concise, user-facing message about
+// what the agent is doing. Designed for chat apps (WhatsApp, Telegram).
+// Unlike step-by-step output, this shows a single summarized line.
+// Mirrors OpenClaw's approach: emoji + label + optional detail.
 func formatToolProgressMessage(toolCalls []ToolCall) string {
 	if len(toolCalls) == 0 {
 		return ""
 	}
 
-	var parts []string
+	// For a single tool call, show a concise description.
+	if len(toolCalls) == 1 {
+		name := toolCalls[0].Function.Name
+		args, _ := parseToolArgs(toolCalls[0].Function.Arguments)
+		return describeToolAction(name, args)
+	}
+
+	// For multiple parallel tool calls, summarize them.
+	// Show the most interesting one (longest description) and count the rest.
+	var best string
+	count := 0
 	for _, tc := range toolCalls {
 		name := tc.Function.Name
 		args, _ := parseToolArgs(tc.Function.Arguments)
 		desc := describeToolAction(name, args)
 		if desc != "" {
-			parts = append(parts, desc)
+			count++
+			if len(desc) > len(best) {
+				best = desc
+			}
 		}
 	}
 
-	if len(parts) == 0 {
+	if count == 0 {
 		return ""
 	}
-	if len(parts) == 1 {
-		return parts[0]
+	if count == 1 {
+		return best
 	}
-	return strings.Join(parts, "\n")
+	return fmt.Sprintf("%s (+%d)", best, count-1)
 }
 
 // describeToolAction returns a human-friendly, emoji-prefixed description

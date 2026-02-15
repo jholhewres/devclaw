@@ -54,7 +54,14 @@ config.local.yaml
 !.env.example
 .goclaw.vault
 
+# Web UI (React)
+web/node_modules/
+web/dist/
+web/.vite/
+pkg/goclaw/webui/dist/
+
 # Build
 /build/
 /tmp/
-goclaw
+/goclaw
+/goclaw-linux

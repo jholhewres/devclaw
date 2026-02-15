@@ -6,21 +6,24 @@
 // this skill delegates everything to Claude Code, which has its own rich set
 // of tools (Bash, Read, Edit, Grep, Glob, Write, etc.).
 //
-// The skill uses --output-format stream-json for real-time progress feedback:
-// as Claude Code works, it sends intermediate updates to the user so they
-// know what's happening (reading files, running commands, etc.).
+// The skill follows the same pattern as OpenClaw's cli-runner:
+//   - Uses --output-format json (single JSON result, no streaming)
+//   - Uses --dangerously-skip-permissions (most reliable permission bypass)
+//   - Passes prompt as positional arg (fallback to stdin for long prompts)
+//   - Waits for completion and parses the JSON output
 //
 // Requirements:
 //   - Claude Code CLI installed: npm install -g @anthropic-ai/claude-code
-//   - Authenticated: claude setup-token or claude login
+//   - Authenticated: claude setup-token or ANTHROPIC_API_KEY
 //   - The user must enable "claude-code" in skills.builtin config.
 package skills
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -28,38 +31,39 @@ import (
 	"time"
 )
 
-// claudeCodeResult represents the final JSON result from Claude Code CLI.
+// claudeCodeResult represents the JSON result from Claude Code CLI (--output-format json).
+// Mirrors OpenClaw's parseCliJson fields.
 type claudeCodeResult struct {
+	// Standard fields from Claude Code JSON output.
 	Type      string  `json:"type"`
 	Subtype   string  `json:"subtype"`
 	Result    string  `json:"result"`
+	Message   string  `json:"message"`
+	Content   string  `json:"content"`
 	IsError   bool    `json:"is_error"`
 	SessionID string  `json:"session_id"`
 	NumTurns  int     `json:"num_turns"`
 	TotalCost float64 `json:"total_cost_usd"`
 	Duration  int     `json:"duration_ms"`
 	Errors    []any   `json:"errors"`
+
+	// Usage (may be nested).
+	Usage json.RawMessage `json:"usage"`
 }
 
-// claudeStreamEvent represents a single line from --output-format stream-json.
-type claudeStreamEvent struct {
-	Type      string  `json:"type"`
-	Subtype   string  `json:"subtype"`
-	SessionID string  `json:"session_id"`
-	Result    string  `json:"result"`
-	IsError   bool    `json:"is_error"`
-	NumTurns  int     `json:"num_turns"`
-	TotalCost float64 `json:"total_cost_usd"`
-	Duration  int     `json:"duration_ms"`
-
-	// For tool_use events.
-	ToolName string `json:"tool_name"`
-
-	// For text/content events.
-	Content string `json:"content"`
-
-	// For tool input.
-	Input json.RawMessage `json:"input"`
+// extractText returns the main text content from the result.
+// Mirrors OpenClaw's collectText: checks result > message > content.
+func (r *claudeCodeResult) extractText() string {
+	if r.Result != "" {
+		return r.Result
+	}
+	if r.Message != "" {
+		return r.Message
+	}
+	if r.Content != "" {
+		return r.Content
+	}
+	return ""
 }
 
 // claudeCodeSkill implements the claude-code skill.
@@ -71,21 +75,36 @@ type claudeCodeSkill struct {
 	sessions   map[string]string
 	sessionsMu sync.RWMutex
 
+	// claudeBin caches the resolved path to the claude binary.
+	claudeBin   string
+	claudeBinMu sync.RWMutex
+
 	// Configurable defaults (can be overridden per call).
 	defaultModel    string
 	defaultBudget   float64
 	skipPermissions bool
 	timeout         time.Duration
+
+	// apiKey and baseURL are injected from GoClaw's main LLM config.
+	// When set, they are passed as ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL
+	// to the Claude Code CLI, allowing it to use the same provider (e.g. Z.AI).
+	apiKey  string
+	baseURL string
 }
 
 // NewClaudeCodeSkill creates the claude-code skill.
 // provider may be nil if project management is not configured.
-func NewClaudeCodeSkill(provider ProjectProvider) Skill {
-	// Model: empty means use Claude Code's own default (from its config).
+// apiKey, baseURL, and defaultModelName are the LLM provider credentials from GoClaw's config;
+// when non-empty, they are injected as env vars so Claude Code CLI authenticates
+// through the same provider (Z.AI, Anthropic, etc.).
+func NewClaudeCodeSkill(provider ProjectProvider, apiKey, baseURL, defaultModelName string) Skill {
+	// Model: env var override takes precedence over config.
 	model := os.Getenv("GOCLAW_CLAUDE_CODE_MODEL")
+	if model == "" {
+		model = defaultModelName
+	}
 
 	// Budget: 0 means no limit (same as interactive Claude Code).
-	// Only set a limit if explicitly configured via env var.
 	var budget float64
 	if budgetStr := os.Getenv("GOCLAW_CLAUDE_CODE_BUDGET"); budgetStr != "" {
 		if v, err := parseFloat(budgetStr); err == nil && v > 0 {
@@ -93,7 +112,7 @@ func NewClaudeCodeSkill(provider ProjectProvider) Skill {
 		}
 	}
 
-	timeoutMin := 15
+	timeoutMin := 18
 	if v := os.Getenv("GOCLAW_CLAUDE_CODE_TIMEOUT_MIN"); v != "" {
 		if n, err := parseInt(v); err == nil && n > 0 {
 			timeoutMin = n
@@ -107,13 +126,15 @@ func NewClaudeCodeSkill(provider ProjectProvider) Skill {
 		defaultBudget:   budget,
 		skipPermissions: true,
 		timeout:         time.Duration(timeoutMin) * time.Minute,
+		apiKey:          apiKey,
+		baseURL:         baseURL,
 	}
 }
 
 func (s *claudeCodeSkill) Metadata() Metadata {
 	return Metadata{
 		Name:        "claude-code",
-		Version:     "1.0.0",
+		Version:     "1.1.0",
 		Author:      "goclaw",
 		Description: "Full-stack coding assistant powered by Claude Code CLI. Handles code editing, review, commit, PR, deploy, test, refactor — any development task.",
 		Category:    "development",
@@ -145,7 +166,7 @@ Send clear, detailed instructions. The task runs in the active project directory
 				{Name: "max_budget", Type: "number", Description: "Max budget in USD. 0 or empty = no limit (normal Claude Code behavior)."},
 				{Name: "allowed_tools", Type: "string", Description: "Restrict tools (e.g. 'Read,Grep,Glob' for read-only). Empty = all tools."},
 				{Name: "add_dirs", Type: "string", Description: "Comma-separated additional directories Claude Code can access."},
-				{Name: "permission_mode", Type: "string", Description: "Permission mode: 'default', 'plan' (read-only analysis), 'bypassPermissions'. Default: bypassPermissions."},
+				{Name: "permission_mode", Type: "string", Description: "Permission mode: 'default', 'plan' (read-only analysis), 'bypass'. Default: bypass."},
 			},
 			Handler: s.handleExecute,
 		},
@@ -221,9 +242,10 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 		return nil, fmt.Errorf("prompt is required")
 	}
 
-	// Check if claude is available.
-	if _, err := exec.LookPath("claude"); err != nil {
-		return nil, fmt.Errorf("Claude Code CLI not found. Install: npm install -g @anthropic-ai/claude-code")
+	// Resolve claude binary — auto-install if missing.
+	claudeBin, err := s.resolveClaudeBin(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Resolve working directory from project.
@@ -237,15 +259,23 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 		}
 	}
 
-	// Build CLI arguments — use stream-json for real-time progress feedback.
-	cliArgs := []string{"-p", "--output-format", "stream-json"}
+	// ── Build CLI arguments (OpenClaw pattern) ──
+	// claude -p --output-format json --dangerously-skip-permissions [flags...] PROMPT
+	cliArgs := []string{"-p", "--output-format", "json"}
 
-	// Permission mode.
+	// Permission mode (OpenClaw: --dangerously-skip-permissions).
 	permMode, _ := args["permission_mode"].(string)
 	if permMode == "" && s.skipPermissions {
-		permMode = "bypassPermissions"
+		permMode = "bypass"
 	}
-	if permMode != "" {
+	switch permMode {
+	case "bypass", "dangerouslySkipPermissions", "bypassPermissions":
+		cliArgs = append(cliArgs, "--dangerously-skip-permissions")
+	case "plan":
+		cliArgs = append(cliArgs, "--permission-mode", "plan")
+	case "default", "":
+		// No flag.
+	default:
 		cliArgs = append(cliArgs, "--permission-mode", permMode)
 	}
 
@@ -255,7 +285,9 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 		model = s.defaultModel
 	}
 	if model != "" {
-		cliArgs = append(cliArgs, "--model", model)
+		// Resolve common aliases (OpenClaw pattern).
+		resolved := resolveModelAlias(model)
+		cliArgs = append(cliArgs, "--model", resolved)
 	}
 
 	// Budget.
@@ -267,9 +299,9 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 		cliArgs = append(cliArgs, "--max-budget-usd", fmt.Sprintf("%.2f", budget))
 	}
 
-	// Session continuation.
+	// Session management (OpenClaw pattern: --session-id for every run, --resume for continuation).
+	sessionKey, _ := args["session_key"].(string)
 	if cont, _ := args["continue_session"].(bool); cont {
-		sessionKey, _ := args["session_key"].(string)
 		s.sessionsMu.RLock()
 		prevSessionID, hasPrev := s.sessions[sessionKey]
 		s.sessionsMu.RUnlock()
@@ -295,144 +327,388 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 		}
 	}
 
-	// Inject project context as append-system-prompt so Claude Code knows
-	// about the project's language, framework, commands, etc.
+	// System prompt with project context.
 	if projectCtx != "" {
 		cliArgs = append(cliArgs, "--append-system-prompt", projectCtx)
 	}
 
-	// The prompt goes last.
-	cliArgs = append(cliArgs, prompt)
+	// ── Prompt: always via stdin ──
+	// Claude Code CLI v2.x hangs when prompt is passed as positional arg
+	// in non-TTY environments (e.g. PM2, SSH). Piping via stdin works reliably.
+	// This is the safest approach for server environments.
 
-	// Execute with timeout.
+	// ── Execute ──
 	execCtx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(execCtx, "claude", cliArgs...)
+	// Send a single progress notification (OpenClaw CLI backend has zero progress).
+	if ps := progressSenderFromCtx(ctx); ps != nil {
+		ps(ctx, "🤖 Claude Code trabalhando...")
+	}
+
+	cmd := exec.CommandContext(execCtx, claudeBin, cliArgs...)
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
 
-	// Set HOME if not set (needed for claude auth).
-	cmd.Env = os.Environ()
-
-	// Get stdout pipe for streaming. Stderr is captured separately for error context.
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create stdout pipe: %v", err)
-	}
-	var stderrBuf strings.Builder
-	cmd.Stderr = &stderrWriter{buf: &stderrBuf}
-
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start claude: %v", err)
-	}
-
-	// Extract progress sender from context (injected by tool_executor via
-	// the well-known "goclaw.progress_sender" context key).
-	type progressSenderFunc = func(ctx context.Context, message string)
-	var progressSend progressSenderFunc
-	if ps, ok := ctx.Value("goclaw.progress_sender").(progressSenderFunc); ok {
-		progressSend = ps
-	}
-
-	// Send initial feedback.
-	if progressSend != nil {
-		progressSend(ctx, "🔧 Claude Code iniciado, processando...")
-	}
-
-	// Parse streaming JSONL output.
-	tracker := &ccStreamTracker{
-		progressSend: progressSend,
-		ctx:          execCtx,
-		minInterval:  12 * time.Second,
-	}
-
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024) // 1MB max line
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var event claudeStreamEvent
-		if json.Unmarshal(line, &event) == nil {
-			tracker.handleEvent(&event)
+	// Log the CLI invocation for debugging (mask the API key).
+	maskedKey := ""
+	if s.apiKey != "" {
+		if len(s.apiKey) > 8 {
+			maskedKey = s.apiKey[:4] + "..." + s.apiKey[len(s.apiKey)-4:]
+		} else {
+			maskedKey = "***"
 		}
 	}
+	slog.Info("claude-code: executing",
+		"bin", claudeBin,
+		"args_count", len(cliArgs),
+		"work_dir", workDir,
+		"has_api_key", s.apiKey != "",
+		"api_key_masked", maskedKey,
+		"base_url", s.baseURL,
+		"model", s.defaultModel,
+	)
 
-	// Wait for the process to finish.
-	cmdErr := cmd.Wait()
+	// Environment: inject API credentials so Claude Code CLI uses the same
+	// provider as GoClaw (e.g. Z.AI). This mirrors how OpenClaw passes
+	// ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL to the CLI.
+	env := os.Environ()
+	env = clearEnvKeys(env, "ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY_OLD",
+		"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL")
 
-	// Build result from tracker.
-	result := tracker.result()
-	if result != nil {
-		// Store session for continuation.
-		if result.SessionID != "" {
-			sessionKey, _ := args["session_key"].(string)
-			if sessionKey != "" {
-				s.sessionsMu.Lock()
-				s.sessions[sessionKey] = result.SessionID
-				s.sessionsMu.Unlock()
-			}
-		}
-
-		// Check for errors.
-		if result.IsError || result.Subtype == "error" {
-			errMsg := result.Result
-			if errMsg == "" {
-				errMsg = fmt.Sprintf("Claude Code error (subtype: %s)", result.Subtype)
-			}
-			return nil, fmt.Errorf("%s", errMsg)
-		}
-
-		// Build response with metadata.
-		response := result.Result
-		if response == "" && result.Subtype == "error_max_budget_usd" {
-			return nil, fmt.Errorf("Claude Code exceeded the budget limit of $%.2f", budget)
-		}
-
-		// Append cost/metadata footer.
-		if result.TotalCost > 0 || result.NumTurns > 0 {
-			meta := fmt.Sprintf("\n\n---\n💰 $%.4f | %d turns | %dms",
-				result.TotalCost, result.NumTurns, result.Duration)
-			if result.SessionID != "" && len(result.SessionID) >= 8 {
-				meta += fmt.Sprintf(" | session: %s", result.SessionID[:8])
-			}
-			response += meta
-		}
-
-		return ccTruncate(response, 15000), nil
+	if s.apiKey != "" {
+		// Use ANTHROPIC_AUTH_TOKEN (Bearer token) as primary auth method.
+		// This is more compatible with proxies like Z.AI and CCProxy.
+		// Also set ANTHROPIC_API_KEY as fallback for direct Anthropic usage.
+		env = append(env, "ANTHROPIC_API_KEY="+s.apiKey)
+		env = append(env, "ANTHROPIC_AUTH_TOKEN="+s.apiKey)
+	}
+	if s.baseURL != "" {
+		env = append(env, "ANTHROPIC_BASE_URL="+s.baseURL)
+	}
+	// When using a proxy like Z.AI, tell Claude Code to use the same model
+	// for both sonnet and opus slots.
+	if s.defaultModel != "" {
+		env = append(env, "ANTHROPIC_DEFAULT_SONNET_MODEL="+s.defaultModel)
+		env = append(env, "ANTHROPIC_DEFAULT_OPUS_MODEL="+s.defaultModel)
 	}
 
-	// Tracker didn't capture a result — fallback to error.
+	// Increase internal Claude Code timeouts for BashTool pre-flight checks.
+	// The pre-flight check can be slow or hang with proxy endpoints (Z.AI, CCProxy).
+	// These env vars prevent Claude Code from stalling on pre-flight validation.
+	env = append(env, "API_TIMEOUT_MS=600000")           // 10 min API call timeout
+	env = append(env, "BASH_DEFAULT_TIMEOUT_MS=600000")   // 10 min bash default timeout
+	env = append(env, "BASH_MAX_TIMEOUT_MS=900000")       // 15 min bash max timeout
+	env = append(env, "DISABLE_PROMPT_CACHING=true")      // Reduce API overhead with proxies
+
+	cmd.Env = env
+
+	// Always pipe prompt via stdin (Claude Code v2.x hangs with positional arg in non-TTY).
+	cmd.Stdin = strings.NewReader(prompt)
+
+	// Capture stdout and stderr.
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &limitedWriter{buf: &stderrBuf, max: 8192}
+
+	cmdErr := cmd.Run()
+
+	stdout := strings.TrimSpace(stdoutBuf.String())
+	stderr := strings.TrimSpace(stderrBuf.String())
+
+	// Log result for debugging.
+	slog.Info("claude-code: execution completed",
+		"exit_error", cmdErr,
+		"stdout_len", len(stdout),
+		"stderr_len", len(stderr),
+		"stderr_preview", ccTruncate(stderr, 500),
+	)
+
+	// ── Parse result (OpenClaw pattern: parseCliJson) ──
 	if cmdErr != nil {
-		stderrStr := strings.TrimSpace(stderrBuf.String())
-		if stderrStr != "" {
-			return nil, fmt.Errorf("claude code: %s", ccTruncate(stderrStr, 3000))
+		// Non-zero exit: return error with stderr context.
+		errMsg := stderr
+		if errMsg == "" {
+			errMsg = stdout
 		}
-		return nil, fmt.Errorf("claude code failed: %v", cmdErr)
+		if errMsg == "" {
+			errMsg = cmdErr.Error()
+		}
+		return nil, fmt.Errorf("claude code: %s", ccTruncate(errMsg, 3000))
 	}
 
-	// If we have accumulated text from the stream, return it.
-	if text := tracker.accumulatedText(); text != "" {
-		return ccTruncate(text, 15000), nil
+	// Parse the JSON output.
+	var result claudeCodeResult
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		// If JSON parsing fails, return raw stdout as text.
+		if stdout != "" {
+			return ccTruncate(stdout, 15000), nil
+		}
+		return nil, fmt.Errorf("claude code: no output (stderr: %s)", ccTruncate(stderr, 500))
 	}
 
-	return "Claude Code completed without output.", nil
+	// Store session ID for continuation.
+	if result.SessionID != "" && sessionKey != "" {
+		s.sessionsMu.Lock()
+		s.sessions[sessionKey] = result.SessionID
+		s.sessionsMu.Unlock()
+	}
+
+	// Check for errors in the result.
+	if result.IsError || result.Subtype == "error" {
+		errMsg := result.extractText()
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("Claude Code error (subtype: %s)", result.Subtype)
+		}
+		return nil, fmt.Errorf("%s", errMsg)
+	}
+	if result.Subtype == "error_max_budget_usd" {
+		return nil, fmt.Errorf("Claude Code exceeded the budget limit of $%.2f", budget)
+	}
+
+	// Build response.
+	response := result.extractText()
+	if response == "" {
+		return "Claude Code completed without output.", nil
+	}
+
+	// Append cost/metadata footer.
+	if result.TotalCost > 0 || result.NumTurns > 0 {
+		meta := fmt.Sprintf("\n\n---\n💰 $%.4f | %d turns | %dms",
+			result.TotalCost, result.NumTurns, result.Duration)
+		if result.SessionID != "" && len(result.SessionID) >= 8 {
+			meta += fmt.Sprintf(" | session: %s", result.SessionID[:8])
+		}
+		response += meta
+	}
+
+	return ccTruncate(response, 15000), nil
 }
 
-// stderrWriter captures stderr output with a size limit to prevent unbounded memory.
-type stderrWriter struct {
-	buf  *strings.Builder
+func (s *claudeCodeSkill) handleCheck(ctx context.Context, _ map[string]any) (any, error) {
+	claudeBin, err := s.resolveClaudeBin(ctx)
+	if err != nil {
+		return map[string]any{
+			"installed": false,
+			"error":     err.Error(),
+			"message":   "Claude Code CLI could not be found or installed.",
+			"docs":      "https://docs.anthropic.com/en/docs/claude-code",
+		}, nil
+	}
+
+	// Get version.
+	versionOut, _ := exec.Command(claudeBin, "--version").CombinedOutput()
+	version := strings.TrimSpace(string(versionOut))
+
+	return map[string]any{
+		"installed": true,
+		"path":      claudeBin,
+		"version":   version,
+		"message":   fmt.Sprintf("Claude Code %s ready at %s", version, claudeBin),
+	}, nil
+}
+
+// ── Binary resolution and auto-installation ──
+
+// resolveClaudeBin finds the claude binary, caching the result.
+// If not found, attempts auto-installation via npm.
+func (s *claudeCodeSkill) resolveClaudeBin(ctx context.Context) (string, error) {
+	// Check cache first.
+	s.claudeBinMu.RLock()
+	cached := s.claudeBin
+	s.claudeBinMu.RUnlock()
+	if cached != "" {
+		// Verify it still exists.
+		if _, err := os.Stat(cached); err == nil {
+			return cached, nil
+		}
+	}
+
+	// Try to find in PATH.
+	if p, err := exec.LookPath("claude"); err == nil {
+		s.cacheClaudeBin(p)
+		return p, nil
+	}
+
+	// Check common locations (PM2 may not inherit full user PATH).
+	commonPaths := []string{
+		os.ExpandEnv("$HOME/.local/bin/claude"),
+		os.ExpandEnv("$HOME/.npm-global/bin/claude"),
+		"/usr/local/bin/claude",
+		"/usr/bin/claude",
+	}
+	for _, p := range commonPaths {
+		if _, err := os.Stat(p); err == nil {
+			s.cacheClaudeBin(p)
+			return p, nil
+		}
+	}
+
+	// Try via bash login shell (picks up nvm/fnm/volta).
+	if out, err := exec.CommandContext(ctx, "bash", "-lc", "which claude").CombinedOutput(); err == nil {
+		p := strings.TrimSpace(string(out))
+		if p != "" {
+			s.cacheClaudeBin(p)
+			return p, nil
+		}
+	}
+
+	// Not found — attempt auto-install.
+	return s.autoInstallClaude(ctx)
+}
+
+// installMu serializes install attempts so concurrent calls don't race.
+var installMu sync.Mutex
+
+// autoInstallClaude installs Claude Code CLI via npm.
+func (s *claudeCodeSkill) autoInstallClaude(ctx context.Context) (string, error) {
+	installMu.Lock()
+	defer installMu.Unlock()
+
+	// Double-check after acquiring lock.
+	if p, err := exec.LookPath("claude"); err == nil {
+		s.cacheClaudeBin(p)
+		return p, nil
+	}
+
+	notify := progressSenderFromCtx(ctx)
+	if notify != nil {
+		notify(ctx, "📦 Instalando Claude Code CLI...")
+	}
+
+	// Install via bash login shell (inherits nvm/fnm/volta PATH).
+	installCmd := exec.CommandContext(ctx, "bash", "-lc", "npm install -g @anthropic-ai/claude-code")
+	installCmd.Env = os.Environ()
+	installOut, installErr := installCmd.CombinedOutput()
+	if installErr != nil {
+		outStr := strings.TrimSpace(string(installOut))
+		if len(outStr) > 500 {
+			outStr = outStr[len(outStr)-500:]
+		}
+		return "", fmt.Errorf("failed to install Claude Code CLI: %v\nOutput: %s", installErr, outStr)
+	}
+
+	// Find the installed binary.
+	// First, get npm global bin dir and add to PATH.
+	if binOut, err := exec.CommandContext(ctx, "bash", "-lc", "npm bin -g").CombinedOutput(); err == nil {
+		globalBin := strings.TrimSpace(string(binOut))
+		if globalBin != "" {
+			currentPath := os.Getenv("PATH")
+			os.Setenv("PATH", globalBin+":"+currentPath)
+		}
+	}
+
+	// Now find claude.
+	claudeBin, err := s.resolveClaudeBinDirect(ctx)
+	if err != nil {
+		return "", fmt.Errorf("installed but claude not found: %v", err)
+	}
+
+	if notify != nil {
+		versionOut, _ := exec.CommandContext(ctx, claudeBin, "--version").CombinedOutput()
+		version := strings.TrimSpace(string(versionOut))
+		notify(ctx, fmt.Sprintf("✅ Claude Code %s instalado", version))
+	}
+
+	return claudeBin, nil
+}
+
+// resolveClaudeBinDirect searches for claude without auto-install (avoids recursion).
+func (s *claudeCodeSkill) resolveClaudeBinDirect(ctx context.Context) (string, error) {
+	if p, err := exec.LookPath("claude"); err == nil {
+		s.cacheClaudeBin(p)
+		return p, nil
+	}
+	commonPaths := []string{
+		os.ExpandEnv("$HOME/.local/bin/claude"),
+		os.ExpandEnv("$HOME/.npm-global/bin/claude"),
+		"/usr/local/bin/claude",
+	}
+	for _, p := range commonPaths {
+		if _, err := os.Stat(p); err == nil {
+			s.cacheClaudeBin(p)
+			return p, nil
+		}
+	}
+	if out, err := exec.CommandContext(ctx, "bash", "-lc", "which claude").CombinedOutput(); err == nil {
+		p := strings.TrimSpace(string(out))
+		if p != "" {
+			s.cacheClaudeBin(p)
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("claude binary not found in PATH or common locations")
+}
+
+func (s *claudeCodeSkill) cacheClaudeBin(path string) {
+	s.claudeBinMu.Lock()
+	s.claudeBin = path
+	s.claudeBinMu.Unlock()
+}
+
+// ── Helpers ──
+
+// progressSenderFromCtx extracts the progress sender callback from context.
+func progressSenderFromCtx(ctx context.Context) func(context.Context, string) {
+	type progressSenderFunc = func(ctx context.Context, message string)
+	if ps, ok := ctx.Value("goclaw.progress_sender").(progressSenderFunc); ok {
+		return ps
+	}
+	return nil
+}
+
+// resolveModelAlias converts common model aliases (OpenClaw pattern).
+func resolveModelAlias(model string) string {
+	aliases := map[string]string{
+		"opus":    "opus",
+		"sonnet":  "sonnet",
+		"haiku":   "haiku",
+		"opus-4":  "opus",
+		"opus-4.5": "opus",
+		"opus-4.6": "opus",
+		"sonnet-4": "sonnet",
+		"sonnet-4.1": "sonnet",
+		"sonnet-4.5": "sonnet",
+		"haiku-3.5": "haiku",
+	}
+	if resolved, ok := aliases[strings.ToLower(model)]; ok {
+		return resolved
+	}
+	return model
+}
+
+// clearEnvKeys removes specified keys from an environment slice.
+func clearEnvKeys(env []string, keys ...string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		skip := false
+		for _, key := range keys {
+			if strings.HasPrefix(e, key+"=") {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
+}
+
+// limitedWriter captures output with a size limit.
+type limitedWriter struct {
+	buf  *bytes.Buffer
+	max  int
 	size int
 }
 
-func (w *stderrWriter) Write(p []byte) (n int, err error) {
-	if w.size >= 4096 {
-		return len(p), nil // Silently discard excess.
+func (w *limitedWriter) Write(p []byte) (n int, err error) {
+	if w.size >= w.max {
+		return len(p), nil
 	}
-	remain := 4096 - w.size
+	remain := w.max - w.size
 	if len(p) > remain {
 		p = p[:remain]
 	}
@@ -441,169 +717,7 @@ func (w *stderrWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-// ccStreamTracker processes Claude Code stream-json events and extracts
-// progress information for real-time user feedback.
-type ccStreamTracker struct {
-	progressSend func(ctx context.Context, message string)
-	ctx          context.Context
-	minInterval  time.Duration
-
-	lastProgress time.Time
-	toolsUsed    []string
-	textBuf      strings.Builder
-	finalResult  *claudeCodeResult
-}
-
-// handleEvent processes a single stream event from Claude Code.
-func (t *ccStreamTracker) handleEvent(ev *claudeStreamEvent) {
-	switch ev.Type {
-	case "result":
-		// Final result event.
-		t.finalResult = &claudeCodeResult{
-			Type:      ev.Type,
-			Subtype:   ev.Subtype,
-			Result:    ev.Result,
-			IsError:   ev.IsError,
-			SessionID: ev.SessionID,
-			NumTurns:  ev.NumTurns,
-			TotalCost: ev.TotalCost,
-			Duration:  ev.Duration,
-		}
-
-	case "assistant":
-		switch ev.Subtype {
-		case "tool_use":
-			t.toolsUsed = append(t.toolsUsed, ev.ToolName)
-			t.maybeSendProgress(t.describeToolUse(ev.ToolName, ev.Input))
-		case "text":
-			// Accumulate assistant text for the final response.
-			if ev.Content != "" {
-				t.textBuf.WriteString(ev.Content)
-			}
-		}
-
-	case "system":
-		if ev.Subtype == "init" && ev.SessionID != "" {
-			// Capture session ID early.
-			if t.finalResult == nil {
-				t.finalResult = &claudeCodeResult{SessionID: ev.SessionID}
-			} else {
-				t.finalResult.SessionID = ev.SessionID
-			}
-		}
-	}
-}
-
-// maybeSendProgress sends a progress message if enough time has passed.
-func (t *ccStreamTracker) maybeSendProgress(msg string) {
-	if t.progressSend == nil || msg == "" {
-		return
-	}
-	now := time.Now()
-	if now.Sub(t.lastProgress) < t.minInterval {
-		return
-	}
-	t.lastProgress = now
-	t.progressSend(t.ctx, msg)
-}
-
-// describeToolUse creates a user-friendly description of what Claude Code is doing.
-func (t *ccStreamTracker) describeToolUse(toolName string, input json.RawMessage) string {
-	// Try to extract a meaningful detail from the input.
-	var detail string
-	if len(input) > 0 {
-		var inputMap map[string]any
-		if json.Unmarshal(input, &inputMap) == nil {
-			// Extract common fields.
-			if cmd, ok := inputMap["command"].(string); ok {
-				detail = ccTruncate(cmd, 80)
-			} else if path, ok := inputMap["file_path"].(string); ok {
-				detail = path
-			} else if path, ok := inputMap["path"].(string); ok {
-				detail = path
-			} else if pattern, ok := inputMap["pattern"].(string); ok {
-				detail = pattern
-			}
-		}
-	}
-
-	// Build a descriptive message based on the tool.
-	icon := ccToolIcon(toolName)
-	turnCount := len(t.toolsUsed)
-	base := fmt.Sprintf("%s %s", icon, toolName)
-	if detail != "" {
-		base += ": `" + detail + "`"
-	}
-	return fmt.Sprintf("⏳ [%d] %s", turnCount, base)
-}
-
-// ccToolIcon returns an emoji for the Claude Code tool name.
-func ccToolIcon(tool string) string {
-	switch strings.ToLower(tool) {
-	case "bash", "shell":
-		return "🖥️"
-	case "read", "readfile":
-		return "📖"
-	case "write", "writefile":
-		return "✏️"
-	case "edit", "editfile":
-		return "📝"
-	case "grep", "search":
-		return "🔍"
-	case "glob":
-		return "📂"
-	case "listfiles":
-		return "📁"
-	default:
-		return "🔧"
-	}
-}
-
-// result returns the final result, or nil if not yet available.
-func (t *ccStreamTracker) result() *claudeCodeResult {
-	return t.finalResult
-}
-
-// accumulatedText returns any text accumulated from assistant text events.
-func (t *ccStreamTracker) accumulatedText() string {
-	return t.textBuf.String()
-}
-
-func (s *claudeCodeSkill) handleCheck(_ context.Context, _ map[string]any) (any, error) {
-	// Check if claude is in PATH.
-	claudePath, err := exec.LookPath("claude")
-	if err != nil {
-		return map[string]any{
-			"installed": false,
-			"message":   "Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code",
-			"docs":      "https://docs.anthropic.com/en/docs/claude-code",
-		}, nil
-	}
-
-	// Get version.
-	versionOut, _ := exec.Command("claude", "--version").CombinedOutput()
-	version := strings.TrimSpace(string(versionOut))
-
-	// Check auth by running doctor.
-	doctorOut, doctorErr := exec.Command("claude", "doctor").CombinedOutput()
-	authOK := doctorErr == nil
-	doctorInfo := strings.TrimSpace(string(doctorOut))
-
-	return map[string]any{
-		"installed":     true,
-		"path":          claudePath,
-		"version":       version,
-		"authenticated": authOK,
-		"doctor":        ccTruncate(doctorInfo, 2000),
-		"message":       fmt.Sprintf("Claude Code %s ready at %s", version, claudePath),
-	}, nil
-}
-
-// ── Helpers ──
-
 // ccResolveProject resolves a project from args (project_id or session active).
-// Prefixed with "cc" to avoid conflict with the package-level resolveProject
-// from other coding skill files during transition.
 func ccResolveProject(provider ProjectProvider, args map[string]any) *ProjectInfo {
 	if id, _ := args["project_id"].(string); id != "" {
 		return provider.Get(id)

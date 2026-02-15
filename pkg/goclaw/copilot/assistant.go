@@ -404,6 +404,11 @@ func (a *Assistant) Start(ctx context.Context) error {
 	// Executes after all channels are connected, with a short delay for stabilization.
 	go a.runBootOnce()
 
+	// 7b. Resume interrupted runs from previous process lifecycle.
+	// Any agent runs that were active when the process last exited are
+	// re-submitted so the user doesn't lose work in progress.
+	go a.resumeInterruptedRuns()
+
 	// 8. Initialize TTS provider if enabled.
 	if a.config.TTS.Enabled {
 		a.ttsProvider = a.buildTTSProvider()
@@ -971,6 +976,11 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 	a.interruptInboxesMu.Unlock()
 
 	runCtx, cancel := context.WithCancel(ctx)
+
+	// ── Persist active run for restart recovery ──
+	channel, chatID, _ := strings.Cut(sessionID, ":")
+	a.markRunActive(sessionID, channel, chatID, userMessage)
+
 	defer func() {
 		// Remove interrupt inbox before releasing the processing lock.
 		a.interruptInboxesMu.Lock()
@@ -980,6 +990,10 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 		a.activeRunsMu.Lock()
 		delete(a.activeRuns, runKey)
 		a.activeRunsMu.Unlock()
+
+		// Clear the active run marker — run completed normally.
+		a.clearRunActive(sessionID)
+
 		cancel()
 	}()
 
@@ -1264,6 +1278,10 @@ func (a *Assistant) registerSkillLoaders() {
 		if a.projectMgr != nil {
 			builtinLoader.SetProjectProvider(NewProjectProviderAdapter(a.projectMgr))
 		}
+
+		// Inject API credentials so skills like claude-code can authenticate
+		// through the same LLM provider (e.g. Z.AI) as GoClaw itself.
+		builtinLoader.SetAPIConfig(a.config.API.APIKey, a.config.API.BaseURL, a.config.Model)
 
 		a.skillRegistry.AddLoader(builtinLoader)
 	}
@@ -1932,6 +1950,164 @@ func (a *Assistant) sendReply(original *channels.IncomingMessage, content string
 				"error", err,
 			)
 		}
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Active run persistence — restart recovery
+// ─────────────────────────────────────────────────────────────────────────────
+
+// markRunActive persists an active run entry in the DB so that if the process
+// restarts, we know which sessions had work in progress.
+func (a *Assistant) markRunActive(sessionID, channel, chatID, userMessage string) {
+	if a.goclawDB == nil {
+		return
+	}
+	_, err := a.goclawDB.Exec(`
+		INSERT OR REPLACE INTO active_runs (session_id, channel, chat_id, user_message, started_at)
+		VALUES (?, ?, ?, ?, datetime('now'))
+	`, sessionID, channel, chatID, userMessage)
+	if err != nil {
+		a.logger.Warn("failed to mark run active", "session", sessionID, "error", err)
+	}
+}
+
+// clearRunActive removes the active run entry after normal completion.
+func (a *Assistant) clearRunActive(sessionID string) {
+	if a.goclawDB == nil {
+		return
+	}
+	_, err := a.goclawDB.Exec(`DELETE FROM active_runs WHERE session_id = ?`, sessionID)
+	if err != nil {
+		a.logger.Warn("failed to clear active run", "session", sessionID, "error", err)
+	}
+}
+
+// interruptedRun holds information about a run that was active when the process
+// was last terminated.
+type interruptedRun struct {
+	SessionID   string
+	Channel     string
+	ChatID      string
+	UserMessage string
+	StartedAt   string
+}
+
+// loadInterruptedRuns reads all active_runs rows from the DB.
+// These represent runs that were in progress when the process last exited.
+func (a *Assistant) loadInterruptedRuns() []interruptedRun {
+	if a.goclawDB == nil {
+		return nil
+	}
+	rows, err := a.goclawDB.Query(`SELECT session_id, channel, chat_id, user_message, started_at FROM active_runs`)
+	if err != nil {
+		a.logger.Warn("failed to query interrupted runs", "error", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var runs []interruptedRun
+	for rows.Next() {
+		var r interruptedRun
+		if err := rows.Scan(&r.SessionID, &r.Channel, &r.ChatID, &r.UserMessage, &r.StartedAt); err != nil {
+			a.logger.Warn("failed to scan interrupted run", "error", err)
+			continue
+		}
+		runs = append(runs, r)
+	}
+	return runs
+}
+
+// resumeInterruptedRuns checks for runs that were active when the process
+// last exited and re-submits them to the message pipeline so the user
+// doesn't lose work-in-progress tasks after a restart.
+func (a *Assistant) resumeInterruptedRuns() {
+	runs := a.loadInterruptedRuns()
+	if len(runs) == 0 {
+		return
+	}
+
+	a.logger.Info("found interrupted runs from previous session", "count", len(runs))
+
+	for _, r := range runs {
+		// Clear the stale entry first — the new run will create its own.
+		a.clearRunActive(r.SessionID)
+
+		// Truncate the original message for display.
+		preview := r.UserMessage
+		if len(preview) > 100 {
+			preview = preview[:100] + "..."
+		}
+
+		// Notify the user that we're resuming.
+		resumeNotice := fmt.Sprintf(
+			"🔄 *Retomando tarefa interrompida*\n\nEu fui reiniciado enquanto processava sua solicitação:\n> %s\n\nContinuando de onde parei...",
+			preview,
+		)
+		outMsg := &channels.OutgoingMessage{
+			Content: FormatForChannel(resumeNotice, r.Channel),
+		}
+		if err := a.channelMgr.Send(a.ctx, r.Channel, r.ChatID, outMsg); err != nil {
+			a.logger.Error("failed to notify about resumed run",
+				"channel", r.Channel, "chat_id", r.ChatID, "error", err)
+			continue
+		}
+
+		a.logger.Info("re-submitting interrupted task",
+			"channel", r.Channel,
+			"chat_id", r.ChatID,
+			"message_preview", preview,
+		)
+
+		// Resume the task directly via the agent, bypassing access checks
+		// (the user already had access when the original run started).
+		go func(run interruptedRun) {
+			// Small delay to let channels fully stabilize.
+			time.Sleep(2 * time.Second)
+
+			// Resolve workspace (uses empty senderJID, non-group).
+			resolved := a.workspaceMgr.Resolve(run.Channel, run.ChatID, "", false)
+			if resolved == nil {
+				a.logger.Error("could not resolve workspace for interrupted run",
+					"channel", run.Channel, "chat_id", run.ChatID)
+				return
+			}
+
+			session := resolved.Session
+			sessionID := MakeSessionID(run.Channel, run.ChatID)
+
+			// Grant owner-level trust so resumed runs don't need approval.
+			a.toolExecutor.SetCallerContext(AccessOwner, "system:resume")
+			a.toolExecutor.SetSessionContext(sessionID)
+
+			prompt := a.composeWorkspacePrompt(resolved.Workspace, session, run.UserMessage)
+
+			// Build block streamer for progressive output.
+			blockStreamer := NewBlockStreamer(
+				DefaultBlockStreamConfig(),
+				a.channelMgr,
+				run.Channel, run.ChatID, "",
+			)
+			defer blockStreamer.Finish()
+
+			response := a.executeAgentWithStream(
+				a.ctx, resolved.Workspace.ID, session, sessionID,
+				prompt, run.UserMessage, blockStreamer,
+			)
+
+			// Flush any remaining streamed text.
+			blockStreamer.Finish()
+
+			// Send final response if there's leftover and streamer didn't send it.
+			if response != "" && !blockStreamer.HasSentBlocks() {
+				formatted := FormatForChannel(response, run.Channel)
+				outMsg := &channels.OutgoingMessage{Content: formatted}
+				_ = a.channelMgr.Send(a.ctx, run.Channel, run.ChatID, outMsg)
+			}
+
+			// Save to session history.
+			session.AddMessage(run.UserMessage, response)
+		}(r)
 	}
 }
 
