@@ -6,6 +6,10 @@
 // this skill delegates everything to Claude Code, which has its own rich set
 // of tools (Bash, Read, Edit, Grep, Glob, Write, etc.).
 //
+// The skill uses --output-format stream-json for real-time progress feedback:
+// as Claude Code works, it sends intermediate updates to the user so they
+// know what's happening (reading files, running commands, etc.).
+//
 // Requirements:
 //   - Claude Code CLI installed: npm install -g @anthropic-ai/claude-code
 //   - Authenticated: claude setup-token or claude login
@@ -13,6 +17,7 @@
 package skills
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,7 +28,7 @@ import (
 	"time"
 )
 
-// claudeCodeResult represents the JSON output from `claude -p --output-format json`.
+// claudeCodeResult represents the final JSON result from Claude Code CLI.
 type claudeCodeResult struct {
 	Type      string  `json:"type"`
 	Subtype   string  `json:"subtype"`
@@ -34,6 +39,27 @@ type claudeCodeResult struct {
 	TotalCost float64 `json:"total_cost_usd"`
 	Duration  int     `json:"duration_ms"`
 	Errors    []any   `json:"errors"`
+}
+
+// claudeStreamEvent represents a single line from --output-format stream-json.
+type claudeStreamEvent struct {
+	Type      string  `json:"type"`
+	Subtype   string  `json:"subtype"`
+	SessionID string  `json:"session_id"`
+	Result    string  `json:"result"`
+	IsError   bool    `json:"is_error"`
+	NumTurns  int     `json:"num_turns"`
+	TotalCost float64 `json:"total_cost_usd"`
+	Duration  int     `json:"duration_ms"`
+
+	// For tool_use events.
+	ToolName string `json:"tool_name"`
+
+	// For text/content events.
+	Content string `json:"content"`
+
+	// For tool input.
+	Input json.RawMessage `json:"input"`
 }
 
 // claudeCodeSkill implements the claude-code skill.
@@ -211,8 +237,8 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 		}
 	}
 
-	// Build CLI arguments.
-	cliArgs := []string{"-p", "--output-format", "json"}
+	// Build CLI arguments — use stream-json for real-time progress feedback.
+	cliArgs := []string{"-p", "--output-format", "stream-json"}
 
 	// Permission mode.
 	permMode, _ := args["permission_mode"].(string)
@@ -290,11 +316,57 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 	// Set HOME if not set (needed for claude auth).
 	cmd.Env = os.Environ()
 
-	out, err := cmd.CombinedOutput()
+	// Get stdout pipe for streaming. Stderr is captured separately for error context.
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdout pipe: %v", err)
+	}
+	var stderrBuf strings.Builder
+	cmd.Stderr = &stderrWriter{buf: &stderrBuf}
 
-	// Parse JSON response.
-	var result claudeCodeResult
-	if jsonErr := json.Unmarshal(out, &result); jsonErr == nil {
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start claude: %v", err)
+	}
+
+	// Extract progress sender from context (injected by tool_executor via
+	// the well-known "goclaw.progress_sender" context key).
+	type progressSenderFunc = func(ctx context.Context, message string)
+	var progressSend progressSenderFunc
+	if ps, ok := ctx.Value("goclaw.progress_sender").(progressSenderFunc); ok {
+		progressSend = ps
+	}
+
+	// Send initial feedback.
+	if progressSend != nil {
+		progressSend(ctx, "🔧 Claude Code iniciado, processando...")
+	}
+
+	// Parse streaming JSONL output.
+	tracker := &ccStreamTracker{
+		progressSend: progressSend,
+		ctx:          execCtx,
+		minInterval:  12 * time.Second,
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024) // 1MB max line
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var event claudeStreamEvent
+		if json.Unmarshal(line, &event) == nil {
+			tracker.handleEvent(&event)
+		}
+	}
+
+	// Wait for the process to finish.
+	cmdErr := cmd.Wait()
+
+	// Build result from tracker.
+	result := tracker.result()
+	if result != nil {
 		// Store session for continuation.
 		if result.SessionID != "" {
 			sessionKey, _ := args["session_key"].(string)
@@ -324,7 +396,7 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 		if result.TotalCost > 0 || result.NumTurns > 0 {
 			meta := fmt.Sprintf("\n\n---\n💰 $%.4f | %d turns | %dms",
 				result.TotalCost, result.NumTurns, result.Duration)
-			if result.SessionID != "" {
+			if result.SessionID != "" && len(result.SessionID) >= 8 {
 				meta += fmt.Sprintf(" | session: %s", result.SessionID[:8])
 			}
 			response += meta
@@ -333,16 +405,168 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 		return ccTruncate(response, 15000), nil
 	}
 
-	// JSON parse failed — return raw output.
-	if err != nil {
-		raw := strings.TrimSpace(string(out))
-		if raw != "" {
-			return nil, fmt.Errorf("claude code: %s", ccTruncate(raw, 3000))
+	// Tracker didn't capture a result — fallback to error.
+	if cmdErr != nil {
+		stderrStr := strings.TrimSpace(stderrBuf.String())
+		if stderrStr != "" {
+			return nil, fmt.Errorf("claude code: %s", ccTruncate(stderrStr, 3000))
 		}
-		return nil, fmt.Errorf("claude code failed: %v", err)
+		return nil, fmt.Errorf("claude code failed: %v", cmdErr)
 	}
 
-	return ccTruncate(string(out), 15000), nil
+	// If we have accumulated text from the stream, return it.
+	if text := tracker.accumulatedText(); text != "" {
+		return ccTruncate(text, 15000), nil
+	}
+
+	return "Claude Code completed without output.", nil
+}
+
+// stderrWriter captures stderr output with a size limit to prevent unbounded memory.
+type stderrWriter struct {
+	buf  *strings.Builder
+	size int
+}
+
+func (w *stderrWriter) Write(p []byte) (n int, err error) {
+	if w.size >= 4096 {
+		return len(p), nil // Silently discard excess.
+	}
+	remain := 4096 - w.size
+	if len(p) > remain {
+		p = p[:remain]
+	}
+	w.size += len(p)
+	w.buf.Write(p)
+	return len(p), nil
+}
+
+// ccStreamTracker processes Claude Code stream-json events and extracts
+// progress information for real-time user feedback.
+type ccStreamTracker struct {
+	progressSend func(ctx context.Context, message string)
+	ctx          context.Context
+	minInterval  time.Duration
+
+	lastProgress time.Time
+	toolsUsed    []string
+	textBuf      strings.Builder
+	finalResult  *claudeCodeResult
+}
+
+// handleEvent processes a single stream event from Claude Code.
+func (t *ccStreamTracker) handleEvent(ev *claudeStreamEvent) {
+	switch ev.Type {
+	case "result":
+		// Final result event.
+		t.finalResult = &claudeCodeResult{
+			Type:      ev.Type,
+			Subtype:   ev.Subtype,
+			Result:    ev.Result,
+			IsError:   ev.IsError,
+			SessionID: ev.SessionID,
+			NumTurns:  ev.NumTurns,
+			TotalCost: ev.TotalCost,
+			Duration:  ev.Duration,
+		}
+
+	case "assistant":
+		switch ev.Subtype {
+		case "tool_use":
+			t.toolsUsed = append(t.toolsUsed, ev.ToolName)
+			t.maybeSendProgress(t.describeToolUse(ev.ToolName, ev.Input))
+		case "text":
+			// Accumulate assistant text for the final response.
+			if ev.Content != "" {
+				t.textBuf.WriteString(ev.Content)
+			}
+		}
+
+	case "system":
+		if ev.Subtype == "init" && ev.SessionID != "" {
+			// Capture session ID early.
+			if t.finalResult == nil {
+				t.finalResult = &claudeCodeResult{SessionID: ev.SessionID}
+			} else {
+				t.finalResult.SessionID = ev.SessionID
+			}
+		}
+	}
+}
+
+// maybeSendProgress sends a progress message if enough time has passed.
+func (t *ccStreamTracker) maybeSendProgress(msg string) {
+	if t.progressSend == nil || msg == "" {
+		return
+	}
+	now := time.Now()
+	if now.Sub(t.lastProgress) < t.minInterval {
+		return
+	}
+	t.lastProgress = now
+	t.progressSend(t.ctx, msg)
+}
+
+// describeToolUse creates a user-friendly description of what Claude Code is doing.
+func (t *ccStreamTracker) describeToolUse(toolName string, input json.RawMessage) string {
+	// Try to extract a meaningful detail from the input.
+	var detail string
+	if len(input) > 0 {
+		var inputMap map[string]any
+		if json.Unmarshal(input, &inputMap) == nil {
+			// Extract common fields.
+			if cmd, ok := inputMap["command"].(string); ok {
+				detail = ccTruncate(cmd, 80)
+			} else if path, ok := inputMap["file_path"].(string); ok {
+				detail = path
+			} else if path, ok := inputMap["path"].(string); ok {
+				detail = path
+			} else if pattern, ok := inputMap["pattern"].(string); ok {
+				detail = pattern
+			}
+		}
+	}
+
+	// Build a descriptive message based on the tool.
+	icon := ccToolIcon(toolName)
+	turnCount := len(t.toolsUsed)
+	base := fmt.Sprintf("%s %s", icon, toolName)
+	if detail != "" {
+		base += ": `" + detail + "`"
+	}
+	return fmt.Sprintf("⏳ [%d] %s", turnCount, base)
+}
+
+// ccToolIcon returns an emoji for the Claude Code tool name.
+func ccToolIcon(tool string) string {
+	switch strings.ToLower(tool) {
+	case "bash", "shell":
+		return "🖥️"
+	case "read", "readfile":
+		return "📖"
+	case "write", "writefile":
+		return "✏️"
+	case "edit", "editfile":
+		return "📝"
+	case "grep", "search":
+		return "🔍"
+	case "glob":
+		return "📂"
+	case "listfiles":
+		return "📁"
+	default:
+		return "🔧"
+	}
+}
+
+// result returns the final result, or nil if not yet available.
+func (t *ccStreamTracker) result() *claudeCodeResult {
+	return t.finalResult
+}
+
+// accumulatedText returns any text accumulated from assistant text events.
+func (t *ccStreamTracker) accumulatedText() string {
+	return t.textBuf.String()
 }
 
 func (s *claudeCodeSkill) handleCheck(_ context.Context, _ map[string]any) (any, error) {

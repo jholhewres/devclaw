@@ -770,6 +770,13 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	agentCtx := ContextWithSession(a.ctx, sessionID)
 	agentCtx = ContextWithDelivery(agentCtx, msg.Channel, msg.ChatID)
 
+	// Inject ProgressSender so long-running tools (e.g. claude-code) can
+	// send intermediate feedback to the user while processing.
+	agentCtx = ContextWithProgressSender(agentCtx, func(_ context.Context, progressMsg string) {
+		outMsg := &channels.OutgoingMessage{Content: FormatForChannel(progressMsg, msg.Channel)}
+		_ = a.channelMgr.Send(a.ctx, msg.Channel, msg.ChatID, outMsg)
+	})
+
 	bsCfg := a.config.BlockStream.Effective()
 	var blockStreamer *BlockStreamer
 	if bsCfg.Enabled {

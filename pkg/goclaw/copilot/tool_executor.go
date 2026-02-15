@@ -65,6 +65,30 @@ func DeliveryTargetFromContext(ctx context.Context) DeliveryTarget {
 	return DeliveryTarget{}
 }
 
+// ProgressSender sends intermediate progress messages to the user during
+// long-running tool execution (e.g. claude-code). Called by tools that want
+// to give real-time feedback without waiting for the full result.
+type ProgressSender func(ctx context.Context, message string)
+
+// ctxKeyProgress is a string-based context key for ProgressSender.
+// Using a well-known string ensures cross-package matching (skills package
+// uses the same key to extract the sender without importing copilot).
+const ctxKeyProgress = "goclaw.progress_sender"
+
+// ContextWithProgressSender returns a context carrying a ProgressSender callback.
+func ContextWithProgressSender(ctx context.Context, fn ProgressSender) context.Context {
+	return context.WithValue(ctx, ctxKeyProgress, fn)
+}
+
+// ProgressSenderFromContext extracts the ProgressSender from context.
+// Returns nil if not set.
+func ProgressSenderFromContext(ctx context.Context) ProgressSender {
+	if fn, ok := ctx.Value(ctxKeyProgress).(ProgressSender); ok {
+		return fn
+	}
+	return nil
+}
+
 const (
 	// DefaultToolTimeout is the maximum time a single tool execution can take.
 	DefaultToolTimeout = 30 * time.Second
@@ -437,8 +461,19 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 	if name == "bash" || name == "ssh" || name == "scp" || name == "exec" {
 		timeout = 5 * time.Minute
 	}
+	// Claude Code manages its own internal timeout (default 15min);
+	// give the executor wrapper enough headroom.
+	if name == "claude-code_execute" {
+		timeout = 20 * time.Minute
+	}
 
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
+
+	// Propagate ProgressSender to the tool context so long-running tools
+	// can send intermediate feedback to the user.
+	if ps := ProgressSenderFromContext(ctx); ps != nil {
+		execCtx = ContextWithProgressSender(execCtx, ps)
+	}
 	defer cancel()
 
 	e.logger.Debug("executing tool", "name", name, "args_keys", mapKeys(args))
