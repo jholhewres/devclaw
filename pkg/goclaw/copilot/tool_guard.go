@@ -129,7 +129,7 @@ func DefaultToolGuardConfig() ToolGuardConfig {
 	}
 }
 
-// ── Tool Groups (aligned with OpenClaw's TOOL_GROUPS) ──
+// ── Tool Groups ──
 // Groups can be used in Allow/Deny lists with "group:" prefix.
 // Example: deny: ["group:sessions", "group:runtime"]
 
@@ -304,6 +304,13 @@ func (g *ToolGuard) SetSQLiteAudit(a *SQLiteAuditLogger) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.sqliteAudit = a
+}
+
+// SQLiteAudit returns the SQLite audit logger (may be nil).
+func (g *ToolGuard) SQLiteAudit() *SQLiteAuditLogger {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.sqliteAudit
 }
 
 // AuditLog records a tool execution to the audit log.

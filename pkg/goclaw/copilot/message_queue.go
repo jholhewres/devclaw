@@ -14,12 +14,16 @@ import (
 )
 
 const (
-	// DefaultDebounceMs is the default debounce delay in milliseconds.
-	DefaultDebounceMs = 1000
+	// DefaultDebounceMs is the debounce delay for followup messages (session busy).
+	// Kept short so followups are grouped without adding perceptible lag.
+	DefaultDebounceMs = 200
 	// DefaultMaxPending is the default max queued messages per session.
 	DefaultMaxPending = 20
 	// DedupWindowSec is the window for deduplication (skip same content).
 	DedupWindowSec = 5
+	// FollowupDebounceMs is used when the session is already processing.
+	// Slightly longer to allow burst followup messages to be collected.
+	FollowupDebounceMs = 500
 )
 
 // OnDrainFunc is called when the debounce timer fires with drained messages.
@@ -107,18 +111,36 @@ func (q *MessageQueue) Enqueue(sessionID string, msg *channels.IncomingMessage) 
 	sq.items = append(sq.items, &queuedMessage{msg: msg, enqueued: now})
 	sq.lastEnqueue = now
 
-	// Start or reset debounce timer.
-	dur := time.Duration(q.debounceMs) * time.Millisecond
+	// Adaptive debounce: when the session is idle, drain immediately so the
+	// user sees zero added latency. When the session is already processing,
+	// use a short debounce to collect burst followup messages.
 	if sq.timer != nil {
 		sq.timer.Stop()
+		sq.timer = nil
 	}
 	sid := sessionID
-	sq.timer = time.AfterFunc(dur, func() {
-		msgs := q.Drain(sid)
-		if len(msgs) > 0 && q.onDrain != nil {
-			go q.onDrain(sid, msgs)
+	if !sq.processing {
+		// Session idle — drain immediately (no artificial delay).
+		sq.timer = nil
+		go func() {
+			msgs := q.Drain(sid)
+			if len(msgs) > 0 && q.onDrain != nil {
+				q.onDrain(sid, msgs)
+			}
+		}()
+	} else {
+		// Session busy — short debounce to collect followup burst.
+		dur := time.Duration(FollowupDebounceMs) * time.Millisecond
+		if q.debounceMs > 0 && q.debounceMs < FollowupDebounceMs {
+			dur = time.Duration(q.debounceMs) * time.Millisecond
 		}
-	})
+		sq.timer = time.AfterFunc(dur, func() {
+			msgs := q.Drain(sid)
+			if len(msgs) > 0 && q.onDrain != nil {
+				go q.onDrain(sid, msgs)
+			}
+		})
+	}
 
 	return true
 }
@@ -152,6 +174,25 @@ func (q *MessageQueue) IsProcessing(sessionID string) bool {
 	defer q.mu.Unlock()
 	sq, ok := q.queues[sessionID]
 	return ok && sq.processing
+}
+
+// TrySetProcessing atomically checks if the session is NOT processing and
+// sets it to processing. Returns true if successful (caller owns the lock),
+// false if the session was already processing (caller should enqueue).
+// This eliminates the race window between IsProcessing() and SetProcessing().
+func (q *MessageQueue) TrySetProcessing(sessionID string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	sq, ok := q.queues[sessionID]
+	if !ok {
+		sq = &sessionQueue{items: make([]*queuedMessage, 0, 4)}
+		q.queues[sessionID] = sq
+	}
+	if sq.processing {
+		return false // Already processing — caller should enqueue as followup.
+	}
+	sq.processing = true
+	return true
 }
 
 // SetProcessing marks the session as processing or not.

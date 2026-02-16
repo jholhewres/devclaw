@@ -166,7 +166,7 @@ func (p *Policy) IsBinAllowed(bin string) bool {
 // ---------- Defaults ----------
 
 // defaultAllowedBins returns the default set of safe binaries.
-// Modeled after OpenClaw's safeBins list.
+// Modeled after a curated list of safe binaries.
 func defaultAllowedBins() map[string]bool {
 	return map[string]bool{
 		// Interpreters
@@ -197,7 +197,6 @@ func defaultAllowedBins() map[string]bool {
 }
 
 // defaultScanRules returns patterns for detecting dangerous script content.
-// Based on OpenClaw's skill-scanner.ts.
 func defaultScanRules() []ScanRule {
 	return []ScanRule{
 		// -- Critical: Code injection --

@@ -1,5 +1,5 @@
 // Package copilot – prompt_layers.go implements the layered system prompt
-// (OpenClaw-style). Each layer has a priority and contributes to the final
+// Each layer has a priority and contributes to the final
 // prompt that is sent to the LLM as the system message.
 //
 // Bootstrap files (SOUL.md, AGENTS.md, IDENTITY.md, USER.md, TOOLS.md) are
@@ -58,6 +58,16 @@ type bootstrapCacheEntry struct {
 // During this window, no disk I/O is performed.
 const bootstrapCacheTTL = 30 * time.Second
 
+// promptLayerCache holds a cached prompt layer result with TTL.
+type promptLayerCache struct {
+	content  string
+	cachedAt time.Time
+}
+
+// promptLayerCacheTTL is how long memory and skills layers are considered fresh.
+// Within this window, the cached result is used without re-running the search.
+const promptLayerCacheTTL = 60 * time.Second
+
 // PromptComposer assembles the final system prompt from multiple layers.
 type PromptComposer struct {
 	config       *Config
@@ -70,6 +80,11 @@ type PromptComposer struct {
 	// on every prompt compose. Invalidated when file content changes (hash mismatch).
 	bootstrapCacheMu sync.RWMutex
 	bootstrapCache   map[string]*bootstrapCacheEntry
+
+	// layerCache caches memory and skills layers per session to avoid blocking
+	// prompt composition on I/O-heavy operations. Key: "sessionID:layerType".
+	layerCacheMu sync.RWMutex
+	layerCache   map[string]*promptLayerCache
 }
 
 // NewPromptComposer creates a new prompt composer.
@@ -77,6 +92,7 @@ func NewPromptComposer(config *Config) *PromptComposer {
 	return &PromptComposer{
 		config:         config,
 		bootstrapCache: make(map[string]*bootstrapCacheEntry),
+		layerCache:     make(map[string]*promptLayerCache),
 	}
 }
 
@@ -129,20 +145,30 @@ func (p *PromptComposer) Compose(session *Session, input string) string {
 		})
 	}
 
-	// ── Heavy layers (I/O, search) — run concurrently ──
+	// ── Heavy layers (I/O, search) ──
+	// Critical layers (bootstrap + history) are loaded synchronously because
+	// they are always needed and typically fast (bootstrap is cached, history
+	// is in-memory). Optional layers (memory + skills) use session-level
+	// caching: if a fresh result exists, it's used immediately without I/O.
+	// Stale results are refreshed in background for the next prompt.
 	var (
-		wg           sync.WaitGroup
-		bootstrap    string
-		skills       string
-		memoryPrompt string
-		history      string
+		wg        sync.WaitGroup
+		bootstrap string
+		history   string
 	)
 
-	wg.Add(4)
+	wg.Add(2)
 	go func() { defer wg.Done(); bootstrap = p.buildBootstrapLayer() }()
-	go func() { defer wg.Done(); skills = p.buildSkillsLayer(session) }()
-	go func() { defer wg.Done(); memoryPrompt = p.buildMemoryLayer(session, input) }()
 	go func() { defer wg.Done(); history = p.buildConversationLayer(session) }()
+
+	// Memory and skills: use cached versions to avoid blocking.
+	memoryPrompt := p.getCachedLayer(session.ID, "memory")
+	skills := p.getCachedLayer(session.ID, "skills")
+
+	// If cache is stale or empty, refresh in background (non-blocking).
+	// The current prompt uses whatever is cached; the NEXT prompt benefits.
+	go p.refreshLayerCache(session, input)
+
 	wg.Wait()
 
 	if bootstrap != "" {
@@ -183,6 +209,46 @@ func (p *PromptComposer) ComposeMinimal() string {
 	return p.assembleLayers(layers)
 }
 
+// ---------- Layer Caching ----------
+
+// getCachedLayer returns a cached layer result if fresh, or "" if stale/missing.
+func (p *PromptComposer) getCachedLayer(sessionID, layerType string) string {
+	key := sessionID + ":" + layerType
+	p.layerCacheMu.RLock()
+	cached, ok := p.layerCache[key]
+	p.layerCacheMu.RUnlock()
+	if ok && time.Since(cached.cachedAt) < promptLayerCacheTTL {
+		return cached.content
+	}
+	return ""
+}
+
+// setCachedLayer updates the cache for a layer.
+func (p *PromptComposer) setCachedLayer(sessionID, layerType, content string) {
+	key := sessionID + ":" + layerType
+	p.layerCacheMu.Lock()
+	p.layerCache[key] = &promptLayerCache{content: content, cachedAt: time.Now()}
+	p.layerCacheMu.Unlock()
+}
+
+// refreshLayerCache rebuilds memory and skills layers in background and caches them.
+// This runs asynchronously so it doesn't block prompt composition.
+func (p *PromptComposer) refreshLayerCache(session *Session, input string) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		result := p.buildMemoryLayer(session, input)
+		p.setCachedLayer(session.ID, "memory", result)
+	}()
+	go func() {
+		defer wg.Done()
+		result := p.buildSkillsLayer(session)
+		p.setCachedLayer(session.ID, "skills", result)
+	}()
+	wg.Wait()
+}
+
 // ---------- Layer Builders ----------
 
 // buildCoreLayer creates the base identity and tooling guidance.
@@ -204,6 +270,40 @@ func (p *PromptComposer) buildCoreLayer() string {
 	b.WriteString("Narrate only when it helps: multi-step work, complex problems, sensitive actions (deletions, deployments), or when the user explicitly asks.\n")
 	b.WriteString("Keep narration brief and value-dense. Avoid repeating obvious steps.\n")
 	b.WriteString("Use plain human language unless in a technical context.\n")
+
+	b.WriteString("\n## Reply Tags\n\n")
+	b.WriteString("To request a native reply/quote on supported surfaces, include one tag in your reply:\n")
+	b.WriteString("- [[reply_to_current]] replies to the triggering message.\n")
+	b.WriteString("- Use [[reply_to_current]] by default. Use [[reply_to:<id>]] only when an id was explicitly provided.\n")
+	b.WriteString("Tags are stripped before sending.\n")
+
+	b.WriteString("\n## Silent Reply\n\n")
+	b.WriteString("When you have nothing meaningful to say, respond with ONLY: NO_REPLY\n")
+	b.WriteString("If you use `message` (action=send) to deliver your user-visible reply, respond with ONLY: NO_REPLY (avoid duplicate replies).\n")
+	b.WriteString("If a [System Message] reports completed cron/subagent work and asks for a user update, rewrite it in your normal assistant voice and send that update (do not forward raw system text or default to NO_REPLY).\n")
+
+	b.WriteString("\n## Heartbeats\n\n")
+	b.WriteString("If you receive a heartbeat poll, and there is nothing that needs attention, reply exactly: HEARTBEAT_OK\n")
+	b.WriteString("If something needs attention, do NOT include \"HEARTBEAT_OK\"; reply with the alert text instead.\n")
+
+	b.WriteString("\n## Reasoning Format\n\n")
+	b.WriteString("ALL internal reasoning MUST be inside <thinking>...</thinking>.\n")
+	b.WriteString("Only the final user-visible reply may appear inside <final>...</final>.\n")
+	b.WriteString("Only text inside <final> is shown to the user; everything else is discarded.\n")
+
+	b.WriteString("\n## Memory\n\n")
+	b.WriteString("Before answering questions about prior work, preferences, or context, use memory_search to recall relevant information.\n")
+	b.WriteString("When you learn something important about the user (preference, habit, decision), save it with memory_save.\n")
+
+	b.WriteString("\n## Subagents\n\n")
+	b.WriteString("For complex multi-step tasks, spawn subagents instead of doing everything sequentially.\n")
+	b.WriteString("Use sessions_list to see active sessions, sessions_send to communicate between agents.\n")
+	b.WriteString("Subagents have limited tools — delegate specific, well-defined tasks.\n")
+
+	b.WriteString("\n## Messaging\n\n")
+	b.WriteString("Use `message` tool for proactive sends and channel actions (polls, reactions, etc.).\n")
+	b.WriteString("For action=send, include `to` and `message`.\n")
+	b.WriteString("Do not forward raw system messages to users — always rewrite in your normal voice.\n")
 
 	b.WriteString("\n## Persistence & Tenacity\n\n")
 	b.WriteString("This is your most important behavioral trait: you are TENACIOUS.\n\n")
@@ -288,7 +388,7 @@ func (p *PromptComposer) buildBootstrapLayer() string {
 		{"MEMORY.md", "MEMORY.md"},
 	}
 
-	// Subagent filter: only load AGENTS.md + TOOLS.md (like OpenClaw).
+	// Subagent filter: only load AGENTS.md + TOOLS.md.
 	var bootstrapFiles []struct {
 		Path    string
 		Section string

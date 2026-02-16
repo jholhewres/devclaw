@@ -1,4 +1,4 @@
-import { Input } from '@/components/ui/Input'
+import { User, Globe, Clock } from 'lucide-react'
 import type { SetupData } from './SetupWizard'
 
 interface Props {
@@ -7,11 +7,11 @@ interface Props {
 }
 
 const LANGUAGES = [
-  { value: 'pt-BR', label: 'Português (Brasil)' },
-  { value: 'en', label: 'English' },
-  { value: 'es', label: 'Español' },
-  { value: 'fr', label: 'Français' },
-  { value: 'de', label: 'Deutsch' },
+  { value: 'pt-BR', label: 'Português (Brasil)', flag: '🇧🇷' },
+  { value: 'en', label: 'English', flag: '🇺🇸' },
+  { value: 'es', label: 'Español', flag: '🇪🇸' },
+  { value: 'fr', label: 'Français', flag: '🇫🇷' },
+  { value: 'de', label: 'Deutsch', flag: '🇩🇪' },
 ]
 
 /**
@@ -19,47 +19,62 @@ const LANGUAGES = [
  */
 export function StepIdentity({ data, updateData }: Props) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* Header */}
       <div>
-        <h2 className="text-base font-medium">Identidade</h2>
-        <p className="mt-1 text-sm text-zinc-500">
-          Personalize seu assistente
+        <h2 className="text-lg font-semibold text-white">Identidade</h2>
+        <p className="mt-1 text-sm text-zinc-400">
+          Dê um nome e personalize seu assistente
         </p>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-4">
+        {/* Nome */}
         <div>
-          <label className="mb-1 block text-sm font-medium">Nome do assistente</label>
-          <Input
+          <label className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-300">
+            <User className="h-3.5 w-3.5 text-zinc-500" />
+            Nome do assistente
+          </label>
+          <input
             value={data.name}
             onChange={(e) => updateData({ name: e.target.value })}
             placeholder="GoClaw"
+            className="flex h-11 w-full rounded-xl border border-zinc-700/50 bg-zinc-800/50 px-4 text-sm text-white placeholder:text-zinc-600 outline-none transition-all focus:border-orange-500/50 focus:ring-2 focus:ring-orange-500/10"
           />
         </div>
 
+        {/* Idioma */}
         <div>
-          <label className="mb-1 block text-sm font-medium">Idioma</label>
+          <label className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-300">
+            <Globe className="h-3.5 w-3.5 text-zinc-500" />
+            Idioma
+          </label>
           <select
             value={data.language}
             onChange={(e) => updateData({ language: e.target.value })}
-            className="flex h-9 w-full rounded-lg border border-zinc-200 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-zinc-400 dark:border-zinc-700 dark:bg-zinc-900"
+            className="flex h-11 w-full cursor-pointer rounded-xl border border-zinc-700/50 bg-zinc-800/50 px-4 text-sm text-white outline-none transition-all focus:border-orange-500/50 focus:ring-2 focus:ring-orange-500/10"
           >
             {LANGUAGES.map((lang) => (
               <option key={lang.value} value={lang.value}>
-                {lang.label}
+                {lang.flag} {lang.label}
               </option>
             ))}
           </select>
         </div>
 
+        {/* Fuso horário */}
         <div>
-          <label className="mb-1 block text-sm font-medium">Fuso horário</label>
-          <Input
+          <label className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-300">
+            <Clock className="h-3.5 w-3.5 text-zinc-500" />
+            Fuso horário
+          </label>
+          <input
             value={data.timezone}
             onChange={(e) => updateData({ timezone: e.target.value })}
             placeholder="America/Sao_Paulo"
+            className="flex h-11 w-full rounded-xl border border-zinc-700/50 bg-zinc-800/50 px-4 text-sm text-white placeholder:text-zinc-600 outline-none transition-all focus:border-orange-500/50 focus:ring-2 focus:ring-orange-500/10"
           />
-          <p className="mt-1 text-xs text-zinc-400">Detectado automaticamente</p>
+          <p className="mt-1.5 text-xs text-zinc-500">Detectado automaticamente do seu navegador</p>
         </div>
       </div>
     </div>

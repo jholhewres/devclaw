@@ -7,8 +7,10 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /** Format a timestamp into a human-readable relative time */
-export function timeAgo(date: string | Date): string {
+export function timeAgo(date: string | Date | null | undefined): string {
+  if (!date) return ''
   const d = typeof date === 'string' ? new Date(date) : date
+  if (isNaN(d.getTime())) return ''
   const now = new Date()
   const diff = now.getTime() - d.getTime()
   const seconds = Math.floor(diff / 1000)
@@ -24,7 +26,8 @@ export function timeAgo(date: string | Date): string {
 }
 
 /** Truncate a string with ellipsis */
-export function truncate(str: string, max: number): string {
+export function truncate(str: string | null | undefined, max: number): string {
+  if (!str) return ''
   if (str.length <= max) return str
   return str.slice(0, max - 3) + '...'
 }

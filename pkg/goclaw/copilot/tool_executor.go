@@ -27,6 +27,13 @@ type ctxKeySessionID struct{}
 // (channel + chatID) separately from the opaque session ID.
 type ctxKeyDeliveryTarget struct{}
 
+// ctxKeyCallerLevel is the context key for passing caller access level
+// per-request, avoiding the global shared state race condition.
+type ctxKeyCallerLevel struct{}
+
+// ctxKeyCallerJID is the context key for passing caller JID per-request.
+type ctxKeyCallerJID struct{}
+
 // DeliveryTarget holds the channel and chatID for message delivery.
 type DeliveryTarget struct {
 	Channel string
@@ -45,6 +52,32 @@ func ContextWithDelivery(ctx context.Context, channel, chatID string) context.Co
 		Channel: channel,
 		ChatID:  chatID,
 	})
+}
+
+// ContextWithCaller returns a new context carrying the caller's access level and JID.
+// This replaces the global SetCallerContext/SetSessionContext pattern, making
+// tool security checks goroutine-safe (context per request).
+func ContextWithCaller(ctx context.Context, level AccessLevel, jid string) context.Context {
+	ctx = context.WithValue(ctx, ctxKeyCallerLevel{}, level)
+	ctx = context.WithValue(ctx, ctxKeyCallerJID{}, jid)
+	return ctx
+}
+
+// CallerLevelFromContext extracts the caller access level from context.
+// Falls back to AccessNone if not set.
+func CallerLevelFromContext(ctx context.Context) AccessLevel {
+	if v, ok := ctx.Value(ctxKeyCallerLevel{}).(AccessLevel); ok {
+		return v
+	}
+	return AccessNone
+}
+
+// CallerJIDFromContext extracts the caller JID from context.
+func CallerJIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(ctxKeyCallerJID{}).(string); ok {
+		return v
+	}
+	return ""
 }
 
 // SessionIDFromContext extracts the session ID from a context.
@@ -163,8 +196,13 @@ type ToolExecutor struct {
 	// If nil, tools requiring confirmation are denied.
 	confirmationRequester func(sessionID, callerJID, toolName string, args map[string]any) (approved bool, err error)
 
-	// hooks holds registered before/after tool execution hooks (OpenClaw pattern).
+	// hooks holds registered before/after tool execution hooks.
 	hooks []*ToolHook
+
+	// abortCh is closed when an abort is requested, signaling all running
+	// tools to stop as soon as possible. Each run creates a fresh channel.
+	abortCh   chan struct{}
+	abortOnce sync.Once
 }
 
 // NewToolExecutor creates a new empty tool executor.
@@ -176,7 +214,40 @@ func NewToolExecutor(logger *slog.Logger) *ToolExecutor {
 		callerLevel:  AccessOwner, // Default to owner for CLI usage.
 		parallel:     true,
 		maxParallel:  5,
+		abortCh:      make(chan struct{}),
 	}
+}
+
+// ResetAbort creates a fresh abort channel for a new run.
+func (e *ToolExecutor) ResetAbort() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.abortCh = make(chan struct{})
+	e.abortOnce = sync.Once{}
+}
+
+// Abort signals all running tools to stop. Safe to call multiple times.
+func (e *ToolExecutor) Abort() {
+	e.abortOnce.Do(func() {
+		close(e.abortCh)
+	})
+}
+
+// IsAborted returns true if an abort has been signaled.
+func (e *ToolExecutor) IsAborted() bool {
+	select {
+	case <-e.abortCh:
+		return true
+	default:
+		return false
+	}
+}
+
+// AbortCh returns the abort channel for tools to select on.
+func (e *ToolExecutor) AbortCh() <-chan struct{} {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.abortCh
 }
 
 // SetGuard configures the security guard for tool execution.
@@ -415,8 +486,14 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 	e.mu.RLock()
 	tool, ok := e.tools[name]
 	guard := e.guard
-	callerLevel := e.callerLevel
-	callerJID := e.callerJID
+	// Prefer per-request context (goroutine-safe) over global shared state.
+	callerLevel := CallerLevelFromContext(ctx)
+	callerJID := CallerJIDFromContext(ctx)
+	if callerLevel == AccessNone {
+		// Fallback to global state for backward compatibility (CLI, tests).
+		callerLevel = e.callerLevel
+		callerJID = e.callerJID
+	}
 	e.mu.RUnlock()
 
 	if !ok {
@@ -454,14 +531,27 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 	}
 
 	// Confirmation flow: if tool requires approval, return "approval-pending"
-	// immediately (non-blocking, OpenClaw-style) and run the tool in the
+	// immediately (non-blocking) and run the tool in the
 	// background once approved. The result is sent to the user via ProgressSender.
 	if check.RequiresConfirmation {
 		e.mu.RLock()
 		req := e.confirmationRequester
-		sessionID := e.sessionID
-		callerJID := e.callerJID
 		e.mu.RUnlock()
+
+		// Use per-request context (goroutine-safe) for session/caller,
+		// falling back to global state for backward compatibility.
+		sessionID := SessionIDFromContext(ctx)
+		callerJID := CallerJIDFromContext(ctx)
+		if sessionID == "" || callerJID == "" {
+			e.mu.RLock()
+			if sessionID == "" {
+				sessionID = e.sessionID
+			}
+			if callerJID == "" {
+				callerJID = e.callerJID
+			}
+			e.mu.RUnlock()
+		}
 
 		if req == nil {
 			result.Content = "Tool requires confirmation but no approval handler is configured."
@@ -560,7 +650,7 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 	}
 	defer cancel()
 
-	// ── Before-tool hooks (OpenClaw pattern) ──
+	// ── Before-tool hooks ──
 	e.mu.RLock()
 	hooks := e.hooks
 	e.mu.RUnlock()
@@ -583,11 +673,40 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 
 	e.logger.Debug("executing tool", "name", name, "args_keys", mapKeys(args))
 
+	// Auto-progress: for tools that take longer than 5 seconds, send a
+	// "still working" heartbeat every 15 seconds via ProgressSender.
+	// This prevents the user from thinking the bot has frozen.
+	progressDone := make(chan struct{})
+	if ps := ProgressSenderFromContext(execCtx); ps != nil {
+		go func() {
+			// Wait 5s before first progress.
+			select {
+			case <-progressDone:
+				return
+			case <-time.After(5 * time.Second):
+			}
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			count := 0
+			for {
+				select {
+				case <-progressDone:
+					return
+				case <-ticker.C:
+					count++
+					elapsed := 5 + count*15
+					ps(execCtx, fmt.Sprintf("⏳ %s... (%ds)", name, elapsed))
+				}
+			}
+		}()
+	}
+
 	start := time.Now()
 	output, err := tool.Handler(execCtx, args)
+	close(progressDone)
 	duration := time.Since(start)
 
-	// ── After-tool hooks (OpenClaw pattern) ──
+	// ── After-tool hooks ──
 	resultStr := ""
 	if err != nil {
 		resultStr = fmt.Sprintf("Error: %v", err)
@@ -601,7 +720,7 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 	}
 
 	if err != nil {
-		// Structured JSON error result (OpenClaw pattern: { status, tool, error }).
+		// Structured JSON error result ({ status, tool, error }) for parseable LLM retry logic.
 		// This makes tool errors parseable by the LLM for better retry logic.
 		result.Content = formatToolError(name, err)
 		result.Error = err
@@ -619,7 +738,7 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 	// Serialize output to string.
 	result.Content = resultStr
 
-	// ── Tool result size guard (OpenClaw pattern) ──
+	// ── Tool result size guard ──
 	// Cap oversized results proactively to prevent context overflow.
 	if len(result.Content) > HardMaxToolResultChars {
 		original := len(result.Content)
@@ -647,11 +766,11 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 }
 
 // HardMaxToolResultChars is the absolute maximum size for a tool result.
-// Results exceeding this are truncated before entering the conversation.
-// Aligned with OpenClaw's HARD_MAX_TOOL_RESULT_CHARS.
+// Results exceeding this are truncated before entering the conversation
+// to prevent context overflow.
 const HardMaxToolResultChars = 400_000
 
-// formatToolError creates a structured JSON error result (OpenClaw pattern).
+// formatToolError creates a structured JSON error result.
 // This format is more parseable by the LLM than plain "Error: ..." text.
 func formatToolError(toolName string, err error) string {
 	errMsg := err.Error()

@@ -18,13 +18,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/jholhewres/goclaw/pkg/goclaw/channels"
-	qrterminal "github.com/mdp/qrterminal/v3"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store"
@@ -76,6 +74,16 @@ func DefaultConfig() Config {
 	}
 }
 
+// QREvent represents a QR code event sent to observers.
+type QREvent struct {
+	// Type is "code", "success", "timeout", or "error".
+	Type string `json:"type"`
+	// Code is the raw QR code string (only for Type == "code").
+	Code string `json:"code,omitempty"`
+	// Message is a human-readable description.
+	Message string `json:"message,omitempty"`
+}
+
 // WhatsApp implements the channels.Channel, channels.MediaChannel,
 // channels.PresenceChannel, and channels.ReactionChannel interfaces.
 type WhatsApp struct {
@@ -95,11 +103,54 @@ type WhatsApp struct {
 	// errorCount tracks consecutive errors.
 	errorCount atomic.Int64
 
+	// qrObservers receives QR events (for web UI).
+	qrObservers   []chan QREvent
+	qrObserversMu sync.Mutex
+
 	// ctx and cancel for lifecycle management.
 	ctx    context.Context
 	cancel context.CancelFunc
 
 	mu sync.RWMutex
+}
+
+// SubscribeQR registers a channel to receive QR code events.
+// Returns an unsubscribe function.
+func (w *WhatsApp) SubscribeQR() (chan QREvent, func()) {
+	ch := make(chan QREvent, 8)
+	w.qrObserversMu.Lock()
+	w.qrObservers = append(w.qrObservers, ch)
+	w.qrObserversMu.Unlock()
+
+	return ch, func() {
+		w.qrObserversMu.Lock()
+		defer w.qrObserversMu.Unlock()
+		for i, obs := range w.qrObservers {
+			if obs == ch {
+				w.qrObservers = append(w.qrObservers[:i], w.qrObservers[i+1:]...)
+				close(ch)
+				return
+			}
+		}
+	}
+}
+
+// notifyQR sends a QR event to all observers.
+func (w *WhatsApp) notifyQR(evt QREvent) {
+	w.qrObserversMu.Lock()
+	defer w.qrObserversMu.Unlock()
+	for _, ch := range w.qrObservers {
+		select {
+		case ch <- evt:
+		default:
+			// Observer too slow, skip.
+		}
+	}
+}
+
+// NeedsQR returns true if the WhatsApp session is not linked (needs QR scan).
+func (w *WhatsApp) NeedsQR() bool {
+	return w.client != nil && w.client.Store.ID == nil && !w.connected.Load()
 }
 
 // New creates a new WhatsApp channel instance.
@@ -120,7 +171,9 @@ func New(cfg Config, logger *slog.Logger) *WhatsApp {
 func (w *WhatsApp) Name() string { return "whatsapp" }
 
 // Connect establishes the WhatsApp Web connection via whatsmeow.
-// On first run, displays a QR code for linking.
+// If no existing session is found, the QR login process runs in the
+// background (non-blocking) so the server can start immediately.
+// The QR code is streamed to web UI observers for scanning via browser.
 func (w *WhatsApp) Connect(ctx context.Context) error {
 	w.ctx, w.cancel = context.WithCancel(ctx)
 
@@ -148,8 +201,16 @@ func (w *WhatsApp) Connect(ctx context.Context) error {
 
 	// Connect.
 	if w.client.Store.ID == nil {
-		// First login — need QR code.
-		return w.loginWithQR(ctx)
+		// First login — start QR process in background (non-blocking).
+		// The QR code is delivered to web UI observers via notifyQR.
+		// The user scans it via the web dashboard, not the terminal.
+		w.logger.Info("whatsapp: no existing session, QR code required — scan via web UI")
+		go func() {
+			if err := w.loginWithQR(w.ctx); err != nil {
+				w.logger.Warn("whatsapp: QR login pending", "error", err)
+			}
+		}()
+		return nil
 	}
 
 	// Existing session — reconnect.
@@ -336,7 +397,9 @@ func (w *WhatsApp) getDevice(ctx context.Context, container *sqlstore.Container)
 	return container.NewDevice(), nil
 }
 
-// loginWithQR displays a QR code for first-time login.
+// loginWithQR handles the QR code login flow.
+// QR codes are delivered exclusively to web UI observers (no terminal output).
+// This is designed for headless/server deployments managed via the web dashboard.
 func (w *WhatsApp) loginWithQR(ctx context.Context) error {
 	qrChan, _ := w.client.GetQRChannel(ctx)
 	err := w.client.Connect()
@@ -344,33 +407,57 @@ func (w *WhatsApp) loginWithQR(ctx context.Context) error {
 		return fmt.Errorf("connecting for QR: %w", err)
 	}
 
-	w.logger.Info("whatsapp: scan the QR code below to link your account")
+	w.logger.Info("whatsapp: waiting for QR code scan via web UI")
 
 	for evt := range qrChan {
 		switch evt.Event {
 		case "code":
-			// Render QR code as Unicode block art in the terminal.
-			fmt.Println()
-			qrterminal.GenerateHalfBlock(evt.Code, qrterminal.L, os.Stdout)
-			fmt.Println()
-			w.logger.Info("whatsapp: QR code displayed, waiting for scan...")
+			w.logger.Info("whatsapp: QR code ready, scan via web UI at /channels/whatsapp")
+			w.notifyQR(QREvent{Type: "code", Code: evt.Code, Message: "Scan the QR code to link WhatsApp"})
 
 		case "success":
 			w.connected.Store(true)
 			w.logger.Info("whatsapp: login successful!")
+			w.notifyQR(QREvent{Type: "success", Message: "WhatsApp linked successfully!"})
 			return nil
 
 		case "timeout":
-			return fmt.Errorf("QR code timeout, restart to try again")
+			w.notifyQR(QREvent{Type: "timeout", Message: "QR code expired — refresh to try again"})
+			return fmt.Errorf("QR code timeout — scan via web UI to retry")
 
 		default:
 			if evt.Error != nil {
+				w.notifyQR(QREvent{Type: "error", Message: evt.Error.Error()})
 				return fmt.Errorf("QR login error: %v", evt.Error)
 			}
 		}
 	}
 
 	return fmt.Errorf("QR channel closed unexpectedly")
+}
+
+// RequestNewQR disconnects and reconnects to generate a fresh QR code.
+// This is used when the web UI needs a new QR after timeout.
+func (w *WhatsApp) RequestNewQR(ctx context.Context) error {
+	if w.connected.Load() {
+		return fmt.Errorf("already connected")
+	}
+	if w.client == nil {
+		return fmt.Errorf("client not initialized")
+	}
+
+	// Disconnect current attempt if any.
+	w.client.Disconnect()
+
+	// Re-login with QR in a goroutine (non-blocking for the web handler).
+	go func() {
+		if err := w.loginWithQR(ctx); err != nil {
+			w.logger.Error("whatsapp: QR re-login failed", "error", err)
+			w.notifyQR(QREvent{Type: "error", Message: err.Error()})
+		}
+	}()
+
+	return nil
 }
 
 // emitMessage sends a message to the incoming messages channel.

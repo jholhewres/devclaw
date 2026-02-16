@@ -1,12 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Search, Puzzle, ToggleLeft, ToggleRight } from 'lucide-react'
+import { Search, ToggleLeft, ToggleRight, Zap, Package, Wrench } from 'lucide-react'
 import { api, type SkillInfo } from '@/lib/api'
-import { Input } from '@/components/ui/Input'
-import { Badge } from '@/components/ui/Badge'
 
-/**
- * Skills Store — grid de skills com busca, toggle, e info.
- */
 export function Skills() {
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [search, setSearch] = useState('')
@@ -34,73 +29,98 @@ export function Skills() {
     } catch { /* ignore */ }
   }
 
+  const enabledCount = skills.filter((s) => s.enabled).length
+
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900 dark:border-zinc-700 dark:border-t-zinc-100" />
+      <div className="flex flex-1 items-center justify-center bg-[#0a0a0f]">
+        <div className="h-10 w-10 rounded-full border-4 border-orange-500/30 border-t-orange-500 animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-4xl px-6 py-8">
-        <h1 className="text-xl font-semibold">Skills</h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Gerencie as habilidades do seu assistente
+    <div className="flex-1 overflow-y-auto bg-[#0a0a0f]">
+      <div className="mx-auto max-w-5xl px-8 py-10">
+        {/* Header */}
+        <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-gray-600">Gerenciar</p>
+        <h1 className="mt-1 text-2xl font-black text-white tracking-tight">Skills</h1>
+        <p className="mt-2 text-base text-gray-500">
+          {enabledCount} ativas de {skills.length} disponiveis
         </p>
 
-        {/* Busca */}
+        {/* Search */}
         <div className="relative mt-6">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-          <Input
+          <Search className="absolute left-5 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-600" />
+          <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar skills..."
-            className="pl-9"
+            className="w-full rounded-2xl border border-white/[0.08] bg-[#111118] px-5 py-4 pl-14 text-base text-white outline-none placeholder:text-gray-600 transition-all focus:border-orange-500/30 focus:ring-2 focus:ring-orange-500/10"
           />
         </div>
 
-        {/* Grid */}
-        <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Grid — game-mode card style */}
+        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((skill) => (
             <div
               key={skill.name}
-              className="rounded-xl border border-zinc-200 p-4 transition-colors hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700"
+              className={`group relative overflow-hidden rounded-2xl border p-6 transition-all ${
+                skill.enabled
+                  ? 'border-orange-500/25 bg-orange-500/[0.04]'
+                  : 'border-white/[0.06] bg-[#111118] hover:border-orange-500/15'
+              }`}
             >
-              <div className="flex items-start justify-between">
+              {/* Active badge */}
+              {skill.enabled && (
+                <div className="absolute right-4 top-4">
+                  <span className="rounded-full bg-orange-500 px-2.5 py-0.5 text-[10px] font-bold text-white shadow-lg shadow-orange-500/30">ativa</span>
+                </div>
+              )}
+
+              {/* Icon */}
+              <div className={`flex h-14 w-14 items-center justify-center rounded-xl ${
+                skill.enabled ? 'bg-orange-500/15 text-orange-400' : 'bg-white/[0.05] text-gray-500 group-hover:text-orange-400'
+              } transition-colors`}>
+                <Package className="h-7 w-7" />
+              </div>
+
+              {/* Content */}
+              <h3 className="mt-4 text-lg font-bold text-white">{skill.name}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-gray-400 line-clamp-2">{skill.description}</p>
+
+              {/* Bottom row */}
+              <div className="mt-4 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-800">
-                    <Puzzle className="h-4 w-4 text-zinc-500" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-medium">{skill.name}</h3>
-                    <Badge variant={skill.enabled ? 'success' : 'default'} className="mt-0.5">
-                      {skill.enabled ? 'Ativo' : 'Inativo'}
-                    </Badge>
-                  </div>
+                  <span className="flex items-center gap-1.5 rounded-full bg-white/[0.04] px-3 py-1 text-xs font-semibold text-gray-500">
+                    <Wrench className="h-3 w-3" />
+                    {skill.tool_count} ferramentas
+                  </span>
                 </div>
                 <button
                   onClick={() => handleToggle(skill.name, skill.enabled)}
-                  className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+                  className="cursor-pointer text-gray-500 transition-colors hover:text-white"
                 >
                   {skill.enabled ? (
-                    <ToggleRight className="h-5 w-5 text-emerald-500" />
+                    <ToggleRight className="h-7 w-7 text-orange-400" />
                   ) : (
-                    <ToggleLeft className="h-5 w-5" />
+                    <ToggleLeft className="h-7 w-7" />
                   )}
                 </button>
               </div>
-              <p className="mt-2 text-xs text-zinc-500 line-clamp-2">{skill.description}</p>
-              <p className="mt-2 text-[11px] text-zinc-400">{skill.tool_count} ferramentas</p>
             </div>
           ))}
         </div>
 
         {filtered.length === 0 && (
-          <p className="mt-12 text-center text-sm text-zinc-400">
-            {search ? 'Nenhuma skill encontrada' : 'Nenhuma skill disponível'}
-          </p>
+          <div className="mt-20 flex flex-col items-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/[0.04]">
+              <Zap className="h-8 w-8 text-gray-700" />
+            </div>
+            <p className="mt-4 text-lg font-semibold text-gray-500">
+              {search ? 'Nenhuma skill encontrada' : 'Nenhuma skill disponivel'}
+            </p>
+          </div>
         )}
       </div>
     </div>

@@ -106,6 +106,9 @@ type Config struct {
 
 	// WebUI configures the web dashboard.
 	WebUI webui.Config `yaml:"webui"`
+
+	// Group configures group chat behavior.
+	Group GroupConfig `yaml:"group"`
 }
 
 // DatabaseConfig configures the central goclaw.db SQLite database.
@@ -131,11 +134,20 @@ type GatewayConfig struct {
 
 // QueueConfig configures the message queue for handling bursts.
 type QueueConfig struct {
-	// DebounceMs is the debounce delay in ms before draining queued messages (default: 1000).
+	// DebounceMs is the debounce delay in ms before draining queued messages (default: 200).
 	DebounceMs int `yaml:"debounce_ms"`
 
 	// MaxPending is the max queued messages per session before dropping oldest (default: 20).
 	MaxPending int `yaml:"max_pending"`
+
+	// DefaultMode is the default queue mode for all channels (default: "collect").
+	DefaultMode QueueMode `yaml:"default_mode"`
+
+	// ByChannel overrides the default mode per channel name.
+	ByChannel map[string]QueueMode `yaml:"by_channel"`
+
+	// DropPolicy controls what happens when the queue exceeds MaxPending (default: "old").
+	DropPolicy QueueDropPolicy `yaml:"drop_policy"`
 }
 
 // MediaConfig configures vision and audio transcription capabilities.
@@ -564,4 +576,34 @@ type TTSConfig struct {
 	//   "always"  - always generate audio alongside text
 	//   "inbound" - generate audio only when the user sent a voice note
 	AutoMode string `yaml:"auto_mode"`
+}
+
+// GroupConfig configures group chat behavior.
+type GroupConfig struct {
+	// ActivationMode controls when the bot responds in groups:
+	//   "always"  — responds to all messages (default)
+	//   "mention" — only when mentioned by name/trigger
+	//   "reply"   — only when replied to directly
+	ActivationMode string `yaml:"activation_mode"`
+
+	// IntroMessage is sent when the bot joins a new group.
+	// Empty = no intro. Supports template variables: {{name}}, {{trigger}}.
+	IntroMessage string `yaml:"intro_message"`
+
+	// ContextInjection adds group-specific context to the system prompt.
+	// Useful for per-group instructions, rules, or personas.
+	ContextInjection map[string]string `yaml:"context_injection"`
+
+	// MaxParticipants limits context tracking for group participants.
+	// Names of the last N participants are included in the prompt for
+	// natural multi-party conversation (default: 20).
+	MaxParticipants int `yaml:"max_participants"`
+
+	// QuietHours defines time ranges when the bot won't respond in groups
+	// (e.g. "23:00-07:00"). Empty = always active.
+	QuietHours string `yaml:"quiet_hours"`
+
+	// IgnorePatterns are regex patterns for messages the bot should ignore
+	// even when activated (e.g. forwarded messages, bot commands for other bots).
+	IgnorePatterns []string `yaml:"ignore_patterns"`
 }

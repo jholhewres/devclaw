@@ -8,17 +8,113 @@ Documentation of the performance strategies implemented in GoClaw, including con
 
 GoClaw is designed for high throughput with low latency, leveraging Go's concurrency model (goroutines + channels) to the fullest. The optimizations cover:
 
-1. **Parallel tool execution** — semaphore for controlled concurrency.
-2. **Concurrent subagents** — isolated goroutines for parallel work.
-3. **Message queue with debounce** — batching of burst messages.
-4. **Progressive streaming** — partial delivery without waiting for full response.
-5. **Prompt caching** — cost and latency reduction on compatible providers.
-6. **Incremental memory indexing** — delta sync for efficient re-indexing.
-7. **Config hot-reload** — zero downtime for configuration changes.
+1. **Adaptive message debounce** — reduced latency with smart drain.
+2. **Unified send+stream** — single HTTP request eliminates round-trips.
+3. **Asynchronous media enrichment** — non-blocking vision/transcription.
+4. **Parallel tool execution** — semaphore for controlled concurrency.
+5. **Concurrent subagents** — isolated goroutines for parallel work.
+6. **Lazy prompt composition** — cached layers with background refresh.
+7. **Progressive streaming** — partial delivery without waiting for full response.
+8. **Context pruning** — proactive trimming prevents context bloat.
+9. **Prompt caching** — cost and latency reduction on compatible providers.
+10. **Incremental memory indexing** — delta sync for efficient re-indexing.
+11. **Lane-based concurrency** — work-type isolation prevents contention.
+12. **Config hot-reload** — zero downtime for configuration changes.
 
 ---
 
-## 1. Parallel Tool Execution (`tool_executor.go`)
+## 1. Adaptive Message Debounce (`message_queue.go`)
+
+### Problem
+
+Users send multiple messages in quick succession ("message burst"). Fixed debounce adds unnecessary delay for single messages.
+
+### Solution
+
+Adaptive debounce with three behaviors:
+
+| Scenario | Debounce | Behavior |
+|----------|----------|----------|
+| Session idle | 0ms | Message drained immediately |
+| Session busy (new message) | 200ms | Short debounce for batching |
+| Session busy (followup) | 500ms | Longer debounce for follow-ups |
+
+```yaml
+queue:
+  debounce_ms: 200       # Default (was 1000ms)
+  max_pending: 20
+```
+
+### Impact
+
+| Scenario | Before (v1.x) | After (v2.0) | Improvement |
+|----------|---------------|--------------|-------------|
+| Single message, idle session | 1000ms wait | 0ms | **1s faster** |
+| Burst of 5 messages | 1000ms wait | 200ms wait | **800ms faster** |
+
+---
+
+## 2. Unified Send+Stream (`handlers.go`, `sse.ts`)
+
+### Problem
+
+The WebUI previously made two HTTP requests: (1) POST to send message, (2) GET to start SSE stream. This added a round-trip of latency.
+
+### Solution
+
+New `POST /api/chat/{sessionId}/stream` endpoint that accepts the message body and returns SSE stream in a single request.
+
+```
+Before:
+  Client ──POST /api/chat/send──▶ Server (200 OK)
+  Client ──GET /api/chat/stream──▶ Server (SSE events...)
+
+After:
+  Client ──POST /api/chat/{id}/stream──▶ Server (SSE events...)
+```
+
+### Impact
+
+Eliminates one full HTTP round-trip (50-200ms depending on connection).
+
+---
+
+## 3. Asynchronous Media Enrichment (`assistant.go`)
+
+### Problem
+
+Vision (image description) and audio transcription blocked the agent from starting, adding 2-10s of delay.
+
+### Solution
+
+Two-phase enrichment:
+
+1. **Fast phase** (synchronous): extracts text and metadata instantly.
+2. **Async phase** (goroutine): runs vision/transcription in background; results injected via interrupt channel.
+
+```
+Message with image arrives
+       │
+       ▼
+  enrichMessageContentFast()  →  Text extracted immediately
+       │                              │
+       ▼                              ▼
+  Agent starts responding        enrichMediaAsync() (goroutine)
+       │                              │
+       ▼                              ▼
+  ...processing...              Vision API returns description
+       │                              │
+       ▼                              ▼
+  Agent receives interrupt  ◀─  Result injected via interruptCh
+```
+
+### Impact
+
+Agent starts responding immediately instead of waiting for vision/transcription.
+
+---
+
+## 4. Parallel Tool Execution (`tool_executor.go`)
 
 ### Mechanism
 
@@ -50,7 +146,20 @@ These tools **always** run one at a time, as they share mutable state:
 | `exec` | Process execution |
 | `set_env` | Modifies global environment |
 
-### Semaphore Configuration
+### Fast Abort
+
+Tools check an abort channel during execution, allowing cancellation of long-running operations:
+
+```go
+select {
+case <-te.AbortCh():
+    return "aborted", nil
+default:
+    // continue execution
+}
+```
+
+### Configuration
 
 ```yaml
 security:
@@ -58,13 +167,6 @@ security:
     parallel: true       # Enable parallel execution
     max_parallel: 5      # Maximum concurrent tools
 ```
-
-### Implementation
-
-- **Semaphore**: buffered channel of size `max_parallel`.
-- **Wait group**: `sync.WaitGroup` waits for all tools to complete.
-- **Timeout**: each tool has an individual timeout (default 30s).
-- **Error isolation**: failure in one tool does not affect the others.
 
 ### Expected Benchmarks
 
@@ -76,7 +178,7 @@ security:
 
 ---
 
-## 2. Concurrent Subagents (`subagent.go`)
+## 5. Concurrent Subagents (`subagent.go`)
 
 ### Architecture
 
@@ -106,59 +208,50 @@ subagents:
 - **No recursion**: subagents cannot spawn other subagents.
 - **Tool filtering**: deny list removes spawning tools.
 
-### Model Optimization
-
-```yaml
-subagents:
-  model: "gpt-4o-mini"   # Faster/cheaper model for subagents
-```
-
-Subagents can use a different model than the main agent, enabling cost/speed trade-offs per task.
-
 ---
 
-## 3. Message Queue (`message_queue.go`)
+## 6. Lazy Prompt Composition (`prompt_layers.go`)
 
 ### Problem
 
-In messaging channels, users often send multiple messages in quick succession ("message burst"). Processing each individually creates unnecessary overhead.
+Loading memory and skills layers involves disk I/O and embedding queries, blocking agent startup.
 
 ### Solution
 
+Layer caching with background refresh:
+
 ```
-Message 1 ──▶ ┌──────────┐
-Message 2 ──▶ │  Queue   │──debounce 1s──▶ Batch Processing
-Message 3 ──▶ │  (dedup) │                 (combined messages)
-               └──────────┘
+Agent starts
+    │
+    ▼
+  Critical layers loaded synchronously:
+    - Bootstrap (SOUL.md, AGENTS.md)
+    - History (conversation)
+    │
+    ▼
+  Cached layers used immediately:
+    - Memory (60s TTL cache)
+    - Skills (60s TTL cache)
+    │
+    ▼
+  Agent starts responding
+    │
+    ▼
+  Background goroutine refreshes stale caches
+  (ready for next prompt)
 ```
 
-### Configuration
+### Impact
 
-```yaml
-queue:
-  debounce_ms: 1000     # Wait 1s of silence before processing
-  max_pending: 20       # Maximum messages in queue
-```
-
-### Mechanisms
-
-| Feature | Description | Impact |
-|---------|-------------|--------|
-| **Debounce** | Waits for 1s of silence between messages | Reduces LLM calls |
-| **Deduplication** | Identical messages within 5s window are discarded | Eliminates duplicates |
-| **Batching** | Accumulated messages are combined into one | 1 LLM call vs N |
-| **Max pending** | Discards messages beyond the limit (20) | Prevents overload |
-| **Queuing during processing** | Messages arriving while the agent processes are queued | No loss |
-
-### Throughput Impact
-
-For a burst of 5 messages in 2s:
-- **Without queue**: 5 LLM calls (~5x cost, ~15s total)
-- **With queue**: 1 combined LLM call (~1x cost, ~3s total)
+| Phase | Before | After |
+|-------|--------|-------|
+| Memory layer | ~200-500ms (blocking) | ~0ms (cached) |
+| Skills layer | ~100-300ms (blocking) | ~0ms (cached) |
+| First token latency | Higher | Lower |
 
 ---
 
-## 4. Block Streaming (`block_streamer.go`)
+## 7. Block Streaming (`block_streamer.go`)
 
 ### Motivation
 
@@ -169,8 +262,8 @@ Long LLM responses can take 10-30s to complete. Without streaming, the user wait
 ```
 LLM Response (tokens arriving)
     │
-    ├──80 chars──▶ Block 1 sent to channel
-    ├──idle 1.2s──▶ Block 2 sent
+    ├──20 chars──▶ Block 1 sent to channel
+    ├──idle 200ms──▶ Block 2 sent
     ├──3000 chars──▶ Block 3 (force flush)
     └──end──▶ Final block (or skip if already delivered)
 ```
@@ -180,8 +273,8 @@ LLM Response (tokens arriving)
 ```yaml
 block_stream:
   enabled: false        # Disabled by default
-  min_chars: 80         # Minimum chars before first block
-  idle_ms: 1200         # Idle timeout before flush
+  min_chars: 20         # Minimum chars before first block (was 80)
+  idle_ms: 200          # Idle timeout before flush (was 1200)
   max_chars: 3000       # Force flush at this limit
 ```
 
@@ -193,13 +286,28 @@ Blocks are split at natural boundaries (in order of preference):
 3. List items (`- `, `* `, `1. `)
 4. Character limit (force flush)
 
-### Deduplication
+---
 
-The final block is only sent if no partial blocks were already delivered, avoiding duplicate messages.
+## 8. Context Pruning (`agent.go`)
+
+### Problem
+
+Long agent runs accumulate large tool results that consume context window space, eventually triggering overflow errors.
+
+### Solution
+
+Proactive pruning based on turn age:
+
+| Trim Type | Turn Age | Action |
+|-----------|----------|--------|
+| Soft trim | Medium | Truncate result to summary |
+| Hard trim | Old | Remove result entirely |
+
+Pruning runs on every agent turn, preventing gradual context bloat without waiting for LLM overflow errors.
 
 ---
 
-## 5. Prompt Caching
+## 9. Prompt Caching
 
 ### Anthropic Prompt Caching
 
@@ -218,14 +326,9 @@ For Anthropic and Z.AI Anthropic proxy providers, GoClaw automatically adds `cac
 | Prompt token cost | 100% | ~10% | **90%** |
 | Latency (TTFT) | ~2s | ~500ms | **75%** |
 
-Caching is particularly effective for:
-- Long conversations with the same system prompt.
-- Skills with extensive instructions.
-- Bootstrap files (SOUL.md, AGENTS.md) that change rarely.
+### Model Failover
 
-### Model Fallback
-
-On API failure, the client implements fallback with exponential backoff:
+On persistent API failure, the model failover manager classifies the error (billing, rate limit, auth, timeout, format) and rotates to fallback models with per-model cooldowns:
 
 ```yaml
 fallback:
@@ -236,11 +339,9 @@ fallback:
   retry_on_status_codes: [429, 500, 502, 503, 529]
 ```
 
-Fallback minimizes downtime — if the primary provider fails, secondaries take over automatically.
-
 ---
 
-## 6. Incremental Memory Indexing (`memory/sqlite_store.go`)
+## 10. Incremental Memory Indexing (`memory/sqlite_store.go`)
 
 ### Delta Sync
 
@@ -274,32 +375,33 @@ Query ──▶ ┌─── BM25 (FTS5) ──▶ keyword scores
                  Results ranked
 ```
 
-```yaml
-memory:
-  search:
-    hybrid_weight_vector: 0.7    # Vector search weight
-    hybrid_weight_bm25: 0.3      # Keyword search weight
-    max_results: 6
-    min_score: 0.1
-```
-
 ### Embedding Cache
 
 Embeddings are cached in SQLite by chunk hash. If the text hasn't changed, the existing embedding is reused — zero unnecessary API calls.
 
-### SQLite Tuning
+---
 
-```go
-// WAL mode for concurrent reads
-PRAGMA journal_mode=WAL;
+## 11. Lane-Based Concurrency (`lanes.go`)
 
-// Busy timeout to avoid SQLITE_BUSY
-PRAGMA busy_timeout=5000;
-```
+### Problem
+
+Different work types (user messages, cron jobs, subagents) compete for the same resources, causing contention.
+
+### Solution
+
+Isolated lanes with per-type concurrency limits:
+
+| Lane | Concurrency | Purpose |
+|------|-------------|---------|
+| `session` | 10 | User message processing |
+| `cron` | 3 | Scheduled task execution |
+| `subagent` | 4 | Child agent execution |
+
+Each lane has its own queue and goroutine pool. Work submitted to a lane never blocks work in other lanes.
 
 ---
 
-## 7. Config Hot-Reload (`config_watcher.go`)
+## 12. Config Hot-Reload (`config_watcher.go`)
 
 ### Mechanism
 
@@ -330,97 +432,10 @@ config.yaml changed
 | Tool guard rules | No |
 | Heartbeat config | No |
 | Token budgets | No |
+| Queue modes | No |
 | LLM provider/model | **Yes** |
 | Channel config | **Yes** |
 | Gateway config | **Yes** |
-
-### Impact
-
-Zero downtime for common operational changes (access, rules, instructions).
-
----
-
-## 8. Context Compaction
-
-### Preventive Compaction
-
-Triggers automatically at **80%** of the `max_messages` threshold, not 100%. This prevents overflow during message processing.
-
-```
-max_messages = 100
-trigger = 80 messages (80%)
-
-[70 msgs] ─ normal
-[80 msgs] ─ compaction triggered automatically
-[100 msgs] ─ overflow (prevented by preventive compaction)
-```
-
-### Strategies and Trade-offs
-
-| Strategy | Latency | LLM Cost | Context Quality |
-|----------|---------|----------|----------------|
-| `summarize` | ~5-10s | High (1 extra call) | Excellent — semantic context preserved |
-| `truncate` | <1ms | Zero | Good — loses old context |
-| `sliding` | <1ms | Zero | Basic — fixed window |
-
-### Context Overflow Recovery
-
-If the LLM returns `context_length_exceeded`:
-
-1. Compacts messages (keeps system + recent history).
-2. Truncates tool results to 2000 chars.
-3. Retries up to `max_compaction_attempts` (default 3).
-
----
-
-## 9. Session Management
-
-### Thread Safety
-
-Each session has a `sync.RWMutex`:
-- **Read lock**: read operations (history, facts) can be concurrent.
-- **Write lock**: write operations (append, compaction) are exclusive.
-
-### File Locks
-
-Disk persistence uses file locks to prevent corruption in crash/restart scenarios.
-
-### JSONL Persistence
-
-JSONL format (one entry per line) for:
-- **Efficient appending**: new messages are appended without rewriting the entire file.
-- **Partial recovery**: in case of corruption, valid lines are preserved.
-- **Predictable size**: each entry is independent.
-
----
-
-## 10. SSE Streaming (`llm.go`)
-
-### Implementation
-
-The LLM Client supports Server-Sent Events for response streaming:
-
-```
-Client ──POST /v1/chat/completions──▶ Server
-         (stream: true)
-
-Server ──data: {"choices":[...]}──▶ Client
-         data: {"choices":[...]}──▶ Client
-         data: {"choices":[...]}──▶ Client
-         data: [DONE]──▶ Client
-```
-
-### Fallback
-
-If the provider doesn't support streaming, the client automatically falls back to a synchronous request.
-
-### Performance Benefits
-
-| Metric | Without Streaming | With Streaming |
-|--------|------------------|----------------|
-| Time to First Token (TTFT) | 3-15s | 0.5-2s |
-| Perceived latency | High | Low |
-| User experience | Wait → full response | See tokens arriving |
 
 ---
 
@@ -438,12 +453,13 @@ subagents:
   max_concurrent: 6        # More subagents
 
 queue:
-  debounce_ms: 500         # Shorter debounce for faster response
+  debounce_ms: 100         # Minimal debounce
+  default_mode: steer      # Steer instead of queue
   max_pending: 50          # Larger queue
 
 block_stream:
   enabled: true
-  idle_ms: 800             # Faster flush
+  idle_ms: 150             # Faster flush
 
 memory:
   embedding:
@@ -484,10 +500,11 @@ security:
     max_parallel: 10
 
 queue:
-  debounce_ms: 300
+  debounce_ms: 50          # Near-instant drain
+  default_mode: interrupt  # Cancel stale runs
 
 block_stream:
   enabled: true
-  min_chars: 40
-  idle_ms: 600
+  min_chars: 20
+  idle_ms: 150
 ```

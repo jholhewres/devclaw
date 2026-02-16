@@ -28,6 +28,10 @@ type SQLiteStore struct {
 	embedder EmbeddingProvider
 	logger   *slog.Logger
 
+	// ftsAvailable indicates whether FTS5 is available for full-text search.
+	// When false, search falls back to LIKE queries (slower but functional).
+	ftsAvailable bool
+
 	// vectorCache holds all chunk embeddings in memory for fast cosine search.
 	// Refreshed on index operations.
 	vectorCacheMu sync.RWMutex
@@ -77,7 +81,8 @@ func NewSQLiteStore(dbPath string, embedder EmbeddingProvider, logger *slog.Logg
 
 // initSchema creates the required tables and indices.
 func (s *SQLiteStore) initSchema() error {
-	schema := `
+	// Core tables — always created.
+	coreSchema := `
 		CREATE TABLE IF NOT EXISTS files (
 			id        INTEGER PRIMARY KEY AUTOINCREMENT,
 			file_id   TEXT UNIQUE NOT NULL,
@@ -96,13 +101,6 @@ func (s *SQLiteStore) initSchema() error {
 			UNIQUE(file_id, chunk_idx)
 		);
 
-		CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
-			text,
-			content='chunks',
-			content_rowid='id',
-			tokenize='porter unicode61'
-		);
-
 		CREATE TABLE IF NOT EXISTS embedding_cache (
 			text_hash TEXT NOT NULL,
 			provider  TEXT NOT NULL,
@@ -111,8 +109,22 @@ func (s *SQLiteStore) initSchema() error {
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			PRIMARY KEY (text_hash, provider, model)
 		);
+	`
 
-		-- Triggers to keep FTS5 in sync with chunks table.
+	if _, err := s.db.Exec(coreSchema); err != nil {
+		return err
+	}
+
+	// FTS5 full-text search — optional. Some SQLite builds don't include FTS5.
+	// When unavailable, memory search falls back to LIKE queries (slower but functional).
+	ftsSchema := `
+		CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+			text,
+			content='chunks',
+			content_rowid='id',
+			tokenize='porter unicode61'
+		);
+
 		CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
 			INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
 		END;
@@ -126,9 +138,15 @@ func (s *SQLiteStore) initSchema() error {
 			INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
 		END;
 	`
+	if _, err := s.db.Exec(ftsSchema); err != nil {
+		// FTS5 not available — mark it and continue. Search will use LIKE fallback.
+		s.ftsAvailable = false
+		slog.Warn("FTS5 not available, falling back to LIKE search", "error", err.Error())
+	} else {
+		s.ftsAvailable = true
+	}
 
-	_, err := s.db.Exec(schema)
-	return err
+	return nil
 }
 
 // IndexChunks indexes a set of chunks for a file. Uses delta sync: only
@@ -270,9 +288,15 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 }
 
 // SearchBM25 performs a keyword search using FTS5 BM25 ranking.
+// Falls back to LIKE-based search when FTS5 is not available.
 func (s *SQLiteStore) SearchBM25(query string, maxResults int) ([]SearchResult, error) {
 	if maxResults <= 0 {
 		maxResults = 10
+	}
+
+	// If FTS5 is not available, use LIKE fallback.
+	if !s.ftsAvailable {
+		return s.searchLikeFallback(query, maxResults)
 	}
 
 	// Sanitize query for FTS5 syntax: wrap in double quotes to treat as phrase.
@@ -291,7 +315,8 @@ func (s *SQLiteStore) SearchBM25(query string, maxResults int) ([]SearchResult, 
 		LIMIT ?
 	`, safeQuery, maxResults*2) // fetch extra candidates for hybrid merge.
 	if err != nil {
-		return nil, fmt.Errorf("FTS5 search: %w", err)
+		// If FTS5 query fails at runtime, try LIKE fallback.
+		return s.searchLikeFallback(query, maxResults)
 	}
 	defer rows.Close()
 
@@ -304,6 +329,56 @@ func (s *SQLiteStore) SearchBM25(query string, maxResults int) ([]SearchResult, 
 		}
 		// BM25 rank is negative (lower = better), convert to 0..1 score.
 		r.Score = 1.0 / (1.0 + math.Abs(rank))
+		results = append(results, r)
+	}
+
+	return results, nil
+}
+
+// searchLikeFallback performs a simple LIKE search when FTS5 is not available.
+func (s *SQLiteStore) searchLikeFallback(query string, maxResults int) ([]SearchResult, error) {
+	// Split query into words and search for each with LIKE.
+	words := strings.Fields(strings.ToLower(query))
+	if len(words) == 0 {
+		return nil, nil
+	}
+
+	// Build a query that matches any word.
+	var conditions []string
+	var args []any
+	for _, w := range words {
+		conditions = append(conditions, "LOWER(text) LIKE ?")
+		args = append(args, "%"+w+"%")
+	}
+	args = append(args, maxResults*2)
+
+	sqlQuery := fmt.Sprintf(`
+		SELECT file_id, text FROM chunks
+		WHERE %s
+		LIMIT ?
+	`, strings.Join(conditions, " OR "))
+
+	rows, err := s.db.Query(sqlQuery, args...)
+	if err != nil {
+		return nil, fmt.Errorf("LIKE search: %w", err)
+	}
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var r SearchResult
+		if err := rows.Scan(&r.FileID, &r.Text); err != nil {
+			continue
+		}
+		// Score based on word match count.
+		text := strings.ToLower(r.Text)
+		matches := 0
+		for _, w := range words {
+			if strings.Contains(text, w) {
+				matches++
+			}
+		}
+		r.Score = float64(matches) / float64(len(words))
 		results = append(results, r)
 	}
 

@@ -52,7 +52,7 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 
 // wrapExternalContent wraps untrusted content from external sources (web_fetch,
 // web_search) with security markers so the LLM knows not to blindly follow
-// instructions embedded in the content. Mirrors OpenClaw's external-content.ts.
+// instructions embedded in the content.
 func wrapExternalContent(source, ref, content string) string {
 	return fmt.Sprintf(
 		"<external-content source=%q ref=%q>\n"+
@@ -1413,7 +1413,7 @@ func registerMemoryTools(executor *ToolExecutor, store *memory.FileStore, sqlite
 func registerCronTools(executor *ToolExecutor, sched *scheduler.Scheduler) {
 	// cron_add
 	executor.Register(
-		MakeToolDefinition("cron_add", "Schedule a recurring or one-time task. The agent will execute the command at the specified time.", map[string]any{
+		MakeToolDefinition("cron_add", "Schedule a task. Use type='at' for ONE-TIME tasks (reminders, delayed messages). Use type='every' or 'cron' ONLY for RECURRING tasks.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"id": map[string]any{
@@ -1422,11 +1422,11 @@ func registerCronTools(executor *ToolExecutor, sched *scheduler.Scheduler) {
 				},
 				"schedule": map[string]any{
 					"type":        "string",
-					"description": "Cron expression (e.g. '0 9 * * *' for daily at 9AM), interval (e.g. '5m'), or time (e.g. '14:30')",
+					"description": "For type='at': relative duration ('5m','1h') or absolute time ('14:30','2026-01-15 09:00'). For type='every': interval ('5m','1h'). For type='cron': cron expression ('0 9 * * *').",
 				},
 				"type": map[string]any{
 					"type":        "string",
-					"description": "Schedule type: 'cron' (recurring), 'every' (interval), 'at' (one-shot)",
+					"description": "IMPORTANT: 'at' = fires ONCE then auto-removes (use for reminders, delayed tasks). 'every' = fires REPEATEDLY at interval (use for recurring checks). 'cron' = fires by cron schedule (use for daily/weekly tasks).",
 					"enum":        []string{"cron", "every", "at"},
 				},
 				"command": map[string]any{
@@ -1650,6 +1650,178 @@ func registerVaultTools(executor *ToolExecutor, vault *Vault) {
 				return nil, fmt.Errorf("failed to delete from vault: %w", err)
 			}
 			return fmt.Sprintf("Secret '%s' removed from vault.", name), nil
+		},
+	)
+}
+
+// ─── Session Management Tools ───
+
+// RegisterSessionTools registers sessions_list and sessions_send in the executor.
+// These tools enable multi-agent routing: agents can discover other sessions and
+// send messages to them, enabling inter-agent communication.
+func RegisterSessionTools(executor *ToolExecutor, wm *WorkspaceManager) {
+	if wm == nil {
+		return
+	}
+
+	// sessions_list — List active sessions across all workspaces.
+	executor.Register(
+		MakeToolDefinition("sessions_list",
+			"List active chat sessions. Shows session IDs, channels, message counts, and "+
+				"last activity. Use to discover sessions for inter-agent communication or "+
+				"to understand the current conversation landscape.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"channel_filter": map[string]any{
+						"type":        "string",
+						"description": "Filter by channel name (e.g. 'whatsapp', 'webui'). Empty = all.",
+					},
+				},
+			},
+		),
+		func(_ context.Context, args map[string]any) (any, error) {
+			channelFilter, _ := args["channel_filter"].(string)
+
+			allSessions := wm.ListAllSessions()
+			if len(allSessions) == 0 {
+				return "No active sessions.", nil
+			}
+
+			var b strings.Builder
+			count := 0
+			for _, info := range allSessions {
+				if channelFilter != "" && info.Channel != channelFilter {
+					continue
+				}
+				ago := time.Since(info.LastActiveAt).Round(time.Second)
+				b.WriteString(fmt.Sprintf("- [%s] %s (id: %s, ws: %s) — %d msgs — last active: %s ago\n",
+					info.Channel, info.ChatID, info.ID, info.WorkspaceID, info.MessageCount, ago))
+				count++
+			}
+
+			if count == 0 {
+				return fmt.Sprintf("No sessions found for channel '%s'.", channelFilter), nil
+			}
+
+			return fmt.Sprintf("Active sessions (%d):\n%s", count, b.String()), nil
+		},
+	)
+
+	// sessions_delete — Delete a session by ID.
+	executor.Register(
+		MakeToolDefinition("sessions_delete",
+			"Delete a chat session by its ID. Use with caution — this removes all conversation "+
+				"history for the session. Useful for cleaning up test sessions or stale conversations.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{
+						"type":        "string",
+						"description": "The session ID to delete (from sessions_list).",
+					},
+				},
+				"required": []string{"session_id"},
+			},
+		),
+		func(_ context.Context, args map[string]any) (any, error) {
+			sessionID, _ := args["session_id"].(string)
+			if sessionID == "" {
+				return nil, fmt.Errorf("session_id is required")
+			}
+			if wm.DeleteSessionByID(sessionID) {
+				return fmt.Sprintf("Session %s deleted.", sessionID), nil
+			}
+			return nil, fmt.Errorf("session %q not found", sessionID)
+		},
+	)
+
+	// sessions_export — Export a session's full history as JSON.
+	executor.Register(
+		MakeToolDefinition("sessions_export",
+			"Export a session's complete history and metadata as structured data. "+
+				"Useful for backup, analysis, or transferring context to another agent.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{
+						"type":        "string",
+						"description": "The session ID to export (from sessions_list).",
+					},
+				},
+				"required": []string{"session_id"},
+			},
+		),
+		func(_ context.Context, args map[string]any) (any, error) {
+			sessionID, _ := args["session_id"].(string)
+			if sessionID == "" {
+				return nil, fmt.Errorf("session_id is required")
+			}
+			export := wm.ExportSession(sessionID)
+			if export == nil {
+				return nil, fmt.Errorf("session %q not found", sessionID)
+			}
+			data, err := json.Marshal(export)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal export: %w", err)
+			}
+			// Truncate if too large for context.
+			result := string(data)
+			if len(result) > 20000 {
+				result = result[:20000] + "\n... (truncated, export too large)"
+			}
+			return result, nil
+		},
+	)
+
+	// sessions_send — Send a message to another session (inter-agent communication).
+	executor.Register(
+		MakeToolDefinition("sessions_send",
+			"Send a message to another session by its ID. Use this for inter-agent "+
+				"communication: notifying other sessions about results, forwarding information, "+
+				"or requesting collaboration between agents.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"session_id": map[string]any{
+						"type":        "string",
+						"description": "The target session ID (from sessions_list).",
+					},
+					"message": map[string]any{
+						"type":        "string",
+						"description": "The message to inject into the target session.",
+					},
+					"sender_label": map[string]any{
+						"type":        "string",
+						"description": "A label identifying the sender (e.g. 'research-agent', 'main'). Shown in the target session.",
+					},
+				},
+				"required": []string{"session_id", "message"},
+			},
+		),
+		func(_ context.Context, args map[string]any) (any, error) {
+			sessionID, _ := args["session_id"].(string)
+			message, _ := args["message"].(string)
+			senderLabel, _ := args["sender_label"].(string)
+			if sessionID == "" || message == "" {
+				return nil, fmt.Errorf("session_id and message are required")
+			}
+			if senderLabel == "" {
+				senderLabel = "agent"
+			}
+
+			session := wm.FindSessionByID(sessionID)
+			if session == nil {
+				return nil, fmt.Errorf("session %q not found", sessionID)
+			}
+
+			// Inject the message as a system entry in the target session's history.
+			session.AddMessage(
+				fmt.Sprintf("[Inter-agent message from %s]: %s", senderLabel, message),
+				"",
+			)
+
+			return fmt.Sprintf("Message delivered to session %s (channel: %s).", sessionID, session.Channel), nil
 		},
 	)
 }

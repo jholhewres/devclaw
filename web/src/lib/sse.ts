@@ -106,3 +106,88 @@ export function createSSEConnection(options: SSEOptions): () => void {
     eventSource?.close()
   }
 }
+
+/**
+ * Options for POST-based SSE connections (unified send+stream).
+ */
+export interface POSTSSEOptions {
+  url: string
+  body: Record<string, unknown>
+  onEvent: (event: SSEEvent) => void
+  onError?: (error: Error) => void
+  signal?: AbortSignal
+}
+
+/**
+ * Create a POST-based SSE connection using fetch + ReadableStream.
+ * Unlike EventSource (GET-only), this sends JSON in the request body
+ * and reads the SSE response on the same connection — eliminating
+ * the extra round-trip of the two-step send → stream flow.
+ * Returns a cleanup function to abort the connection.
+ */
+export function createPOSTSSEConnection(options: POSTSSEOptions): () => void {
+  const { url, body, onEvent, onError } = options
+  const controller = new AbortController()
+
+  const token = localStorage.getItem('goclaw_token')
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal: controller.signal,
+  })
+    .then(async (res) => {
+      if (!res.ok) {
+        const text = await res.text().catch(() => res.statusText)
+        throw new Error(text)
+      }
+
+      const reader = res.body?.getReader()
+      if (!reader) throw new Error('No readable stream')
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        // Parse SSE frames: "event: type\ndata: json\n\n"
+        const frames = buffer.split('\n\n')
+        buffer = frames.pop() || ''
+
+        for (const frame of frames) {
+          if (!frame.trim()) continue
+          let eventType = 'message'
+          let eventData = ''
+
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('event: ')) {
+              eventType = line.slice(7).trim()
+            } else if (line.startsWith('data: ')) {
+              eventData = line.slice(6)
+            }
+          }
+
+          if (eventData) {
+            try {
+              onEvent({ type: eventType, data: JSON.parse(eventData) })
+            } catch {
+              onEvent({ type: eventType, data: eventData })
+            }
+          }
+        }
+      }
+    })
+    .catch((err) => {
+      if (err.name === 'AbortError') return
+      onError?.(err instanceof Error ? err : new Error(String(err)))
+    })
+
+  return () => controller.abort()
+}

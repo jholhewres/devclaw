@@ -1,0 +1,51 @@
+---
+description: Core copilot package patterns and architecture
+globs: ["pkg/goclaw/copilot/**/*.go"]
+alwaysApply: true
+---
+
+# Copilot Core — Architecture Rules
+
+## Agent Loop (`agent.go`)
+
+The agentic loop: LLM call → tool execution → append results → repeat.
+
+- Max turns: 25 (configurable)
+- Auto-continue: up to 2 continuations when budget exhausted
+- Reflection: every 8 turns, inject budget nudge
+- Context pruning: soft/hard trim old tool results by turn age
+- Agent steering: check interruptCh during tool execution
+
+## Assistant (`assistant.go`)
+
+Entry point for message processing:
+
+- Async media enrichment (enrichMessageContentFast + enrichMediaAsync)
+- Background compaction (maybeCompactSession in goroutine)
+- Memory flush before compaction (append-only strategy)
+- Bounded followup queue (20 items FIFO)
+- Hook integration via HookManager
+
+## Key Concurrency Rules
+
+- `session.mu`: protects session state (RWMutex)
+- `configMu`: protects assistant config (RWMutex)
+- `te.abortOnce`: ensures single abort signal
+- `EventBus`: channel-based pub/sub, never block producers
+- `LaneManager`: per-lane queue + concurrency limit
+
+## Adding a New Tool
+
+1. Define in `system_tools.go` → `RegisterSystemTools` or dedicated `Register*Tools`
+2. Add parameter schema with types and descriptions
+3. Implement handler function returning (string, error)
+4. Set appropriate permission level (owner/admin/user)
+5. Test with `go build ./...` and `go vet ./...`
+
+## Adding a New Hook Event
+
+1. Define constant in `hooks.go`
+2. Dispatch with `hookMgr.Dispatch(event, payload)` or `DispatchAsync`
+3. Blocking hooks: use `Dispatch` (synchronous)
+4. Non-blocking hooks: use `DispatchAsync` (goroutine)
+5. Always wrap handler calls with panic recovery

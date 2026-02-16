@@ -31,13 +31,21 @@ func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f, err := s.root.Open(path)
 		if err == nil {
 			f.Close()
+			// Static assets (hashed filenames) can be cached aggressively.
+			if strings.HasPrefix(path, "/assets/") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
 			http.FileServer(s.root).ServeHTTP(w, r)
 			return
 		}
 	}
 
 	// For all other paths, serve index.html (SPA fallback).
-	// This allows React Router to handle client-side routing.
+	// IMPORTANT: no-cache so the browser always gets the latest HTML
+	// (which references the latest hashed JS/CSS bundles).
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	r.URL.Path = "/"
 	http.FileServer(s.root).ServeHTTP(w, r)
 }

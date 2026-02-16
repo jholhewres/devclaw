@@ -39,6 +39,10 @@ type Scheduler struct {
 	// Defaults to 5 minutes. Jobs exceeding this are cancelled.
 	jobTimeout time.Duration
 
+	// announceHandler is called when a job with Announce=true completes,
+	// sending the result back to the target channel/chat.
+	announceHandler AnnounceHandler
+
 	logger *slog.Logger
 	mu     sync.RWMutex
 	ctx    context.Context
@@ -83,10 +87,39 @@ type Job struct {
 
 	// RunCount tracks how many times the job has executed.
 	RunCount int `json:"run_count" yaml:"run_count"`
+
+	// ── Advanced cron features ──
+
+	// IsolateSession runs each job execution in its own isolated session
+	// instead of sharing the channel's main session. This prevents cron
+	// output from polluting the main conversation history.
+	IsolateSession bool `json:"isolate_session,omitempty" yaml:"isolate_session,omitempty"`
+
+	// Announce sends the job result to the target channel/chat after completion.
+	// When false, the job runs silently (result is only logged).
+	Announce bool `json:"announce,omitempty" yaml:"announce,omitempty"`
+
+	// AsSubagent runs the job as a subagent instead of in the main agent loop.
+	// This provides better isolation and prevents cron jobs from blocking
+	// user-initiated agent runs.
+	AsSubagent bool `json:"as_subagent,omitempty" yaml:"as_subagent,omitempty"`
+
+	// Model overrides the LLM model for this specific job (empty = default).
+	Model string `json:"model,omitempty" yaml:"model,omitempty"`
+
+	// TimeoutSeconds overrides the global job timeout for this job.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty" yaml:"timeout_seconds,omitempty"`
+
+	// Labels are arbitrary tags for filtering and organization.
+	Labels []string `json:"labels,omitempty" yaml:"labels,omitempty"`
 }
 
 // JobHandler is called when a job fires. Returns the agent response or error.
 type JobHandler func(ctx context.Context, job *Job) (string, error)
+
+// AnnounceHandler is called when a job with Announce=true completes.
+// Receives the channel, chatID, and formatted message to send.
+type AnnounceHandler func(channel, chatID, message string) error
 
 // JobStorage defines the persistence interface for jobs.
 type JobStorage interface {
@@ -110,6 +143,13 @@ func New(storage JobStorage, handler JobHandler, logger *slog.Logger) *Scheduler
 		jobTimeout:  5 * time.Minute,
 		logger:      logger,
 	}
+}
+
+// SetAnnounceHandler registers a callback for announce-enabled jobs.
+func (s *Scheduler) SetAnnounceHandler(h AnnounceHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.announceHandler = h
 }
 
 // Add registers a new job in the scheduler.
@@ -335,8 +375,16 @@ func (s *Scheduler) runOneShotJob(job *Job, timeStr string) {
 }
 
 // parseOneShotTime parses various time formats for one-shot scheduling.
+// Supports: relative duration ("5m", "1h30m"), Unix epoch, ISO 8601,
+// "2006-01-02 15:04", and "15:04" (today or tomorrow).
 func parseOneShotTime(timeStr string) (time.Time, error) {
 	now := time.Now()
+
+	// Try relative duration first (e.g. "5m", "1h30m", "2h", "30s").
+	// This allows "at" type to support "fire X time from now".
+	if d, err := time.ParseDuration(timeStr); err == nil && d > 0 {
+		return now.Add(d), nil
+	}
 
 	// Try Unix epoch (seconds).
 	if len(timeStr) >= 10 {
@@ -406,10 +454,13 @@ func (s *Scheduler) executeJob(job *Job) {
 
 		// Recover from panics so one bad job doesn't crash all scheduling.
 		if r := recover(); r != nil {
+			s.mu.Lock()
 			job.LastError = fmt.Sprintf("panic: %v", r)
+			_, stillExists := s.jobs[job.ID]
+			s.mu.Unlock()
 			s.logger.Error("scheduled job panicked",
 				"id", job.ID, "panic", r)
-			if s.storage != nil {
+			if s.storage != nil && stillExists {
 				s.storage.Save(job)
 			}
 		}
@@ -417,9 +468,11 @@ func (s *Scheduler) executeJob(job *Job) {
 
 	s.logger.Info("executing scheduled job", "id", job.ID, "command", job.Command)
 
+	s.mu.Lock()
 	now := time.Now()
 	job.LastRunAt = &now
 	job.RunCount++
+	s.mu.Unlock()
 
 	if s.handler == nil {
 		job.LastError = "no handler configured"
@@ -430,22 +483,56 @@ func (s *Scheduler) executeJob(job *Job) {
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
+	if job.TimeoutSeconds > 0 {
+		timeout = time.Duration(job.TimeoutSeconds) * time.Second
+	}
 	ctx, cancel := context.WithTimeout(s.ctx, timeout)
 	defer cancel()
 
 	result, err := s.handler(ctx, job)
+
+	s.mu.Lock()
 	if err != nil {
 		job.LastError = err.Error()
+	} else {
+		job.LastError = ""
+	}
+	_, stillExists := s.jobs[job.ID]
+	s.mu.Unlock()
+
+	if err != nil {
 		s.logger.Error("scheduled job failed",
 			"id", job.ID, "error", err)
 	} else {
-		job.LastError = ""
 		s.logger.Info("scheduled job completed",
 			"id", job.ID, "result_len", len(result))
 	}
 
-	// Persist updated state.
-	if s.storage != nil {
+	// Announce result to target channel if configured.
+	if job.Announce && job.Channel != "" && job.ChatID != "" {
+		s.mu.RLock()
+		announcer := s.announceHandler
+		s.mu.RUnlock()
+
+		if announcer != nil {
+			announceMsg := result
+			if err != nil {
+				announceMsg = fmt.Sprintf("[Cron job %q failed]: %s", job.ID, err)
+				if result != "" {
+					announceMsg += "\n\nPartial output:\n" + result
+				}
+			}
+			if announceMsg != "" {
+				if aErr := announcer(job.Channel, job.ChatID, announceMsg); aErr != nil {
+					s.logger.Error("failed to announce cron result",
+						"job_id", job.ID, "channel", job.Channel, "error", aErr)
+				}
+			}
+		}
+	}
+
+	// Persist updated state (only if job wasn't removed while running).
+	if s.storage != nil && stillExists {
 		s.storage.Save(job)
 	}
 }

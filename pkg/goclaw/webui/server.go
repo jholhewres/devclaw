@@ -67,6 +67,14 @@ type AssistantAPI interface {
 
 	// DeleteSession removes a session.
 	DeleteSession(sessionID string) error
+
+	// Security
+	GetAuditLog(limit int) []AuditEntry
+	GetAuditCount() int
+	GetToolGuardStatus() ToolGuardStatus
+	UpdateToolGuard(update ToolGuardStatus) error
+	GetVaultStatus() VaultStatus
+	GetSecurityStatus() SecurityStatus
 }
 
 // SessionInfo contains session metadata for the UI.
@@ -150,6 +158,10 @@ type Server struct {
 
 	// onSetupDone is called when the setup wizard completes (optional callback).
 	onSetupDone func()
+
+	// onVaultInit is called during setup finalize to create the encrypted vault.
+	// Receives (masterPassword, secrets map[name]value) and returns error.
+	onVaultInit func(password string, secrets map[string]string) error
 }
 
 // New creates a new web UI server.
@@ -175,6 +187,11 @@ func (s *Server) SetSetupMode(enabled bool) { s.setupMode = enabled }
 // OnSetupDone registers a callback invoked when the setup wizard finishes.
 func (s *Server) OnSetupDone(fn func()) { s.onSetupDone = fn }
 
+// OnVaultInit registers a callback to create the encrypted vault during setup.
+func (s *Server) OnVaultInit(fn func(password string, secrets map[string]string) error) {
+	s.onVaultInit = fn
+}
+
 // Start begins serving the web UI.
 func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
@@ -191,9 +208,12 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/sessions/", s.authMiddleware(s.requireAssistant(s.handleAPISessionDetail)))
 	mux.HandleFunc("/api/skills", s.authMiddleware(s.requireAssistant(s.handleAPISkills)))
 	mux.HandleFunc("/api/channels", s.authMiddleware(s.requireAssistant(s.handleAPIChannels)))
+	mux.HandleFunc("/api/channels/whatsapp/", s.authMiddleware(s.requireAssistant(s.handleAPIWhatsAppQR)))
 	mux.HandleFunc("/api/config", s.authMiddleware(s.requireAssistant(s.handleAPIConfig)))
 	mux.HandleFunc("/api/usage", s.authMiddleware(s.requireAssistant(s.handleAPIUsage)))
 	mux.HandleFunc("/api/jobs", s.authMiddleware(s.requireAssistant(s.handleAPIJobs)))
+	mux.HandleFunc("/api/security/", s.authMiddleware(s.requireAssistant(s.handleAPISecurity)))
+	mux.HandleFunc("/api/security", s.authMiddleware(s.requireAssistant(s.handleAPISecurity)))
 	mux.HandleFunc("/api/chat/", s.authMiddleware(s.requireAssistant(s.handleAPIChat)))
 
 	// ── SPA (React) fallback ──

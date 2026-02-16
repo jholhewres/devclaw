@@ -14,11 +14,24 @@ func (s *Server) handleAPIDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessions := s.api.ListSessions()
+	if sessions == nil {
+		sessions = []SessionInfo{}
+	}
+	channels := s.api.GetChannelHealth()
+	if channels == nil {
+		channels = []ChannelHealthInfo{}
+	}
+	jobs := s.api.GetSchedulerJobs()
+	if jobs == nil {
+		jobs = []JobInfo{}
+	}
+
 	data := map[string]any{
-		"sessions": s.api.ListSessions(),
+		"sessions": sessions,
 		"usage":    s.api.GetUsageGlobal(),
-		"channels": s.api.GetChannelHealth(),
-		"jobs":     s.api.GetSchedulerJobs(),
+		"channels": channels,
+		"jobs":     jobs,
 	}
 	writeJSON(w, http.StatusOK, data)
 }
@@ -28,7 +41,11 @@ func (s *Server) handleAPIDashboard(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPISessions(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, s.api.ListSessions())
+		sessions := s.api.ListSessions()
+		if sessions == nil {
+			sessions = []SessionInfo{}
+		}
+		writeJSON(w, http.StatusOK, sessions)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}
@@ -47,7 +64,11 @@ func (s *Server) handleAPISessionDetail(w http.ResponseWriter, r *http.Request) 
 	// GET /api/sessions/{id}/messages
 	if len(parts) > 1 && parts[1] == "messages" {
 		if r.Method == http.MethodGet {
-			writeJSON(w, http.StatusOK, s.api.GetSessionMessages(sessionID))
+			msgs := s.api.GetSessionMessages(sessionID)
+			if msgs == nil {
+				msgs = []MessageInfo{}
+			}
+			writeJSON(w, http.StatusOK, msgs)
 			return
 		}
 	}
@@ -91,7 +112,13 @@ func (s *Server) handleAPIChat(w http.ResponseWriter, r *http.Request) {
 	case "abort":
 		s.handleChatAbort(w, r, sessionID)
 	case "stream":
-		s.handleChatStream(w, r, sessionID)
+		// Unified endpoint: POST with body starts a new run and streams inline.
+		// GET with run_id connects to an existing run (legacy two-step flow).
+		if r.Method == http.MethodPost {
+			s.handleChatStreamUnified(w, r, sessionID)
+		} else {
+			s.handleChatStream(w, r, sessionID)
+		}
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown action"})
 	}
@@ -131,7 +158,11 @@ func (s *Server) handleChatHistory(w http.ResponseWriter, r *http.Request, sessi
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
-	writeJSON(w, http.StatusOK, s.api.GetSessionMessages(sessionID))
+	msgs := s.api.GetSessionMessages(sessionID)
+	if msgs == nil {
+		msgs = []MessageInfo{}
+	}
+	writeJSON(w, http.StatusOK, msgs)
 }
 
 func (s *Server) handleChatAbort(w http.ResponseWriter, r *http.Request, sessionID string) {
@@ -141,10 +172,12 @@ func (s *Server) handleChatAbort(w http.ResponseWriter, r *http.Request, session
 	}
 
 	// Cancel via the webui's active stream registry (primary path for web UI runs).
+	// Persist partial output before cancelling so the user sees what was generated.
 	stopped := false
 	s.activeStreamMu.Lock()
 	for runID, handle := range s.activeStreams {
 		if handle.SessionID == sessionID {
+			// Signal abort — the event loop will detect cancellation and flush.
 			handle.Cancel()
 			delete(s.activeStreams, runID)
 			stopped = true
@@ -158,7 +191,10 @@ func (s *Server) handleChatAbort(w http.ResponseWriter, r *http.Request, session
 		stopped = s.api.AbortRun(sessionID)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"stopped": stopped})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"stopped": stopped,
+		"partial": stopped, // Indicates partial output may have been preserved.
+	})
 }
 
 // handleChatStream serves SSE events for an active agent run.
@@ -214,12 +250,77 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request, sessio
 	}
 }
 
+// handleChatStreamUnified combines send + stream in a single SSE connection.
+// The frontend POSTs {"content":"..."} and receives SSE events on the same
+// connection — no second round-trip needed. This eliminates ~200-500ms of
+// latency compared to the two-step send → stream flow.
+func (s *Server) handleChatStreamUnified(w http.ResponseWriter, r *http.Request, sessionID string) {
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Content == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing content"})
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming not supported"})
+		return
+	}
+
+	// Start the agent run.
+	handle, err := s.api.StartChatStream(r.Context(), sessionID, body.Content)
+	if err != nil {
+		s.logger.Error("unified stream failed", "session", sessionID, "error", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Register for abort support.
+	s.registerRun(handle)
+
+	// Switch to SSE mode — headers must be written before any events.
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+
+	// First event: notify the frontend of the run_id (useful for abort).
+	writeSSE(w, flusher, "run_start", map[string]string{"run_id": handle.RunID})
+
+	// Stream events until the run completes or the client disconnects.
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			s.logger.Debug("unified SSE client disconnected", "run_id", handle.RunID)
+			handle.Cancel()
+			s.unregisterRun(handle.RunID)
+			return
+
+		case event, ok := <-handle.Events:
+			if !ok {
+				handle.Cancel()
+				s.unregisterRun(handle.RunID)
+				return
+			}
+			writeSSE(w, flusher, event.Type, event.Data)
+		}
+	}
+}
+
 // ── Skills ──
 
 func (s *Server) handleAPISkills(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, s.api.ListSkills())
+		skills := s.api.ListSkills()
+		if skills == nil {
+			skills = []SkillInfo{}
+		}
+		writeJSON(w, http.StatusOK, skills)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}
@@ -230,7 +331,11 @@ func (s *Server) handleAPISkills(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIChannels(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, s.api.GetChannelHealth())
+		channels := s.api.GetChannelHealth()
+		if channels == nil {
+			channels = []ChannelHealthInfo{}
+		}
+		writeJSON(w, http.StatusOK, channels)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}
@@ -265,7 +370,11 @@ func (s *Server) handleAPIUsage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		writeJSON(w, http.StatusOK, s.api.GetSchedulerJobs())
+		jobs := s.api.GetSchedulerJobs()
+		if jobs == nil {
+			jobs = []JobInfo{}
+		}
+		writeJSON(w, http.StatusOK, jobs)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}

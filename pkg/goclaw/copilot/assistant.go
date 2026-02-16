@@ -76,6 +76,9 @@ type Assistant struct {
 	// subagentMgr orchestrates subagent spawning and lifecycle.
 	subagentMgr *SubagentManager
 
+	// hookMgr manages lifecycle hooks (16+ events).
+	hookMgr *HookManager
+
 	// heartbeat runs periodic proactive checks (stored for config hot-reload).
 	heartbeat *Heartbeat
 
@@ -92,6 +95,13 @@ type Assistant struct {
 	// agent loop picks it up on its next turn (Claude Code-style).
 	interruptInboxes   map[string]chan string
 	interruptInboxesMu sync.Mutex
+
+	// followupQueues holds messages received while a session is busy.
+	// Unlike interrupt injection (which waits for the current tool to finish),
+	// followup messages are processed as NEW agent runs after the current run
+	// completes.
+	followupQueues   map[string][]*channels.IncomingMessage
+	followupQueuesMu sync.Mutex
 
 	// usageTracker records token usage and estimated costs per session.
 	usageTracker *UsageTracker
@@ -159,9 +169,11 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 		inputGuard:     security.NewInputGuardrail(cfg.Security.MaxInputLength, cfg.Security.RateLimit),
 		outputGuard:    security.NewOutputGuardrail(),
 		subagentMgr:    NewSubagentManager(cfg.Subagents, logger),
+		hookMgr:        NewHookManager(logger),
 		projectMgr:      projectMgr,
 		activeRuns:       make(map[string]context.CancelFunc),
 		interruptInboxes: make(map[string]chan string),
+		followupQueues:   make(map[string][]*channels.IncomingMessage),
 		usageTracker:     NewUsageTracker(logger.With("component", "usage")),
 		logger:           logger,
 	}
@@ -189,9 +201,9 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 		return approvalMgr.Request(sessionID, callerJID, toolName, args, sendMsg)
 	})
 
-	// Wire subagent announce callback (OpenClaw pattern): when a subagent
-	// completes, push the result to the parent's channel instead of requiring
-	// the agent to poll with wait_subagent.
+	// Wire subagent announce callback: when a subagent completes, push the
+	// result to the parent's channel instead of requiring the agent to poll
+	// with wait_subagent.
 	a.subagentMgr.SetAnnounceCallback(func(run *SubagentRun) {
 		sessionID := run.ParentSessionID
 		channel, chatID, ok := strings.Cut(sessionID, ":")
@@ -376,9 +388,9 @@ func (a *Assistant) Start(ctx context.Context) error {
 	// 1e. Register system tools (needs scheduler to be created first).
 	a.registerSystemTools()
 
-	// 2. Start channel manager (allows 0 channels for CLI mode).
+	// 2. Start channel manager (non-fatal: webui/gateway can work without channels).
 	if err := a.channelMgr.Start(a.ctx); err != nil {
-		return fmt.Errorf("failed to start channels: %w", err)
+		a.logger.Warn("channels not connected yet (will retry in background)", "error", err)
 	}
 
 	// 3. Start session pruners for all workspaces.
@@ -400,7 +412,7 @@ func (a *Assistant) Start(ctx context.Context) error {
 	// 6. Start main message processing loop.
 	go a.messageLoop()
 
-	// 7. Run BOOT.md if present (like OpenClaw's gateway:startup → BOOT.md).
+	// 7. Run BOOT.md if present (gateway startup).
 	// Executes after all channels are connected, with a short delay for stabilization.
 	go a.runBootOnce()
 
@@ -426,7 +438,7 @@ func (a *Assistant) Start(ctx context.Context) error {
 // startup command. This enables proactive behaviors like "check emails" or
 // "review today's calendar" on boot.
 func (a *Assistant) runBootOnce() {
-	// Short delay to let channels stabilize (like OpenClaw's 250ms hook delay).
+	// Short delay to let channels stabilize.
 	time.Sleep(500 * time.Millisecond)
 
 	// Search for BOOT.md in the workspace directories.
@@ -616,6 +628,39 @@ func (a *Assistant) handleDrainedMessages(sessionID string, msgs []*channels.Inc
 	a.handleMessage(&synthetic)
 }
 
+// drainFollowupQueue processes messages that were enqueued while a session was
+// busy. Each followup message is processed as a new, independent agent run.
+// When there are multiple queued messages, they are combined into a single run.
+func (a *Assistant) drainFollowupQueue(sessionID string) {
+	a.followupQueuesMu.Lock()
+	msgs := a.followupQueues[sessionID]
+	delete(a.followupQueues, sessionID)
+	a.followupQueuesMu.Unlock()
+
+	if len(msgs) == 0 {
+		return
+	}
+
+	a.logger.Info("draining followup queue",
+		"session", sessionID,
+		"count", len(msgs),
+	)
+
+	// Collect mode: combine multiple queued messages into one prompt,
+	// then process as a single agent run.
+	if len(msgs) > 1 {
+		combined := a.messageQueue.CombineMessages(msgs)
+		synthetic := *msgs[0]
+		synthetic.Content = combined
+		synthetic.ID = msgs[0].ID + "-followup-collected"
+		a.handleMessage(&synthetic)
+		return
+	}
+
+	// Single followup: process directly.
+	a.handleMessage(msgs[0])
+}
+
 // messageLoop is the main loop that processes messages from all channels.
 func (a *Assistant) messageLoop() {
 	for {
@@ -651,7 +696,7 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 
 	// ── Step 0: Access control ──
 	// Check if the sender is authorized BEFORE anything else.
-	// This is the OpenClaw-style behavior: unknown contacts are silently ignored.
+	// Unknown contacts are silently ignored (deny-by-default policy).
 	accessResult := a.accessMgr.Check(msg)
 
 	if !accessResult.Allowed {
@@ -710,47 +755,60 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 		}
 	}
 
-	// ── Step 1b: Live injection / message queue ──
-	// If the session is already processing, try to inject the message into the
-	// active agent run (Claude Code-style). The agent loop will pick it up on
-	// its next turn. Falls back to the debounce queue if injection is not possible.
-	if a.messageQueue.IsProcessing(sessionID) {
+	// ── Step 1b: Atomic processing lock + followup queue ──
+	// TrySetProcessing atomically checks and sets, eliminating the race window
+	// where two goroutines could both pass IsProcessing and start parallel runs.
+	if !a.messageQueue.TrySetProcessing(sessionID) {
+		// Session is busy — enqueue as followup for processing after current run.
+		// Bounded to 20 items to prevent unbounded memory growth.
+		const maxFollowupQueue = 20
+		a.followupQueuesMu.Lock()
+		if len(a.followupQueues[sessionID]) >= maxFollowupQueue {
+			// Drop oldest to make room (FIFO eviction).
+			a.followupQueues[sessionID] = a.followupQueues[sessionID][1:]
+			logger.Warn("followup queue full, dropped oldest", "session", sessionID)
+		}
+		a.followupQueues[sessionID] = append(a.followupQueues[sessionID], msg)
+		qLen := len(a.followupQueues[sessionID])
+		a.followupQueuesMu.Unlock()
+
+		// Also inject into interrupt inbox so the current run is AWARE of the
+		// new message (it can adjust its behavior), but the main processing
+		// will happen in the followup run.
 		a.interruptInboxesMu.Lock()
 		inbox, hasInbox := a.interruptInboxes[sessionID]
 		a.interruptInboxesMu.Unlock()
-
 		if hasInbox {
-			// Enrich content (images → description, audio → transcript).
 			enriched := a.enrichMessageContent(a.ctx, msg, logger)
-
-			// Validate input before injection.
-			if err := a.inputGuard.Validate(msg.From, enriched); err != nil {
-				logger.Warn("interrupt input rejected", "error", err)
-				return
-			}
-
-			// Non-blocking send to the interrupt inbox.
 			select {
 			case inbox <- enriched:
-				logger.Info("message injected into active agent run",
-					"session", sessionID,
-					"content_preview", truncate(enriched, 50),
-				)
-				a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "👀")
-				return
 			default:
-				logger.Warn("interrupt inbox full, falling back to queue", "session", sessionID)
 			}
 		}
 
-		// Fallback: enqueue for processing after the current run finishes.
-		if a.messageQueue.Enqueue(sessionID, msg) {
-			logger.Info("message enqueued (session busy)", "session", sessionID)
+		// Send ack to user so they know the message was received.
+		a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "👀")
+
+		logger.Info("message enqueued as followup (session busy)",
+			"session", sessionID,
+			"queue_length", qLen,
+			"content_preview", truncate(msg.Content, 50),
+		)
+
+		// Send a brief notification if this is the first followup.
+		if qLen == 1 {
+			_ = a.channelMgr.Send(a.ctx, msg.Channel, msg.ChatID, &channels.OutgoingMessage{
+				Content: "📋 Recebi sua mensagem. Processarei assim que a tarefa atual terminar.",
+			})
 		}
 		return
 	}
-	a.messageQueue.SetProcessing(sessionID, true)
-	defer a.messageQueue.SetProcessing(sessionID, false)
+	defer func() {
+		a.messageQueue.SetProcessing(sessionID, false)
+		// Drain followup queue: process messages received during this run.
+		// Each followup is handled as a new, independent agent run.
+		a.drainFollowupQueue(sessionID)
+	}()
 
 	// ── Step 2: Resolve workspace ──
 	// Determine which workspace this message belongs to.
@@ -782,7 +840,9 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	a.channelMgr.MarkRead(a.ctx, msg.Channel, msg.ChatID, []string{msg.ID})
 
 	// ── Step 4: Enrich content with media (images → description, audio → transcript) ──
-	userContent := a.enrichMessageContent(a.ctx, msg, logger)
+	// Phase 1 (fast): extract text immediately, schedule media for async processing.
+	// Phase 2 (async): media results are injected via interruptCh when ready.
+	userContent, hasMediaPending := a.enrichMessageContentFast(msg, logger)
 
 	// ── Step 5: Validate input ──
 	if err := a.inputGuard.Validate(msg.From, userContent); err != nil {
@@ -791,9 +851,9 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 		return
 	}
 
-	// ── Step 6: Set caller and session context for tool security / approval ──
-	a.toolExecutor.SetCallerContext(accessResult.Level, msg.From)
-	a.toolExecutor.SetSessionContext(sessionID)
+	// ── Step 6: Caller context is now passed via context.Context (see Step 8).
+	// The old global SetCallerContext/SetSessionContext is kept for backward
+	// compatibility (CLI, scheduler) but the agent run uses per-request context.
 
 	// ── Step 7: Build prompt with workspace context ──
 	promptStart := time.Now()
@@ -804,10 +864,11 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	)
 
 	// ── Step 8: Execute agent (with optional block streaming) ──
-	// Propagate opaque session ID and delivery target through context so
-	// tools (e.g. cron_add) can read them without shared mutable state.
+	// Propagate caller, session, and delivery target through context so
+	// tools get per-request security context without shared mutable state.
 	agentCtx := ContextWithSession(a.ctx, sessionID)
 	agentCtx = ContextWithDelivery(agentCtx, msg.Channel, msg.ChatID)
+	agentCtx = ContextWithCaller(agentCtx, accessResult.Level, msg.From)
 
 	// Inject ProgressSender so long-running tools (e.g. claude-code) can
 	// send intermediate feedback to the user while processing.
@@ -839,6 +900,14 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 		}
 	}()
 
+	// ── Step 8b: Schedule async media processing if pending ──
+	// Media enrichment runs in parallel with the agent. When results arrive,
+	// they are injected via the interrupt channel so the agent incorporates
+	// them into its next turn without blocking the initial response.
+	if hasMediaPending {
+		go a.enrichMediaAsync(a.ctx, msg, sessionID, logger)
+	}
+
 	agentStart := time.Now()
 	response := a.executeAgentWithStream(agentCtx, workspace.ID, session, sessionID, prompt, userContent, blockStreamer)
 	logger.Info("agent execution complete",
@@ -864,14 +933,16 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	session.AddMessage(userContent, response)
 
 	// ── Step 10b: Auto-capture memories from this conversation turn ──
-	// OpenClaw pattern: asynchronously extract important facts, preferences, and
-	// decisions from the user+assistant exchange so they're available for future recall.
+	// Asynchronously extract important facts, preferences, and decisions from
+	// the user+assistant exchange so they're available for future recall.
 	if a.memoryStore != nil {
 		go a.autoCaptureFacts(userContent, response, sessionID)
 	}
 
-	// ── Step 10c: Check if session needs compaction ──
-	a.maybeCompactSession(session)
+	// ── Step 10c: Check if session needs compaction (background) ──
+	// Compaction may trigger an LLM call (summarize strategy), so run it in
+	// the background to avoid blocking the user's response delivery.
+	go a.maybeCompactSession(session)
 
 	// ── Step 11: Send reply (skip if block streamer already sent everything) ──
 	if blockStreamer == nil || !blockStreamer.HasSentBlocks() {
@@ -1096,6 +1167,11 @@ func (a *Assistant) UsageTracker() *UsageTracker {
 	return a.usageTracker
 }
 
+// HookManager returns the lifecycle hook manager for registering plugin hooks.
+func (a *Assistant) HookManager() *HookManager {
+	return a.hookMgr
+}
+
 // Config returns the assistant configuration.
 func (a *Assistant) Config() *Config {
 	return a.config
@@ -1203,18 +1279,12 @@ func (a *Assistant) initScheduler() {
 		for _, toolName := range a.config.Security.ToolGuard.RequireConfirmation {
 			a.approvalMgr.GrantTrust(schedulerSessionID, toolName)
 		}
-		// Set the tool executor context for the scheduler session.
-		// Note: this is shared state and may be overwritten by concurrent requests,
-		// but we also propagate via context.WithValue below for goroutine safety.
-		a.toolExecutor.SetCallerContext(AccessOwner, "scheduler")
-		a.toolExecutor.SetSessionContext(schedulerSessionID)
-
-		// Propagate the job's delivery target through context so any tools
-		// called during the scheduled run (e.g. cron_add creating sub-jobs)
-		// correctly know where to deliver messages.
-		jobCtx := ctx
+		// Propagate caller, session, and delivery target via context (goroutine-safe).
+		// This replaces the old global SetCallerContext/SetSessionContext pattern.
+		jobCtx := ContextWithCaller(ctx, AccessOwner, "scheduler")
+		jobCtx = ContextWithSession(jobCtx, schedulerSessionID)
 		if job.Channel != "" && job.ChatID != "" {
-			jobCtx = ContextWithDelivery(ctx, job.Channel, job.ChatID)
+			jobCtx = ContextWithDelivery(jobCtx, job.Channel, job.ChatID)
 		}
 
 		// Build a delivery-focused prompt. Use ComposeMinimal() to skip
@@ -1286,7 +1356,7 @@ func (a *Assistant) registerSkillLoaders() {
 		a.skillRegistry.AddLoader(builtinLoader)
 	}
 
-	// ClawdHub (OpenClaw-compatible) skills loader.
+	// ClawdHub skills loader (loads from configured skill directories).
 	// Always include ./skills/ as the default user skills directory, even if
 	// not explicitly listed in config. This ensures user-installed skills are
 	// always discovered.
@@ -1394,6 +1464,9 @@ func (a *Assistant) registerSystemTools() {
 	// Register subagent tools (spawn, list, wait, stop).
 	RegisterSubagentTools(a.toolExecutor, a.subagentMgr, a.llmClient, a.promptComposer, a.logger)
 
+	// Register session management tools (sessions_list, sessions_send) for multi-agent routing.
+	RegisterSessionTools(a.toolExecutor, a.workspaceMgr)
+
 	// Register media tools (describe_image, transcribe_audio).
 	RegisterMediaTools(a.toolExecutor, a.llmClient, a.config, a.logger)
 
@@ -1480,15 +1553,15 @@ func (a *Assistant) doCompactSession(session *Session) {
 // and replaces old entries with the summary, keeping recent entries.
 // autoCaptureFacts performs lightweight fact extraction from a conversation turn.
 // Runs asynchronously — should not block message delivery.
-// Mirrors OpenClaw's auto-capture hook: scans for memory triggers (preferences,
-// decisions, entities, facts) and saves them via memory_save.
+// Scans for memory triggers (preferences, decisions, entities, facts) and
+// saves them via memory_save.
 func (a *Assistant) autoCaptureFacts(userMessage, assistantResponse, sessionID string) {
 	// Only capture from substantive exchanges (skip greetings, short replies).
 	if len(userMessage) < 30 && len(assistantResponse) < 100 {
 		return
 	}
 
-	// Check for memory triggers (OpenClaw pattern from MEMORY_TRIGGERS).
+	// Check for memory triggers.
 	combined := strings.ToLower(userMessage + " " + assistantResponse)
 	triggers := []string{
 		"remember", "lembre", "lembra", "prefer", "prefiro", "prefere",
@@ -1582,8 +1655,15 @@ func truncateForCapture(s string, n int) string {
 
 func (a *Assistant) compactSummarize(session *Session, threshold int) {
 	// Step 1: Memory flush — extract important facts before discarding.
+	// The agent saves durable memories to disk BEFORE the session history is compacted.
+	// IMPORTANT: Use append-only to avoid overwriting existing entries.
 	if a.memoryStore != nil {
-		flushPrompt := "Extract the most important facts, preferences, and information from this conversation that should be remembered long-term. Save them using the memory_save tool. If nothing important, reply with NO_REPLY."
+		flushPrompt := "Pre-compaction memory flush turn. The session is near auto-compaction; " +
+			"capture durable memories to disk.\n" +
+			"IMPORTANT: If the file already exists, APPEND new content only and do not overwrite existing entries.\n\n" +
+			"Extract the most important facts, preferences, decisions, and information from this conversation " +
+			"that should be remembered long-term. Save them using the memory_save tool. " +
+			"If nothing important, reply with NO_REPLY."
 
 		agent := NewAgentRunWithConfig(a.llmClient, a.toolExecutor, a.config.Agent, a.logger)
 		systemPrompt := a.promptComposer.Compose(session, flushPrompt)
@@ -1663,6 +1743,84 @@ func (a *Assistant) compactSliding(session *Session, threshold int) {
 		"entries_removed", len(oldEntries),
 		"new_history_len", session.HistoryLen(),
 	)
+}
+
+// enrichMessageContentFast returns the text content immediately, indicating whether
+// async media processing is needed. This avoids blocking the agent start on media
+// downloads, Vision API calls, or Whisper transcription.
+// Returns (userContent, hasMediaPending).
+func (a *Assistant) enrichMessageContentFast(msg *channels.IncomingMessage, logger *slog.Logger) (string, bool) {
+	if msg.Media == nil {
+		return msg.Content, false
+	}
+
+	// Check if the channel supports media and if we have relevant config.
+	media := a.config.Media.Effective()
+	_, ok := a.channelMgr.Channel(msg.Channel)
+	if !ok {
+		return msg.Content, false
+	}
+
+	switch msg.Media.Type {
+	case channels.MessageImage:
+		if !media.VisionEnabled {
+			return msg.Content, false
+		}
+		// Return text with placeholder — media will be processed async.
+		placeholder := "[Analyzing image... results will follow]"
+		if msg.Content != "" {
+			return fmt.Sprintf("%s\n\n%s", msg.Content, placeholder), true
+		}
+		return placeholder, true
+
+	case channels.MessageAudio:
+		if !media.TranscriptionEnabled {
+			return msg.Content, false
+		}
+		placeholder := "[Transcribing audio... results will follow]"
+		if msg.Content != "" {
+			return fmt.Sprintf("%s\n\n%s", msg.Content, placeholder), true
+		}
+		return placeholder, true
+	}
+
+	return msg.Content, false
+}
+
+// enrichMediaAsync runs media enrichment in a background goroutine and injects
+// the result into the agent's interrupt channel. This allows the agent to start
+// processing the user's text immediately while media is being downloaded and
+// analyzed in parallel.
+func (a *Assistant) enrichMediaAsync(ctx context.Context, msg *channels.IncomingMessage, sessionID string, logger *slog.Logger) {
+	enriched := a.enrichMessageContent(ctx, msg, logger)
+	if enriched == msg.Content {
+		return // Nothing enriched.
+	}
+
+	// Build the enrichment result message.
+	var result string
+	switch msg.Media.Type {
+	case channels.MessageImage:
+		result = fmt.Sprintf("[Media enrichment complete]\n%s", enriched)
+	case channels.MessageAudio:
+		result = fmt.Sprintf("[Audio transcription complete]\n%s", enriched)
+	default:
+		result = enriched
+	}
+
+	// Inject into the interrupt inbox so the active agent run picks it up.
+	a.interruptInboxesMu.Lock()
+	inbox, hasInbox := a.interruptInboxes[sessionID]
+	a.interruptInboxesMu.Unlock()
+
+	if hasInbox {
+		select {
+		case inbox <- result:
+			logger.Info("media enrichment injected into agent", "type", msg.Media.Type)
+		default:
+			logger.Warn("interrupt inbox full, media enrichment dropped")
+		}
+	}
 }
 
 // enrichMessageContent downloads media when present, describes images via vision API,
@@ -1749,8 +1907,8 @@ func truncate(s string, n int) string {
 }
 
 // summarizeAndSaveSessionFromHistory uses the LLM to summarize a pre-captured
-// history snapshot and saves it to memory/YYYY-MM-DD-slug.md (like OpenClaw's
-// session-memory hook). The history must be captured before session.ClearHistory()
+// history snapshot and saves it to memory/YYYY-MM-DD-slug.md. The history must
+// be captured before session.ClearHistory()
 // to avoid race conditions.
 func (a *Assistant) summarizeAndSaveSessionFromHistory(history []ConversationEntry) {
 	if len(history) < 2 {
@@ -2076,9 +2234,10 @@ func (a *Assistant) resumeInterruptedRuns() {
 			session := resolved.Session
 			sessionID := MakeSessionID(run.Channel, run.ChatID)
 
-			// Grant owner-level trust so resumed runs don't need approval.
-			a.toolExecutor.SetCallerContext(AccessOwner, "system:resume")
-			a.toolExecutor.SetSessionContext(sessionID)
+			// Propagate caller/session via context (goroutine-safe).
+			resumeCtx := ContextWithCaller(a.ctx, AccessOwner, "system:resume")
+			resumeCtx = ContextWithSession(resumeCtx, sessionID)
+			resumeCtx = ContextWithDelivery(resumeCtx, run.Channel, run.ChatID)
 
 			prompt := a.composeWorkspacePrompt(resolved.Workspace, session, run.UserMessage)
 
@@ -2091,7 +2250,7 @@ func (a *Assistant) resumeInterruptedRuns() {
 			defer blockStreamer.Finish()
 
 			response := a.executeAgentWithStream(
-				a.ctx, resolved.Workspace.ID, session, sessionID,
+				resumeCtx, resolved.Workspace.ID, session, sessionID,
 				prompt, run.UserMessage, blockStreamer,
 			)
 

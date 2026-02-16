@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { api, type MessageInfo } from '@/lib/api'
-import { createSSEConnection, type SSEEvent } from '@/lib/sse'
+import { createPOSTSSEConnection, type SSEEvent } from '@/lib/sse'
 
 interface ChatState {
   messages: MessageInfo[]
@@ -66,15 +66,20 @@ export function useChat(sessionId: string | null) {
       streamContentRef.current = ''
 
       try {
-        // Enviar e conectar ao stream
-        const { run_id } = await api.chat.send(sessionId, content.trim())
-
-        // Conectar SSE para receber a resposta
+        // Unified endpoint: POST with body, receive SSE on the same connection.
+        // Eliminates the extra round-trip of send → GET stream.
         cleanupRef.current?.()
-        cleanupRef.current = createSSEConnection({
-          url: `/api/chat/${sessionId}/stream?run_id=${run_id}`,
+        cleanupRef.current = createPOSTSSEConnection({
+          url: `/api/chat/${sessionId}/stream`,
+          body: { content: content.trim() },
           onEvent: (event: SSEEvent) => handleStreamEvent(event),
-          maxRetries: 0, // Não reconectar streams de chat
+          onError: (err) => {
+            setState((s) => ({
+              ...s,
+              isStreaming: false,
+              error: err.message || 'Erro no stream',
+            }))
+          },
         })
       } catch (err) {
         setState((s) => ({
@@ -90,6 +95,11 @@ export function useChat(sessionId: string | null) {
   /* Processar eventos SSE do stream */
   const handleStreamEvent = useCallback((event: SSEEvent) => {
     switch (event.type) {
+      case 'run_start': {
+        // Unified endpoint sends run_id on start — no action needed,
+        // but we could store it for advanced abort flows if desired.
+        break
+      }
       case 'delta': {
         const data = event.data as { content: string }
         streamContentRef.current += data.content

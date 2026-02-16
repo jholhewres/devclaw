@@ -92,6 +92,12 @@ export interface SkillInfo {
   tool_count: number
 }
 
+export interface WhatsAppStatus {
+  connected: boolean
+  needs_qr: boolean
+  phone?: string
+}
+
 export interface DashboardData {
   sessions: SessionInfo[]
   usage: UsageInfo
@@ -102,6 +108,52 @@ export interface DashboardData {
 export interface SetupStatus {
   configured: boolean
   current_step: number
+}
+
+/* ── Security Types ── */
+
+export interface AuditEntry {
+  id: number
+  tool: string
+  caller: string
+  level: string
+  allowed: boolean
+  args_summary: string
+  result_summary: string
+  created_at: string
+}
+
+export interface AuditResponse {
+  entries: AuditEntry[]
+  total: number
+}
+
+export interface ToolGuardStatus {
+  enabled: boolean
+  allow_destructive: boolean
+  allow_sudo: boolean
+  allow_reboot: boolean
+  auto_approve: string[]
+  require_confirmation: string[]
+  protected_paths: string[]
+  ssh_allowed_hosts: string[]
+  dangerous_commands: string[]
+  tool_permissions: Record<string, string>
+}
+
+export interface VaultStatus {
+  exists: boolean
+  unlocked: boolean
+  keys: string[]
+}
+
+export interface SecurityStatus {
+  gateway_auth_configured: boolean
+  webui_auth_configured: boolean
+  tool_guard_enabled: boolean
+  vault_exists: boolean
+  vault_unlocked: boolean
+  audit_entry_count: number
 }
 
 /* ── API Methods ── */
@@ -148,6 +200,10 @@ export const api = {
   /* Channels */
   channels: {
     list: () => request<ChannelHealth[]>('/channels'),
+    whatsapp: {
+      status: () => request<WhatsAppStatus>('/channels/whatsapp/status'),
+      requestQR: () => request<{ status: string; message: string }>('/channels/whatsapp/qr', { method: 'POST' }),
+    },
   },
 
   /* Config */
@@ -176,16 +232,31 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
-    testProvider: (provider: string, apiKey: string, model: string) =>
+    testProvider: (provider: string, apiKey: string, model: string, baseUrl?: string) =>
       request<{ success: boolean; error?: string }>('/setup/test-provider', {
         method: 'POST',
-        body: JSON.stringify({ provider, api_key: apiKey, model }),
+        body: JSON.stringify({ provider, api_key: apiKey, model, base_url: baseUrl || '' }),
       }),
     finalize: (data: Record<string, unknown>) =>
       request<{ status: string; message: string }>('/setup/finalize', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+  },
+
+  /* Security */
+  security: {
+    overview: () => request<SecurityStatus>('/security'),
+    audit: (limit = 50) => request<AuditResponse>(`/security/audit?limit=${limit}`),
+    toolGuard: {
+      get: () => request<ToolGuardStatus>('/security/tool-guard'),
+      update: (data: Partial<ToolGuardStatus>) =>
+        request<void>('/security/tool-guard', {
+          method: 'PUT',
+          body: JSON.stringify(data),
+        }),
+    },
+    vault: () => request<VaultStatus>('/security/vault'),
   },
 
   /* Auth */

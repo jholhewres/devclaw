@@ -154,6 +154,21 @@ func (a *Assistant) HandleCommand(msg *channels.IncomingMessage) CommandResult {
 	case "/tts":
 		return CommandResult{Response: a.ttsCommand(args, msg), Handled: true}
 
+	// Extended directives.
+	case "/verbose":
+		return CommandResult{Response: a.verboseCommand(args, msg), Handled: true}
+	case "/reasoning":
+		return CommandResult{Response: a.thinkCommand(args, msg), Handled: true} // Alias for /think
+	case "/queue":
+		return CommandResult{Response: a.queueCommand(args, msg), Handled: true}
+	case "/usage":
+		return CommandResult{Response: a.usageCommand(args, msg), Handled: true}
+	case "/activation":
+		if !isAdmin {
+			return CommandResult{Response: "Permission denied.", Handled: true}
+		}
+		return CommandResult{Response: a.activationCommand(args, msg), Handled: true}
+
 	default:
 		return CommandResult{Handled: false}
 	}
@@ -207,6 +222,14 @@ func (a *Assistant) helpCommand(isAdmin bool) string {
 	b.WriteString("/usage [reset] - Show token usage\n")
 	b.WriteString("/think [off|low|medium|high] - Set thinking level\n")
 	b.WriteString("/tts [off|always|inbound] - Toggle text-to-speech\n")
+	b.WriteString("/verbose [on|off] - Toggle verbose tool narration\n")
+	b.WriteString("/reasoning [off|low|medium|high] - Set reasoning level (alias: /think)\n")
+	b.WriteString("/queue [collect|steer|followup|interrupt] - Set queue mode\n")
+	b.WriteString("/usage [reset|global] - Show token usage\n")
+
+	if isAdmin {
+		b.WriteString("/activation [always|mention] - Set group activation mode\n")
+	}
 
 	b.WriteString("\n/help - Show this message")
 	return b.String()
@@ -249,7 +272,7 @@ func (a *Assistant) usageCommand(args []string, msg *channels.IncomingMessage) s
 	promptTok, completionTok, requests := session.GetTokenUsage()
 	total := promptTok + completionTok
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("*Token Usage*\n\n"))
+	b.WriteString("*Token Usage*\n\n")
 	b.WriteString(fmt.Sprintf("Prompt: %d | Completion: %d | Total: %d\n", promptTok, completionTok, total))
 	b.WriteString(fmt.Sprintf("Requests: %d\n", requests))
 	if a.usageTracker != nil {
@@ -744,6 +767,88 @@ func (a *Assistant) skillsCommand(args []string, msg *channels.IncomingMessage) 
 
 	default:
 		return "Unknown subcommand. Use: list, defaults, install"
+	}
+}
+
+func (a *Assistant) verboseCommand(args []string, msg *channels.IncomingMessage) string {
+	resolved := a.workspaceMgr.Resolve(msg.Channel, msg.ChatID, msg.From, msg.IsGroup)
+	session := resolved.Session
+	cfg := session.GetConfig()
+
+	if len(args) == 0 {
+		mode := "off"
+		if cfg.Verbose {
+			mode = "on"
+		}
+		return fmt.Sprintf("Verbose mode: %s", mode)
+	}
+
+	switch strings.ToLower(args[0]) {
+	case "on", "true", "1":
+		cfg.Verbose = true
+		session.SetConfig(cfg)
+		return "Verbose mode: on — tool calls will be narrated."
+	case "off", "false", "0":
+		cfg.Verbose = false
+		session.SetConfig(cfg)
+		return "Verbose mode: off — routine tool calls are silent."
+	default:
+		return "Usage: /verbose [on|off]"
+	}
+}
+
+func (a *Assistant) queueCommand(args []string, msg *channels.IncomingMessage) string {
+	if len(args) == 0 {
+		a.configMu.RLock()
+		mode := EffectiveQueueMode(a.config.Queue, msg.Channel)
+		a.configMu.RUnlock()
+		return fmt.Sprintf("Queue mode: %s\n\nAvailable: collect, steer, followup, interrupt, steer-backlog", mode)
+	}
+
+	mode, ok := ParseQueueMode(args[0])
+	if !ok {
+		return "Unknown queue mode. Available: collect, steer, followup, interrupt, steer-backlog"
+	}
+
+	// Update the per-channel override.
+	a.configMu.Lock()
+	if a.config.Queue.ByChannel == nil {
+		a.config.Queue.ByChannel = make(map[string]QueueMode)
+	}
+	a.config.Queue.ByChannel[msg.Channel] = mode
+	a.configMu.Unlock()
+
+	return fmt.Sprintf("Queue mode set to: %s (for channel: %s)", mode, msg.Channel)
+}
+
+func (a *Assistant) activationCommand(args []string, msg *channels.IncomingMessage) string {
+	if len(args) == 0 {
+		a.configMu.RLock()
+		trigger := a.config.Trigger
+		a.configMu.RUnlock()
+		if trigger == "" {
+			trigger = "always (no trigger)"
+		}
+		return fmt.Sprintf("Current activation: %s", trigger)
+	}
+
+	switch strings.ToLower(args[0]) {
+	case "always":
+		a.configMu.Lock()
+		a.config.Trigger = ""
+		a.configMu.Unlock()
+		return "Activation mode: always (responds to all messages in groups)"
+	case "mention":
+		a.configMu.Lock()
+		name := a.config.Name
+		if name == "" {
+			name = "goclaw"
+		}
+		a.config.Trigger = name
+		a.configMu.Unlock()
+		return fmt.Sprintf("Activation mode: mention-only (requires '%s' in message)", name)
+	default:
+		return "Usage: /activation [always|mention]"
 	}
 }
 

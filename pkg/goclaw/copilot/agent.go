@@ -3,7 +3,7 @@
 // → execute tools → append results → call LLM again, until the LLM produces
 // a final text response with no tool calls.
 //
-// Architecture (aligned with OpenClaw/pi-agent-core):
+// Architecture:
 //   - No fixed max turns — the loop runs until the LLM stops calling tools.
 //   - Single run timeout (default: 600s = 10min) controls the whole run.
 //   - Per-LLM-call safety timeout (5min) prevents individual hung requests.
@@ -41,7 +41,7 @@ const (
 // AgentConfig holds configurable agent loop parameters.
 type AgentConfig struct {
 	// RunTimeoutSeconds is the max seconds for the entire agent run (default: 600).
-	// Aligned with OpenClaw: one timer for the whole run, not per-turn.
+	// One timer for the whole run, not per-turn.
 	RunTimeoutSeconds int `yaml:"run_timeout_seconds"`
 
 	// LLMCallTimeoutSeconds is the safety-net timeout per individual LLM call
@@ -50,7 +50,6 @@ type AgentConfig struct {
 
 	// MaxTurns is a soft safety limit on LLM round-trips (default: 0 = unlimited).
 	// When > 0, the agent will request a summary after this many turns.
-	// OpenClaw has no turn limit; set to 0 to match.
 	MaxTurns int `yaml:"max_turns"`
 
 	// MaxContinuations is how many auto-continue rounds are allowed when
@@ -70,7 +69,7 @@ func DefaultAgentConfig() AgentConfig {
 	return AgentConfig{
 		RunTimeoutSeconds:     int(DefaultRunTimeout / time.Second),
 		LLMCallTimeoutSeconds: int(DefaultLLMCallTimeout / time.Second),
-		MaxTurns:              0, // Unlimited — OpenClaw pattern
+		MaxTurns:              0, // Unlimited
 		MaxContinuations:      2,
 		ReflectionEnabled:     true,
 		MaxCompactionAttempts: DefaultMaxCompactionAttempts,
@@ -83,7 +82,7 @@ type AgentRun struct {
 	executor              *ToolExecutor
 	runTimeout            time.Duration // Total run timeout (default: 600s)
 	llmCallTimeout        time.Duration // Per-LLM-call safety timeout (default: 5min)
-	maxTurns              int           // 0 = unlimited (OpenClaw pattern)
+	maxTurns              int           // 0 = unlimited
 	reflectionOn          bool
 	maxCompactionAttempts int
 	streamCallback        StreamCallback
@@ -111,7 +110,7 @@ func NewAgentRun(llm *LLMClient, executor *ToolExecutor, logger *slog.Logger) *A
 		executor:              executor,
 		runTimeout:            DefaultRunTimeout,
 		llmCallTimeout:        DefaultLLMCallTimeout,
-		maxTurns:              0, // Unlimited (OpenClaw pattern)
+		maxTurns:              0, // Unlimited
 		reflectionOn:          true,
 		maxCompactionAttempts: DefaultMaxCompactionAttempts,
 		logger:                logger.With("component", "agent"),
@@ -183,13 +182,13 @@ func (a *AgentRun) Run(ctx context.Context, systemPrompt string, history []Conve
 
 // RunWithUsage is like Run but also returns aggregated token usage from all LLM calls.
 //
-// Architecture (aligned with OpenClaw/pi-agent-core):
+// Architecture:
 //   - The loop runs until the LLM produces a response with no tool calls.
 //   - A single run-level timeout controls the entire execution (default: 600s).
 //   - Individual LLM calls have a safety-net timeout (5min) to catch hung connections.
 //   - No fixed turn limit — the agent keeps going as long as it has tools to call.
 func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, history []ConversationEntry, userMessage string) (string, *LLMUsage, error) {
-	// ── Run-level timeout (OpenClaw pattern: single timer for the whole run) ──
+	// ── Run-level timeout (single timer for the whole run) ──
 	runCtx, runCancel := context.WithTimeout(ctx, a.runTimeout)
 	defer runCancel()
 
@@ -223,12 +222,11 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 	totalTurns := 0
 
 	// Progress cooldown: avoid flooding the user with tool progress messages.
-	// OpenClaw's CLI backend sends zero progress; the embedded agent uses verbose levels.
-	// We send summarized progress at most every 15 seconds.
-	const progressCooldown = 15 * time.Second
+	// Short 3s cooldown for faster feedback while avoiding message spam.
+	const progressCooldown = 3 * time.Second
 	var lastProgressAt time.Time
 
-	// ── Main agent loop (OpenClaw/pi-agent-core pattern) ──
+	// ── Main agent loop ──
 	// Loop until: (1) LLM produces no tool calls, (2) run timeout fires, or
 	// (3) optional soft turn limit is hit. No fixed turn limit by default.
 	for {
@@ -281,6 +279,15 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 					"turn", totalTurns,
 				)
 			}
+		}
+
+		// ── Proactive context pruning ──
+		// Trim old tool results to prevent context bloat:
+		//   - Soft trim: tool results older than 5 turns → truncated to 500 chars
+		//   - Hard trim: tool results older than 10 turns → removed entirely
+		// This reduces the need for full compaction and keeps the context lean.
+		if totalTurns > 5 {
+			messages = a.pruneOldToolResults(messages, totalTurns)
 		}
 
 		// Inject reflection nudge periodically so the agent is aware of duration.
@@ -382,12 +389,25 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 
 		// Send progress to the user so they see what the agent is doing
 		// while tools execute (especially for long-running tools).
-		// Uses a cooldown to avoid flooding: at most one message every 15 seconds.
-		// This mirrors OpenClaw's approach of summarized feedback (not step-by-step).
+		// Priority: (1) LLM's own text before tool calls (real thinking),
+		// (2) concise tool description as fallback.
 		if ps := ProgressSenderFromContext(runCtx); ps != nil {
 			now := time.Now()
 			if now.Sub(lastProgressAt) >= progressCooldown {
-				progressMsg := formatToolProgressMessage(resp.ToolCalls)
+				var progressMsg string
+
+				// If the LLM emitted text alongside tool calls, that IS the
+				// real "thinking" — send it directly instead of a generic label.
+				if resp.Content != "" && len(resp.Content) < 1000 {
+					progressMsg = resp.Content
+				} else if resp.Content != "" {
+					// Truncate long thinking to a reasonable preview.
+					progressMsg = resp.Content[:500] + "..."
+				} else {
+					// No LLM text — fall back to tool description.
+					progressMsg = formatToolProgressMessage(resp.ToolCalls)
+				}
+
 				if progressMsg != "" {
 					ps(runCtx, progressMsg)
 					lastProgressAt = now
@@ -405,7 +425,7 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 
 		// Append each tool result as a message.
 		// Classify recoverable errors: the model should retry silently without
-		// the user seeing transient failures (OpenClaw pattern).
+		// the user seeing transient failures.
 		for _, result := range results {
 			content := result.Content
 			if result.Error != nil && isRecoverableToolError(content) {
@@ -426,7 +446,7 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 // formatToolProgressMessage creates a clean, concise, user-facing message about
 // what the agent is doing. Designed for chat apps (WhatsApp, Telegram).
 // Unlike step-by-step output, this shows a single summarized line.
-// Mirrors OpenClaw's approach: emoji + label + optional detail.
+// Format: emoji + label + optional detail.
 func formatToolProgressMessage(toolCalls []ToolCall) string {
 	if len(toolCalls) == 0 {
 		return ""
@@ -703,7 +723,7 @@ func shortPath(p string) string {
 
 // isRecoverableToolError checks if a tool error is likely transient or due to
 // incorrect parameters, so the model should retry without surfacing it to the user.
-// Matches OpenClaw's recoverable error classification from payloads.ts.
+// Classifies errors that the model can recover from by retrying or adjusting parameters.
 func isRecoverableToolError(errMsg string) bool {
 	lower := strings.ToLower(errMsg)
 	patterns := []string{
@@ -861,11 +881,71 @@ func (a *AgentRun) truncateToolResults(messages []chatMessage, maxLen int) []cha
 	return result
 }
 
+// pruneOldToolResults implements proactive context trimming.
+// Tool results are tagged with their turn number. Older results are progressively
+// truncated or removed to keep the context lean without waiting for overflow.
+func (a *AgentRun) pruneOldToolResults(messages []chatMessage, currentTurn int) []chatMessage {
+	const (
+		softTrimAge    = 5    // Turns before soft trim (truncate to 500 chars)
+		hardTrimAge    = 10   // Turns before hard trim (remove entirely)
+		softTrimChars  = 500  // Max chars after soft trim
+	)
+
+	// Estimate the "turn" of each message based on position. Tool messages
+	// between two assistant messages belong to the same turn.
+	msgCount := len(messages)
+	if msgCount < 10 {
+		return messages
+	}
+
+	// Count tool result messages from the end to estimate age.
+	toolResultCount := 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "tool" {
+			toolResultCount++
+		}
+	}
+
+	if toolResultCount < softTrimAge {
+		return messages // Not enough tool results to prune.
+	}
+
+	// Walk through messages, trimming old tool results.
+	result := make([]chatMessage, 0, len(messages))
+	toolIdx := 0
+	for _, m := range messages {
+		if m.Role == "tool" {
+			age := toolResultCount - toolIdx
+			toolIdx++
+
+			if age > hardTrimAge {
+				// Hard trim: skip this tool result entirely.
+				result = append(result, chatMessage{
+					Role:       m.Role,
+					Content:    "[tool result removed — too old]",
+					ToolCallID: m.ToolCallID,
+				})
+				continue
+			}
+
+			if age > softTrimAge {
+				// Soft trim: truncate to 500 chars.
+				if s, ok := m.Content.(string); ok && len(s) > softTrimChars {
+					m.Content = s[:softTrimChars] + "... [truncated — old result]"
+				}
+			}
+		}
+		result = append(result, m)
+	}
+
+	return result
+}
+
 // doLLMCallWithOverflowRetry runs the LLM call and retries with compaction on context overflow.
 // The per-call timeout is a safety net (llmCallTimeout, default 5min) — the primary timeout
 // is the run-level context passed in ctx.
 //
-// Compaction strategy (aligned with OpenClaw):
+// Compaction strategy:
 //  1. First attempt: truncate oversized tool results (>4K chars).
 //  2. Second attempt: compact messages (keep last N) + truncate tool results harder.
 //  3. Third attempt: aggressive compaction (keep fewer messages).
@@ -902,7 +982,7 @@ func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []ch
 			"messages_before", len(messages),
 		)
 
-		// ── OpenClaw compaction strategy ──
+		// ── Compaction strategy ──
 		// Step 1: Try truncating oversized tool results first (cheap operation).
 		if !toolResultTruncated {
 			if hasOversizedToolResults(messages, 4000) {

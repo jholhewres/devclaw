@@ -146,7 +146,8 @@ func (g *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		g.writeError(w, "method not allowed", 405)
 		return
 	}
-	body, err := io.ReadAll(r.Body)
+	// Limit request body to 2MB to prevent OOM from oversized payloads.
+	body, err := io.ReadAll(io.LimitReader(r.Body, 2*1024*1024))
 	if err != nil {
 		g.writeError(w, "failed to read body", 400)
 		return
@@ -211,12 +212,14 @@ func (g *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request) 
 	if systemPrompt != "" {
 		prompt = systemPrompt + "\n\n" + prompt
 	}
-	g.assistant.ToolExecutor().SetCallerContext(copilot.AccessOwner, "api-client")
+	// Propagate caller context via context.Context (goroutine-safe).
+	reqCtx := copilot.ContextWithCaller(r.Context(), copilot.AccessOwner, "api-client")
+	reqCtx = copilot.ContextWithSession(reqCtx, session.ID)
 	if req.Stream {
-		g.handleChatStream(w, r, session, prompt, history, lastUser, model)
+		g.handleChatStream(w, r.WithContext(reqCtx), session, prompt, history, lastUser, model)
 		return
 	}
-	resp := g.assistant.ExecuteAgent(r.Context(), prompt, session, lastUser)
+	resp := g.assistant.ExecuteAgent(reqCtx, prompt, session, lastUser)
 	session.AddMessage(lastUser, resp)
 	g.writeOpenAINonStream(w, model, resp)
 }

@@ -109,5 +109,42 @@ func (a *SQLiteAuditLogger) Recent(n int) []string {
 	return entries
 }
 
+// AuditRecord is a structured audit log entry.
+type AuditRecord struct {
+	ID            int64
+	Tool          string
+	Caller        string
+	Level         string
+	Allowed       bool
+	ArgsSummary   string
+	ResultSummary string
+	CreatedAt     string
+}
+
+// RecentRecords returns the last N audit log entries as structured records.
+func (a *SQLiteAuditLogger) RecentRecords(n int) []AuditRecord {
+	rows, err := a.db.Query(`
+		SELECT id, tool, caller, level, allowed, args_summary, result_summary, created_at
+		FROM audit_log
+		ORDER BY id DESC
+		LIMIT ?`, n)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var records []AuditRecord
+	for rows.Next() {
+		var r AuditRecord
+		var allowed int
+		if err := rows.Scan(&r.ID, &r.Tool, &r.Caller, &r.Level, &allowed, &r.ArgsSummary, &r.ResultSummary, &r.CreatedAt); err != nil {
+			continue
+		}
+		r.Allowed = allowed != 0
+		records = append(records, r)
+	}
+	return records
+}
+
 // Close is a no-op; the shared *sql.DB is closed at the application level.
 func (a *SQLiteAuditLogger) Close() {}

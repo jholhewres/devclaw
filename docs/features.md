@@ -37,6 +37,21 @@ When the agent reaches the turn limit but is still executing tools, it automatic
 
 Every 8 turns, the system injects a `[System: N turns used of M]` message, allowing the agent to consciously manage its budget — prioritizing remaining tasks or summarizing progress.
 
+### Context Pruning
+
+Old tool results are proactively trimmed based on turn age:
+
+| Trim Type | Turn Age | Action |
+|-----------|----------|--------|
+| Soft trim | Medium | Truncate result to summary |
+| Hard trim | Old | Remove result entirely |
+
+This prevents context bloat without waiting for LLM overflow errors.
+
+### Agent Steering
+
+During tool execution, the agent monitors an interrupt channel for incoming messages. Users can redirect the agent mid-run, and the agent adjusts its behavior accordingly.
+
 ### Context Compaction
 
 Three strategies to keep the context within limits:
@@ -47,13 +62,15 @@ Three strategies to keep the context within limits:
 | `truncate` | Drop oldest entries, keep 50% recent | Zero | Instant |
 | `sliding` | Fixed window of most recent entries | Zero | Instant |
 
+**Memory flush pre-compaction**: before compaction, the agent performs a dedicated turn to save durable memories to disk using an append-only strategy, ensuring important context survives.
+
 **Preventive compaction**: triggers automatically at 80% of the `max_messages` threshold, avoiding overflow during conversation.
 
 ---
 
 ## Tool System
 
-### Built-in Tools
+### Built-in Tools (45+)
 
 #### Filesystem
 
@@ -115,6 +132,34 @@ Three strategies to keep the context within limits:
 | `wait_subagent` | Wait for subagent completion | admin |
 | `stop_subagent` | Terminate a running subagent | admin |
 
+#### Browser Automation
+
+| Tool | Description | Permission |
+|------|-------------|------------|
+| `browser_navigate` | Navigate browser to URL via CDP | admin |
+| `browser_screenshot` | Take screenshot of current page | admin |
+| `browser_content` | Extract page text content | admin |
+| `browser_click` | Click element by CSS selector | admin |
+| `browser_fill` | Fill form input field | admin |
+
+#### Interactive Canvas
+
+| Tool | Description | Permission |
+|------|-------------|------------|
+| `canvas_create` | Create HTML/JS canvas with live-reload | admin |
+| `canvas_update` | Update canvas content (triggers live-reload) | admin |
+| `canvas_list` | List active canvases | user |
+| `canvas_stop` | Stop a canvas server | admin |
+
+#### Session Management
+
+| Tool | Description | Permission |
+|------|-------------|------------|
+| `sessions_list` | List active sessions across all workspaces | admin |
+| `sessions_send` | Send message to another session (inter-agent) | admin |
+| `sessions_delete` | Delete a session by ID | admin |
+| `sessions_export` | Export session history and metadata as JSON | admin |
+
 #### Skills Management
 
 | Tool | Description | Permission |
@@ -127,6 +172,57 @@ Three strategies to keep the context within limits:
 | `install_skill` | Install from ClawHub, GitHub, URL, or local path | admin |
 | `search_skills` | Search the ClawHub catalog | user |
 | `remove_skill` | Uninstall a skill | admin |
+
+---
+
+## Lifecycle Hooks
+
+16+ lifecycle events that external code can subscribe to for observing and modifying agent behavior.
+
+### Events
+
+| Event | Phase | Blocking |
+|-------|-------|----------|
+| `SessionStart` | Session creation | No |
+| `SessionEnd` | Session destruction | No |
+| `PreToolUse` | Before tool execution | Yes (can block) |
+| `PostToolUse` | After tool execution | No |
+| `AgentStart` | Agent loop begins | No |
+| `AgentStop` | Agent loop ends | No |
+| `PreCompact` | Before session compaction | No |
+| `PostCompact` | After session compaction | No |
+| `MessageReceived` | New message arrives | No |
+| `MessageSent` | Response sent to channel | No |
+
+### Features
+
+- **Priority-ordered dispatch**: hooks execute in priority order.
+- **Sync/async modes**: blocking hooks for pre-execution validation, non-blocking for logging/monitoring.
+- **Panic recovery**: individual handler panics don't crash the dispatch or goroutine.
+- **Deduplication**: prevents duplicate event subscriptions.
+
+---
+
+## Queue Modes
+
+Configurable strategies for handling incoming messages when the agent is busy:
+
+| Mode | Behavior |
+|------|----------|
+| `collect` | Queue messages, process as batch when agent is free |
+| `steer` | Inject new message into running agent's context |
+| `followup` | Queue as followup to current run |
+| `interrupt` | Cancel current run, process new message |
+| `steer-backlog` | Steer if possible, queue remainder |
+
+```yaml
+queue:
+  default_mode: collect
+  by_channel:
+    whatsapp: collect
+    webui: steer
+  drop_policy: oldest
+```
 
 ---
 
@@ -147,22 +243,9 @@ SQLite store with FTS5 (keyword) and vector search (embeddings):
 3. **Delta Sync**: only re-indexes/re-embeds chunks whose SHA-256 hash changed.
 4. **Hybrid search**: combines BM25 (FTS5) and cosine similarity via Reciprocal Rank Fusion (RRF).
 
-```yaml
-memory:
-  embedding:
-    provider: openai
-    model: text-embedding-3-small
-    dimensions: 1536
-    batch_size: 20
-  search:
-    hybrid_weight_vector: 0.7
-    hybrid_weight_bm25: 0.3
-    max_results: 6
-    min_score: 0.1
-  index:
-    auto: true
-    chunk_max_tokens: 500
-```
+### Memory Security
+
+Memory content injected into prompts is treated as untrusted data — HTML entities are escaped, dangerous tags stripped, content wrapped in `<relevant-memories>` tags, and injection patterns detected.
 
 ### Session Memory
 
@@ -179,7 +262,7 @@ Skills extend the agent's capabilities with custom tools and behaviors.
 | Format | Structure | Execution |
 |--------|-----------|-----------|
 | **Native Go** | `skill.yaml` + `skill.go` | Compiled into binary |
-| **ClawdHub** | `SKILL.md` + scripts (Python/Node/Shell) | Sandbox |
+| **ClawHub** | `SKILL.md` + `scripts/` | Python, Node.js, Shell — sandboxed |
 
 ### Installation Sources
 
@@ -211,6 +294,17 @@ Native Go implementation via [whatsmeow](https://go.mau.fi/whatsmeow):
 - **Groups**: full group message support with access control.
 - **Device name**: "GoClaw". LID resolution for phone number normalization.
 
+### Group Chat (Enhanced)
+
+| Feature | Description |
+|---------|-------------|
+| Activation modes | Always respond, mention-only, or keyword-based |
+| Intro messages | Automatic welcome message for new groups |
+| Context injection | Inject group context into agent prompts |
+| Participant tracking | Track active participants |
+| Quiet hours | Suppress responses during configured hours |
+| Ignore patterns | Skip messages matching regex patterns |
+
 ### Media Processing
 
 | Type | Processing | API |
@@ -219,47 +313,32 @@ Native Go implementation via [whatsmeow](https://go.mau.fi/whatsmeow):
 | Audio | Automatic transcription | Whisper |
 | Video | Thumbnail extraction → vision | OpenAI Vision |
 
-```yaml
-media:
-  vision_enabled: true
-  vision_detail: auto       # auto | low | high
-  transcription_enabled: true
-  transcription_model: whisper-1
-  max_image_size: 20971520  # 20 MB
-  max_audio_size: 26214400  # 25 MB
-```
-
-### Message Splitting
-
-Long responses are split into channel-compatible chunks:
-- **WhatsApp**: 4096 characters per message.
-- Splits preserve code blocks and prefer paragraph/sentence boundaries.
-- Automatic markdown to WhatsApp format conversion (`**bold**` → `*bold*`).
+Media enrichment runs **asynchronously** — the agent starts responding immediately while vision/transcription happens in background.
 
 ### Block Streaming
 
-Progressive delivery of long responses so the user sees activity in real-time:
+Progressive delivery of long responses:
 
 ```yaml
 block_stream:
   enabled: false
-  min_chars: 80        # Minimum before first block
-  idle_ms: 1200        # Idle timeout before flush
-  max_chars: 3000      # Force flush at this limit
+  min_chars: 20
+  idle_ms: 200
+  max_chars: 3000
 ```
 
 ---
 
 ## HTTP Gateway
 
-OpenAI-compatible REST API for integration with external applications.
+OpenAI-compatible REST API with WebSocket support.
 
 ### Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check |
-| POST | `/v1/chat/completions` | Chat completions (supports SSE streaming) |
+| POST | `/v1/chat/completions` | Chat completions (SSE streaming) |
 | GET | `/api/sessions` | List all sessions |
 | GET | `/api/sessions/:id` | Session details |
 | DELETE | `/api/sessions/:id` | Delete session |
@@ -267,10 +346,16 @@ OpenAI-compatible REST API for integration with external applications.
 | GET | `/api/usage/:session` | Per-session usage |
 | GET | `/api/status` | System status |
 | POST | `/api/webhooks` | Register webhook |
+| POST | `/api/chat/{id}/stream` | Unified send+stream (SSE) |
+| WS | `/ws` | WebSocket JSON-RPC (bidirectional) |
+
+### WebSocket JSON-RPC
+
+Bidirectional communication supporting:
+- **Client requests**: `chat.send`, `chat.abort`, `session.list`
+- **Server events**: `delta`, `tool_use`, `done`, `error`
 
 ### Authentication
-
-Optional Bearer token:
 
 ```yaml
 gateway:
@@ -282,19 +367,34 @@ gateway:
 
 ---
 
-## Scheduler (Cron)
+## Scheduler (Advanced Cron)
 
-Task scheduling system with SQLite persistence:
+Task scheduling system with advanced job features:
+
+| Feature | Description |
+|---------|-------------|
+| Cron expressions | Standard 5-field or predefined (`@hourly`, `@daily`) |
+| Isolated sessions | Each job runs in its own session |
+| Announce | Broadcast results to target channels |
+| Subagent spawn | Run job as a subagent |
+| Per-job timeouts | Custom timeout per task |
+| Labels | Categorize and filter jobs |
+| Persistence | Jobs survive restarts |
+
+---
+
+## Remote Access (Tailscale)
+
+Secure remote access via Tailscale Serve/Funnel:
 
 ```yaml
-scheduler:
+tailscale:
   enabled: true
-  storage: ./data/scheduler.db
+  serve_port: 8080
+  funnel: false     # expose to internet
 ```
 
-- **Cron expressions**: standard 5-field or predefined (`@hourly`, `@daily`).
-- **Persistence**: tasks survive restarts.
-- **Management**: via tools (`schedule_add/list/remove`) or CLI (`copilot schedule`).
+No manual port forwarding or DNS configuration required.
 
 ---
 
@@ -306,8 +406,8 @@ Proactive agent behavior at configurable intervals:
 heartbeat:
   enabled: true
   interval: 30m
-  active_start: 9       # Active hours start (hour)
-  active_end: 22         # Active hours end (hour)
+  active_start: 9
+  active_end: 22
   channel: whatsapp
   chat_id: "5511999999999"
 ```
@@ -318,58 +418,41 @@ The agent reads `HEARTBEAT.md` for pending tasks and acts on them. Replies with 
 
 ## Workspaces
 
-Multi-tenant isolation with independent configurations per workspace:
+Multi-tenant isolation with independent configurations per workspace. Each workspace has: independent system prompt, skills, model, language, and conversation memory.
 
-```yaml
-workspaces:
-  default_workspace: default
-  workspaces:
-    - id: default
-      name: Default
-      active: true
-    - id: work
-      name: Dev Team
-      model: gpt-4o-mini
-      language: en
-      skills: [github, web-search]
-      members: ["5511888888888"]
-      groups: ["120363000000000000@g.us"]
-```
+---
 
-Each workspace has: independent system prompt, skills, model, language, and conversation memory.
+## Session Management
+
+### Structured Session Keys
+
+Sessions are identified by `SessionKey` (Channel, ChatID, Branch), enabling multi-agent routing and session branching.
+
+### CRUD Operations
+
+| Operation | Description |
+|-----------|-------------|
+| Create | Automatic on first message |
+| Get | By session ID or structured key |
+| Delete | Via tool or API |
+| Export | Full history + metadata as JSON |
+| Rename | Change session display name |
+
+### Bounded Followup Queue
+
+When the agent is busy, incoming messages are queued with FIFO eviction at 20 items maximum.
 
 ---
 
 ## Token Usage Tracking
 
-Per-session and global tracking of consumed tokens:
-
-| Model | Input/1M | Output/1M |
-|-------|----------|-----------|
-| `gpt-5-mini` | $0.15 | $0.60 |
-| `gpt-5` | $2.00 | $8.00 |
-| `gpt-4o` | $2.50 | $10.00 |
-| `claude-opus-4.6` | $5.00 | $25.00 |
-| `claude-sonnet-4.5` | $3.00 | $15.00 |
-| `glm-5` | $1.00 | $3.20 |
-| `glm-4.7-flash` | $0.10 | $0.40 |
-
-Accessible via `/usage` command or `GET /api/usage`.
+Per-session and global tracking of consumed tokens. Accessible via `/usage` command or `GET /api/usage`.
 
 ---
 
 ## Config Hot-Reload
 
-`ConfigWatcher` monitors `config.yaml` for changes (mtime + SHA-256 hash).
-
-**Hot-reloadable fields** (no restart required):
-- Access control (allowed/blocked users)
-- Custom instructions
-- Tool guard rules
-- Heartbeat config
-- Token budgets
-
-**Change detection**: periodic mtime polling, followed by SHA-256 verification to confirm actual change.
+`ConfigWatcher` monitors `config.yaml` for changes. Hot-reloadable: access control, instructions, tool guard, heartbeat, token budgets, queue modes. No restart required.
 
 ---
 
@@ -379,12 +462,10 @@ Accessible via `/usage` command or `GET /api/usage`.
 
 | Command | Description |
 |---------|-------------|
-| `copilot setup` | Interactive wizard (TUI) — model selection, vault, provider |
-| `copilot serve` | Start daemon with messaging channels |
+| `copilot setup` | Interactive wizard (TUI) |
+| `copilot serve` | Start daemon |
 | `copilot chat [msg]` | Interactive REPL or single message |
-| `copilot config init` | Create default config |
-| `copilot config show` | Show current config |
-| `copilot config validate` | Validate config |
+| `copilot config init/show/validate` | Config management |
 | `copilot config vault-*` | Vault management |
 | `copilot skill list/search/install` | Skills management |
 | `copilot schedule list/add` | Cron management |
@@ -402,20 +483,15 @@ Accessible via `/usage` command or `GET /api/usage`.
 | `/usage [global\|reset]` | Token statistics |
 | `/compact` | Manually compact session |
 | `/think [off\|low\|medium\|high]` | Extended thinking level |
+| `/verbose [on\|off]` | Toggle verbose output |
+| `/reasoning [level]` | Set reasoning format (alias for /think) |
+| `/queue [mode]` | Show/change queue mode |
+| `/activation [mode]` | Show/change group activation mode |
 | `/new` | Clear history (with summarization if enabled) |
 | `/reset` | Full session reset |
 | `/stop` | Cancel active execution |
 | `/approve`, `/deny` | Approve/reject tool execution |
 | `/ws create/assign/list` | Workspace management |
-
-### CLI REPL Features
-
-Interactive REPL with readline support:
-- Arrow key history (↑/↓)
-- Reverse search (Ctrl+R)
-- Tab completion
-- Line editing (Ctrl+A/E/W/U)
-- Persistent history (`~/.goclaw/chat_history`)
 
 ---
 

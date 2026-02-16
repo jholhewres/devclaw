@@ -2,6 +2,86 @@
 
 All notable changes to GoClaw are documented in this file.
 
+## [2.0.0] — 2026-02-16
+
+Major release with significant performance improvements, new concurrency architecture, advanced agent capabilities, comprehensive security hardening, and new tools.
+
+### Performance
+
+- **Adaptive debounce**: reduced default from 1000ms to 200ms; followup debounce at 500ms; idle sessions drain immediately
+- **Unified send+stream endpoint**: new `POST /api/chat/{sessionId}/stream` combines send and stream in a single HTTP request, eliminating a round-trip
+- **Asynchronous media enrichment**: vision/transcription runs in background while the agent starts responding; results are injected via interrupt channel
+- **Background compaction**: `maybeCompactSession` now runs in a goroutine, no longer blocking the response path
+- **Faster block streaming**: `MinChars` reduced from 50→20, `IdleMs` from 400→200ms; eliminated double idle check for immediate flushing
+- **Lazy prompt composition**: memory and skills layers cached (60s TTL) with background refresh; critical layers (bootstrap, history) still loaded synchronously
+
+### Architecture
+
+- **Lane-based concurrency** (`lanes.go`): configurable lanes (session, cron, subagent) with per-lane queue and concurrency limits — prevents work-type contention
+- **Event bus** (`events.go`): in-memory pub/sub for agent lifecycle events (delta, tool_use, done, error) — supports multi-consumer streams
+- **WebSocket JSON-RPC** (`gateway/websocket.go`): bidirectional real-time communication as alternative to HTTP/SSE; supports client requests (chat.abort) and server events
+- **Fast abort** (`tool_executor.go`): abort channel with `ResetAbort`/`Abort`/`IsAborted` — tools detect and respond to external abort signals during execution
+
+### Agent Capabilities
+
+- **Queue modes** (`queue_modes.go`): configurable strategies for incoming messages when session is busy — collect, steer, followup, interrupt, steer-backlog
+- **Model failover** (`model_failover.go`): automatic LLM failover with reason classification (billing, rate limit, auth, timeout, format) and per-model cooldowns
+- **Proactive prompts** (`prompt_layers.go`): reply tags, silent reply tokens, heartbeat guidance, reasoning format, memory recall, subagent orchestration, and messaging directives
+- **Agent steering**: interrupt during tool execution; tools check `interruptCh` for incoming messages to steer behavior mid-run
+- **Context pruning** (`agent.go`): proactive soft/hard trim of old tool results based on turn age — prevents context bloat without waiting for LLM overflow
+- **Memory flush pre-compaction**: explicit "pre-compaction memory flush turn" saves durable memories to disk before compaction using append-only strategy
+- **Expanded directives**: new `/verbose`, `/reasoning` (alias for `/think`), `/queue`, `/usage`, `/activation` commands with thread-safe config access
+
+### Security
+
+- **Workspace containment** (`workspace_containment.go`): sandbox path validation and symlink escape protection for all file operations
+- **Memory injection hardening** (`memory_hardening.go`): treats memories as untrusted data; escapes HTML entities, strips dangerous tags, wraps in `<relevant-memories>` tags, detects injection patterns
+- **Request body limiter**: 2MB limit on `POST /v1/chat/completions` to prevent OOM from oversized payloads
+- **Partial output on abort**: `handleChatAbort` now includes a `partial` flag indicating preserved partial output before cancellation
+
+### New Tools & Features
+
+- **Browser automation** (`browser_tool.go`): Chrome DevTools Protocol (CDP) integration with `browser_navigate`, `browser_screenshot`, `browser_content`, `browser_click`, `browser_fill`
+- **Interactive canvas** (`canvas_host.go`): HTML/JS canvas with live-reload via temporary HTTP server; `canvas_create`, `canvas_update`, `canvas_list`, `canvas_stop`
+- **Session management tools**: `sessions_list` (all workspaces), `sessions_send` (inter-agent messaging), `sessions_delete`, `sessions_export` (full history + metadata as JSON)
+- **Lifecycle hooks** (`hooks.go`): 16+ event types (SessionStart, PreToolUse, AgentStop, etc.) with priority-ordered dispatch, sync blocking, async non-blocking, and panic recovery
+- **Group chat** (`group_chat.go`): activation modes, intro messages, context injection, participant tracking, quiet hours, ignore patterns
+- **Tailscale integration** (`tailscale.go`): Tailscale Serve/Funnel for secure remote access without manual port forwarding or DNS configuration
+- **Advanced cron** (`scheduler.go`): isolated sessions per job, announce handler for broadcasting results, subagent spawn option, per-job timeouts, job labels
+
+### Session Management
+
+- **Structured session keys**: `SessionKey` struct (Channel, ChatID, Branch) enables multi-agent routing
+- **Session CRUD**: `DeleteByID`, `Export`, `RenameSession` on SessionStore
+- **Bounded followup queue**: FIFO eviction at 20 items maximum
+
+### Bug Fixes
+
+- Fixed data race in `ListSessions` when reading `lastActiveAt`/`CreatedAt` without lock
+- Fixed `splitMax` panic on empty separator
+- Fixed restored sessions not persisting (missing `persistence` field)
+- Fixed duplicate hook event registration in `HookManager.Register`
+- Fixed panic in hook dispatch — individual handler panics no longer crash dispatch goroutine
+- Fixed race condition in canvas `Update` — hold mutex during channel send to prevent panic from concurrent `Stop`
+- Fixed infinite loop in `findFreePort` when `MaxCanvases` exceeds available port range
+- Fixed `tailscale.go` hostname parsing — replaced manual JSON parsing with `json.Unmarshal`
+- Fixed data race on `Job.LastRunAt`/`RunCount`/`LastError` in scheduler `executeJob`
+- Fixed scheduler persisting removed jobs — added existence check before `Save`
+- Fixed `commands.go` reading config without mutex — added `configMu.RLock()` to `/queue` and `/activation`
+
+### Frontend (WebUI)
+
+- New `createPOSTSSEConnection` for POST-based SSE in unified send+stream flow
+- Updated `useChat` hook to eliminate separate `api.chat.send` + `createSSEConnection` calls
+- Added `run_start` event handler for unified stream protocol
+
+### Dependencies
+
+- Added `github.com/gorilla/websocket` (WebSocket support)
+- Added `github.com/robfig/cron/v3` (advanced cron scheduling)
+
+---
+
 ## [1.1.0] — 2026-02-12
 
 ### Performance
@@ -147,7 +227,7 @@ First stable release.
 
 ### Skills
 
-- Native Go skills (compiled, direct execution) and SKILL.md format (ClawHub/OpenClaw compatible)
+- Native Go skills (compiled, direct execution) and SKILL.md format (ClawHub compatible)
 - Skill installation from ClawHub, GitHub, HTTP URLs, and local paths
 - Built-in skills: weather, calculator, web-search, web-fetch, summarize, github, gog, calendar
 - Skill creation via chat (agent can author its own skills)

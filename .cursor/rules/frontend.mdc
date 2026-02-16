@@ -1,0 +1,40 @@
+---
+description: Frontend conventions for GoClaw WebUI
+globs: ["web/**/*.{ts,tsx,css}"]
+alwaysApply: true
+---
+
+# Frontend Conventions — GoClaw WebUI
+
+## Stack
+
+- React 18+ with TypeScript
+- Vite for bundling
+- Tailwind CSS for styling
+- SSE (Server-Sent Events) for real-time streaming
+
+## Directory Structure
+
+- `web/src/pages/` — page components (Chat, Dashboard, Sessions, etc.)
+- `web/src/components/` — shared UI components
+- `web/src/layouts/` — layout wrappers (AppLayout, SetupLayout)
+- `web/src/hooks/` — custom React hooks (useChat, etc.)
+- `web/src/lib/` — utilities (api.ts, sse.ts, utils.ts)
+
+## SSE Streaming
+
+- Use `createPOSTSSEConnection` for unified send+stream (POST-based SSE)
+- Use `createSSEConnection` for legacy GET-based SSE
+- Handle events: `delta`, `tool_use`, `done`, `error`, `run_start`
+
+## Patterns
+
+- Use TypeScript strict mode
+- Use functional components with hooks
+- Colocate types near usage
+- API calls go through `web/src/lib/api.ts`
+
+## Do NOT
+
+- Create test files unless explicitly requested
+- Create documentation files unless explicitly requested

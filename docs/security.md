@@ -14,6 +14,12 @@ Documentation of the security mechanisms implemented in GoClaw. The framework ad
 │                   Tool Guard                      │
 │      (permissions, command blocking, auditing)    │
 ├──────────────────────────────────────────────────┤
+│            Workspace Containment                  │
+│   (sandbox path, symlink escape protection)       │
+├──────────────────────────────────────────────────┤
+│            Memory Injection Hardening             │
+│   (untrusted content sanitization)                │
+├──────────────────────────────────────────────────┤
 │                  SSRF Protection                  │
 │       (URL validation, private IP blocking)       │
 ├──────────────────────────────────────────────────┤
@@ -24,7 +30,7 @@ Documentation of the security mechanisms implemented in GoClaw. The framework ad
 │      (namespaces, Docker, content scanning)       │
 ├──────────────────────────────────────────────────┤
 │              Gateway Authentication               │
-│            (Bearer token, CORS)                   │
+│     (Bearer token, CORS, body limit, WebSocket)   │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -113,8 +119,6 @@ security:
       - "curl.*\\|.*sh"
 ```
 
-To enable destructive commands for the owner, set `allow_destructive: true`. Non-owners remain blocked regardless.
-
 ### Sensitive Path Protection
 
 Protected paths cannot be read/written by non-owners:
@@ -134,14 +138,6 @@ protected_paths:
 
 Supports glob patterns. Protected paths are checked in `read_file`, `write_file`, `edit_file`, and `bash`.
 
-### SSH Host Allowlist
-
-```yaml
-ssh_allowed_hosts: []   # Empty = any host allowed
-```
-
-When configured, only hosts in the list can be accessed via `ssh` and `scp`.
-
 ### Interactive Approval
 
 Tools in the `require_confirmation` list require explicit user approval before executing:
@@ -156,16 +152,6 @@ Flow:
 3. User responds with `/approve <id>` or `/deny <id>`.
 4. If approved, executes. If denied or timeout, cancels.
 
-### Auto-Approve
-
-Tools in the `auto_approve` list execute without any permission check:
-
-```yaml
-auto_approve: [web_search, memory_search]
-```
-
-Use with caution — completely bypasses the ToolGuard for those tools.
-
 ### Audit Log
 
 **Every** tool execution (allowed or blocked) is logged:
@@ -175,8 +161,6 @@ Use with caution — completely bypasses the ToolGuard for those tools.
 2025-01-15T14:30:45Z | BLOCKED | user:5511888888888 | bash | {"command": "rm -rf /"} | reason: destructive command
 ```
 
-Fields: timestamp, result (ALLOWED/BLOCKED), role:user, tool, arguments, reason (if blocked).
-
 ```yaml
 security:
   tool_guard:
@@ -185,14 +169,82 @@ security:
 
 ---
 
-## 3. SSRF Protection (`security/ssrf.go`)
+## 3. Workspace Containment (`workspace_containment.go`)
+
+All file operations are validated against the configured workspace root.
+
+### Protections
+
+| Attack | Protection |
+|--------|------------|
+| Path traversal (`../../etc/passwd`) | Resolved path must be under workspace root |
+| Symlink escape | `os.Lstat` + `filepath.EvalSymlinks` check |
+| Absolute path bypass | Verified against workspace root |
+
+### Implementation
+
+```
+File operation request (path: "../../../etc/shadow")
+       │
+       ▼
+  Resolve to absolute path
+       │
+       ▼
+  Check symlink target (if symlink)
+       │
+       ▼
+  Verify resolved path is under workspace root
+       │
+       ├── Under root ──▶ ALLOW
+       └── Outside root ──▶ BLOCK
+```
+
+---
+
+## 4. Memory Injection Hardening (`memory_hardening.go`)
+
+Memory content injected into LLM prompts is treated as **untrusted historical data**.
+
+### Protections
+
+| Threat | Mitigation |
+|--------|------------|
+| Prompt injection via saved memories | Content wrapped in `<relevant-memories>` tags |
+| HTML/script injection | HTML entities escaped |
+| Dangerous tags | Stripped before injection |
+| Common injection patterns | Detected and neutralized |
+
+### How It Works
+
+```
+Memory recalled from SQLite
+       │
+       ▼
+  Escape HTML entities (< > & " ')
+       │
+       ▼
+  Strip dangerous tags (<script>, <iframe>, etc.)
+       │
+       ▼
+  Detect injection patterns (system prompts, role overrides)
+       │
+       ▼
+  Wrap in <relevant-memories> tags
+       │
+       ▼
+  Inject into prompt
+```
+
+---
+
+## 5. SSRF Protection (`security/ssrf.go`)
 
 Protection against Server-Side Request Forgery in `web_fetch` and similar tools.
 
 ### Mechanism
 
 1. **URL parsing**: validates format and extracts hostname.
-2. **Scheme validation**: only `http` and `https` are allowed. `file://`, `ftp://`, etc. are blocked.
+2. **Scheme validation**: only `http` and `https` are allowed.
 3. **DNS resolution**: hostname is resolved to IPs **before** validation (defense against DNS rebinding).
 4. **IP validation**: resolved IPs are checked against blocked ranges.
 5. **Allowlist/Blocklist**: if configured, only whitelisted hosts are allowed.
@@ -210,24 +262,9 @@ Protection against Server-Side Request Forgery in `web_fetch` and similar tools.
 | `0.0.0.0` | Any local interface |
 | `::1`, `fe80::/10` | IPv6 loopback and link-local |
 
-### DNS Rebinding Protection
-
-The SSRF Guard resolves the hostname to an IP **before** making the request, and validates the resulting IP. This prevents attacks where a malicious DNS first returns a public IP (to pass the check) and then a private IP (for the actual request).
-
-### Configuration
-
-```yaml
-security:
-  ssrf:
-    allow_private: false           # Block private IPs (default)
-    allowed_hosts: []              # Whitelist (empty = no host restriction)
-    blocked_hosts:                 # Additional blacklist
-      - "internal.corp.com"
-```
-
 ---
 
-## 4. Encrypted Vault (`vault.go`, `keyring.go`)
+## 6. Encrypted Vault (`vault.go`, `keyring.go`)
 
 Encrypted credential storage using military-grade cryptography.
 
@@ -248,27 +285,6 @@ argonThreads = 4           // 4 parallel threads
 argonKeyLen  = 32          // AES-256 (32 bytes)
 ```
 
-These parameters follow OWASP recommendations for resistance against GPU/ASIC attacks.
-
-### Vault Format
-
-```json
-{
-  "version": 1,
-  "salt": "base64-encoded-salt",
-  "entries": {
-    "openai_api_key": {
-      "nonce": "base64-encoded-nonce",
-      "ciphertext": "base64-encoded-encrypted-data"
-    }
-  }
-}
-```
-
-- Each entry has its own nonce (never reused).
-- Salt is global to the vault (key derivation).
-- Master password is **never** stored — only the derived key is held in memory while the vault is unlocked.
-
 ### Secret Resolution Chain
 
 ```
@@ -280,30 +296,9 @@ These parameters follow OWASP recommendations for resistance against GPU/ASIC at
 
 First match wins. The priority ensures the encrypted vault is always preferred.
 
-### Management
-
-```bash
-copilot config vault-init              # Create vault with master password
-copilot config vault-set               # Store credential
-copilot config vault-status            # Vault status
-copilot config vault-change-password   # Change master password
-```
-
-Via agent tools:
-- `vault_save <key> <value>` — store in vault
-- `vault_get <key>` — retrieve from vault
-- `vault_list` — list stored keys
-- `vault_delete <key>` — remove from vault
-
-### Additional Protections
-
-- The `.goclaw.vault` file is in the protected paths list — cannot be read by non-owners.
-- Secrets are never logged in audit log, daily notes, or MEMORY.md.
-- `sync.RWMutex` protects concurrent vault operations.
-
 ---
 
-## 5. Script Sandbox (`sandbox/`)
+## 7. Script Sandbox (`sandbox/`)
 
 Execution isolation for community skill scripts.
 
@@ -314,26 +309,6 @@ Execution isolation for community skill scripts.
 | `none` | Direct `exec.Command` | Builtin/trusted skills | High |
 | `restricted` | Linux namespaces + seccomp + cgroups | Community skills | Medium |
 | `container` | Docker with purpose-built image | Untrusted scripts | Low |
-
-### Restricted Sandbox (Linux Namespaces)
-
-Docker-free isolation via syscall:
-
-- **PID namespace**: isolated processes (cannot see host processes).
-- **Mount namespace**: separate filesystem, read-only workspace.
-- **Network namespace**: isolated networking (no access to host network).
-- **User namespace**: remapped UID/GID (no root on host).
-
-### Resource Limits
-
-```yaml
-sandbox:
-  default_isolation: restricted
-  timeout: 60s              # Timeout per execution
-  max_output_bytes: 1048576 # 1 MB stdout+stderr
-  max_memory_mb: 256        # RAM limit
-  max_cpu_percent: 50       # CPU limit
-```
 
 ### Pre-Execution Content Scanning (`policy.go`)
 
@@ -351,28 +326,11 @@ Before execution, scripts are scanned for malicious patterns:
 - **Warning**: execution allowed with logging.
 - **Critical**: execution **blocked**.
 
-### Policy Engine
-
-```go
-// Binary allowlist — only permitted binaries can execute
-AllowedBinaries: ["python3", "node", "sh", "bash"]
-
-// Environment filtering — dangerous variables removed
-BlockedEnvVars: ["LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES"]
-```
-
-### Supported Runtimes
-
-| Runtime | Binary | Extensions |
-|---------|--------|------------|
-| Python | `python3` | `.py` |
-| Node.js | `node` | `.js`, `.mjs` |
-| Shell | `sh`, `bash` | `.sh` |
-| Binary | (direct) | (executable) |
-
 ---
 
-## 6. Gateway Authentication (`gateway/`)
+## 8. Gateway Authentication (`gateway/`)
+
+### HTTP Authentication
 
 Bearer token authentication for the HTTP API:
 
@@ -382,9 +340,13 @@ gateway:
   cors_origins: ["http://localhost:3000"]
 ```
 
-- Requests without a valid token receive `401 Unauthorized`.
-- Configurable CORS to control allowed origins.
-- Token is verified via the `Authorization: Bearer <token>` header.
+### Request Body Limiter
+
+API gateway enforces a 2MB request body limit on `/v1/chat/completions` to prevent oversized payloads from causing memory exhaustion (OOM).
+
+### WebSocket Security
+
+WebSocket connections at `/ws` share the same Bearer token authentication as HTTP endpoints.
 
 ---
 
@@ -397,6 +359,9 @@ Summary of protections by attack vector:
 | Unauthorized access | Role-based access control | Access Control |
 | Destructive commands | Regex blocking + confirmation | Tool Guard |
 | Secret reading | Protected paths + vault encryption | Tool Guard + Vault |
+| Path traversal | Workspace containment | Containment |
+| Symlink escape | Target resolution + root check | Containment |
+| Prompt injection via memory | Sanitization + wrapping | Memory Hardening |
 | SSRF (request forgery) | DNS resolve + IP validation | SSRF Guard |
 | DNS rebinding | Pre-resolve hostname to IP | SSRF Guard |
 | Cloud metadata theft | Block 169.254.169.254 | SSRF Guard |
@@ -409,6 +374,7 @@ Summary of protections by attack vector:
 | Privilege escalation | Namespace isolation + sudo block | Sandbox + Tool Guard |
 | Audit evasion | Mandatory logging of all tool calls | Tool Guard |
 | Unauthorized API access | Bearer token + CORS | Gateway |
+| OOM via oversized payload | Request body limiter (2MB) | Gateway |
 
 ---
 

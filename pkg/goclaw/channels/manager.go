@@ -53,6 +53,8 @@ func (m *Manager) Register(ch Channel) error {
 
 // Start connects all registered channels and begins listening for messages.
 // Channels that fail to connect are logged but don't block others.
+// The listen goroutine is started for ALL channels (even failed ones),
+// so reconnections via web UI or background retries deliver messages.
 func (m *Manager) Start(ctx context.Context) error {
 	m.ctx, m.cancel = context.WithCancel(ctx)
 
@@ -73,12 +75,13 @@ func (m *Manager) Start(ctx context.Context) error {
 		if err := ch.Connect(m.ctx); err != nil {
 			m.logger.Error("failed to connect channel",
 				"channel", name, "error", err)
-			continue
+		} else {
+			connected++
+			m.logger.Info("channel connected", "channel", name)
 		}
 
-		connected++
-		m.logger.Info("channel connected", "channel", name)
-
+		// Always start listening — if the channel reconnects later
+		// (e.g. via QR scan in the web UI), messages will flow through.
 		m.listenWg.Add(1)
 		go func(c Channel) {
 			defer m.listenWg.Done()

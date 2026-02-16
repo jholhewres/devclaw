@@ -1,7 +1,7 @@
 // Package copilot – subagent.go implements a subagent system that allows the
 // main agent to spawn independent child agents to handle tasks concurrently.
 //
-// Architecture (inspired by OpenClaw):
+// Architecture:
 //
 //	Main Agent ──spawn_subagent──▶ SubagentManager ──goroutine──▶ Child AgentRun
 //	                                   │                              │
@@ -52,7 +52,7 @@ type SubagentConfig struct {
 	Model string `yaml:"model"`
 }
 
-// DefaultSubagentDeniedTools mirrors OpenClaw's DEFAULT_SUBAGENT_TOOL_DENY.
+// DefaultSubagentDeniedTools lists tools subagents should not access.
 // Subagents should not manage sessions, spawn recursively, or access memory/cron.
 var DefaultSubagentDeniedTools = []string{
 	// Subagent management tools (prevent recursion).
@@ -78,7 +78,7 @@ var DefaultSubagentDeniedTools = []string{
 func DefaultSubagentConfig() SubagentConfig {
 	return SubagentConfig{
 		Enabled:        true,
-		MaxConcurrent:  8, // OpenClaw default: 8
+		MaxConcurrent:  8,
 		MaxTurns:       0, // Unlimited (aligned with agent loop)
 		TimeoutSeconds: 300,
 		DeniedTools:    DefaultSubagentDeniedTools,
@@ -145,7 +145,7 @@ type SubagentRun struct {
 // ─── Subagent Manager ───
 
 // AnnounceCallback is called when a subagent completes, allowing push-style
-// notification to the parent session (OpenClaw announce pattern).
+// notification to the parent session.
 // Receives the completed run so the caller can notify the user/agent.
 type AnnounceCallback func(run *SubagentRun)
 
@@ -191,7 +191,7 @@ func NewSubagentManager(cfg SubagentConfig, logger *slog.Logger) *SubagentManage
 }
 
 // SetAnnounceCallback registers a callback that fires when any subagent completes.
-// This enables OpenClaw-style push announce: the parent is notified immediately
+// This enables push-style announce: the parent is notified immediately
 // instead of having to poll via wait_subagent.
 func (m *SubagentManager) SetAnnounceCallback(cb AnnounceCallback) {
 	m.mu.Lock()
@@ -327,7 +327,7 @@ func (m *SubagentManager) Spawn(
 		// Create and run the agent.
 		agent := NewAgentRun(childLLM, childExecutor, m.logger)
 		if m.cfg.MaxTurns > 0 {
-			agent.maxTurns = m.cfg.MaxTurns // 0 = unlimited (OpenClaw pattern)
+			agent.maxTurns = m.cfg.MaxTurns // 0 = unlimited
 		}
 		// Subagent run timeout is driven by the context timeout set above,
 		// so set the agent's own run timeout generously (it won't exceed ctx).
@@ -379,7 +379,7 @@ func (m *SubagentManager) completeRun(run *SubagentRun, result string, err error
 	cb := m.announceCallback
 	m.mu.Unlock()
 
-	// ── Announce (push) ── OpenClaw pattern: notify parent immediately
+	// ── Announce (push) ── Notify parent immediately
 	// instead of requiring poll via wait_subagent.
 	if cb != nil {
 		go cb(run)
@@ -493,7 +493,7 @@ func (m *SubagentManager) createChildExecutor(parent *ToolExecutor) *ToolExecuto
 	child.callerLevel = parent.callerLevel
 	child.callerJID = parent.callerJID
 
-	// Build deny set — expand group references (OpenClaw pattern).
+	// Build deny set — expand group references.
 	expanded := ExpandToolGroups(m.cfg.DeniedTools)
 	denySet := make(map[string]bool, len(expanded)+4)
 	for _, name := range expanded {
@@ -525,7 +525,7 @@ func (m *SubagentManager) createChildExecutor(parent *ToolExecutor) *ToolExecuto
 }
 
 // buildSubagentPrompt creates a focused, minimal system prompt for the subagent.
-// Aligned with OpenClaw: subagents get a lightweight bootstrap prompt, NOT the
+// Subagents get a lightweight bootstrap prompt, NOT the
 // full Compose() — this saves tokens and keeps the subagent focused on its task.
 func (m *SubagentManager) buildSubagentPrompt(composer *PromptComposer, session *Session, task string) string {
 	// Use ComposeMinimal instead of full Compose — saves ~60% of system prompt tokens.

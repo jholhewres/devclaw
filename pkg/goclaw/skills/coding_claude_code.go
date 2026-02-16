@@ -341,11 +341,6 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 	execCtx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
-	// Send a single progress notification (OpenClaw CLI backend has zero progress).
-	if ps := progressSenderFromCtx(ctx); ps != nil {
-		ps(ctx, "🤖 Claude Code trabalhando...")
-	}
-
 	cmd := exec.CommandContext(execCtx, claudeBin, cliArgs...)
 	if workDir != "" {
 		cmd.Dir = workDir
@@ -379,41 +374,114 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 		"ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL")
 
 	if s.apiKey != "" {
-		// Use ANTHROPIC_AUTH_TOKEN (Bearer token) as primary auth method.
-		// This is more compatible with proxies like Z.AI and CCProxy.
-		// Also set ANTHROPIC_API_KEY as fallback for direct Anthropic usage.
 		env = append(env, "ANTHROPIC_API_KEY="+s.apiKey)
 		env = append(env, "ANTHROPIC_AUTH_TOKEN="+s.apiKey)
 	}
 	if s.baseURL != "" {
 		env = append(env, "ANTHROPIC_BASE_URL="+s.baseURL)
 	}
-	// When using a proxy like Z.AI, tell Claude Code to use the same model
-	// for both sonnet and opus slots.
 	if s.defaultModel != "" {
 		env = append(env, "ANTHROPIC_DEFAULT_SONNET_MODEL="+s.defaultModel)
 		env = append(env, "ANTHROPIC_DEFAULT_OPUS_MODEL="+s.defaultModel)
 	}
 
 	// Increase internal Claude Code timeouts for BashTool pre-flight checks.
-	// The pre-flight check can be slow or hang with proxy endpoints (Z.AI, CCProxy).
-	// These env vars prevent Claude Code from stalling on pre-flight validation.
-	env = append(env, "API_TIMEOUT_MS=600000")           // 10 min API call timeout
-	env = append(env, "BASH_DEFAULT_TIMEOUT_MS=600000")   // 10 min bash default timeout
-	env = append(env, "BASH_MAX_TIMEOUT_MS=900000")       // 15 min bash max timeout
-	env = append(env, "DISABLE_PROMPT_CACHING=true")      // Reduce API overhead with proxies
+	env = append(env, "API_TIMEOUT_MS=600000")
+	env = append(env, "BASH_DEFAULT_TIMEOUT_MS=600000")
+	env = append(env, "BASH_MAX_TIMEOUT_MS=900000")
+	env = append(env, "DISABLE_PROMPT_CACHING=true")
 
 	cmd.Env = env
 
 	// Always pipe prompt via stdin (Claude Code v2.x hangs with positional arg in non-TTY).
 	cmd.Stdin = strings.NewReader(prompt)
 
-	// Capture stdout and stderr.
-	var stdoutBuf, stderrBuf bytes.Buffer
+	// Capture stdout; stream stderr for real-time progress.
+	var stdoutBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &limitedWriter{buf: &stderrBuf, max: 8192}
 
-	cmdErr := cmd.Run()
+	// Stream stderr in real-time: send periodic progress updates to the user
+	// instead of a single "trabalhando..." message. This gives real feedback
+	// about what Claude Code is doing (compiling, running tests, etc.).
+	ps := progressSenderFromCtx(ctx)
+	stderrPipe, pipeErr := cmd.StderrPipe()
+	if pipeErr != nil {
+		// Fallback: capture stderr as buffer.
+		var stderrBuf bytes.Buffer
+		cmd.Stderr = &limitedWriter{buf: &stderrBuf, max: 8192}
+	}
+
+	// Send initial progress.
+	if ps != nil {
+		ps(ctx, "🤖 Claude Code iniciando...")
+	}
+
+	startErr := cmd.Start()
+	if startErr != nil {
+		return nil, fmt.Errorf("claude code: failed to start: %w", startErr)
+	}
+
+	// Stream stderr in background, sending periodic progress updates.
+	var stderrBuf bytes.Buffer
+	var stderrWg sync.WaitGroup
+	if pipeErr == nil {
+		stderrWg.Add(1)
+		go func() {
+			defer stderrWg.Done()
+			buf := make([]byte, 4096)
+			lastSend := time.Now()
+			for {
+				n, readErr := stderrPipe.Read(buf)
+				if n > 0 {
+					chunk := string(buf[:n])
+					stderrBuf.WriteString(chunk)
+
+					// Send progress at most every 10 seconds from stderr.
+					if ps != nil && time.Since(lastSend) >= 10*time.Second {
+						// Filter out noisy pre-flight warnings.
+						line := strings.TrimSpace(chunk)
+						if line != "" && !strings.Contains(line, "Pre-flight check") {
+							msg := "🤖 " + ccTruncate(line, 200)
+							ps(ctx, msg)
+							lastSend = time.Now()
+						}
+					}
+				}
+				if readErr != nil {
+					break
+				}
+			}
+		}()
+	}
+
+	// Also send a periodic heartbeat so the user knows it's alive.
+	heartbeatDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		count := 0
+		for {
+			select {
+			case <-heartbeatDone:
+				return
+			case <-execCtx.Done():
+				return
+			case <-ticker.C:
+				count++
+				if ps != nil {
+					elapsed := time.Duration(count*30) * time.Second
+					ps(ctx, fmt.Sprintf("🤖 Claude Code trabalhando... (%s)", elapsed.Round(time.Second)))
+				}
+			}
+		}
+	}()
+
+	cmdErr := cmd.Wait()
+	close(heartbeatDone)
+
+	// Wait for stderr goroutine to finish before reading stderrBuf,
+	// preventing a data race between the reader goroutine and main goroutine.
+	stderrWg.Wait()
 
 	stdout := strings.TrimSpace(stdoutBuf.String())
 	stderr := strings.TrimSpace(stderrBuf.String())

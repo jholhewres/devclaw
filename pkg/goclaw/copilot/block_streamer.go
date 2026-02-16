@@ -1,7 +1,7 @@
 // Package copilot – block_streamer.go implements progressive message delivery
 // for channels. Instead of waiting for the full LLM response, text is coalesced
 // into blocks and sent as they become available, giving the user near-real-time
-// feedback similar to OpenClaw's block streaming.
+// feedback as blocks become available.
 //
 // Coalescing rules:
 //   - Wait until at least MinChars are accumulated.
@@ -23,25 +23,27 @@ type BlockStreamConfig struct {
 	// Enabled turns block streaming on/off (default: true).
 	Enabled bool `yaml:"enabled"`
 
-	// MinChars is the minimum characters to accumulate before sending a block (default: 600).
+	// MinChars is the minimum characters to accumulate before sending a block (default: 20).
+	// Kept low for near-instant first-block feedback.
 	MinChars int `yaml:"min_chars"`
 
-	// MaxChars is the maximum characters per block before a forced flush (default: 1200).
+	// MaxChars is the maximum characters per block before a forced flush (default: 600).
 	MaxChars int `yaml:"max_chars"`
 
 	// IdleMs is the idle timeout in milliseconds: if no new tokens arrive within
-	// this window, flush whatever is buffered (default: 1500).
+	// this window, flush whatever is buffered (default: 200).
 	IdleMs int `yaml:"idle_ms"`
 }
 
 // DefaultBlockStreamConfig returns sensible defaults for block streaming.
-// Tuned for WhatsApp/chat UX: send text quickly so the user sees progress.
+// Tuned for WhatsApp/chat UX: send text as quickly as possible so the user
+// sees real-time progress. Lower values = faster feedback.
 func DefaultBlockStreamConfig() BlockStreamConfig {
 	return BlockStreamConfig{
 		Enabled:  true,
-		MinChars: 150,  // Send small blocks early for real-time feel
-		MaxChars: 800,  // Reasonable block size for chat apps
-		IdleMs:   800,  // Flush quickly when LLM pauses (tool calls, thinking)
+		MinChars: 20,   // ~4 words — first block appears almost instantly
+		MaxChars: 600,  // Moderate block size for chat apps
+		IdleMs:   200,  // Flush 200ms after last token — fast feedback on pauses
 	}
 }
 
@@ -49,13 +51,13 @@ func DefaultBlockStreamConfig() BlockStreamConfig {
 func (c BlockStreamConfig) Effective() BlockStreamConfig {
 	out := c
 	if out.MinChars <= 0 {
-		out.MinChars = 150
+		out.MinChars = 20
 	}
 	if out.MaxChars <= 0 {
-		out.MaxChars = 800
+		out.MaxChars = 600
 	}
 	if out.IdleMs <= 0 {
-		out.IdleMs = 800
+		out.IdleMs = 200
 	}
 	return out
 }
@@ -170,6 +172,9 @@ func (bs *BlockStreamer) HasSentBlocks() bool {
 }
 
 // resetIdleTimer resets the idle flush timer. Must be called with mu held.
+// When the LLM pauses (tool call, thinking), the idle timer fires and flushes
+// whatever is buffered so the user sees progress immediately. No double-check:
+// if tokens stopped arriving, the content is ready to send.
 func (bs *BlockStreamer) resetIdleTimer() {
 	if bs.idleTimer != nil {
 		bs.idleTimer.Stop()
@@ -180,15 +185,13 @@ func (bs *BlockStreamer) resetIdleTimer() {
 		bs.mu.Lock()
 		defer bs.mu.Unlock()
 
-		if bs.done {
+		if bs.done || bs.buf.Len() == 0 {
 			return
 		}
 
-		// Flush whatever is buffered when idle — don't wait for MinChars.
-		// This ensures the user sees text promptly even for short responses.
-		if bs.buf.Len() > 0 {
-			bs.flushLocked()
-		}
+		// Flush immediately — if the LLM paused, the user should see
+		// whatever text has accumulated regardless of MinChars.
+		bs.flushLocked()
 	})
 }
 

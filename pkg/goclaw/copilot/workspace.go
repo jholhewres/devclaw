@@ -556,6 +556,34 @@ func (wm *WorkspaceManager) StartPruners(ctx context.Context) {
 	}
 }
 
+// ─── Multi-agent routing ───
+
+// FindSessionByID searches all workspace session stores for a session by its hash ID.
+func (wm *WorkspaceManager) FindSessionByID(id string) *Session {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+
+	for _, store := range wm.sessions {
+		if s := store.GetByID(id); s != nil {
+			return s
+		}
+	}
+	return nil
+}
+
+// ExportSession exports a session's history and metadata by hash ID.
+func (wm *WorkspaceManager) ExportSession(id string) *SessionExport {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+
+	for _, store := range wm.sessions {
+		if export := store.Export(id); export != nil {
+			return export
+		}
+	}
+	return nil
+}
+
 // --- Helpers ---
 
 func removeFromSlice(slice []string, item string) []string {

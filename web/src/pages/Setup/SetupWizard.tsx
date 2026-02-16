@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { CheckCircle2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { CheckCircle2, ArrowRight, ArrowLeft, Sparkles, Loader2 } from 'lucide-react'
 import { StepIdentity } from './StepIdentity'
 import { StepProvider } from './StepProvider'
 import { StepSecurity } from './StepSecurity'
@@ -17,6 +17,7 @@ export interface SetupData {
   provider: string
   apiKey: string
   model: string
+  baseUrl: string
 
   /* Etapa 3: Segurança */
   webuiPassword: string
@@ -36,6 +37,7 @@ const INITIAL_DATA: SetupData = {
   provider: 'openai',
   apiKey: '',
   model: '',
+  baseUrl: '',
   webuiPassword: '',
   accessMode: 'strict',
   channels: {},
@@ -44,16 +46,14 @@ const INITIAL_DATA: SetupData = {
 
 const STEPS = [
   { id: 1, label: 'Identidade' },
-  { id: 2, label: 'Provider AI' },
+  { id: 2, label: 'Provider' },
   { id: 3, label: 'Segurança' },
   { id: 4, label: 'Canais' },
   { id: 5, label: 'Skills' },
 ]
 
 /**
- * Wizard de setup em 5 etapas.
- * Cada etapa é um componente que recebe data + updateData.
- * Após finalizar, exibe tela de sucesso pedindo para reiniciar o servidor.
+ * Wizard de setup em 5 etapas com stepper visual moderno.
  */
 export function SetupWizard() {
   const [step, setStep] = useState(1)
@@ -91,57 +91,67 @@ export function SetupWizard() {
     }
   }
 
-  // Tela de sucesso pós-setup
+  /* Tela de sucesso pós-setup — polling para auto-redirect */
   if (done) {
-    return (
-      <div className="flex flex-col items-center gap-4 py-8 text-center">
-        <CheckCircle2 className="h-12 w-12 text-emerald-500" />
-        <h2 className="text-xl font-semibold">Configuração salva!</h2>
-        <p className="text-sm text-zinc-500 max-w-sm">
-          O arquivo <code className="rounded bg-zinc-100 px-1 dark:bg-zinc-800">config.yaml</code> foi
-          criado. Reinicie o servidor para aplicar as configurações.
-        </p>
-        <div className="mt-2 rounded-lg bg-zinc-100 px-4 py-2 font-mono text-sm dark:bg-zinc-800">
-          copilot serve
-        </div>
-        {data.webuiPassword && (
-          <p className="mt-2 text-xs text-zinc-400">
-            Após reiniciar, faça login com a senha definida na etapa de segurança.
-          </p>
-        )}
-      </div>
-    )
+    return <SetupComplete hasPassword={!!data.webuiPassword} />
   }
 
   return (
     <div>
-      {/* Stepper */}
-      <div className="mb-6 flex items-center gap-2">
-        {STEPS.map(({ id, label }) => (
-          <div key={id} className="flex items-center gap-2">
-            <div
-              className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium transition-colors ${
-                id === step
-                  ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                  : id < step
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                    : 'bg-zinc-100 text-zinc-400 dark:bg-zinc-800'
-              }`}
-            >
-              {id < step ? '✓' : id}
+      {/* Stepper moderno */}
+      <div className="mb-8">
+        <div className="flex items-center justify-between">
+          {STEPS.map(({ id, label }, index) => (
+            <div key={id} className="flex items-center">
+              {/* Step circle + label */}
+              <div className="flex flex-col items-center gap-1.5">
+                <button
+                  onClick={() => id < step && setStep(id)}
+                  disabled={id > step}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full text-xs font-semibold transition-all duration-300 ${
+                    id === step
+                      ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/25 ring-4 ring-orange-500/10'
+                      : id < step
+                        ? 'bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/20 cursor-pointer hover:bg-emerald-500/25'
+                        : 'bg-zinc-800/60 text-zinc-600 ring-1 ring-zinc-700/50'
+                  }`}
+                >
+                  {id < step ? (
+                    <CheckCircle2 className="h-4 w-4" />
+                  ) : (
+                    id
+                  )}
+                </button>
+                <span className={`text-[11px] font-medium transition-colors ${
+                  id === step
+                    ? 'text-orange-400'
+                    : id < step
+                      ? 'text-emerald-400/70'
+                      : 'text-zinc-600'
+                }`}>
+                  {label}
+                </span>
+              </div>
+
+              {/* Connector line */}
+              {index < STEPS.length - 1 && (
+                <div className="relative mx-2 mt-[-18px] h-0.5 w-8 sm:w-12 lg:w-16 overflow-hidden rounded-full bg-zinc-800">
+                  <div
+                    className="absolute inset-y-0 left-0 bg-emerald-500/60 transition-all duration-500 ease-out rounded-full"
+                    style={{ width: id < step ? '100%' : '0%' }}
+                  />
+                </div>
+              )}
             </div>
-            <span className={`hidden text-xs sm:inline ${
-              id === step ? 'text-zinc-900 dark:text-zinc-100 font-medium' : 'text-zinc-400'
-            }`}>
-              {label}
-            </span>
-            {id < 5 && <div className="h-px w-4 bg-zinc-200 dark:bg-zinc-700" />}
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
 
+      {/* Separador */}
+      <div className="mb-6 h-px bg-gradient-to-r from-transparent via-zinc-700/50 to-transparent" />
+
       {/* Etapa atual */}
-      <div className="min-h-[280px]">
+      <div className="min-h-[300px]">
         {step === 1 && <StepIdentity data={data} updateData={updateData} />}
         {step === 2 && <StepProvider data={data} updateData={updateData} />}
         {step === 3 && <StepSecurity data={data} updateData={updateData} />}
@@ -151,39 +161,144 @@ export function SetupWizard() {
 
       {/* Erro */}
       {error && (
-        <p className="mt-2 text-sm text-red-500 dark:text-red-400">{error}</p>
+        <div className="mt-3 rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-2.5 text-sm text-red-400">
+          {error}
+        </div>
       )}
 
       {/* Navegação */}
-      <div className="mt-6 flex items-center justify-between">
+      <div className="mt-8 flex items-center justify-between">
         <button
           onClick={prev}
           disabled={step === 1}
-          className="text-sm text-zinc-500 hover:text-zinc-700 disabled:opacity-0 dark:hover:text-zinc-300 transition-colors"
+          className="flex cursor-pointer items-center gap-1.5 text-sm text-zinc-500 transition-colors hover:text-zinc-300 disabled:pointer-events-none disabled:opacity-0"
         >
-          ← Voltar
+          <ArrowLeft className="h-3.5 w-3.5" />
+          Voltar
         </button>
 
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-zinc-400">Etapa {step} de 5</span>
+        <div className="flex items-center gap-4">
+          {/* Dots indicadores */}
+          <div className="flex gap-1.5">
+            {STEPS.map(({ id }) => (
+              <div
+                key={id}
+                className={`h-1.5 rounded-full transition-all duration-300 ${
+                  id === step
+                    ? 'w-6 bg-orange-500'
+                    : id < step
+                      ? 'w-1.5 bg-emerald-500/50'
+                      : 'w-1.5 bg-zinc-700'
+                }`}
+              />
+            ))}
+          </div>
+
           {step < 5 ? (
             <button
               onClick={next}
-              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 transition-colors dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              className="group flex cursor-pointer items-center gap-2 rounded-xl bg-orange-500 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-orange-500/20 transition-all hover:bg-orange-400 hover:shadow-orange-500/30"
             >
-              Próximo →
+              Próximo
+              <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
             </button>
           ) : (
             <button
               onClick={handleFinalize}
               disabled={submitting}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+              className="group flex cursor-pointer items-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-medium text-white shadow-lg shadow-emerald-500/20 transition-all hover:bg-emerald-400 hover:shadow-emerald-500/30 disabled:cursor-wait disabled:opacity-50"
             >
-              {submitting ? 'Configurando...' : 'Finalizar ✓'}
+              {submitting ? (
+                <>
+                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                  Configurando...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Finalizar
+                </>
+              )}
             </button>
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Tela pós-setup: mostra progresso enquanto o servidor reinicia,
+ * depois redireciona automaticamente para o dashboard.
+ */
+function SetupComplete({ hasPassword }: { hasPassword: boolean }) {
+  const [phase, setPhase] = useState<'restarting' | 'ready'>('restarting')
+
+  useEffect(() => {
+    let cancelled = false
+    let attempts = 0
+
+    const poll = async () => {
+      while (!cancelled && attempts < 60) {
+        attempts++
+        // Espera o servidor reiniciar (pm2 faz auto-restart)
+        await new Promise((r) => setTimeout(r, 2000))
+        try {
+          const res = await fetch('/api/auth/status')
+          if (res.ok) {
+            setPhase('ready')
+            // Pequeno delay para o usuário ver a mensagem
+            await new Promise((r) => setTimeout(r, 1500))
+            if (!cancelled) {
+              window.location.href = hasPassword ? '/login' : '/'
+            }
+            return
+          }
+        } catch {
+          // Servidor ainda reiniciando — continua polling
+        }
+      }
+    }
+
+    poll()
+    return () => { cancelled = true }
+  }, [hasPassword])
+
+  return (
+    <div className="flex flex-col items-center gap-5 py-6 text-center">
+      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10 ring-1 ring-emerald-500/20">
+        {phase === 'restarting' ? (
+          <Loader2 className="h-8 w-8 animate-spin text-orange-400" />
+        ) : (
+          <CheckCircle2 className="h-8 w-8 text-emerald-400" />
+        )}
+      </div>
+      <div>
+        <h2 className="text-xl font-semibold text-white">
+          {phase === 'restarting' ? 'Iniciando...' : 'Tudo pronto!'}
+        </h2>
+        <p className="mt-2 text-sm text-zinc-400 max-w-sm">
+          {phase === 'restarting'
+            ? 'O servidor está reiniciando com as novas configurações. Aguarde...'
+            : 'Redirecionando para o painel...'
+          }
+        </p>
+      </div>
+
+      {/* Barra de progresso */}
+      <div className="w-48 h-1 rounded-full bg-zinc-800 overflow-hidden">
+        <div className={`h-full rounded-full transition-all duration-1000 ${
+          phase === 'restarting'
+            ? 'w-2/3 bg-orange-500 animate-pulse'
+            : 'w-full bg-emerald-500'
+        }`} />
+      </div>
+
+      {hasPassword && phase === 'ready' && (
+        <p className="text-xs text-zinc-500">
+          Use a senha definida na etapa de segurança para acessar.
+        </p>
+      )}
     </div>
   )
 }

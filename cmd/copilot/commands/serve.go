@@ -84,8 +84,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	channelFilter, _ := cmd.Flags().GetStringSlice("channel")
 
 	// WhatsApp (core channel).
+	var wa *whatsapp.WhatsApp
 	if shouldEnable("whatsapp", channelFilter, true) {
-		wa := whatsapp.New(cfg.Channels.WhatsApp, logger)
+		wa = whatsapp.New(cfg.Channels.WhatsApp, logger)
 		if err := assistant.ChannelManager().Register(wa); err != nil {
 			logger.Error("failed to register WhatsApp", "error", err)
 		} else {
@@ -133,9 +134,22 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	// ── Start ──
+	// ── Start Web UI first (independent of channels) ──
+	var webServer *webui.Server
+	if cfg.WebUI.Enabled {
+		adapter := buildWebUIAdapter(assistant, cfg, wa)
+		webServer = webui.New(cfg.WebUI, adapter, logger)
+		if err := webServer.Start(ctx); err != nil {
+			logger.Error("failed to start web UI", "error", err)
+		} else {
+			logger.Info("web UI running", "address", cfg.WebUI.Address)
+		}
+	}
+
+	// ── Start assistant (channels, scheduler, heartbeat, etc.) ──
 	if err := assistant.Start(ctx); err != nil {
-		return fmt.Errorf("failed to start: %w", err)
+		logger.Warn("assistant started with warnings", "error", err)
+		logger.Info("channels pending — connect via web UI", "url", fmt.Sprintf("http://localhost%s/channels", cfg.WebUI.Address))
 	}
 
 	// ── Start gateway if enabled ──
@@ -146,18 +160,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			logger.Error("failed to start gateway", "error", err)
 		} else {
 			logger.Info("gateway running", "address", cfg.Gateway.Address)
-		}
-	}
-
-	// ── Start Web UI if enabled ──
-	var webServer *webui.Server
-	if cfg.WebUI.Enabled {
-		adapter := buildWebUIAdapter(assistant, cfg)
-		webServer = webui.New(cfg.WebUI, adapter, logger)
-		if err := webServer.Start(ctx); err != nil {
-			logger.Error("failed to start web UI", "error", err)
-		} else {
-			logger.Info("web UI running", "address", cfg.WebUI.Address)
 		}
 	}
 
@@ -247,12 +249,14 @@ func runWebSetupMode() error {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	fmt.Println()
-	fmt.Println("╭────────────────────────────────────────╮")
-	fmt.Println("│  No configuration found.               │")
-	fmt.Println("│  Starting web setup wizard...          │")
-	fmt.Println("│                                        │")
-	fmt.Println("│  Open http://localhost:8090/setup       │")
-	fmt.Println("╰────────────────────────────────────────╯")
+	fmt.Println("  ╭──────────────────────────────────────────────╮")
+	fmt.Println("  │  🐾 GoClaw — First Run Setup                 │")
+	fmt.Println("  │                                              │")
+	fmt.Println("  │  No config.yaml found.                       │")
+	fmt.Println("  │  Starting web setup wizard...                │")
+	fmt.Println("  │                                              │")
+	fmt.Println("  │  Open:  http://localhost:8090/setup           │")
+	fmt.Println("  ╰──────────────────────────────────────────────╯")
 	fmt.Println()
 
 	setupDone := make(chan struct{})
@@ -266,6 +270,25 @@ func runWebSetupMode() error {
 	webServer.SetSetupMode(true)
 	webServer.OnSetupDone(func() {
 		close(setupDone)
+	})
+	webServer.OnVaultInit(func(password string, secrets map[string]string) error {
+		vault := copilot.NewVault(copilot.VaultFile)
+		if vault.Exists() {
+			// Vault already exists — unlock and add secrets.
+			if err := vault.Unlock(password); err != nil {
+				return fmt.Errorf("failed to unlock existing vault: %w", err)
+			}
+		} else {
+			if err := vault.Create(password); err != nil {
+				return fmt.Errorf("failed to create vault: %w", err)
+			}
+		}
+		for name, value := range secrets {
+			if err := vault.Set(name, value); err != nil {
+				return fmt.Errorf("failed to store %s in vault: %w", name, err)
+			}
+		}
+		return nil
 	})
 
 	if err := webServer.Start(context.Background()); err != nil {
@@ -303,8 +326,8 @@ func shouldEnable(name string, filter []string, defaultEnabled bool) bool {
 }
 
 // buildWebUIAdapter creates the adapter that bridges the Assistant to the WebUI.
-func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config) *webui.AssistantAdapter {
-	return &webui.AssistantAdapter{
+func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *whatsapp.WhatsApp) *webui.AssistantAdapter {
+	adapter := &webui.AssistantAdapter{
 		GetConfigMapFn: func() map[string]any {
 			return map[string]any{
 				"name":     cfg.Name,
@@ -459,8 +482,9 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config) *webui
 					slog.Default(),
 				)
 
-				// Set caller context for access control.
-				assistant.ToolExecutor().SetCallerContext(copilot.AccessOwner, "webui")
+				// Propagate caller context via context.Context (goroutine-safe).
+				runCtx = copilot.ContextWithCaller(runCtx, copilot.AccessOwner, "webui")
+				runCtx = copilot.ContextWithSession(runCtx, sessionID)
 
 				// Stream text tokens to the SSE channel.
 				agent.SetStreamCallback(func(chunk string) {
@@ -549,4 +573,148 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config) *webui
 			return nil
 		},
 	}
+
+	// ── Security: Audit Log ──
+	adapter.GetAuditLogFn = func(limit int) []webui.AuditEntry {
+		guard := assistant.ToolExecutor().Guard()
+		if guard == nil {
+			return nil
+		}
+		audit := guard.SQLiteAudit()
+		if audit == nil {
+			return nil
+		}
+		records := audit.RecentRecords(limit)
+		entries := make([]webui.AuditEntry, len(records))
+		for i, r := range records {
+			entries[i] = webui.AuditEntry{
+				ID:            r.ID,
+				Tool:          r.Tool,
+				Caller:        r.Caller,
+				Level:         r.Level,
+				Allowed:       r.Allowed,
+				ArgsSummary:   r.ArgsSummary,
+				ResultSummary: r.ResultSummary,
+				CreatedAt:     r.CreatedAt,
+			}
+		}
+		return entries
+	}
+	adapter.GetAuditCountFn = func() int {
+		guard := assistant.ToolExecutor().Guard()
+		if guard == nil {
+			return 0
+		}
+		audit := guard.SQLiteAudit()
+		if audit == nil {
+			return 0
+		}
+		return audit.Count()
+	}
+
+	// ── Security: Tool Guard ──
+	adapter.GetToolGuardStatusFn = func() webui.ToolGuardStatus {
+		gc := cfg.Security.ToolGuard
+		return webui.ToolGuardStatus{
+			Enabled:             gc.Enabled,
+			AllowDestructive:    gc.AllowDestructive,
+			AllowSudo:           gc.AllowSudo,
+			AllowReboot:         gc.AllowReboot,
+			AutoApprove:         gc.AutoApprove,
+			RequireConfirmation: gc.RequireConfirmation,
+			ProtectedPaths:      gc.ProtectedPaths,
+			SSHAllowedHosts:     gc.SSHAllowedHosts,
+			DangerousCommands:   gc.DangerousCommands,
+			ToolPermissions:     gc.ToolPermissions,
+		}
+	}
+	adapter.UpdateToolGuardFn = func(update webui.ToolGuardStatus) error {
+		cfg.Security.ToolGuard.AllowDestructive = update.AllowDestructive
+		cfg.Security.ToolGuard.AllowSudo = update.AllowSudo
+		cfg.Security.ToolGuard.AllowReboot = update.AllowReboot
+		if update.AutoApprove != nil {
+			cfg.Security.ToolGuard.AutoApprove = update.AutoApprove
+		}
+		if update.RequireConfirmation != nil {
+			cfg.Security.ToolGuard.RequireConfirmation = update.RequireConfirmation
+		}
+		if update.ProtectedPaths != nil {
+			cfg.Security.ToolGuard.ProtectedPaths = update.ProtectedPaths
+		}
+		if update.SSHAllowedHosts != nil {
+			cfg.Security.ToolGuard.SSHAllowedHosts = update.SSHAllowedHosts
+		}
+		// Apply hot-reload to the running tool guard.
+		assistant.ToolExecutor().UpdateGuardConfig(cfg.Security.ToolGuard)
+		return nil
+	}
+
+	// ── Security: Vault ──
+	adapter.GetVaultStatusFn = func() webui.VaultStatus {
+		v := assistant.Vault()
+		if v == nil {
+			return webui.VaultStatus{Exists: false}
+		}
+		status := webui.VaultStatus{
+			Exists:   v.Exists(),
+			Unlocked: v.IsUnlocked(),
+		}
+		if v.IsUnlocked() {
+			status.Keys = v.List()
+			if status.Keys == nil {
+				status.Keys = []string{}
+			}
+		}
+		return status
+	}
+
+	// ── Security: Overview ──
+	adapter.GetSecurityStatusFn = func() webui.SecurityStatus {
+		s := webui.SecurityStatus{
+			GatewayAuthConfigured: cfg.Gateway.AuthToken != "",
+			WebUIAuthConfigured:   cfg.WebUI.AuthToken != "",
+			ToolGuardEnabled:      cfg.Security.ToolGuard.Enabled,
+		}
+		if v := assistant.Vault(); v != nil {
+			s.VaultExists = v.Exists()
+			s.VaultUnlocked = v.IsUnlocked()
+		}
+		if guard := assistant.ToolExecutor().Guard(); guard != nil {
+			if audit := guard.SQLiteAudit(); audit != nil {
+				s.AuditEntryCount = audit.Count()
+			}
+		}
+		return s
+	}
+
+	// Wire up WhatsApp QR callbacks if WhatsApp channel is available.
+	if wa != nil {
+		adapter.GetWhatsAppStatusFn = func() webui.WhatsAppStatus {
+			return webui.WhatsAppStatus{
+				Connected: wa.IsConnected(),
+				NeedsQR:   wa.NeedsQR(),
+			}
+		}
+		adapter.SubscribeWhatsAppQRFn = func() (chan webui.WhatsAppQREvent, func()) {
+			ch, unsub := wa.SubscribeQR()
+			// Bridge whatsapp.QREvent → webui.WhatsAppQREvent
+			out := make(chan webui.WhatsAppQREvent, 8)
+			go func() {
+				defer close(out)
+				for evt := range ch {
+					out <- webui.WhatsAppQREvent{
+						Type:    evt.Type,
+						Code:    evt.Code,
+						Message: evt.Message,
+					}
+				}
+			}()
+			return out, unsub
+		}
+		adapter.RequestWhatsAppQRFn = func() error {
+			return wa.RequestNewQR(context.Background())
+		}
+	}
+
+	return adapter
 }

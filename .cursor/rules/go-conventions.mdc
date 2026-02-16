@@ -1,0 +1,69 @@
+---
+description: Go coding conventions for GoClaw project
+globs: ["**/*.go"]
+alwaysApply: true
+---
+
+# Go Conventions — GoClaw
+
+## Project Structure
+
+- CLI: `cmd/copilot/commands/` — cobra commands
+- Core: `pkg/goclaw/copilot/` — assistant, agent, tools, sessions
+- Channels: `pkg/goclaw/channels/` — WhatsApp, Discord, Telegram
+- Gateway: `pkg/goclaw/gateway/` — HTTP API + WebSocket
+- Skills: `pkg/goclaw/skills/` — skill system
+- Scheduler: `pkg/goclaw/scheduler/` — cron jobs
+- Sandbox: `pkg/goclaw/sandbox/` — script isolation
+- WebUI: `pkg/goclaw/webui/` — web interface backend
+
+## Concurrency Patterns
+
+- Use `sync.RWMutex` for read-heavy shared state (sessions, config)
+- Use `sync.Mutex` for write-heavy state (tool executor, scheduler)
+- Use channels for communication between goroutines (events, interrupts)
+- Always acquire locks in consistent order to prevent deadlocks
+- Use `defer mu.Unlock()` immediately after `mu.Lock()`
+- Protect map access with mutexes — Go maps are not goroutine-safe
+- Use `sync.Once` for one-time initialization
+
+## Error Handling
+
+- Return errors, don't panic — except in init functions
+- Wrap errors with context: `fmt.Errorf("operation: %w", err)`
+- Use structured logging with `log.Printf` for operational messages
+- Recover panics in goroutines that must not crash the process
+
+## Tool Registration
+
+- Tools are registered in `system_tools.go` via `RegisterSystemTools`
+- Each tool: name, description, parameters schema, handler function
+- Tool names: snake_case, lowercase
+- Use `ToolExecutor.Register()` for runtime registration
+
+## Session Safety
+
+- Session fields must be accessed under `session.mu` lock
+- Use `session.mu.RLock()` for reads, `session.mu.Lock()` for writes
+- Never hold session lock while calling LLM (long-running)
+- Session IDs are derived from `SessionKey.Hash()` — structured keys
+
+## Config Access
+
+- Read config fields under `configMu.RLock()`
+- Hot-reloadable fields: access, instructions, tool guard, heartbeat, queue modes
+- Non-hot-reloadable: LLM provider, channels, gateway — require restart
+
+## Testing
+
+- Table-driven tests preferred
+- Test files: `*_test.go` in same package
+- Mock interfaces, not implementations
+- Use `t.Parallel()` for independent tests
+
+## Do NOT
+
+- Reference external projects (e.g. OpenClaw) in code comments
+- Create documentation files unless explicitly requested
+- Create test files unless explicitly requested
+- Use `fmt.Sprintf` where a plain string suffices (linter: S1039)

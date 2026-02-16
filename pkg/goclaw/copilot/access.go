@@ -1,6 +1,6 @@
 // Package copilot – access.go implements the access control system for GoClaw.
 //
-// Like OpenClaw, the bot does NOT respond to everyone by default. Only
+// The bot does NOT respond to everyone by default. Only
 // explicitly authorized contacts (or groups) can interact with the assistant.
 //
 // Access levels:
@@ -30,6 +30,7 @@ const (
 	AccessAdmin   AccessLevel = "admin"
 	AccessUser    AccessLevel = "user"
 	AccessBlocked AccessLevel = "blocked"
+	AccessNone    AccessLevel = "none"
 	AccessUnknown AccessLevel = ""
 )
 
@@ -37,7 +38,7 @@ const (
 type AccessPolicy string
 
 const (
-	// PolicyDeny silently ignores unknown contacts (default, like OpenClaw).
+	// PolicyDeny silently ignores unknown contacts (default).
 	PolicyDeny AccessPolicy = "deny"
 
 	// PolicyAllow responds to everyone not explicitly blocked.

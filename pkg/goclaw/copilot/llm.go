@@ -45,9 +45,13 @@ func NewLLMClient(cfg *Config, logger *slog.Logger) *LLMClient {
 	}
 	baseURL = strings.TrimRight(baseURL, "/")
 
-	provider := cfg.API.Provider
-	if provider == "" {
-		provider = detectProvider(baseURL)
+	// Always detect the provider from the URL first — this correctly identifies
+	// proxy providers (e.g. zai-anthropic) that require different auth headers.
+	// Only fall back to the config's provider when auto-detection returns the
+	// generic default ("openai") and the user explicitly specified one.
+	provider := detectProvider(baseURL)
+	if provider == "openai" && cfg.API.Provider != "" && cfg.API.Provider != "openai" {
+		provider = cfg.API.Provider
 	}
 
 	return &LLMClient{
@@ -726,7 +730,7 @@ type LLMUsage struct {
 // ---------- Error Classification ----------
 
 // LLMErrorKind classifies API errors for retry/fallback decisions.
-// Granular classification mirrors OpenClaw's errors.ts for smarter retry behavior.
+// Granular classification enables smarter retry behavior.
 type LLMErrorKind int
 
 const (
@@ -784,7 +788,7 @@ func (e *apiError) Error() string {
 }
 
 // classifyAPIError determines the error kind from status code and response body.
-// Mirrors OpenClaw's granular classification: rate_limit, billing, auth,
+// Classifies: rate_limit, billing, auth,
 // overloaded, timeout, context, transient HTTP.
 func classifyAPIError(statusCode int, body string) LLMErrorKind {
 	bodyLower := strings.ToLower(body)
@@ -1087,8 +1091,13 @@ func (c *LLMClient) completeOnceAnthropic(ctx context.Context, model string, mes
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", c.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
+	// Z.Ai Anthropic Proxy expects Authorization: Bearer; native Anthropic uses x-api-key.
+	if c.provider == "zai-anthropic" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	} else {
+		req.Header.Set("x-api-key", c.apiKey)
+	}
 
 	c.logger.Debug("sending anthropic chat completion",
 		"model", model,
@@ -1308,7 +1317,7 @@ func (c *LLMClient) CompleteWithToolsStreamUsingModel(ctx context.Context, model
 		model = modelOverride
 	}
 
-	// Try streaming with 1 retry for transient errors (like OpenClaw's 2.5s retry).
+	// Try streaming with 1 retry for transient errors.
 	const maxStreamRetries = 1
 	const transientRetryDelay = 2500 * time.Millisecond
 
@@ -1381,9 +1390,14 @@ func (c *LLMClient) completeOnceStreamAnthropic(ctx context.Context, model strin
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", c.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 	req.Header.Set("Accept", "text/event-stream")
+	// Z.Ai Anthropic Proxy expects Authorization: Bearer; native Anthropic uses x-api-key.
+	if c.provider == "zai-anthropic" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	} else {
+		req.Header.Set("x-api-key", c.apiKey)
+	}
 
 	start := time.Now()
 	resp, err := c.httpClient.Do(req)

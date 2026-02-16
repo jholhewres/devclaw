@@ -1,15 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, MessageSquare, Trash2 } from 'lucide-react'
+import { Search, MessageSquare, Trash2, MessageCircle } from 'lucide-react'
 import { api, type SessionInfo } from '@/lib/api'
-import { Input } from '@/components/ui/Input'
-import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
 import { timeAgo } from '@/lib/utils'
 
-/**
- * Lista de sessões com busca, filtro por canal, e ações.
- */
 export function Sessions() {
   const navigate = useNavigate()
   const [sessions, setSessions] = useState<SessionInfo[]>([])
@@ -39,72 +33,78 @@ export function Sessions() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-900 dark:border-zinc-700 dark:border-t-zinc-100" />
+      <div className="flex flex-1 items-center justify-center bg-[#0a0a0f]">
+        <div className="h-10 w-10 rounded-full border-4 border-orange-500/30 border-t-orange-500 animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-4xl px-6 py-8">
-        <h1 className="text-xl font-semibold">Sessões</h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Todas as conversas do assistente
-        </p>
+    <div className="flex-1 overflow-y-auto bg-[#0a0a0f]">
+      <div className="mx-auto max-w-5xl px-8 py-10">
+        <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-gray-600">Historico</p>
+        <h1 className="mt-1 text-2xl font-black text-white tracking-tight">Sessoes</h1>
+        <p className="mt-2 text-base text-gray-500">{sessions.length} conversas</p>
 
-        {/* Busca */}
+        {/* Search */}
         <div className="relative mt-6">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-          <Input
+          <Search className="absolute left-5 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-600" />
+          <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar sessões..."
-            className="pl-9"
+            placeholder="Buscar sessoes..."
+            className="w-full rounded-2xl border border-white/[0.08] bg-[#111118] px-5 py-4 pl-14 text-base text-white outline-none placeholder:text-gray-600 transition-all focus:border-orange-500/30 focus:ring-2 focus:ring-orange-500/10"
           />
         </div>
 
-        {/* Lista */}
-        <div className="mt-4 space-y-2">
+        {/* List */}
+        <div className="mt-6 space-y-3">
           {filtered.map((session) => (
             <div
               key={session.id}
-              className="flex items-center justify-between rounded-xl border border-zinc-200 px-4 py-3 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700 transition-colors"
+              className="group flex items-center rounded-2xl border border-white/[0.06] bg-[#111118] transition-all hover:border-orange-500/20"
             >
               <button
                 onClick={() => navigate(`/chat/${encodeURIComponent(session.id)}`)}
-                className="flex flex-1 items-center gap-3 text-left"
+                className="flex flex-1 cursor-pointer items-center gap-5 px-6 py-5 text-left"
               >
-                <MessageSquare className="h-4 w-4 shrink-0 text-zinc-400" />
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/[0.05] text-gray-500 group-hover:bg-orange-500/15 group-hover:text-orange-400 transition-colors">
+                  <MessageSquare className="h-6 w-6" />
+                </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">
+                  <p className="truncate text-base font-bold text-white">
                     {session.chat_id || session.id}
                   </p>
-                  <p className="text-xs text-zinc-500">
+                  <p className="mt-1 text-sm text-gray-500">
                     {session.message_count} mensagens · {timeAgo(session.last_message_at)}
                   </p>
                 </div>
-                <Badge>{session.channel}</Badge>
+                <span className="rounded-full bg-white/[0.04] px-3 py-1 text-xs font-bold uppercase tracking-wider text-gray-500">
+                  {session.channel}
+                </span>
               </button>
 
-              <Button
-                variant="ghost"
-                size="icon"
+              <button
                 onClick={(e) => {
                   e.stopPropagation()
                   handleDelete(session.id)
                 }}
-                className="ml-2 text-zinc-400 hover:text-red-500"
+                className="mr-4 cursor-pointer rounded-xl p-3 text-gray-600 opacity-0 transition-all hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
               >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+                <Trash2 className="h-5 w-5" />
+              </button>
             </div>
           ))}
 
           {filtered.length === 0 && (
-            <p className="py-12 text-center text-sm text-zinc-400">
-              {search ? 'Nenhuma sessão encontrada' : 'Nenhuma sessão ativa'}
-            </p>
+            <div className="mt-20 flex flex-col items-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/[0.04]">
+                <MessageCircle className="h-8 w-8 text-gray-700" />
+              </div>
+              <p className="mt-4 text-lg font-semibold text-gray-500">
+                {search ? 'Nenhuma sessao encontrada' : 'Nenhuma sessao ativa'}
+              </p>
+            </div>
           )}
         </div>
       </div>

@@ -91,6 +91,9 @@ type SessionConfig struct {
 
 	// ThinkingLevel controls extended thinking: "", "off", "low", "medium", "high".
 	ThinkingLevel string `yaml:"thinking_level"`
+
+	// Verbose enables narration of tool calls and internal steps.
+	Verbose bool `yaml:"verbose"`
 }
 
 // ConversationEntry representa uma troca de mensagem na sessão.
@@ -481,16 +484,16 @@ func (ss *SessionStore) ListSessions() []SessionMeta {
 	out := make([]SessionMeta, 0, len(ss.sessions))
 	for _, s := range ss.sessions {
 		s.mu.RLock()
-		msgCount := len(s.history)
-		s.mu.RUnlock()
-		out = append(out, SessionMeta{
+		meta := SessionMeta{
 			ID:           s.ID,
 			Channel:      s.Channel,
 			ChatID:       s.ChatID,
-			MessageCount: msgCount,
+			MessageCount: len(s.history),
 			CreatedAt:    s.CreatedAt,
 			LastActiveAt: s.lastActiveAt,
-		})
+		}
+		s.mu.RUnlock()
+		out = append(out, meta)
 	}
 	return out
 }
@@ -515,13 +518,163 @@ func (ss *SessionStore) Delete(channel, chatID string) bool {
 	return false
 }
 
+// DeleteByID removes a session by its hash ID.
+func (ss *SessionStore) DeleteByID(id string) bool {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	if s, exists := ss.sessions[id]; exists {
+		delete(ss.sessions, id)
+		// Also delete from persistence if available.
+		if ss.persistence != nil {
+			ss.persistence.DeleteSession(id)
+		}
+		ss.logger.Info("session deleted by ID",
+			"id", id, "channel", s.Channel, "chat_id", s.ChatID)
+		return true
+	}
+	return false
+}
+
+// Export returns a portable representation of a session's history and metadata.
+func (ss *SessionStore) Export(id string) *SessionExport {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	s, exists := ss.sessions[id]
+	if !exists {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	export := &SessionExport{
+		ID:        s.ID,
+		Channel:   s.Channel,
+		ChatID:    s.ChatID,
+		Config:    s.config,
+		Facts:     make([]string, len(s.facts)),
+		CreatedAt: s.CreatedAt,
+		Messages:  make([]ExportedMessage, 0, len(s.history)),
+	}
+	copy(export.Facts, s.facts)
+	for _, entry := range s.history {
+		export.Messages = append(export.Messages, ExportedMessage{
+			User:      entry.UserMessage,
+			Assistant: entry.AssistantResponse,
+			Timestamp: entry.Timestamp,
+		})
+	}
+	return export
+}
+
+// SessionExport is a portable representation of a session for backup/export.
+type SessionExport struct {
+	ID        string            `json:"id"`
+	Channel   string            `json:"channel"`
+	ChatID    string            `json:"chat_id"`
+	Config    SessionConfig     `json:"config"`
+	Facts     []string          `json:"facts"`
+	CreatedAt time.Time         `json:"created_at"`
+	Messages  []ExportedMessage `json:"messages"`
+}
+
+// ExportedMessage is a single message in an exported session.
+type ExportedMessage struct {
+	User      string    `json:"user"`
+	Assistant string    `json:"assistant"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// RenameSession changes the ChatID of a session (e.g. for aliasing).
+func (ss *SessionStore) RenameSession(oldID, newChannel, newChatID string) bool {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	s, exists := ss.sessions[oldID]
+	if !exists {
+		return false
+	}
+	newKey := sessionKey(newChannel, newChatID)
+	if _, conflict := ss.sessions[newKey]; conflict {
+		return false
+	}
+	delete(ss.sessions, oldID)
+	s.mu.Lock()
+	s.ID = newKey
+	s.Channel = newChannel
+	s.ChatID = newChatID
+	s.mu.Unlock()
+	ss.sessions[newKey] = s
+	ss.logger.Info("session renamed", "old_id", oldID, "new_id", newKey)
+	return true
+}
+
 // sessionKey gera a chave única para uma sessão.
 // MakeSessionID generates a deterministic, opaque session ID from channel and chatID.
 // The ID is a truncated SHA-256 hash, so no PII (phone numbers, etc.) leaks into
 // file names, logs, or persisted job data.
+// SessionKey is a structured session identifier that preserves the original
+// channel, chatID, and optional branch components while providing a compact
+// string form. This enables multi-agent routing: sessions can be found by
+// channel, user, or branch without losing context.
+type SessionKey struct {
+	Channel string // "whatsapp", "discord", "webui", "subagent", etc.
+	ChatID  string // Group JID, user JID, or chat UUID.
+	Branch  string // Optional: sub-session branch (e.g. "topic-research", fork ID).
+}
+
+// String returns the canonical string form: "channel:chatID" or "channel:chatID:branch".
+func (sk SessionKey) String() string {
+	if sk.Branch != "" {
+		return sk.Channel + ":" + sk.ChatID + ":" + sk.Branch
+	}
+	return sk.Channel + ":" + sk.ChatID
+}
+
+// Hash returns a compact hash suitable for map keys and persistence IDs.
+func (sk SessionKey) Hash() string {
+	h := sha256.Sum256([]byte(sk.String()))
+	return hex.EncodeToString(h[:8])
+}
+
+// ParseSessionKey parses a "channel:chatID" or "channel:chatID:branch" string.
+func ParseSessionKey(s string) SessionKey {
+	parts := splitMax(s, ":", 3)
+	switch len(parts) {
+	case 3:
+		return SessionKey{Channel: parts[0], ChatID: parts[1], Branch: parts[2]}
+	case 2:
+		return SessionKey{Channel: parts[0], ChatID: parts[1]}
+	default:
+		return SessionKey{ChatID: s}
+	}
+}
+
+// splitMax splits s by sep into at most n parts.
+func splitMax(s, sep string, n int) []string {
+	if sep == "" || n <= 1 {
+		return []string{s}
+	}
+	var parts []string
+	for i := 0; i < n-1; i++ {
+		idx := -1
+		for j := 0; j < len(s); j++ {
+			if s[j] == sep[0] {
+				idx = j
+				break
+			}
+		}
+		if idx < 0 {
+			break
+		}
+		parts = append(parts, s[:idx])
+		s = s[idx+1:]
+	}
+	parts = append(parts, s)
+	return parts
+}
+
+// MakeSessionID returns a compact hash-based session ID from channel and chatID.
+// For backward compatibility, this is still used as the primary key.
 func MakeSessionID(channel, chatID string) string {
-	h := sha256.Sum256([]byte(channel + ":" + chatID))
-	return hex.EncodeToString(h[:8]) // 16 hex chars = 64 bits of entropy
+	return SessionKey{Channel: channel, ChatID: chatID}.Hash()
 }
 
 func sessionKey(channel, chatID string) string {

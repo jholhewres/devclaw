@@ -10,21 +10,12 @@ interface ChatInputProps {
   placeholder?: string
 }
 
-/**
- * Área de input do chat. Estilo Claude: textarea expansível,
- * botão de enviar/parar, Enter para enviar, Shift+Enter para nova linha.
- */
 export function ChatInput({
-  onSend,
-  onAbort,
-  isStreaming = false,
-  disabled = false,
-  placeholder = 'Escreva sua mensagem...',
+  onSend, onAbort, isStreaming = false, disabled = false, placeholder = 'Escreva sua mensagem...',
 }: ChatInputProps) {
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  /* Auto-resize */
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
@@ -32,20 +23,14 @@ export function ChatInput({
     el.style.height = Math.min(el.scrollHeight, 200) + 'px'
   }, [value])
 
-  /* Focus ao montar */
-  useEffect(() => {
-    textareaRef.current?.focus()
-  }, [])
+  useEffect(() => { textareaRef.current?.focus() }, [])
 
   const handleSend = () => {
     const trimmed = value.trim()
     if (!trimmed || disabled) return
     onSend(trimmed)
     setValue('')
-    // Reset height
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-    }
+    if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -57,13 +42,12 @@ export function ChatInput({
   }
 
   return (
-    <div className="border-t border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+    <div className="border-t border-white/[0.06] bg-[#0a0a0f] px-6 py-5">
       <div
         className={cn(
-          'flex items-end gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2',
-          'dark:border-zinc-700 dark:bg-zinc-900',
-          'focus-within:border-zinc-400 dark:focus-within:border-zinc-500',
-          'transition-colors',
+          'flex items-end gap-4 rounded-2xl border border-white/[0.08] bg-[#111118] px-5 py-4',
+          'transition-all',
+          'focus-within:border-orange-500/30 focus-within:ring-2 focus-within:ring-orange-500/10',
         )}
       >
         <textarea
@@ -74,41 +58,34 @@ export function ChatInput({
           placeholder={placeholder}
           disabled={disabled}
           rows={1}
-          className={cn(
-            'flex-1 resize-none bg-transparent text-sm outline-none',
-            'placeholder:text-zinc-400',
-            'max-h-[200px]',
-            'disabled:opacity-50',
-          )}
+          className="flex-1 resize-none bg-transparent text-base text-white outline-none placeholder:text-gray-600 max-h-[200px] disabled:opacity-50"
         />
-
         {isStreaming ? (
           <button
             onClick={() => onAbort?.()}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-900 text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
-            title="Parar geração"
+            className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-red-500/15 text-red-400 ring-1 ring-red-500/20 transition-all hover:bg-red-500/25"
+            title="Parar"
           >
-            <Square className="h-3.5 w-3.5" fill="currentColor" />
+            <Square className="h-4.5 w-4.5" fill="currentColor" />
           </button>
         ) : (
           <button
             onClick={handleSend}
             disabled={!value.trim() || disabled}
             className={cn(
-              'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors',
+              'flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl transition-all',
               value.trim()
-                ? 'bg-zinc-900 text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300'
-                : 'bg-zinc-200 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-600',
+                ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-lg shadow-orange-500/20 hover:shadow-orange-500/30'
+                : 'bg-white/[0.06] text-gray-600',
             )}
-            title="Enviar mensagem"
+            title="Enviar"
           >
-            <ArrowUp className="h-4 w-4" />
+            <ArrowUp className="h-5 w-5" />
           </button>
         )}
       </div>
-
-      <p className="mt-1.5 text-center text-[11px] text-zinc-400">
-        GoClaw pode cometer erros. Considere verificar informações importantes.
+      <p className="mt-3 text-center text-xs text-gray-700">
+        GoClaw pode cometer erros. Considere verificar informacoes importantes.
       </p>
     </div>
   )

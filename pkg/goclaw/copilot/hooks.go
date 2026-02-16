@@ -1,0 +1,318 @@
+// Package copilot – hooks.go implements a lifecycle hook system. Hooks allow
+// external code to observe and optionally modify agent behavior at well-defined
+// points in the lifecycle.
+//
+// Hook events include:
+//
+//	SessionStart      — A new session is created or restored.
+//	SessionEnd        — A session is about to be pruned/deleted.
+//	UserPromptSubmit  — User message received, before processing.
+//	PreToolUse        — Before a tool is called (can block/modify).
+//	PostToolUse       — After a tool returns (observe/log).
+//	AgentStart        — Agent loop is about to begin.
+//	AgentStop         — Agent loop finished (normal or error).
+//	SubagentStart     — A subagent has been spawned.
+//	SubagentStop      — A subagent has finished.
+//	PreCompact        — Before session compaction.
+//	PostCompact       — After session compaction.
+//	MemorySave        — A memory was saved.
+//	MemoryRecall      — Memories were recalled for prompt.
+//	Notification      — An outbound notification/message is being sent.
+//	Heartbeat         — Periodic heartbeat tick.
+//	Error             — An unrecoverable error occurred.
+package copilot
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"sync"
+)
+
+// HookEvent identifies the lifecycle point at which a hook fires.
+type HookEvent string
+
+const (
+	HookSessionStart     HookEvent = "session_start"
+	HookSessionEnd       HookEvent = "session_end"
+	HookUserPromptSubmit HookEvent = "user_prompt_submit"
+	HookPreToolUse       HookEvent = "pre_tool_use"
+	HookPostToolUse      HookEvent = "post_tool_use"
+	HookAgentStart       HookEvent = "agent_start"
+	HookAgentStop        HookEvent = "agent_stop"
+	HookSubagentStart    HookEvent = "subagent_start"
+	HookSubagentStop     HookEvent = "subagent_stop"
+	HookPreCompact       HookEvent = "pre_compact"
+	HookPostCompact      HookEvent = "post_compact"
+	HookMemorySave       HookEvent = "memory_save"
+	HookMemoryRecall     HookEvent = "memory_recall"
+	HookNotification     HookEvent = "notification"
+	HookHeartbeat        HookEvent = "heartbeat"
+	HookError            HookEvent = "error"
+)
+
+// AllHookEvents lists every supported hook event for discovery/documentation.
+var AllHookEvents = []HookEvent{
+	HookSessionStart, HookSessionEnd,
+	HookUserPromptSubmit,
+	HookPreToolUse, HookPostToolUse,
+	HookAgentStart, HookAgentStop,
+	HookSubagentStart, HookSubagentStop,
+	HookPreCompact, HookPostCompact,
+	HookMemorySave, HookMemoryRecall,
+	HookNotification,
+	HookHeartbeat,
+	HookError,
+}
+
+// HookPayload carries contextual data for a hook invocation.
+// Fields are populated based on the event type; unused fields are zero-valued.
+type HookPayload struct {
+	// Event is the hook event type.
+	Event HookEvent
+
+	// SessionID is the session this event relates to (if applicable).
+	SessionID string
+
+	// Channel is the originating channel (if applicable).
+	Channel string
+
+	// ToolName is the tool being called (PreToolUse/PostToolUse).
+	ToolName string
+
+	// ToolArgs are the tool arguments (PreToolUse only).
+	ToolArgs map[string]any
+
+	// ToolResult is the tool output (PostToolUse only).
+	ToolResult string
+
+	// Message is a human-readable description or the user message content.
+	Message string
+
+	// Error is set for HookError events.
+	Error error
+
+	// Extra holds arbitrary key-value data for extensibility.
+	Extra map[string]any
+}
+
+// HookAction is the result returned by a hook handler.
+type HookAction struct {
+	// Block prevents the operation from proceeding (PreToolUse, UserPromptSubmit).
+	Block bool
+
+	// Reason explains why the operation was blocked.
+	Reason string
+
+	// ModifiedArgs replaces ToolArgs if non-nil (PreToolUse only).
+	ModifiedArgs map[string]any
+
+	// ModifiedMessage replaces the user message if non-empty (UserPromptSubmit).
+	ModifiedMessage string
+}
+
+// HookHandler processes a hook event and returns an action.
+// Handlers should be fast and non-blocking. For async work, spawn a goroutine.
+type HookHandler func(ctx context.Context, payload HookPayload) HookAction
+
+// RegisteredHook associates a handler with metadata.
+type RegisteredHook struct {
+	// Name identifies this hook for logging.
+	Name string
+
+	// Events lists which events this hook subscribes to.
+	Events []HookEvent
+
+	// Priority controls execution order (lower = earlier). Default: 100.
+	Priority int
+
+	// Handler is the callback function.
+	Handler HookHandler
+}
+
+// HookManager manages lifecycle hook registration and dispatch.
+type HookManager struct {
+	mu     sync.RWMutex
+	hooks  map[HookEvent][]*RegisteredHook
+	logger *slog.Logger
+}
+
+// NewHookManager creates a new hook manager.
+func NewHookManager(logger *slog.Logger) *HookManager {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	hooks := make(map[HookEvent][]*RegisteredHook, len(AllHookEvents))
+	for _, ev := range AllHookEvents {
+		hooks[ev] = nil
+	}
+	return &HookManager{
+		hooks:  hooks,
+		logger: logger.With("component", "hooks"),
+	}
+}
+
+// Register adds a hook handler for the specified events.
+func (hm *HookManager) Register(hook *RegisteredHook) error {
+	if hook == nil || hook.Handler == nil {
+		return fmt.Errorf("hook and handler must not be nil")
+	}
+	if len(hook.Events) == 0 {
+		return fmt.Errorf("hook must subscribe to at least one event")
+	}
+	if hook.Priority == 0 {
+		hook.Priority = 100
+	}
+
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+
+	// Deduplicate events to prevent double-registration.
+	seen := make(map[HookEvent]bool, len(hook.Events))
+	for _, ev := range hook.Events {
+		if seen[ev] {
+			continue
+		}
+		seen[ev] = true
+	}
+
+	for ev := range seen {
+		list := hm.hooks[ev]
+		// Insert in priority order.
+		inserted := false
+		for i, existing := range list {
+			if hook.Priority < existing.Priority {
+				list = append(list[:i], append([]*RegisteredHook{hook}, list[i:]...)...)
+				inserted = true
+				break
+			}
+		}
+		if !inserted {
+			list = append(list, hook)
+		}
+		hm.hooks[ev] = list
+	}
+
+	hm.logger.Info("hook registered",
+		"name", hook.Name,
+		"events", hook.Events,
+		"priority", hook.Priority,
+	)
+	return nil
+}
+
+// Dispatch fires all hooks for the given event and returns the combined action.
+// For blocking events (PreToolUse, UserPromptSubmit), the first Block=true stops
+// dispatch and returns immediately. For non-blocking events, all hooks run.
+func (hm *HookManager) Dispatch(ctx context.Context, payload HookPayload) HookAction {
+	hm.mu.RLock()
+	hooks := hm.hooks[payload.Event]
+	hm.mu.RUnlock()
+
+	if len(hooks) == 0 {
+		return HookAction{}
+	}
+
+	var combined HookAction
+
+	for _, hook := range hooks {
+		action, panicked := func(h *RegisteredHook) (a HookAction, didPanic bool) {
+			defer func() {
+				if r := recover(); r != nil {
+					hm.logger.Error("hook panicked in dispatch",
+						"hook", h.Name, "event", payload.Event, "panic", r)
+					didPanic = true
+				}
+			}()
+			return h.Handler(ctx, payload), false
+		}(hook)
+
+		if panicked {
+			continue
+		}
+
+		// Blocking events: first block wins.
+		if action.Block {
+			hm.logger.Info("hook blocked operation",
+				"hook", hook.Name,
+				"event", payload.Event,
+				"reason", action.Reason,
+			)
+			return action
+		}
+
+		// Merge modifications: last non-nil wins.
+		if action.ModifiedArgs != nil {
+			combined.ModifiedArgs = action.ModifiedArgs
+			payload.ToolArgs = action.ModifiedArgs // Chain to next hook.
+		}
+		if action.ModifiedMessage != "" {
+			combined.ModifiedMessage = action.ModifiedMessage
+			payload.Message = action.ModifiedMessage
+		}
+	}
+
+	return combined
+}
+
+// DispatchAsync fires all hooks for the event without waiting for them.
+// Use for non-critical observe-only events (PostToolUse, Notification, etc.).
+func (hm *HookManager) DispatchAsync(payload HookPayload) {
+	hm.mu.RLock()
+	hooks := hm.hooks[payload.Event]
+	hm.mu.RUnlock()
+
+	if len(hooks) == 0 {
+		return
+	}
+
+	go func() {
+		ctx := context.Background()
+		for _, hook := range hooks {
+			func(h *RegisteredHook) {
+				defer func() {
+					if r := recover(); r != nil {
+						hm.logger.Error("hook panicked in async dispatch",
+							"hook", h.Name, "event", payload.Event, "panic", r)
+					}
+				}()
+				h.Handler(ctx, payload)
+			}(hook)
+		}
+	}()
+}
+
+// HasHooks returns true if any hooks are registered for the given event.
+func (hm *HookManager) HasHooks(event HookEvent) bool {
+	hm.mu.RLock()
+	defer hm.mu.RUnlock()
+	return len(hm.hooks[event]) > 0
+}
+
+// HookCount returns the total number of registered hooks.
+func (hm *HookManager) HookCount() int {
+	hm.mu.RLock()
+	defer hm.mu.RUnlock()
+	total := 0
+	for _, list := range hm.hooks {
+		total += len(list)
+	}
+	return total
+}
+
+// ListHooks returns all registered hooks grouped by event.
+func (hm *HookManager) ListHooks() map[HookEvent][]string {
+	hm.mu.RLock()
+	defer hm.mu.RUnlock()
+	result := make(map[HookEvent][]string)
+	for ev, hooks := range hm.hooks {
+		if len(hooks) > 0 {
+			names := make([]string, len(hooks))
+			for i, h := range hooks {
+				names[i] = h.Name
+			}
+			result[ev] = names
+		}
+	}
+	return result
+}
