@@ -673,33 +673,10 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 
 	e.logger.Debug("executing tool", "name", name, "args_keys", mapKeys(args))
 
-	// Auto-progress: for tools that take longer than 5 seconds, send a
-	// "still working" heartbeat every 15 seconds via ProgressSender.
-	// This prevents the user from thinking the bot has frozen.
+	// Progress heartbeat is handled by the ProgressSender cooldown in assistant.go.
+	// Individual tools (e.g. claude-code) send their own progress; we don't add
+	// a redundant generic heartbeat to avoid flooding the user.
 	progressDone := make(chan struct{})
-	if ps := ProgressSenderFromContext(execCtx); ps != nil {
-		go func() {
-			// Wait 5s before first progress.
-			select {
-			case <-progressDone:
-				return
-			case <-time.After(5 * time.Second):
-			}
-			ticker := time.NewTicker(15 * time.Second)
-			defer ticker.Stop()
-			count := 0
-			for {
-				select {
-				case <-progressDone:
-					return
-				case <-ticker.C:
-					count++
-					elapsed := 5 + count*15
-					ps(execCtx, fmt.Sprintf("⏳ %s... (%ds)", name, elapsed))
-				}
-			}
-		}()
-	}
 
 	start := time.Now()
 	output, err := tool.Handler(execCtx, args)

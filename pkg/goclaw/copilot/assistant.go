@@ -628,6 +628,112 @@ func (a *Assistant) handleDrainedMessages(sessionID string, msgs []*channels.Inc
 	a.handleMessage(&synthetic)
 }
 
+// handleBusySession processes a new message when the session is already running
+// an agent. Behavior depends on the configured queue mode for the channel.
+func (a *Assistant) handleBusySession(msg *channels.IncomingMessage, sessionID string, logger *slog.Logger) {
+	a.configMu.RLock()
+	mode := EffectiveQueueMode(a.config.Queue, msg.Channel)
+	a.configMu.RUnlock()
+
+	logger.Info("session busy, applying queue mode",
+		"session", sessionID,
+		"mode", mode,
+		"content_preview", truncate(msg.Content, 50),
+	)
+
+	switch mode {
+	case QueueModeInterrupt:
+		// Abort the current run and let this message be processed fresh.
+		a.activeRunsMu.Lock()
+		for key, cancel := range a.activeRuns {
+			if strings.HasSuffix(key, ":"+sessionID) || strings.HasSuffix(key, sessionID) {
+				cancel()
+				delete(a.activeRuns, key)
+				break
+			}
+		}
+		a.activeRunsMu.Unlock()
+
+		// Clear the followup queue (new message supersedes pending ones).
+		a.followupQueuesMu.Lock()
+		delete(a.followupQueues, sessionID)
+		a.followupQueuesMu.Unlock()
+
+		// Wait briefly for the cancelled run to release the processing lock.
+		time.Sleep(200 * time.Millisecond)
+
+		// Re-enqueue for immediate processing.
+		go a.handleMessage(msg)
+		return
+
+	case QueueModeSteer, QueueModeSteerBacklog:
+		// Inject into the active run's interrupt inbox so the agent sees it
+		// between turns and can adapt its behavior. Also enqueue as followup
+		// in case the steer is missed (e.g. run completes before next turn).
+		a.interruptInboxesMu.Lock()
+		inbox, hasInbox := a.interruptInboxes[sessionID]
+		a.interruptInboxesMu.Unlock()
+
+		if hasInbox {
+			enriched := a.enrichMessageContent(a.ctx, msg, logger)
+			select {
+			case inbox <- enriched:
+				logger.Debug("message injected into active run (steer)", "session", sessionID)
+			default:
+				logger.Warn("interrupt inbox full, message will be queued as followup", "session", sessionID)
+			}
+		}
+
+		// Also add to followup queue in case agent doesn't pick it up.
+		a.enqueueFollowup(msg, sessionID, logger)
+		a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "👀")
+		return
+
+	case QueueModeCollect:
+		// Just enqueue; all queued messages will be combined into a single
+		// prompt when the current run completes.
+		a.enqueueFollowup(msg, sessionID, logger)
+		a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "👀")
+		return
+
+	default: // QueueModeFollowup (default)
+		// Enqueue as individual followup. Also inject into interrupt inbox
+		// so the agent is at least aware of the incoming message.
+		a.interruptInboxesMu.Lock()
+		inbox, hasInbox := a.interruptInboxes[sessionID]
+		a.interruptInboxesMu.Unlock()
+		if hasInbox {
+			enriched := a.enrichMessageContent(a.ctx, msg, logger)
+			select {
+			case inbox <- enriched:
+			default:
+			}
+		}
+		a.enqueueFollowup(msg, sessionID, logger)
+		a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "👀")
+		return
+	}
+}
+
+// enqueueFollowup adds a message to the followup queue with bounds checking.
+func (a *Assistant) enqueueFollowup(msg *channels.IncomingMessage, sessionID string, logger *slog.Logger) {
+	const maxFollowupQueue = 20
+	a.followupQueuesMu.Lock()
+	if len(a.followupQueues[sessionID]) >= maxFollowupQueue {
+		a.followupQueues[sessionID] = a.followupQueues[sessionID][1:]
+		logger.Warn("followup queue full, dropped oldest", "session", sessionID)
+	}
+	a.followupQueues[sessionID] = append(a.followupQueues[sessionID], msg)
+	qLen := len(a.followupQueues[sessionID])
+	a.followupQueuesMu.Unlock()
+
+	logger.Info("message enqueued as followup",
+		"session", sessionID,
+		"queue_length", qLen,
+		"content_preview", truncate(msg.Content, 50),
+	)
+}
+
 // drainFollowupQueue processes messages that were enqueued while a session was
 // busy. Each followup message is processed as a new, independent agent run.
 // When there are multiple queued messages, they are combined into a single run.
@@ -759,48 +865,7 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	// TrySetProcessing atomically checks and sets, eliminating the race window
 	// where two goroutines could both pass IsProcessing and start parallel runs.
 	if !a.messageQueue.TrySetProcessing(sessionID) {
-		// Session is busy — enqueue as followup for processing after current run.
-		// Bounded to 20 items to prevent unbounded memory growth.
-		const maxFollowupQueue = 20
-		a.followupQueuesMu.Lock()
-		if len(a.followupQueues[sessionID]) >= maxFollowupQueue {
-			// Drop oldest to make room (FIFO eviction).
-			a.followupQueues[sessionID] = a.followupQueues[sessionID][1:]
-			logger.Warn("followup queue full, dropped oldest", "session", sessionID)
-		}
-		a.followupQueues[sessionID] = append(a.followupQueues[sessionID], msg)
-		qLen := len(a.followupQueues[sessionID])
-		a.followupQueuesMu.Unlock()
-
-		// Also inject into interrupt inbox so the current run is AWARE of the
-		// new message (it can adjust its behavior), but the main processing
-		// will happen in the followup run.
-		a.interruptInboxesMu.Lock()
-		inbox, hasInbox := a.interruptInboxes[sessionID]
-		a.interruptInboxesMu.Unlock()
-		if hasInbox {
-			enriched := a.enrichMessageContent(a.ctx, msg, logger)
-			select {
-			case inbox <- enriched:
-			default:
-			}
-		}
-
-		// Send ack to user so they know the message was received.
-		a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "👀")
-
-		logger.Info("message enqueued as followup (session busy)",
-			"session", sessionID,
-			"queue_length", qLen,
-			"content_preview", truncate(msg.Content, 50),
-		)
-
-		// Send a brief notification if this is the first followup.
-		if qLen == 1 {
-			_ = a.channelMgr.Send(a.ctx, msg.Channel, msg.ChatID, &channels.OutgoingMessage{
-				Content: "📋 Recebi sua mensagem. Processarei assim que a tarefa atual terminar.",
-			})
-		}
+		a.handleBusySession(msg, sessionID, logger)
 		return
 	}
 	defer func() {
@@ -870,9 +935,23 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	agentCtx = ContextWithDelivery(agentCtx, msg.Channel, msg.ChatID)
 	agentCtx = ContextWithCaller(agentCtx, accessResult.Level, msg.From)
 
-	// Inject ProgressSender so long-running tools (e.g. claude-code) can
-	// send intermediate feedback to the user while processing.
+	// Inject ProgressSender with per-channel cooldown.
+	// WhatsApp doesn't support editing messages, so we rate-limit progress
+	// to avoid flooding the chat with dozens of "still working..." messages.
+	var lastProgressMu sync.Mutex
+	var lastProgressAt time.Time
+	progressCooldown := 60 * time.Second // default: max 1 progress msg/min
+	if msg.Channel == "webui" {
+		progressCooldown = 10 * time.Second
+	}
 	agentCtx = ContextWithProgressSender(agentCtx, func(_ context.Context, progressMsg string) {
+		lastProgressMu.Lock()
+		if time.Since(lastProgressAt) < progressCooldown {
+			lastProgressMu.Unlock()
+			return
+		}
+		lastProgressAt = time.Now()
+		lastProgressMu.Unlock()
 		outMsg := &channels.OutgoingMessage{Content: FormatForChannel(progressMsg, msg.Channel)}
 		_ = a.channelMgr.Send(a.ctx, msg.Channel, msg.ChatID, outMsg)
 	})

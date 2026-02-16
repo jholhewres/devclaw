@@ -57,7 +57,7 @@ func EffectiveQueueMode(qc QueueConfig, channelName string) QueueMode {
 	if qc.DefaultMode != "" {
 		return qc.DefaultMode
 	}
-	return QueueModeCollect
+	return QueueModeSteer
 }
 
 // ParseQueueMode parses a string into a QueueMode. Returns (mode, true) on

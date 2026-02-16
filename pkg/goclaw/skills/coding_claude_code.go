@@ -421,7 +421,10 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 		return nil, fmt.Errorf("claude code: failed to start: %w", startErr)
 	}
 
-	// Stream stderr in background, sending periodic progress updates.
+	// Stream stderr in background, capturing output.
+	// Progress messages go through the ProgressSender which has its own
+	// per-channel cooldown (e.g. 60s for WhatsApp), so we send only meaningful
+	// updates and let the cooldown prevent flooding.
 	var stderrBuf bytes.Buffer
 	var stderrWg sync.WaitGroup
 	if pipeErr == nil {
@@ -436,13 +439,11 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 					chunk := string(buf[:n])
 					stderrBuf.WriteString(chunk)
 
-					// Send progress at most every 10 seconds from stderr.
-					if ps != nil && time.Since(lastSend) >= 10*time.Second {
-						// Filter out noisy pre-flight warnings.
+					// Send meaningful stderr updates (cooldown is enforced upstream).
+					if ps != nil && time.Since(lastSend) >= 30*time.Second {
 						line := strings.TrimSpace(chunk)
 						if line != "" && !strings.Contains(line, "Pre-flight check") {
-							msg := "🤖 " + ccTruncate(line, 200)
-							ps(ctx, msg)
+							ps(ctx, "🤖 "+ccTruncate(line, 200))
 							lastSend = time.Now()
 						}
 					}
@@ -454,30 +455,7 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 		}()
 	}
 
-	// Also send a periodic heartbeat so the user knows it's alive.
-	heartbeatDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		count := 0
-		for {
-			select {
-			case <-heartbeatDone:
-				return
-			case <-execCtx.Done():
-				return
-			case <-ticker.C:
-				count++
-				if ps != nil {
-					elapsed := time.Duration(count*30) * time.Second
-					ps(ctx, fmt.Sprintf("🤖 Claude Code trabalhando... (%s)", elapsed.Round(time.Second)))
-				}
-			}
-		}
-	}()
-
 	cmdErr := cmd.Wait()
-	close(heartbeatDone)
 
 	// Wait for stderr goroutine to finish before reading stderrBuf,
 	// preventing a data race between the reader goroutine and main goroutine.
