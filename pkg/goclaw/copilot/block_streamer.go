@@ -36,14 +36,15 @@ type BlockStreamConfig struct {
 }
 
 // DefaultBlockStreamConfig returns sensible defaults for block streaming.
-// Tuned for WhatsApp/chat UX: send text as quickly as possible so the user
-// sees real-time progress. Lower values = faster feedback.
+// Tuned for WhatsApp/chat UX: each flush = a new message, so we prioritize
+// sending coherent paragraphs over low-latency fragments. MinChars must be
+// high enough to avoid sending single-line fragments as separate messages.
 func DefaultBlockStreamConfig() BlockStreamConfig {
 	return BlockStreamConfig{
 		Enabled:  true,
-		MinChars: 20,   // ~4 words — first block appears almost instantly
-		MaxChars: 600,  // Moderate block size for chat apps
-		IdleMs:   200,  // Flush 200ms after last token — fast feedback on pauses
+		MinChars: 200,   // ~40 words — avoids tiny fragments as separate messages
+		MaxChars: 1500,  // Full paragraph; WhatsApp supports up to 65K chars
+		IdleMs:   1500,  // Flush 1.5s after last token — allows sentences to complete
 	}
 }
 
@@ -51,13 +52,13 @@ func DefaultBlockStreamConfig() BlockStreamConfig {
 func (c BlockStreamConfig) Effective() BlockStreamConfig {
 	out := c
 	if out.MinChars <= 0 {
-		out.MinChars = 20
+		out.MinChars = 200
 	}
 	if out.MaxChars <= 0 {
-		out.MaxChars = 600
+		out.MaxChars = 1500
 	}
 	if out.IdleMs <= 0 {
-		out.IdleMs = 200
+		out.IdleMs = 1500
 	}
 	return out
 }

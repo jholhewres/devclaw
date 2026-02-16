@@ -668,8 +668,9 @@ func (a *Assistant) handleBusySession(msg *channels.IncomingMessage, sessionID s
 
 	case QueueModeSteer, QueueModeSteerBacklog:
 		// Inject into the active run's interrupt inbox so the agent sees it
-		// between turns and can adapt its behavior. Also enqueue as followup
-		// in case the steer is missed (e.g. run completes before next turn).
+		// between turns and can adapt its behavior. The agent should respond
+		// to it within the current run — do NOT also enqueue as followup to
+		// avoid double processing.
 		a.interruptInboxesMu.Lock()
 		inbox, hasInbox := a.interruptInboxes[sessionID]
 		a.interruptInboxesMu.Unlock()
@@ -679,12 +680,14 @@ func (a *Assistant) handleBusySession(msg *channels.IncomingMessage, sessionID s
 			select {
 			case inbox <- enriched:
 				logger.Debug("message injected into active run (steer)", "session", sessionID)
+				a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "👀")
+				return
 			default:
-				logger.Warn("interrupt inbox full, message will be queued as followup", "session", sessionID)
+				logger.Warn("interrupt inbox full, falling back to followup", "session", sessionID)
 			}
 		}
 
-		// Also add to followup queue in case agent doesn't pick it up.
+		// Fallback: inbox was full or didn't exist — enqueue as followup.
 		a.enqueueFollowup(msg, sessionID, logger)
 		a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "👀")
 		return
@@ -697,18 +700,9 @@ func (a *Assistant) handleBusySession(msg *channels.IncomingMessage, sessionID s
 		return
 
 	default: // QueueModeFollowup (default)
-		// Enqueue as individual followup. Also inject into interrupt inbox
-		// so the agent is at least aware of the incoming message.
-		a.interruptInboxesMu.Lock()
-		inbox, hasInbox := a.interruptInboxes[sessionID]
-		a.interruptInboxesMu.Unlock()
-		if hasInbox {
-			enriched := a.enrichMessageContent(a.ctx, msg, logger)
-			select {
-			case inbox <- enriched:
-			default:
-			}
-		}
+		// Enqueue as individual followup — will be processed as a separate
+		// agent run after the current one completes. No injection into the
+		// active run to avoid the same message being processed twice.
 		a.enqueueFollowup(msg, sessionID, logger)
 		a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "👀")
 		return
