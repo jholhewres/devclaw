@@ -15,6 +15,7 @@ The agentic loop: LLM call → tool execution → append results → repeat.
 - Reflection: every 8 turns, inject budget nudge
 - Context pruning: soft/hard trim old tool results by turn age
 - Agent steering: check interruptCh during tool execution
+- ProgressSender: channel-specific cooldown (60s WhatsApp, 10s WebUI)
 
 ## Assistant (`assistant.go`)
 
@@ -25,6 +26,33 @@ Entry point for message processing:
 - Memory flush before compaction (append-only strategy)
 - Bounded followup queue (20 items FIFO)
 - Hook integration via HookManager
+- Queue modes: steer (default), collect, followup, interrupt, steer-backlog
+
+## Output Sanitization
+
+All outgoing text passes through `FormatForChannel` → `StripInternalTags`:
+- Strips `[[reply_to_*]]` tags, `<final>`, `<thinking>`, `<reasoning>` XML tags
+- Removes silent tokens: `NO_REPLY`, `HEARTBEAT_OK`
+- Empty message guards in: `sendReply`, `BlockStreamer.flushLocked`, `ProgressSender`
+
+## Security — Encrypted Vault
+
+Secrets flow: vault → env injection → config resolution. Never plain text.
+
+- **Vault file:** `.goclaw.vault` (AES-256-GCM + Argon2id)
+- **Unlock:** `GOCLAW_VAULT_PASSWORD` env var (from `.env`, loaded by godotenv)
+- **Injection:** `injectVaultSecrets()` in `keyring.go` — sets env vars + config fields
+- **Mapping:** `api_key` → `GOCLAW_API_KEY`, `webui_token` → `GOCLAW_WEBUI_TOKEN`
+- **Tools:** `vault_save`, `vault_get`, `vault_list`, `vault_delete` (registered if unlocked)
+- **Setup wizard:** stores all secrets in vault; `.env` only holds vault password
+- **Config refs:** `${GOCLAW_API_KEY}`, `${GOCLAW_WEBUI_TOKEN}` — resolved from vault
+
+## LLM Fallback & Rate-Limit Recovery
+
+- `LLMClient` tracks cooldown per model (setCooldown/clearCooldown)
+- On rate limit: model enters cooldown, fallback model used
+- Periodic probe of primary model (shouldProbePrimary, 2min interval)
+- On successful probe: clearCooldown, resume primary
 
 ## Key Concurrency Rules
 
@@ -33,6 +61,7 @@ Entry point for message processing:
 - `te.abortOnce`: ensures single abort signal
 - `EventBus`: channel-based pub/sub, never block producers
 - `LaneManager`: per-lane queue + concurrency limit
+- `cooldownMu`: protects LLM fallback state
 
 ## Adding a New Tool
 
@@ -49,3 +78,10 @@ Entry point for message processing:
 3. Blocking hooks: use `Dispatch` (synchronous)
 4. Non-blocking hooks: use `DispatchAsync` (goroutine)
 5. Always wrap handler calls with panic recovery
+
+## File Permissions
+
+- Session transcripts (JSONL, facts, meta): `0600`
+- Sessions directory: `0700`
+- Config files: `0600` (with `.bak` backup before overwrite)
+- Vault file: `0600`

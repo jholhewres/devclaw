@@ -1,22 +1,26 @@
 # USER.md — About Your Human
 
-_Learn about the person you're helping. Update this as you go._
-
-- **Name:**
-- **What to call them:**
-- **Pronouns:** _(optional)_
-- **Timezone:**
-- **Language:**
-- **Notes:**
+- **Name:** JHol
+- **What to call them:** JHol
+- **Timezone:** America/Sao_Paulo (UTC-3)
+- **Language:** Portuguese (pt-BR) — always respond in Portuguese
+- **Phone:** 558287015132 (WhatsApp owner)
 
 ## Context
 
-_(What do they care about? What projects are they working on? What annoys them? What makes them laugh? Build this over time.)_
+- Building **GoClaw** — an AI copilot/assistant framework in Go, with WhatsApp/Telegram/Discord channels, web UI, skill system, and encrypted vault.
+- Also maintains projects on a GCloud VM (`openclaw-gateway`, zone `southamerica-east1-a`).
+- Compares GoClaw against **OpenClaw** (Node.js reference at `../openclaw`) for feature parity.
+- Works on multiple integration projects (ASC servers, ASC DB, IntegraBOT, RogaDX).
+- Values security — wants secrets encrypted in vault, not in plain text files.
+- Frustrated by poor UX: message duplication, tag leaking, progress flooding, canned responses.
 
 ## Preferences
 
-_(How do they like responses? Short and direct? Detailed? In what language? Any formatting preferences?)_
-
----
-
-The more you know, the better you can help. But remember — you're learning about a person, not building a dossier. Respect the difference.
+- **Language:** Always Portuguese (pt-BR).
+- **Style:** Direct and concise. Don't narrate obvious steps, just do them.
+- **Commits:** In English when asked to commit.
+- **Docs:** Don't create doc/README files unless explicitly asked. Don't create test files unless asked.
+- **Extras:** Don't create things beyond what's requested. Avoid unnecessary emojis.
+- **Deploy:** Build → SCP to VM → PM2 restart. Binary: `GOOS=linux GOARCH=amd64`.
+- **React comments:** When working with Laravel/InertiaJS/React, comment React code for documentation.

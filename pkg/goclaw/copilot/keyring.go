@@ -58,6 +58,14 @@ func KeyringAvailable() bool {
 	return true
 }
 
+// vaultEnvMapping maps vault key names to the environment variables they
+// should be injected as. This ensures ${GOCLAW_*} references in config.yaml
+// resolve correctly even when the only on-disk secret is the vault password.
+var vaultEnvMapping = map[string]string{
+	"api_key":     "GOCLAW_API_KEY",
+	"webui_token": "GOCLAW_WEBUI_TOKEN",
+}
+
 // ResolveAPIKey resolves the API key using the priority chain:
 // vault → keyring → env var → config value.
 // Also updates the config in-place with the resolved value.
@@ -95,13 +103,13 @@ func ResolveAPIKey(cfg *Config, logger *slog.Logger) *Vault {
 		}
 
 		if vault.IsUnlocked() {
-			if val, err := vault.Get(keyringAPIKey); err == nil && val != "" {
-				cfg.API.APIKey = val
-				logger.Debug("API key loaded from encrypted vault")
-				// Don't lock — keep it available for agent vault tools.
-				return vault
-			}
-			// Vault is unlocked but no API key inside — keep it open for tools.
+			// Inject all vault secrets into the process environment so that
+			// ${GOCLAW_*} references in config.yaml resolve correctly.
+			// This is the key design: .env only holds the vault password;
+			// all other secrets live encrypted in the vault and are injected
+			// at runtime.
+			injectVaultSecrets(vault, cfg, logger)
+
 			return vault
 		}
 	}
@@ -121,6 +129,44 @@ func ResolveAPIKey(cfg *Config, logger *slog.Logger) *Vault {
 
 	logger.Warn("no API key found. Set one with: copilot config set-key or copilot config vault-set")
 	return nil
+}
+
+// injectVaultSecrets reads all secrets from the unlocked vault, sets them as
+// environment variables (GOCLAW_<KEY>), and resolves known config fields.
+// This allows config.yaml to use ${GOCLAW_API_KEY}, ${GOCLAW_WEBUI_TOKEN},
+// etc. without those values ever touching .env or config files in plain text.
+func injectVaultSecrets(vault *Vault, cfg *Config, logger *slog.Logger) {
+	keys := vault.List()
+	injected := 0
+
+	for _, key := range keys {
+		val, err := vault.Get(key)
+		if err != nil || val == "" {
+			continue
+		}
+
+		// Inject as env var if there's a known mapping.
+		if envName, ok := vaultEnvMapping[key]; ok {
+			os.Setenv(envName, val)
+			injected++
+			logger.Debug("vault secret injected as env var", "key", key, "env", envName)
+		}
+	}
+
+	// Resolve known config fields from the injected env vars.
+	if val, err := vault.Get("api_key"); err == nil && val != "" {
+		cfg.API.APIKey = val
+		logger.Debug("API key loaded from encrypted vault")
+	}
+	if val, err := vault.Get("webui_token"); err == nil && val != "" {
+		cfg.WebUI.AuthToken = val
+		logger.Debug("WebUI auth token loaded from encrypted vault")
+	}
+
+	if injected > 0 {
+		logger.Info("vault secrets injected into process environment",
+			"count", injected)
+	}
 }
 
 // MigrateKeyToKeyring moves an API key from config/env to the OS keyring

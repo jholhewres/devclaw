@@ -54,12 +54,26 @@ alwaysApply: true
 - Hot-reloadable fields: access, instructions, tool guard, heartbeat, queue modes
 - Non-hot-reloadable: LLM provider, channels, gateway — require restart
 
+## Vault & Secrets
+
+- All secrets stored in encrypted vault (`.goclaw.vault`, AES-256-GCM + Argon2id)
+- `.env` only holds `GOCLAW_VAULT_PASSWORD` — never API keys or tokens
+- `config.yaml` uses `${GOCLAW_*}` references — resolved from vault at startup
+- `injectVaultSecrets()` in `keyring.go` maps vault keys to env vars
+- Add new vault→env mappings in `vaultEnvMapping` map in `keyring.go`
+
 ## Testing
 
 - Table-driven tests preferred
 - Test files: `*_test.go` in same package
 - Mock interfaces, not implementations
 - Use `t.Parallel()` for independent tests
+
+## Deploy
+
+- Cross-compile: `GOOS=linux GOARCH=amd64 go build -o goclaw-linux-amd64 ./cmd/copilot`
+- Upload: `gcloud compute scp` to `openclaw-gateway` (zone: `southamerica-east1-a`)
+- Process manager: PM2 (`pm2 stop goclaw && cp ... && pm2 start goclaw`)
 
 ## Do NOT
 

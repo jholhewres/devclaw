@@ -65,3 +65,4 @@ pkg/goclaw/webui/dist/
 /tmp/
 /goclaw
 /goclaw-linux
+pkg/goclaw/copilot/data/

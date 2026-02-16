@@ -1,4 +1,4 @@
-.PHONY: build run serve setup chat test lint clean install init help web-install web-build web-dev
+.PHONY: build run serve setup chat test test-v lint clean install init help web-install web-build web-dev
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
@@ -70,9 +70,13 @@ validate: build-go
 chat: build-go
 	./bin/copilot chat "$(MSG)"
 
-## test: Run tests
+## test: Run all unit tests
 test:
-	go test ./... -v -race
+	CGO_ENABLED=1 go test -tags 'sqlite_fts5' -count=1 -race ./pkg/goclaw/copilot/ ./pkg/goclaw/copilot/security/ ./pkg/goclaw/skills/
+
+## test-v: Run all unit tests (verbose)
+test-v:
+	CGO_ENABLED=1 go test -tags 'sqlite_fts5' -count=1 -race -v ./pkg/goclaw/copilot/ ./pkg/goclaw/copilot/security/ ./pkg/goclaw/skills/
 
 ## lint: Run linter
 lint:

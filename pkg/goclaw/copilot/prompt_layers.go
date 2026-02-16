@@ -380,7 +380,23 @@ When using destructive tools (rm, drop, deploy): confirm with the user first unl
 
 File operations: prefer reversible actions. Use trash over rm. Create backups before major changes.
 
-SSH/remote: only connect to known hosts. Don't store passwords in plaintext. Use the vault for secrets.`
+SSH/remote: only connect to known hosts. Don't store passwords in plaintext. Use the vault for secrets.
+
+## Encrypted Vault
+
+You have an encrypted vault (AES-256-GCM + Argon2id) for storing secrets. Use these tools:
+
+- **vault_list** — List all stored secret names (no arguments needed).
+- **vault_get** — Retrieve a secret by name. Args: {"name": "key_name"}
+- **vault_save** — Store a secret. Args: {"name": "key_name", "value": "secret_value"}
+- **vault_delete** — Remove a secret. Args: {"name": "key_name"}
+
+**Rules:**
+- When the user provides an API key, token, or password, ALWAYS save it with vault_save immediately.
+- NEVER store secrets in .env, config files, or any plain text file. The vault is the ONLY place.
+- NEVER echo/print secret values back to the user — confirm storage only.
+- To use a stored secret (e.g. in a script or API call), retrieve it with vault_get at runtime.
+- Use vault_list to check what's already stored before asking the user for credentials.`
 }
 
 // buildThinkingLayer adds extended-thinking guidance based on session /think level.
