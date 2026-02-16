@@ -26,6 +26,7 @@ type SetupRequest struct {
 	Model         string          `json:"model"`
 	BaseURL       string          `json:"baseUrl"`
 	WebuiPassword string          `json:"webuiPassword"`
+	VaultPassword string          `json:"vaultPassword"`
 	AccessMode    string          `json:"accessMode"`
 	Channels      map[string]bool `json:"channels"`
 	EnabledSkills []string        `json:"enabledSkills"`
@@ -148,11 +149,14 @@ func (s *Server) handleSetupFinalize(w http.ResponseWriter, r *http.Request) {
 		s.installSetupSkills(setup.EnabledSkills)
 	}
 
-	// Initialize the encrypted vault with the webui password as master password
-	// and store the API key securely.
-	vaultPassword := setup.WebuiPassword
+	// Initialize the encrypted vault. Prefer dedicated vault password;
+	// fall back to webui password; then to a minimal default.
+	vaultPassword := setup.VaultPassword
 	if vaultPassword == "" {
-		vaultPassword = "goclaw-default" // minimal fallback; user can change later
+		vaultPassword = setup.WebuiPassword
+	}
+	if vaultPassword == "" {
+		vaultPassword = "goclaw-default"
 	}
 
 	if s.onVaultInit != nil && setup.APIKey != "" {

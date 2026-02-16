@@ -29,6 +29,7 @@ type AssistantAdapter struct {
 	GetChannelHealthFn   func() []ChannelHealthInfo
 	GetSchedulerJobsFn   func() []JobInfo
 	ListSkillsFn         func() []SkillInfo
+	ToggleSkillFn        func(name string, enabled bool) error
 	SendChatMessageFn    func(sessionID, content string) (string, error)
 	StartChatStreamFn    func(ctx context.Context, sessionID, content string) (*RunHandle, error)
 	AbortRunFn           func(sessionID string) bool
@@ -101,6 +102,13 @@ func (a *AssistantAdapter) ListSkills() []SkillInfo {
 		return a.ListSkillsFn()
 	}
 	return nil
+}
+
+func (a *AssistantAdapter) ToggleSkill(name string, enabled bool) error {
+	if a.ToggleSkillFn != nil {
+		return a.ToggleSkillFn(name, enabled)
+	}
+	return errors.New("not implemented")
 }
 
 func (a *AssistantAdapter) SendChatMessage(sessionID, content string) (string, error) {

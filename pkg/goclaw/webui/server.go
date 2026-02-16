@@ -53,6 +53,9 @@ type AssistantAPI interface {
 	// ListSkills returns available skills.
 	ListSkills() []SkillInfo
 
+	// ToggleSkill enables or disables a skill by name.
+	ToggleSkill(name string, enabled bool) error
+
 	// SendChatMessage sends a message and blocks until the full response is ready.
 	// Used as fallback when streaming is not available.
 	SendChatMessage(sessionID, content string) (string, error)
@@ -207,6 +210,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/sessions", s.authMiddleware(s.requireAssistant(s.handleAPISessions)))
 	mux.HandleFunc("/api/sessions/", s.authMiddleware(s.requireAssistant(s.handleAPISessionDetail)))
 	mux.HandleFunc("/api/skills", s.authMiddleware(s.requireAssistant(s.handleAPISkills)))
+	mux.HandleFunc("/api/skills/", s.authMiddleware(s.requireAssistant(s.handleAPISkillsAction)))
 	mux.HandleFunc("/api/channels", s.authMiddleware(s.requireAssistant(s.handleAPIChannels)))
 	mux.HandleFunc("/api/channels/whatsapp/", s.authMiddleware(s.requireAssistant(s.handleAPIWhatsAppQR)))
 	mux.HandleFunc("/api/config", s.authMiddleware(s.requireAssistant(s.handleAPIConfig)))

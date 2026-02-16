@@ -326,6 +326,75 @@ func (s *Server) handleAPISkills(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleAPISkillsAction(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/skills/")
+
+	switch {
+	case path == "available" && r.Method == http.MethodGet:
+		s.handleSkillsAvailable(w, r)
+	case path == "install" && r.Method == http.MethodPost:
+		s.handleSkillInstall(w, r)
+	case strings.HasSuffix(path, "/toggle") && r.Method == http.MethodPost:
+		name := strings.TrimSuffix(path, "/toggle")
+		s.handleSkillToggle(w, r, name)
+	default:
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	}
+}
+
+func (s *Server) handleSkillsAvailable(w http.ResponseWriter, _ *http.Request) {
+	result := fetchSkillsCatalogFromGitHub(s.logger)
+	if len(result) == 0 {
+		result = []map[string]any{}
+	}
+
+	installed := s.api.ListSkills()
+	installedSet := make(map[string]bool, len(installed))
+	for _, sk := range installed {
+		installedSet[sk.Name] = true
+	}
+	for i := range result {
+		name, _ := result[i]["name"].(string)
+		result[i]["installed"] = installedSet[name]
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+
+	s.installSetupSkills([]string{body.Name})
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"message": "Skill " + body.Name + " instalada. Reinicie para ativar.",
+	})
+}
+
+func (s *Server) handleSkillToggle(w http.ResponseWriter, r *http.Request, name string) {
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+
+	if err := s.api.ToggleSkill(name, body.Enabled); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // ── Channels ──
 
 func (s *Server) handleAPIChannels(w http.ResponseWriter, r *http.Request) {

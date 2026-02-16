@@ -1,4 +1,5 @@
-import { Shield, ShieldCheck, ShieldAlert, Lock } from 'lucide-react'
+import { useState } from 'react'
+import { Shield, ShieldCheck, ShieldAlert, Lock, KeyRound, Eye, EyeOff, Info } from 'lucide-react'
 import type { SetupData } from './SetupWizard'
 
 interface Props {
@@ -48,37 +49,118 @@ const COLOR_MAP = {
   },
 }
 
-/**
- * Etapa 3: Password da web UI e modo de acesso.
- */
 export function StepSecurity({ data, updateData }: Props) {
+  const [showPassword, setShowPassword] = useState(false)
+  const [showVault, setShowVault] = useState(false)
+
+  const useCustomVault = data.vaultPassword !== '' && data.vaultPassword !== data.webuiPassword
+
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
-        <h2 className="text-lg font-semibold text-white">Segurança</h2>
+        <h2 className="text-lg font-semibold text-white">Seguranca</h2>
         <p className="mt-1 text-sm text-zinc-400">
-          Proteja o acesso e defina o nível de controle das ferramentas
+          Proteja o acesso e defina o nivel de controle das ferramentas
         </p>
       </div>
 
       <div className="space-y-5">
-        {/* Password */}
+        {/* Web UI Password */}
         <div>
           <label className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-300">
             <Lock className="h-3.5 w-3.5 text-zinc-500" />
             Senha da Web UI
           </label>
-          <input
-            type="password"
-            value={data.webuiPassword}
-            onChange={(e) => updateData({ webuiPassword: e.target.value })}
-            placeholder="Defina uma senha para o painel"
-            className="flex h-11 w-full rounded-xl border border-zinc-700/50 bg-zinc-800/50 px-4 text-sm text-white placeholder:text-zinc-600 outline-none transition-all focus:border-orange-500/50 focus:ring-2 focus:ring-orange-500/10"
-          />
+          <div className="relative">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              value={data.webuiPassword}
+              onChange={(e) => {
+                updateData({ webuiPassword: e.target.value })
+                if (!useCustomVault) {
+                  updateData({ vaultPassword: e.target.value })
+                }
+              }}
+              placeholder="Defina uma senha para o painel"
+              className="flex h-11 w-full rounded-xl border border-zinc-700/50 bg-zinc-800/50 px-4 pr-10 text-sm text-white placeholder:text-zinc-600 outline-none transition-all focus:border-orange-500/50 focus:ring-2 focus:ring-orange-500/10"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
           <p className="mt-1.5 text-xs text-zinc-500">
             Opcional para acesso local. Recomendado se expor na internet.
           </p>
+        </div>
+
+        {/* Vault Password */}
+        <div className="rounded-xl border border-zinc-700/30 bg-zinc-800/20 p-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-500/10">
+              <KeyRound className="h-4 w-4 text-orange-400" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-medium text-white">Cofre Criptografado (Vault)</h3>
+              <p className="mt-1 text-xs text-zinc-400">
+                O vault armazena suas API keys com criptografia AES-256. Por padrao, usa a mesma senha da Web UI.
+              </p>
+
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (useCustomVault) {
+                      updateData({ vaultPassword: data.webuiPassword })
+                    } else {
+                      updateData({ vaultPassword: '' })
+                    }
+                  }}
+                  className={`relative h-5 w-9 rounded-full transition-colors ${
+                    useCustomVault ? 'bg-orange-500' : 'bg-zinc-700'
+                  }`}
+                >
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                    useCustomVault ? 'translate-x-4' : 'translate-x-0.5'
+                  }`} />
+                </button>
+                <span className="text-xs text-zinc-400">Usar senha diferente para o vault</span>
+              </div>
+
+              {useCustomVault && (
+                <div className="mt-3">
+                  <div className="relative">
+                    <input
+                      type={showVault ? 'text' : 'password'}
+                      value={data.vaultPassword}
+                      onChange={(e) => updateData({ vaultPassword: e.target.value })}
+                      placeholder="Senha do vault (AES-256 + Argon2id)"
+                      className="flex h-10 w-full rounded-lg border border-zinc-700/50 bg-zinc-900/50 px-3 pr-10 text-sm text-white placeholder:text-zinc-600 outline-none transition-all focus:border-orange-500/50 focus:ring-2 focus:ring-orange-500/10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowVault(!showVault)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors"
+                    >
+                      {showVault ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {data.webuiPassword && (
+                <div className="mt-2 flex items-start gap-1.5">
+                  <Info className="mt-0.5 h-3 w-3 shrink-0 text-emerald-400/60" />
+                  <p className="text-[11px] text-emerald-400/60">
+                    A API key sera armazenada no vault automaticamente.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Modo de acesso */}

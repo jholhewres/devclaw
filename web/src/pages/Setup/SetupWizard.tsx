@@ -21,6 +21,7 @@ export interface SetupData {
 
   /* Etapa 3: Segurança */
   webuiPassword: string
+  vaultPassword: string
   accessMode: 'relaxed' | 'strict' | 'paranoid'
 
   /* Etapa 4: Canais */
@@ -39,6 +40,7 @@ const INITIAL_DATA: SetupData = {
   model: '',
   baseUrl: '',
   webuiPassword: '',
+  vaultPassword: '',
   accessMode: 'strict',
   channels: {},
   enabledSkills: [],

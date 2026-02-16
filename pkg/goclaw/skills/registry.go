@@ -15,6 +15,9 @@ type Registry struct {
 	// skills armazena as skills registradas, indexadas por nome.
 	skills map[string]Skill
 
+	// disabled tracks skills that have been disabled by the user.
+	disabled map[string]bool
+
 	// loaders contém os carregadores de skills de diferentes fontes.
 	loaders []SkillLoader
 
@@ -39,8 +42,9 @@ func NewRegistry(logger *slog.Logger) *Registry {
 	}
 
 	return &Registry{
-		skills:  make(map[string]Skill),
-		loaders: make([]SkillLoader, 0),
+		skills:   make(map[string]Skill),
+		disabled: make(map[string]bool),
+		loaders:  make([]SkillLoader, 0),
 		index: &Index{
 			ByCategory: make(map[string][]string),
 			ByTag:      make(map[string][]string),
@@ -197,6 +201,35 @@ func (r *Registry) Reload(ctx context.Context) (int, error) {
 
 	r.logger.Info("skills reloaded", "count", loaded)
 	return loaded, nil
+}
+
+// Enable re-enables a previously disabled skill.
+func (r *Registry) Enable(name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.skills[name]; !exists {
+		return fmt.Errorf("skill %q not found", name)
+	}
+	delete(r.disabled, name)
+	return nil
+}
+
+// Disable marks a skill as disabled without removing it.
+func (r *Registry) Disable(name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.skills[name]; !exists {
+		return fmt.Errorf("skill %q not found", name)
+	}
+	r.disabled[name] = true
+	return nil
+}
+
+// IsEnabled returns whether a skill is currently enabled.
+func (r *Registry) IsEnabled(name string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return !r.disabled[name]
 }
 
 // Remove removes a skill from the registry by name.

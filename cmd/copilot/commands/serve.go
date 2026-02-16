@@ -438,10 +438,20 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 				result[i] = webui.SkillInfo{
 					Name:        m.Name,
 					Description: m.Description,
-					Enabled:     true,
+					Enabled:     reg.IsEnabled(m.Name),
 				}
 			}
 			return result
+		},
+		ToggleSkillFn: func(name string, enabled bool) error {
+			reg := assistant.SkillRegistry()
+			if reg == nil {
+				return fmt.Errorf("skill registry not available")
+			}
+			if enabled {
+				return reg.Enable(name)
+			}
+			return reg.Disable(name)
 		},
 		SendChatMessageFn: func(sessionID, content string) (string, error) {
 			session := assistant.SessionStore().GetOrCreate("webui", sessionID)
