@@ -169,11 +169,12 @@ type ToolHook struct {
 
 // ToolExecutor manages tool registration and dispatches tool calls.
 type ToolExecutor struct {
-	tools   map[string]*registeredTool
-	timeout time.Duration
-	logger  *slog.Logger
-	guard   *ToolGuard
-	mu      sync.RWMutex
+	tools       map[string]*registeredTool
+	timeout     time.Duration
+	bashTimeout time.Duration // timeout for bash/ssh/scp/exec (default: 5min)
+	logger      *slog.Logger
+	guard       *ToolGuard
+	mu          sync.RWMutex
 
 	// toolDefsCache caches the slice of ToolDefinitions so we don't rebuild
 	// it on every Tools() call. Invalidated when a new tool is registered.
@@ -210,6 +211,7 @@ func NewToolExecutor(logger *slog.Logger) *ToolExecutor {
 	return &ToolExecutor{
 		tools:        make(map[string]*registeredTool),
 		timeout:      DefaultToolTimeout,
+		bashTimeout:  5 * time.Minute,
 		logger:       logger.With("component", "tool_executor"),
 		callerLevel:  AccessOwner, // Default to owner for CLI usage.
 		parallel:     true,
@@ -315,7 +317,7 @@ func (e *ToolExecutor) SetConfirmationRequester(fn func(sessionID, callerJID, to
 	e.confirmationRequester = fn
 }
 
-// Configure applies ToolExecutorConfig (parallel, max_parallel).
+// Configure applies ToolExecutorConfig (parallel, max_parallel, timeouts).
 func (e *ToolExecutor) Configure(cfg ToolExecutorConfig) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -323,6 +325,12 @@ func (e *ToolExecutor) Configure(cfg ToolExecutorConfig) {
 	e.maxParallel = cfg.MaxParallel
 	if e.maxParallel <= 0 {
 		e.maxParallel = 5
+	}
+	if cfg.DefaultTimeoutSeconds > 0 {
+		e.timeout = time.Duration(cfg.DefaultTimeoutSeconds) * time.Second
+	}
+	if cfg.BashTimeoutSeconds > 0 {
+		e.bashTimeout = time.Duration(cfg.BashTimeoutSeconds) * time.Second
 	}
 }
 
@@ -631,9 +639,9 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 
 	// Execute with timeout.
 	timeout := e.timeout
-	// Give bash/ssh/scp longer timeouts.
+	// Give bash/ssh/scp longer timeouts (configurable via bash_timeout_seconds).
 	if name == "bash" || name == "ssh" || name == "scp" || name == "exec" {
-		timeout = 5 * time.Minute
+		timeout = e.bashTimeout
 	}
 	// Claude Code manages its own internal timeout (default 15min);
 	// give the executor wrapper enough headroom.

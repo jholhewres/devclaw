@@ -42,10 +42,11 @@ type MessageQueue struct {
 
 // sessionQueue holds pending messages for a single session.
 type sessionQueue struct {
-	items       []*queuedMessage
-	timer       *time.Timer
-	lastEnqueue time.Time
-	processing  bool
+	items             []*queuedMessage
+	timer             *time.Timer
+	lastEnqueue       time.Time
+	processing        bool
+	processingStarted time.Time // when processing began (zero if not processing)
 }
 
 // queuedMessage wraps an incoming message with enqueue timestamp.
@@ -192,6 +193,7 @@ func (q *MessageQueue) TrySetProcessing(sessionID string) bool {
 		return false // Already processing — caller should enqueue as followup.
 	}
 	sq.processing = true
+	sq.processingStarted = time.Now()
 	return true
 }
 
@@ -205,6 +207,25 @@ func (q *MessageQueue) SetProcessing(sessionID string, active bool) {
 		q.queues[sessionID] = sq
 	}
 	sq.processing = active
+	if active {
+		sq.processingStarted = time.Now()
+	} else {
+		sq.processingStarted = time.Time{}
+	}
+}
+
+// StuckSessions returns session IDs that have been processing longer than maxAge.
+func (q *MessageQueue) StuckSessions(maxAge time.Duration) []string {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	now := time.Now()
+	var stuck []string
+	for id, sq := range q.queues {
+		if sq.processing && !sq.processingStarted.IsZero() && now.Sub(sq.processingStarted) > maxAge {
+			stuck = append(stuck, id)
+		}
+	}
+	return stuck
 }
 
 // CombineMessages merges multiple messages into one prompt string.

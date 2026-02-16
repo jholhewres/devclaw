@@ -172,10 +172,15 @@ func (bs *BlockStreamer) HasSentBlocks() bool {
 	return bs.flushed
 }
 
+// idleMinChars is the minimum buffer size for an idle flush. When the LLM
+// pauses briefly mid-sentence, we don't want to send tiny fragments like
+// "(collect," as separate messages. If the buffer is below this threshold,
+// the idle timer reschedules itself to wait longer.
+const idleMinChars = 80
+
 // resetIdleTimer resets the idle flush timer. Must be called with mu held.
 // When the LLM pauses (tool call, thinking), the idle timer fires and flushes
-// whatever is buffered so the user sees progress immediately. No double-check:
-// if tokens stopped arriving, the content is ready to send.
+// whatever is buffered so the user sees progress.
 func (bs *BlockStreamer) resetIdleTimer() {
 	if bs.idleTimer != nil {
 		bs.idleTimer.Stop()
@@ -190,8 +195,19 @@ func (bs *BlockStreamer) resetIdleTimer() {
 			return
 		}
 
-		// Flush immediately — if the LLM paused, the user should see
-		// whatever text has accumulated regardless of MinChars.
+		// If the buffer is too small, don't send a tiny fragment — reschedule
+		// the timer to give the LLM more time to produce a coherent block.
+		if bs.buf.Len() < idleMinChars {
+			bs.idleTimer = time.AfterFunc(idleDuration, func() {
+				bs.mu.Lock()
+				defer bs.mu.Unlock()
+				if !bs.done && bs.buf.Len() > 0 {
+					bs.flushLocked()
+				}
+			})
+			return
+		}
+
 		bs.flushLocked()
 	})
 }

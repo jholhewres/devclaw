@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jholhewres/goclaw/pkg/goclaw/copilot/memory"
@@ -459,6 +460,13 @@ func registerBashTool(executor *ToolExecutor) {
 			wrappedCmd += " ; __exit=$?; echo \"__GOCLAW_CWD=$(pwd)\"; exit $__exit"
 
 			cmd := exec.CommandContext(cmdCtx, "bash", "-l", "-c", wrappedCmd)
+			// Create a new process group so we can kill all child processes
+			// (nohup, background &, etc.) when the timeout fires.
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			cmd.Cancel = func() error {
+				// Kill the entire process group (negative PID).
+				return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
 			cmd.Env = os.Environ() // Inherit full user environment.
 
 			// Add any extra env vars set via set_env.
@@ -563,6 +571,10 @@ func registerBashTool(executor *ToolExecutor) {
 			sshArgs = append(sshArgs, host, command)
 
 			cmd := exec.CommandContext(cmdCtx, "ssh", sshArgs...)
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			cmd.Cancel = func() error {
+				return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
 			cmd.Env = os.Environ() // Inherit SSH agent, keys, etc.
 
 			out, err := cmd.CombinedOutput()
@@ -629,6 +641,10 @@ func registerBashTool(executor *ToolExecutor) {
 			scpArgs = append(scpArgs, source, dest)
 
 			cmd := exec.CommandContext(cmdCtx, "scp", scpArgs...)
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			cmd.Cancel = func() error {
+				return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
 			cmd.Env = os.Environ()
 
 			out, err := cmd.CombinedOutput()

@@ -412,6 +412,9 @@ func (a *Assistant) Start(ctx context.Context) error {
 	// 6. Start main message processing loop.
 	go a.messageLoop()
 
+	// 6b. Start session watchdog to recover stuck sessions.
+	go a.sessionWatchdog()
+
 	// 7. Run BOOT.md if present (gateway startup).
 	// Executes after all channels are connected, with a short delay for stabilization.
 	go a.runBootOnce()
@@ -1308,6 +1311,8 @@ func (a *Assistant) ExecuteAgent(ctx context.Context, systemPrompt string, sessi
 }
 
 // StopActiveRun cancels the active agent run for the given workspace and session.
+// It also signals the tool executor to abort all running tools and forces the
+// session out of "processing" state so new messages are handled immediately.
 // Returns true if a run was stopped, false if none was active.
 func (a *Assistant) StopActiveRun(workspaceID, sessionID string) bool {
 	runKey := workspaceID + ":" + sessionID
@@ -1317,11 +1322,75 @@ func (a *Assistant) StopActiveRun(workspaceID, sessionID string) bool {
 		delete(a.activeRuns, runKey)
 	}
 	a.activeRunsMu.Unlock()
+
 	if ok && cancel != nil {
+		// Signal tool executor to abort all running tools immediately.
+		a.toolExecutor.Abort()
+		// Cancel the run context (kills LLM calls and tool contexts).
 		cancel()
+		// Force-clear the processing flag so the session is unblocked.
+		a.messageQueue.SetProcessing(sessionID, false)
+		// Reset abort channel for the next run.
+		a.toolExecutor.ResetAbort()
+		a.logger.Info("active run force-stopped", "workspace", workspaceID, "session", sessionID)
 		return true
 	}
+
+	// Even if no active run was found, clear a potentially stuck processing flag.
+	if a.messageQueue.IsProcessing(sessionID) {
+		a.messageQueue.SetProcessing(sessionID, false)
+		a.logger.Warn("cleared stuck processing flag (no active run found)", "session", sessionID)
+		return true
+	}
+
 	return false
+}
+
+// sessionWatchdog periodically checks for sessions stuck in "processing" state
+// and force-recovers them. This prevents sessions from being permanently blocked
+// when a tool hangs beyond all timeout layers (e.g. orphaned child processes).
+func (a *Assistant) sessionWatchdog() {
+	const checkInterval = 60 * time.Second
+	// Max time a session can be "processing" before the watchdog intervenes.
+	// Set above the agent run timeout (default 20min) to avoid false positives.
+	maxBusy := time.Duration(a.config.Agent.RunTimeoutSeconds)*time.Second + 5*time.Minute
+	if maxBusy < 10*time.Minute {
+		maxBusy = 25 * time.Minute
+	}
+
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case <-ticker.C:
+			stuck := a.messageQueue.StuckSessions(maxBusy)
+			for _, sessionID := range stuck {
+				a.logger.Warn("watchdog: session stuck in processing, force-recovering",
+					"session", sessionID, "max_busy", maxBusy)
+
+				// Try to cancel the active run.
+				a.activeRunsMu.Lock()
+				for key, cancel := range a.activeRuns {
+					if strings.HasSuffix(key, ":"+sessionID) || key == sessionID {
+						cancel()
+						delete(a.activeRuns, key)
+						break
+					}
+				}
+				a.activeRunsMu.Unlock()
+
+				// Abort running tools and reset.
+				a.toolExecutor.Abort()
+				a.toolExecutor.ResetAbort()
+
+				// Force-clear the processing flag.
+				a.messageQueue.SetProcessing(sessionID, false)
+			}
+		}
+	}
 }
 
 // initScheduler creates and configures the scheduler.

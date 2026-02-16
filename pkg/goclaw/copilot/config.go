@@ -386,6 +386,12 @@ type ToolExecutorConfig struct {
 
 	// MaxParallel is the max concurrent tool executions when parallel is enabled (default: 5).
 	MaxParallel int `yaml:"max_parallel"`
+
+	// BashTimeoutSeconds is the executor-level timeout for bash/ssh/scp/exec tools (default: 300).
+	BashTimeoutSeconds int `yaml:"bash_timeout_seconds"`
+
+	// DefaultTimeoutSeconds is the executor-level timeout for all other tools (default: 30).
+	DefaultTimeoutSeconds int `yaml:"default_timeout_seconds"`
 }
 
 // TokenBudgetConfig configures per-layer token allocation.
@@ -478,8 +484,10 @@ func DefaultConfig() *Config {
 			EnableURLValidation: true,
 			ToolGuard:           DefaultToolGuardConfig(),
 			ToolExecutor: ToolExecutorConfig{
-				Parallel:    true,
-				MaxParallel: 5,
+				Parallel:              true,
+				MaxParallel:           5,
+				BashTimeoutSeconds:    300,
+				DefaultTimeoutSeconds: 30,
 			},
 		},
 		TokenBudget: TokenBudgetConfig{

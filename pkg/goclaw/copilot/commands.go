@@ -330,7 +330,7 @@ func (a *Assistant) denyCommand(args []string, msg *channels.IncomingMessage) st
 func (a *Assistant) stopCommand(msg *channels.IncomingMessage) string {
 	resolved := a.workspaceMgr.Resolve(msg.Channel, msg.ChatID, msg.From, msg.IsGroup)
 	if a.StopActiveRun(resolved.Workspace.ID, resolved.Session.ID) {
-		return "Agent stopped."
+		return "Agent stopped. Session unlocked."
 	}
 	return "No active run."
 }
