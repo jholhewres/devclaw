@@ -25,6 +25,7 @@ type SetupRequest struct {
 	APIKey        string          `json:"apiKey"`
 	Model         string          `json:"model"`
 	BaseURL       string          `json:"baseUrl"`
+	OwnerPhone    string          `json:"ownerPhone"`
 	WebuiPassword string          `json:"webuiPassword"`
 	VaultPassword string          `json:"vaultPassword"`
 	AccessMode    string          `json:"accessMode"`
@@ -487,7 +488,13 @@ func generateConfigYAML(s *SetupRequest) string {
 	default:
 		b.WriteString("  default_policy: deny\n")
 	}
-	b.WriteString("  owners: []\n\n")
+	if s.OwnerPhone != "" {
+		// Format as WhatsApp JID for the access system.
+		jid := s.OwnerPhone + "@s.whatsapp.net"
+		fmt.Fprintf(&b, "  owners: [%q]\n\n", jid)
+	} else {
+		b.WriteString("  owners: []\n\n")
+	}
 
 	// ── Channels ──
 	b.WriteString("# ── Channels ──\n")

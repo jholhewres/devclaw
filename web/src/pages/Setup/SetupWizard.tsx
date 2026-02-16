@@ -20,6 +20,7 @@ export interface SetupData {
   baseUrl: string
 
   /* Etapa 3: Segurança */
+  ownerPhone: string
   webuiPassword: string
   vaultPassword: string
   accessMode: 'relaxed' | 'strict' | 'paranoid'
@@ -39,6 +40,7 @@ const INITIAL_DATA: SetupData = {
   apiKey: '',
   model: '',
   baseUrl: '',
+  ownerPhone: '',
   webuiPassword: '',
   vaultPassword: '',
   accessMode: 'strict',
