@@ -1,4 +1,4 @@
-.PHONY: build run serve setup chat test test-v lint clean install init help web-install web-build web-dev
+.PHONY: build build-linux run serve setup chat test test-v lint clean install init help web-install web-build web-dev
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
@@ -36,6 +36,10 @@ build: web-build
 ## build-go: Build only the Go binary (skip frontend)
 build-go:
 	CGO_ENABLED=1 go build -tags 'sqlite_fts5' $(LDFLAGS) -o bin/copilot ./cmd/copilot
+
+## build-linux: Cross-compile for Linux AMD64 (for VM deploy)
+build-linux:
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags 'sqlite_fts5' $(LDFLAGS) -o bin/copilot-linux-amd64 ./cmd/copilot
 
 ## run: Build and start copilot serve
 run: build
