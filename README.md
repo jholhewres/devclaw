@@ -69,6 +69,7 @@ iwr -useb https://raw.githubusercontent.com/jholhewres/devclaw/master/scripts/in
 - **Encrypted vault** — AES-256-GCM + Argon2id for all secrets
 - **Persistent memory** — SQLite FTS5 + vector embeddings for long-term context
 - **Daemon manager** — start, monitor, and control background processes (dev servers, watchers)
+- **Subagents** — spawn concurrent child agents for parallel tasks (research, code, deploy simultaneously)
 - **Plugin system** — GitHub, Jira, Sentry integrations with webhook support
 - **Shell hook** — auto-capture failed commands and suggest `devclaw fix`
 
@@ -85,12 +86,18 @@ iwr -useb https://raw.githubusercontent.com/jholhewres/devclaw/master/scripts/in
         ┌──────────────▼──────────────┐
         │         Assistant           │
         │       (agent loop)          │
-        └──┬──────────┬──────────┬────┘
-           │          │          │
-    ┌──────▼──┐  ┌────▼────┐  ┌─▼────────┐
-    │  Tools  │  │   LLM   │  │  Memory  │
-    │  (70+)  │  │  Client │  │ (SQLite) │
-    └─────────┘  └─────────┘  └──────────┘
+        └──┬──────┬──────────┬────┬───┘
+           │      │          │    │
+    ┌──────▼──┐ ┌─▼──────┐ ┌▼──────────┐
+    │  Tools  │ │  LLM   │ │  Memory   │
+    │  (70+)  │ │ Client │ │ (SQLite)  │
+    └─────────┘ └────────┘ └───────────┘
+           │
+    ┌──────▼────────────────────────────┐
+    │          Subagent Manager         │
+    │  (up to 8 concurrent child agents │
+    │   with isolated sessions + tools) │
+    └───────────────────────────────────┘
            │
     ┌──────▼────────────────────────────────┐
     │            MCP Server                 │
@@ -123,6 +130,7 @@ iwr -useb https://raw.githubusercontent.com/jholhewres/devclaw/master/scripts/in
 | **Ops** | server_health (HTTP/TCP/DNS), deploy_run, tunnel_manage, ssh_exec |
 | **Product** | sprint_report, dora_metrics, project_summary |
 | **Daemons** | start_daemon, daemon_logs, daemon_list, daemon_stop, daemon_restart |
+| **Subagents** | spawn_subagent, list_subagents, wait_subagent, stop_subagent |
 | **Plugins** | plugin_list, plugin_install, plugin_call (GitHub, Jira, Sentry) |
 | **Team** | team_users (RBAC), shared_memory |
 | **IDE** | ide_configure (VSCode, Cursor, JetBrains, Neovim) |
@@ -241,6 +249,56 @@ devclaw skill list
 ```
 
 Browse the catalog: [devclaw-skills](https://github.com/jholhewres/devclaw-skills)
+
+---
+
+## Subagents
+
+DevClaw can spawn **concurrent child agents** to handle multiple tasks in parallel. The main agent delegates work to subagents, each running in its own goroutine with an isolated session and filtered tool set.
+
+```
+Main Agent
+  ├── spawn_subagent("research API docs")     → runs concurrently
+  ├── spawn_subagent("write unit tests")      → runs concurrently
+  └── spawn_subagent("check deploy status")   → runs concurrently
+         │
+         ▼
+  Results announced back to parent when done
+```
+
+**How it works:**
+
+- `spawn_subagent` — creates a child agent with a specific task, returns a `run_id` immediately
+- `list_subagents` — check status of all running/completed subagents
+- `wait_subagent` — block until a subagent finishes and get its result
+- `stop_subagent` — cancel a running subagent
+
+**Key properties:**
+
+- Up to **8 concurrent** subagents (configurable)
+- Each subagent gets its own **isolated session** and **filtered tools** (no recursion, no memory writes)
+- Configurable **timeout** (default: 10min) and optional **model override** per subagent
+- Results are **persisted to SQLite** — survive process restarts
+- **Push-style announce** — parent is notified immediately when a subagent completes
+
+**Example use cases:**
+
+- Research multiple topics simultaneously while the main agent continues working
+- Run tests in background while writing code
+- Deploy to staging while generating release notes
+- Audit dependencies across multiple languages in parallel
+
+```yaml
+# config.yaml
+subagents:
+  enabled: true
+  max_concurrent: 8
+  timeout_seconds: 600
+  denied_tools:
+    - spawn_subagent    # no recursion
+    - memory_save       # no memory pollution
+    - cron_add          # no scheduling
+```
 
 ---
 
