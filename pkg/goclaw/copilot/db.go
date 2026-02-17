@@ -84,6 +84,23 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at);
+
+-- Subagent runs (persisted for restart recovery and history lookup).
+CREATE TABLE IF NOT EXISTS subagent_runs (
+    id                TEXT PRIMARY KEY,
+    label             TEXT NOT NULL,
+    task              TEXT NOT NULL,
+    status            TEXT NOT NULL DEFAULT 'running',
+    result            TEXT DEFAULT '',
+    error             TEXT DEFAULT '',
+    model             TEXT DEFAULT '',
+    parent_session_id TEXT DEFAULT '',
+    tokens_used       INTEGER DEFAULT 0,
+    started_at        TEXT NOT NULL,
+    completed_at      TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_subagent_runs_parent ON subagent_runs(parent_session_id);
+CREATE INDEX IF NOT EXISTS idx_subagent_runs_status ON subagent_runs(status);
 `
 
 // OpenDatabase opens (or creates) the central goclaw.db at the given path.

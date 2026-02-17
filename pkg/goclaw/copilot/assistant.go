@@ -379,6 +379,16 @@ func (a *Assistant) Start(ctx context.Context) error {
 		}
 	}
 
+	// 0c-3. Subagent persistence: wire SQLite for run history across restarts.
+	if a.goclawDB != nil {
+		a.subagentMgr.SetDB(a.goclawDB)
+		// Auto-prune runs older than 7 days on startup.
+		a.subagentMgr.PruneOldRuns(7)
+		// Clean up stale "running" entries from previous crashes.
+		a.subagentMgr.cleanupStaleRunning()
+		a.logger.Info("subagent persistence enabled (SQLite)")
+	}
+
 	// 1. Register skill loaders and load all skills.
 	a.registerSkillLoaders()
 	if err := a.skillRegistry.LoadAll(a.ctx); err != nil {

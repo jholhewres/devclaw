@@ -20,6 +20,7 @@ package copilot
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -79,8 +80,8 @@ func DefaultSubagentConfig() SubagentConfig {
 	return SubagentConfig{
 		Enabled:        true,
 		MaxConcurrent:  8,
-		MaxTurns:       0, // Unlimited (aligned with agent loop)
-		TimeoutSeconds: 300,
+		MaxTurns:       0,   // Unlimited (aligned with agent loop)
+		TimeoutSeconds: 600, // 10 minutes — enough for research tasks that do many web searches
 		DeniedTools:    DefaultSubagentDeniedTools,
 	}
 }
@@ -154,8 +155,12 @@ type SubagentManager struct {
 	cfg    SubagentConfig
 	logger *slog.Logger
 
-	// runs tracks all subagent runs (active and completed).
+	// runs tracks all subagent runs (active and in-memory completed).
 	runs map[string]*SubagentRun
+
+	// db is the central SQLite database for persisting completed runs.
+	// When nil, runs are only kept in memory (lost on restart).
+	db *sql.DB
 
 	// semaphore limits concurrent subagents.
 	semaphore chan struct{}
@@ -197,6 +202,160 @@ func (m *SubagentManager) SetAnnounceCallback(cb AnnounceCallback) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.announceCallback = cb
+}
+
+// SetDB wires the central SQLite database for persisting subagent runs.
+// When set, completed/failed runs survive process restarts.
+func (m *SubagentManager) SetDB(db *sql.DB) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.db = db
+}
+
+// ─── SQLite Persistence ───
+
+// persistRun saves or updates a subagent run to SQLite.
+func (m *SubagentManager) persistRun(run *SubagentRun) {
+	if m.db == nil {
+		return
+	}
+
+	completedAt := ""
+	if !run.CompletedAt.IsZero() {
+		completedAt = run.CompletedAt.Format(time.RFC3339)
+	}
+
+	_, err := m.db.Exec(`
+		INSERT OR REPLACE INTO subagent_runs
+			(id, label, task, status, result, error, model, parent_session_id, tokens_used, started_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.ID, run.Label, run.Task, string(run.Status),
+		run.Result, run.Error, run.Model,
+		run.ParentSessionID, run.TokensUsed,
+		run.StartedAt.Format(time.RFC3339), completedAt,
+	)
+	if err != nil {
+		m.logger.Warn("failed to persist subagent run", "run_id", run.ID, "error", err)
+	}
+}
+
+// loadRunFromDB loads a single subagent run from SQLite by ID.
+// Returns nil if not found.
+func (m *SubagentManager) loadRunFromDB(runID string) *SubagentRun {
+	if m.db == nil {
+		return nil
+	}
+
+	var run SubagentRun
+	var status, startedAt, completedAt string
+
+	err := m.db.QueryRow(`
+		SELECT id, label, task, status, result, error, model, parent_session_id, tokens_used, started_at, completed_at
+		FROM subagent_runs WHERE id = ?`, runID,
+	).Scan(&run.ID, &run.Label, &run.Task, &status,
+		&run.Result, &run.Error, &run.Model,
+		&run.ParentSessionID, &run.TokensUsed,
+		&startedAt, &completedAt,
+	)
+	if err != nil {
+		return nil
+	}
+
+	run.Status = SubagentStatus(status)
+	run.StartedAt, _ = time.Parse(time.RFC3339, startedAt)
+	if completedAt != "" {
+		run.CompletedAt, _ = time.Parse(time.RFC3339, completedAt)
+		run.Duration = run.CompletedAt.Sub(run.StartedAt)
+	}
+	return &run
+}
+
+// loadRecentRunsFromDB loads completed runs from the last N days.
+func (m *SubagentManager) loadRecentRunsFromDB(days int) []*SubagentRun {
+	if m.db == nil {
+		return nil
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
+	rows, err := m.db.Query(`
+		SELECT id, label, task, status, result, error, model, parent_session_id, tokens_used, started_at, completed_at
+		FROM subagent_runs
+		WHERE started_at > ? AND status != 'running'
+		ORDER BY started_at DESC
+		LIMIT 50`, cutoff,
+	)
+	if err != nil {
+		m.logger.Warn("failed to load recent subagent runs", "error", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var runs []*SubagentRun
+	for rows.Next() {
+		var run SubagentRun
+		var status, startedAt, completedAt string
+
+		if err := rows.Scan(&run.ID, &run.Label, &run.Task, &status,
+			&run.Result, &run.Error, &run.Model,
+			&run.ParentSessionID, &run.TokensUsed,
+			&startedAt, &completedAt,
+		); err != nil {
+			continue
+		}
+
+		run.Status = SubagentStatus(status)
+		run.StartedAt, _ = time.Parse(time.RFC3339, startedAt)
+		if completedAt != "" {
+			run.CompletedAt, _ = time.Parse(time.RFC3339, completedAt)
+			run.Duration = run.CompletedAt.Sub(run.StartedAt)
+		}
+		runs = append(runs, &run)
+	}
+	return runs
+}
+
+// cleanupStaleRunning marks any "running" entries from previous crashes as "failed".
+// Called on startup — if a subagent was still running when the process died, it can't
+// be recovered, so we mark it failed so the user sees an honest status.
+func (m *SubagentManager) cleanupStaleRunning() {
+	if m.db == nil {
+		return
+	}
+
+	result, err := m.db.Exec(`
+		UPDATE subagent_runs
+		SET status = 'failed', error = 'interrupted by process restart', completed_at = datetime('now')
+		WHERE status = 'running'`,
+	)
+	if err != nil {
+		m.logger.Warn("failed to cleanup stale running subagents", "error", err)
+		return
+	}
+
+	affected, _ := result.RowsAffected()
+	if affected > 0 {
+		m.logger.Info("cleaned up stale subagent runs", "count", affected)
+	}
+}
+
+// PruneOldRuns removes persisted runs older than the given number of days.
+func (m *SubagentManager) PruneOldRuns(days int) int {
+	if m.db == nil {
+		return 0
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -days).Format(time.RFC3339)
+	result, err := m.db.Exec(`DELETE FROM subagent_runs WHERE started_at < ? AND status != 'running'`, cutoff)
+	if err != nil {
+		m.logger.Warn("failed to prune old subagent runs", "error", err)
+		return 0
+	}
+
+	affected, _ := result.RowsAffected()
+	if affected > 0 {
+		m.logger.Info("pruned old subagent runs", "deleted", affected, "cutoff_days", days)
+	}
+	return int(affected)
 }
 
 // SpawnParams holds parameters for spawning a subagent.
@@ -255,6 +414,9 @@ func (m *SubagentManager) Spawn(
 	m.mu.Lock()
 	m.runs[runID] = run
 	m.mu.Unlock()
+
+	// Persist the "running" state so we can detect interrupted subagents on restart.
+	m.persistRun(run)
 
 	m.logger.Info("spawning subagent",
 		"run_id", runID,
@@ -379,6 +541,9 @@ func (m *SubagentManager) completeRun(run *SubagentRun, result string, err error
 	cb := m.announceCallback
 	m.mu.Unlock()
 
+	// Persist the completed state to SQLite for restart recovery.
+	m.persistRun(run)
+
 	// ── Announce (push) ── Notify parent immediately
 	// instead of requiring poll via wait_subagent.
 	if cb != nil {
@@ -405,23 +570,44 @@ func (m *SubagentManager) Wait(ctx context.Context, runID string) (*SubagentRun,
 	}
 }
 
-// Get returns a subagent run by ID.
+// Get returns a subagent run by ID. Checks in-memory first, then SQLite.
 func (m *SubagentManager) Get(runID string) (*SubagentRun, bool) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	run, ok := m.runs[runID]
-	return run, ok
+	m.mu.RUnlock()
+
+	if ok {
+		return run, true
+	}
+
+	// Fall back to SQLite for completed runs that were evicted from memory.
+	if dbRun := m.loadRunFromDB(runID); dbRun != nil {
+		return dbRun, true
+	}
+	return nil, false
 }
 
-// List returns all subagent runs (active and completed).
+// List returns all subagent runs (active in-memory + recent from SQLite).
+// Merges both sources, deduplicating by ID.
 func (m *SubagentManager) List() []*SubagentRun {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
+	seen := make(map[string]bool, len(m.runs))
 	runs := make([]*SubagentRun, 0, len(m.runs))
 	for _, run := range m.runs {
 		runs = append(runs, run)
+		seen[run.ID] = true
 	}
+	m.mu.RUnlock()
+
+	// Merge recent runs from SQLite (last 7 days).
+	dbRuns := m.loadRecentRunsFromDB(7)
+	for _, run := range dbRuns {
+		if !seen[run.ID] {
+			runs = append(runs, run)
+			seen[run.ID] = true
+		}
+	}
+
 	return runs
 }
 
