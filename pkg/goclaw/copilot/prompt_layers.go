@@ -597,30 +597,89 @@ func (p *PromptComposer) loadBootstrapFileCached(filename string, searchDirs []s
 	return text
 }
 
+// skillsMaxTokenBudget is the maximum approximate token budget for the skills
+// layer. Each ~4 chars ≈ 1 token. When skills exceed this budget, the largest
+// skills are truncated and a note is appended. This prevents prompt bloat from
+// verbose skill system prompts consuming the entire context window.
+const skillsMaxTokenBudget = 4000
+
 // buildSkillsLayer creates instructions from active skills.
+// Applies a token budget guard: if the total skills text exceeds
+// skillsMaxTokenBudget tokens, larger skills are truncated.
 func (p *PromptComposer) buildSkillsLayer(session *Session) string {
 	activeSkills := session.GetActiveSkills()
 	if len(activeSkills) == 0 {
 		return ""
 	}
 
+	// Collect skill prompts with their sizes.
+	type skillEntry struct {
+		name   string
+		prompt string
+		chars  int
+	}
+	var entries []skillEntry
+	totalChars := 0
+
+	for _, skillName := range activeSkills {
+		sp := ""
+		if p.skillGetter != nil {
+			if skill, ok := p.skillGetter(skillName); ok {
+				sp = skill.SystemPrompt()
+			}
+		}
+		entry := skillEntry{name: skillName, prompt: sp, chars: len(sp)}
+		entries = append(entries, entry)
+		totalChars += entry.chars
+	}
+
+	// Budget check: ~4 chars per token.
+	budgetChars := skillsMaxTokenBudget * 4
+	truncated := false
+
+	if totalChars > budgetChars {
+		truncated = true
+		// Sort by size descending to truncate the largest first.
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].chars > entries[j].chars
+		})
+
+		excess := totalChars - budgetChars
+		for i := range entries {
+			if excess <= 0 {
+				break
+			}
+			maxLen := entries[i].chars - excess
+			if maxLen < 200 {
+				maxLen = 200
+			}
+			if maxLen < entries[i].chars {
+				cut := maxLen
+				if cut > len(entries[i].prompt) {
+					cut = len(entries[i].prompt)
+				}
+				excess -= entries[i].chars - cut
+				entries[i].prompt = entries[i].prompt[:cut] + "\n... (truncated for token budget)"
+				entries[i].chars = cut
+			}
+		}
+	}
+
 	var b strings.Builder
 	b.WriteString("## Skills\n\n")
 	b.WriteString("You have specialized skills available. Each skill provides tools and context.\n\n")
 
-	for _, skillName := range activeSkills {
-		b.WriteString(fmt.Sprintf("### %s\n", skillName))
-
-		if p.skillGetter != nil {
-			if skill, ok := p.skillGetter(skillName); ok {
-				sp := skill.SystemPrompt()
-				if sp != "" {
-					b.WriteString(sp)
-					b.WriteString("\n")
-				}
-			}
+	for _, entry := range entries {
+		b.WriteString(fmt.Sprintf("### %s\n", entry.name))
+		if entry.prompt != "" {
+			b.WriteString(entry.prompt)
+			b.WriteString("\n")
 		}
 		b.WriteString("\n")
+	}
+
+	if truncated {
+		b.WriteString("_Note: Some skill prompts were truncated to stay within the token budget._\n")
 	}
 
 	return b.String()

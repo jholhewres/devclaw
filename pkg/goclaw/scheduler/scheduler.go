@@ -431,8 +431,14 @@ func parseOneShotTime(timeStr string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unrecognized time format: %s", timeStr)
 }
 
+// minJobInterval is the minimum time between consecutive executions of the
+// same job. Prevents "spin loop" where cron fires multiple times within the
+// same second (e.g., when cron.Next(now) == now).
+const minJobInterval = 2 * time.Second
+
 // executeJob runs a job's command through the handler with safety guards:
 // - Per-job mutex prevents duplicate concurrent runs
+// - Spin loop guard: skips execution if the job ran less than minJobInterval ago
 // - Panic recovery isolates errors so one bad job doesn't crash others
 // - Configurable timeout prevents stalls
 func (s *Scheduler) executeJob(job *Job) {
@@ -443,6 +449,20 @@ func (s *Scheduler) executeJob(job *Job) {
 		s.logger.Warn("skipping job (already running)", "id", job.ID)
 		return
 	}
+
+	// Spin loop guard: if the job ran less than minJobInterval ago, skip.
+	// This prevents rapid re-execution when cron schedules fire at the exact
+	// same second boundary.
+	if job.LastRunAt != nil && time.Since(*job.LastRunAt) < minJobInterval {
+		s.mu.Unlock()
+		s.logger.Debug("skipping job (spin loop guard, ran too recently)",
+			"id", job.ID,
+			"last_run_at", job.LastRunAt.Format(time.RFC3339),
+			"elapsed", time.Since(*job.LastRunAt).String(),
+		)
+		return
+	}
+
 	s.runningJobs[job.ID] = true
 	s.mu.Unlock()
 

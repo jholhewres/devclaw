@@ -62,6 +62,9 @@ type AgentConfig struct {
 
 	// MaxCompactionAttempts is how many times to retry after context overflow (default: 3).
 	MaxCompactionAttempts int `yaml:"max_compaction_attempts"`
+
+	// ToolLoop configures tool loop detection thresholds.
+	ToolLoop ToolLoopConfig `yaml:"tool_loop"`
 }
 
 // DefaultAgentConfig returns sensible defaults for agent autonomy.
@@ -103,6 +106,9 @@ type AgentRun struct {
 	// onToolResult is called after each tool execution completes.
 	// Used to auto-send media (e.g. generated images) to the channel.
 	onToolResult func(name string, result ToolResult)
+
+	// loopDetector tracks tool call history and detects repetitive patterns.
+	loopDetector *ToolLoopDetector
 
 	logger *slog.Logger
 }
@@ -169,6 +175,11 @@ func (a *AgentRun) SetOnBeforeToolExec(fn func()) {
 // Used to auto-send media (e.g. generated images) to the channel.
 func (a *AgentRun) SetOnToolResult(fn func(name string, result ToolResult)) {
 	a.onToolResult = fn
+}
+
+// SetLoopDetector sets the tool loop detector for this run.
+func (a *AgentRun) SetLoopDetector(d *ToolLoopDetector) {
+	a.loopDetector = d
 }
 
 // SetInterruptChannel sets the channel for receiving follow-up user messages
@@ -379,6 +390,28 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 			ToolCalls: resp.ToolCalls,
 		})
 
+		// ── Tool Loop Detection ──
+		// Record tool calls and check for repetitive patterns before execution.
+		// Warnings/criticals are deferred until AFTER tool results to maintain
+		// valid message ordering (assistant→tool→user, not assistant→user→tool).
+		var loopWarning string
+		if a.loopDetector != nil {
+			for _, tc := range resp.ToolCalls {
+				args, _ := parseToolArgs(tc.Function.Arguments)
+				result := a.loopDetector.RecordAndCheck(tc.Function.Name, args)
+
+				switch result.Severity {
+				case LoopBreaker:
+					a.logger.Error("tool loop circuit breaker",
+						"tool", tc.Function.Name, "streak", result.Streak, "pattern", result.Pattern)
+					return result.Message, &totalUsage, nil
+
+				case LoopCritical, LoopWarning:
+					loopWarning = result.Message
+				}
+			}
+		}
+
 		// Execute all requested tool calls.
 		toolStart := time.Now()
 		toolNames := make([]string, len(resp.ToolCalls))
@@ -456,6 +489,16 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 			if a.onToolResult != nil && result.Error == nil {
 				a.onToolResult(result.Name, result)
 			}
+		}
+
+		// Inject deferred loop warning AFTER tool results (valid message order:
+		// assistant→tool→user). This ensures providers that validate message
+		// sequences don't reject the request.
+		if loopWarning != "" {
+			messages = append(messages, chatMessage{
+				Role:    "user",
+				Content: "[System] " + loopWarning,
+			})
 		}
 	}
 }

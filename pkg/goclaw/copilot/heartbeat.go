@@ -155,15 +155,17 @@ func (h *Heartbeat) tick(ctx context.Context) {
 		return
 	}
 
-	// Save to session.
-	session.AddMessage(prompt, response)
-
-	// If the response is just HEARTBEAT_OK or empty, skip delivery.
+	// If the response is just HEARTBEAT_OK or empty, skip delivery AND skip
+	// saving to session history. This prevents no-op heartbeat turns from
+	// bloating the transcript over time ("Heartbeat Transcript Pruning").
 	trimmed := strings.TrimSpace(response)
 	if trimmed == "" || strings.EqualFold(trimmed, TokenHeartbeatOK) || strings.EqualFold(trimmed, TokenNoReply) {
-		h.logger.Debug("heartbeat: nothing to deliver")
+		h.logger.Debug("heartbeat: nothing to deliver, pruning from transcript")
 		return
 	}
+
+	// Only save to session when the heartbeat produced an actionable response.
+	session.AddMessage(prompt, response)
 
 	// Deliver proactive message to configured channel.
 	if h.config.Channel != "" && h.config.ChatID != "" {

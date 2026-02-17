@@ -2,6 +2,34 @@
 
 All notable changes to GoClaw are documented in this file.
 
+## [1.5.1] — 2026-02-16
+
+Agent loop safety improvements ported from OpenClaw: tool loop detection, skills token budget guard, heartbeat transcript pruning, compaction retry with backoff, and cron spin loop fix.
+
+### Agent Loop Safety
+
+- **Tool loop detection**: New `ToolLoopDetector` module tracks tool call history with a ring buffer and detects two patterns — **repeat** (same tool+args N times) and **ping-pong** (A→B→A→B). Three severity levels: warning (8x, injects hint), critical (15x, strong nudge), circuit breaker (25x, terminates run). Fully configurable via `config.yaml` under `agent.tool_loop`
+- **Per-run detector isolation**: Each agent run creates its own `ToolLoopDetector` instance to avoid cross-session race conditions when multiple users interact concurrently
+- **Valid message ordering**: Loop warnings are injected AFTER tool results (assistant→tool→user sequence) to avoid API rejections from providers that validate message order
+
+### Prompt & Memory Optimization
+
+- **Skills prompt bloat guard**: Skills layer now enforces a ~4000 token budget. When total skills text exceeds the budget, largest skills are truncated first (minimum 200 chars preserved). Prevents verbose skill prompts from consuming the entire context window
+- **Heartbeat transcript pruning**: No-op heartbeat turns (HEARTBEAT_OK, NO_REPLY, empty) are no longer saved to session history. Only actionable heartbeat responses are persisted, preventing transcript bloat over time
+
+### Reliability
+
+- **Compaction retry with exponential backoff**: The `compactSummarize` LLM call now retries up to 3 times with backoff (2s→4s→8s) on transient errors (rate-limits, timeouts). Properly exits retry loop on context cancellation. Falls back to static summary only after all retries are exhausted
+- **Cron spin loop fix**: New `minJobInterval` (2s) guard in scheduler's `executeJob` prevents rapid re-execution when cron fires at the exact same second boundary. Skips silently with debug log when a job ran too recently
+
+### Testing
+
+- **Tool loop detection tests**: 12 test cases covering warning/critical/breaker thresholds, ping-pong detection, reset behavior, disabled mode, ring buffer limits, threshold normalization, and hash determinism
+- **Scheduler spin loop tests**: 3 test cases covering spin loop guard, duplicate execution guard, and minJobInterval value assertion
+- All tests pass with `-race` detector
+
+---
+
 ## [1.5.0] — 2026-02-16
 
 Media processing, document enrichment, WhatsApp UX overhaul, comprehensive security hardening, agent intelligence improvements, and full unit test coverage.

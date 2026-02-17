@@ -119,6 +119,9 @@ type Assistant struct {
 	// ttsProvider handles text-to-speech synthesis (nil if TTS is disabled).
 	ttsProvider tts.Provider
 
+	// loopDetectorConfig holds tool loop detection config for creating per-run detectors.
+	loopDetectorConfig ToolLoopConfig
+
 	// configMu protects hot-reloadable config fields.
 	configMu sync.RWMutex
 
@@ -176,6 +179,14 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 		followupQueues:   make(map[string][]*channels.IncomingMessage),
 		usageTracker:     NewUsageTracker(logger.With("component", "usage")),
 		logger:           logger,
+	}
+
+	// Initialize tool loop detection config (detectors are created per-run to avoid races).
+	// Use defaults, then apply user overrides. NewToolLoopDetector normalizes zero-values.
+	a.loopDetectorConfig = cfg.Agent.ToolLoop
+	if !a.loopDetectorConfig.Enabled && a.loopDetectorConfig.HistorySize == 0 {
+		// No explicit config provided (all zero-values) → use defaults (enabled by default).
+		a.loopDetectorConfig = DefaultToolLoopConfig()
 	}
 
 	// Wire message queue with onDrain callback (requires assistant reference).
@@ -1177,6 +1188,12 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 		agent.SetOnToolResult(a.makeToolResultHook(dt.Channel, dt.ChatID))
 	}
 
+	// Wire tool loop detector (new instance per-run to avoid cross-session races).
+	if a.loopDetectorConfig.Enabled {
+		detector := NewToolLoopDetector(a.loopDetectorConfig, a.logger.With("component", "loop-detect"))
+		agent.SetLoopDetector(detector)
+	}
+
 	if a.usageTracker != nil {
 		agent.SetUsageRecorder(func(model string, usage LLMUsage) {
 			a.usageTracker.Record(session.ID, model, usage)
@@ -1221,6 +1238,13 @@ func (a *Assistant) executeAgent(ctx context.Context, workspaceID string, sessio
 	modelOverride := session.GetConfig().Model
 	agent := NewAgentRunWithConfig(a.llmClient, a.toolExecutor, a.config.Agent, a.logger)
 	agent.SetModelOverride(modelOverride)
+
+	// Wire tool loop detector (new instance per-run to avoid cross-session races).
+	if a.loopDetectorConfig.Enabled {
+		detector := NewToolLoopDetector(a.loopDetectorConfig, a.logger.With("component", "loop-detect"))
+		agent.SetLoopDetector(detector)
+	}
+
 	if a.usageTracker != nil {
 		agent.SetUsageRecorder(func(model string, usage LLMUsage) {
 			a.usageTracker.Record(session.ID, model, usage)
@@ -1831,10 +1855,46 @@ func (a *Assistant) compactSummarize(session *Session, threshold int) {
 		}
 	}
 
-	// Step 2: LLM summarizes the conversation.
+	// Step 2: LLM summarizes the conversation with retry and exponential backoff.
+	// Transient errors (rate-limits, timeouts) are retried up to 3 times with
+	// backoff: 2s → 4s → 8s. On permanent failure, a static fallback is used.
 	summaryPrompt := "Summarize the key points of this conversation in 2-3 sentences. Focus on decisions made, tasks completed, and important context."
-	summary, err := a.llmClient.Complete(a.ctx, "", session.RecentHistory(20), summaryPrompt)
-	if err != nil {
+	var summary string
+	var summaryErr error
+
+	backoff := 2 * time.Second
+	const maxSummaryRetries = 3
+
+	for attempt := 1; attempt <= maxSummaryRetries; attempt++ {
+		summary, summaryErr = a.llmClient.Complete(a.ctx, "", session.RecentHistory(20), summaryPrompt)
+		if summaryErr == nil {
+			break
+		}
+
+		a.logger.Warn("compaction summary attempt failed",
+			"attempt", attempt,
+			"max_retries", maxSummaryRetries,
+			"error", summaryErr,
+			"next_backoff", backoff.String(),
+		)
+
+		// Stop retrying if the context is already cancelled.
+		if a.ctx.Err() != nil {
+			break
+		}
+
+		if attempt < maxSummaryRetries {
+			select {
+			case <-time.After(backoff):
+				backoff *= 2
+			case <-a.ctx.Done():
+				// Context cancelled during backoff wait — stop retrying.
+			}
+		}
+	}
+	if summaryErr != nil {
+		a.logger.Error("compaction summary failed after all retries, using fallback",
+			"retries", maxSummaryRetries, "error", summaryErr)
 		summary = "Previous conversation context was compacted."
 	}
 
