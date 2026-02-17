@@ -535,8 +535,8 @@ function PermToggle({
         <p className="text-xs font-semibold text-zinc-200">{label}</p>
         <p className="text-[10px] text-zinc-500">{hint}</p>
       </div>
-      <div className={`h-5 w-9 shrink-0 rounded-full transition-colors ${enabled ? trackActive : 'bg-zinc-700'}`}>
-        <div className={`mt-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${enabled ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
+      <div className={`inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${enabled ? trackActive : 'bg-zinc-700'}`}>
+        <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${enabled ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
       </div>
     </button>
   )

@@ -381,14 +381,16 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={value}
       onClick={() => onChange(!value)}
-      className={`relative h-6 w-10 shrink-0 cursor-pointer rounded-full transition-colors ${
+      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
         value ? 'bg-orange-500' : 'bg-zinc-700'
       }`}
     >
       <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
-          value ? 'translate-x-[18px]' : 'translate-x-0.5'
+        className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+          value ? 'translate-x-5' : 'translate-x-0.5'
         }`}
       />
     </button>
