@@ -51,7 +51,7 @@ export function Security() {
 
         {/* Quick status */}
         <div className="mt-6 grid grid-cols-3 gap-2.5">
-          <StatusPill label="Vault" ok={!!vaultOk} text={vaultOk ? 'Desbloqueado' : 'Inativo'} />
+          <StatusPill label="Vault" ok={!!vaultOk} text={vaultOk ? 'Protegido' : 'Inativo'} />
           <StatusPill label="Tool Guard" ok={!!guardOk} text={guardOk ? 'Ativo' : 'Desativado'} />
           <StatusPill label="Autenticação" ok={!!authOk} text={authOk ? 'Protegido' : 'Aberto'} />
         </div>
@@ -159,7 +159,7 @@ function VaultSection({ exists, unlocked }: { exists: boolean; unlocked: boolean
         ? 'bg-emerald-500/10 text-emerald-400 ring-emerald-500/20'
         : 'bg-amber-500/10 text-amber-400 ring-amber-500/20'
     }`}>
-      {!exists ? 'Inexistente' : unlocked ? 'Desbloqueado' : 'Bloqueado'}
+      {!exists ? 'Não configurado' : unlocked ? 'Protegido' : 'Inacessível'}
     </span>
   )
 
@@ -183,8 +183,8 @@ function VaultSection({ exists, unlocked }: { exists: boolean; unlocked: boolean
       ) : !vault.unlocked ? (
         <EmptyState
           icon={<Lock className="h-8 w-8 text-amber-400/40" />}
-          title="Vault bloqueado"
-          description="Defina DEVCLAW_VAULT_PASSWORD no ambiente para desbloquear"
+          title="Vault inacessível"
+          description="Defina DEVCLAW_VAULT_PASSWORD no ambiente para liberar o acesso"
         />
       ) : (
         <div>
@@ -466,7 +466,7 @@ function AuditLogSection({ entryCount }: { entryCount: number }) {
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-[10px] font-medium text-red-400">
-                        <XCircle className="h-3 w-3" /> Bloqueado
+                        <XCircle className="h-3 w-3" /> Negado
                       </span>
                     )}
                   </td>
