@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/huh"
-	"github.com/jholhewres/goclaw/pkg/goclaw/copilot"
-	"github.com/jholhewres/goclaw/pkg/goclaw/skills"
+	"github.com/jholhewres/devclaw/pkg/devclaw/copilot"
+	"github.com/jholhewres/devclaw/pkg/devclaw/skills"
 	"github.com/spf13/cobra"
 )
 
@@ -95,7 +95,7 @@ func newSkillDefaultsCmd() *cobra.Command {
 		Use:   "defaults",
 		Short: "Install recommended default skills (interactive or --all)",
 		Long: `Interactively select and install recommended default skills that come
-bundled with GoClaw. Use --all to install all of them at once.
+bundled with DevClaw. Use --all to install all of them at once.
 
 These are productivity-focused skills like web-search, weather, notes,
 reminders, timer, translate, and more — ready to use without any setup.`,

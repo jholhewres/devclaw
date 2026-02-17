@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/chzyer/readline"
-	"github.com/jholhewres/goclaw/pkg/goclaw/copilot"
+	"github.com/jholhewres/devclaw/pkg/devclaw/copilot"
 	"github.com/spf13/cobra"
 )
 
@@ -150,7 +150,7 @@ func historyFile() string {
 	if err != nil {
 		return ""
 	}
-	dir := filepath.Join(home, ".goclaw")
+	dir := filepath.Join(home, ".devclaw")
 	_ = os.MkdirAll(dir, 0o700)
 	return filepath.Join(dir, "chat_history")
 }

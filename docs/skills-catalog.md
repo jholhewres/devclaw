@@ -1,10 +1,10 @@
-# GoClaw Skills Catalog
+# DevClaw Skills Catalog
 
-Complete catalog of available, planned, and compatible skills for GoClaw.
+Complete catalog of available, planned, and compatible skills for DevClaw.
 
 ## Skill Formats
 
-GoClaw supports two skill formats:
+DevClaw supports two skill formats:
 
 | Format | Files | Runtime | Sandbox |
 |--------|-------|---------|---------|
@@ -243,12 +243,12 @@ Google Calendar integration via credentials JSON.
 
 ## ClawdHub Compatible Skills
 
-GoClaw can run any skill from [ClawdHub](https://github.com/openclaw/skills) (924 stars, 23K+ commits) via the SKILL.md compatibility layer. Scripts execute inside the [sandbox](../README.md#script-sandbox).
+DevClaw can run any skill from [ClawdHub](https://github.com/openclaw/skills) (924 stars, 23K+ commits) via the SKILL.md compatibility layer. Scripts execute inside the [sandbox](../README.md#script-sandbox).
 
 ### How it works
 
 ```
-ClawdHub Skill                GoClaw
+ClawdHub Skill                DevClaw
 ─────────────                ────────
 SKILL.md       ──parse──►   ClawdHubLoader
   frontmatter  ──validate►   Requirement check (bins, env, OS)
@@ -372,7 +372,7 @@ metadata:             # Optional. Single-line JSON.
       bins: [string]
       anyBins: [string]
       env: [string]
-    install: [...]    # UI-only, not used by GoClaw
+    install: [...]    # UI-only, not used by DevClaw
 ---
 # Skill Title
 

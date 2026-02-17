@@ -1,21 +1,21 @@
 ---
-description: Go coding conventions for GoClaw project
+description: Go coding conventions for DevClaw project
 globs: ["**/*.go"]
 alwaysApply: true
 ---
 
-# Go Conventions — GoClaw
+# Go Conventions — DevClaw
 
 ## Project Structure
 
 - CLI: `cmd/copilot/commands/` — cobra commands
-- Core: `pkg/goclaw/copilot/` — assistant, agent, tools, sessions
-- Channels: `pkg/goclaw/channels/` — WhatsApp, Discord, Telegram
-- Gateway: `pkg/goclaw/gateway/` — HTTP API + WebSocket
-- Skills: `pkg/goclaw/skills/` — skill system
-- Scheduler: `pkg/goclaw/scheduler/` — cron jobs
-- Sandbox: `pkg/goclaw/sandbox/` — script isolation
-- WebUI: `pkg/goclaw/webui/` — web interface backend
+- Core: `pkg/devclaw/copilot/` — assistant, agent, tools, sessions
+- Channels: `pkg/devclaw/channels/` — WhatsApp, Discord, Telegram
+- Gateway: `pkg/devclaw/gateway/` — HTTP API + WebSocket
+- Skills: `pkg/devclaw/skills/` — skill system
+- Scheduler: `pkg/devclaw/scheduler/` — cron jobs
+- Sandbox: `pkg/devclaw/sandbox/` — script isolation
+- WebUI: `pkg/devclaw/webui/` — web interface backend
 
 ## Concurrency Patterns
 
@@ -56,9 +56,9 @@ alwaysApply: true
 
 ## Vault & Secrets
 
-- All secrets stored in encrypted vault (`.goclaw.vault`, AES-256-GCM + Argon2id)
-- `.env` only holds `GOCLAW_VAULT_PASSWORD` — never API keys or tokens
-- `config.yaml` uses `${GOCLAW_*}` references — resolved from vault at startup
+- All secrets stored in encrypted vault (`.devclaw.vault`, AES-256-GCM + Argon2id)
+- `.env` only holds `DEVCLAW_VAULT_PASSWORD` — never API keys or tokens
+- `config.yaml` uses `${DEVCLAW_*}` references — resolved from vault at startup
 - `injectVaultSecrets()` in `keyring.go` maps vault keys to env vars
 - Add new vault→env mappings in `vaultEnvMapping` map in `keyring.go`
 
@@ -71,9 +71,9 @@ alwaysApply: true
 
 ## Deploy
 
-- Cross-compile: `GOOS=linux GOARCH=amd64 go build -o goclaw-linux-amd64 ./cmd/copilot`
+- Cross-compile: `GOOS=linux GOARCH=amd64 go build -o devclaw-linux-amd64 ./cmd/copilot`
 - Upload: `gcloud compute scp` to `openclaw-gateway` (zone: `southamerica-east1-a`)
-- Process manager: PM2 (`pm2 stop goclaw && cp ... && pm2 start goclaw`)
+- Process manager: PM2 (`pm2 stop devclaw && cp ... && pm2 start devclaw`)
 
 ## Do NOT
 

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jholhewres/goclaw/cmd/copilot/commands"
+	"github.com/jholhewres/devclaw/cmd/copilot/commands"
 )
 
 // version é injetado em build time via ldflags.

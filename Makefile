@@ -22,8 +22,8 @@ web-install:
 web-build:
 	cd web && npm run build
 	@# Copy dist into the Go embed directory
-	rm -rf pkg/goclaw/webui/dist
-	cp -r web/dist pkg/goclaw/webui/dist
+	rm -rf pkg/devclaw/webui/dist
+	cp -r web/dist pkg/devclaw/webui/dist
 
 ## web-dev: Start Vite dev server (proxies /api to :8090)
 web-dev:
@@ -76,11 +76,11 @@ chat: build-go
 
 ## test: Run all unit tests
 test:
-	CGO_ENABLED=1 go test -tags 'sqlite_fts5' -count=1 -race ./pkg/goclaw/copilot/ ./pkg/goclaw/copilot/security/ ./pkg/goclaw/skills/
+	CGO_ENABLED=1 go test -tags 'sqlite_fts5' -count=1 -race ./pkg/devclaw/copilot/ ./pkg/devclaw/copilot/security/ ./pkg/devclaw/skills/
 
 ## test-v: Run all unit tests (verbose)
 test-v:
-	CGO_ENABLED=1 go test -tags 'sqlite_fts5' -count=1 -race -v ./pkg/goclaw/copilot/ ./pkg/goclaw/copilot/security/ ./pkg/goclaw/skills/
+	CGO_ENABLED=1 go test -tags 'sqlite_fts5' -count=1 -race -v ./pkg/devclaw/copilot/ ./pkg/devclaw/copilot/security/ ./pkg/devclaw/skills/
 
 ## lint: Run linter
 lint:
@@ -88,7 +88,7 @@ lint:
 
 ## clean: Remove build artifacts
 clean:
-	rm -rf bin/ dist/ web/dist/ pkg/goclaw/webui/dist/
+	rm -rf bin/ dist/ web/dist/ pkg/devclaw/webui/dist/
 
 ## install: Install binary to GOPATH
 install: web-build

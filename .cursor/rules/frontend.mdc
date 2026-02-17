@@ -1,10 +1,10 @@
 ---
-description: Frontend conventions for GoClaw WebUI
+description: Frontend conventions for DevClaw WebUI
 globs: ["web/**/*.{ts,tsx,css}"]
 alwaysApply: true
 ---
 
-# Frontend Conventions — GoClaw WebUI
+# Frontend Conventions — DevClaw WebUI
 
 ## Stack
 

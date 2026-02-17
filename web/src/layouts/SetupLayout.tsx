@@ -47,7 +47,7 @@ export function SetupLayout() {
         </div>
 
         <p className="mt-6 text-center text-[11px] text-gray-700">
-          GoClaw &mdash; AI Assistant Framework
+          DevClaw &mdash; AI Assistant Framework
         </p>
       </div>
     </div>

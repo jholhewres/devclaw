@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jholhewres/goclaw/pkg/goclaw/copilot"
+	"github.com/jholhewres/devclaw/pkg/devclaw/copilot"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -17,7 +17,7 @@ func newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage assistant configuration",
-		Long: `Manage GoClaw Copilot configuration.
+		Long: `Manage DevClaw Copilot configuration.
 
 Examples:
   copilot config init
@@ -178,7 +178,7 @@ Examples:
 			fmt.Println("API key stored in OS keyring (encrypted).")
 			fmt.Println()
 			fmt.Println("You can now safely remove it from other locations:")
-			fmt.Println("  - Delete the GOCLAW_API_KEY line from .env")
+			fmt.Println("  - Delete the DEVCLAW_API_KEY line from .env")
 			fmt.Println("  - Set api_key: \"\" in config.yaml")
 			fmt.Println()
 			fmt.Println("The keyring is checked first, before .env or config.yaml.")
@@ -215,7 +215,7 @@ func newConfigKeyStatusCmd() *cobra.Command {
 			// 1. Encrypted vault.
 			vault := copilot.NewVault(copilot.VaultFile)
 			if vault.Exists() {
-				fmt.Println("  1. [OK] Encrypted vault: .goclaw.vault (AES-256-GCM, locked)")
+				fmt.Println("  1. [OK] Encrypted vault: .devclaw.vault (AES-256-GCM, locked)")
 			} else {
 				fmt.Println("  1. [--] Encrypted vault: (not created)")
 			}
@@ -233,11 +233,11 @@ func newConfigKeyStatusCmd() *cobra.Command {
 			}
 
 			// 3. Environment variable.
-			if val := os.Getenv("GOCLAW_API_KEY"); val != "" {
+			if val := os.Getenv("DEVCLAW_API_KEY"); val != "" {
 				masked := val[:min(4, len(val))] + "****" + val[max(0, len(val)-4):]
-				fmt.Printf("  3. [OK] GOCLAW_API_KEY: %s\n", masked)
+				fmt.Printf("  3. [OK] DEVCLAW_API_KEY: %s\n", masked)
 			} else {
-				fmt.Println("  3. [--] GOCLAW_API_KEY: (not set)")
+				fmt.Println("  3. [--] DEVCLAW_API_KEY: (not set)")
 			}
 
 			if val := os.Getenv("OPENAI_API_KEY"); val != "" {
@@ -268,7 +268,7 @@ func newVaultInitCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "vault-init",
 		Short: "Create an encrypted vault for secrets",
-		Long: `Creates a new encrypted vault file (.goclaw.vault) protected by a master password.
+		Long: `Creates a new encrypted vault file (.devclaw.vault) protected by a master password.
 
 The vault uses AES-256-GCM encryption with Argon2id key derivation.
 Even with filesystem access, secrets cannot be read without the password.
@@ -312,7 +312,7 @@ Examples:
 			}
 
 			fmt.Println()
-			fmt.Println("Encrypted vault created at .goclaw.vault")
+			fmt.Println("Encrypted vault created at .devclaw.vault")
 			fmt.Println()
 			fmt.Println("Next: store your API key with 'copilot config vault-set'")
 
@@ -326,7 +326,7 @@ func newVaultSetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "vault-set",
 		Short: "Store API key in the encrypted vault",
-		Long: `Encrypts and stores your API key in the vault (.goclaw.vault).
+		Long: `Encrypts and stores your API key in the vault (.devclaw.vault).
 Requires the master password to unlock the vault.
 
 After storing, you can safely delete the .env file:
@@ -385,7 +385,7 @@ Examples:
 			fmt.Println("  rm .env                          # delete .env file")
 			fmt.Println("  copilot config delete-key        # remove from OS keyring")
 			fmt.Println()
-			fmt.Println("On startup, GoClaw will ask for your master password to decrypt.")
+			fmt.Println("On startup, DevClaw will ask for your master password to decrypt.")
 
 			return nil
 		},

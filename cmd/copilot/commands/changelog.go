@@ -30,7 +30,7 @@ Use --all to show the full changelog.`,
 
 			// Show current version header.
 			cleanVersion := cleanVersionTag(version)
-			fmt.Printf("GoClaw %s\n\n", version)
+			fmt.Printf("DevClaw %s\n\n", version)
 
 			if showAll {
 				fmt.Println(content)

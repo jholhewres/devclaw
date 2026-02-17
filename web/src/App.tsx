@@ -38,7 +38,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   })
 
   useEffect(() => {
-    const token = localStorage.getItem('goclaw_token')
+    const token = localStorage.getItem('devclaw_token')
     const headers: Record<string, string> = {}
     if (token) headers['Authorization'] = `Bearer ${token}`
 

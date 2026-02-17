@@ -17,7 +17,7 @@ export function Login() {
     try {
       const { token } = await api.auth.login(password)
       if (token) {
-        localStorage.setItem('goclaw_token', token)
+        localStorage.setItem('devclaw_token', token)
       }
       navigate('/')
     } catch (err) {

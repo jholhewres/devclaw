@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Puzzle, Check, Search, Package, Code, Zap, Globe, Database, Wrench } from 'lucide-react'
 import type { SetupData } from './SetupWizard'
 
-/** Skill vinda do catálogo do repositório goclaw-skills */
+/** Skill vinda do catálogo do repositório devclaw-skills */
 interface CatalogSkill {
   name: string
   description: string
@@ -34,7 +34,7 @@ interface Props {
 }
 
 /**
- * Etapa 5: Escolha de skills do catálogo goclaw-skills.
+ * Etapa 5: Escolha de skills do catálogo devclaw-skills.
  */
 export function StepSkills({ data, updateData }: Props) {
   const [skills, setSkills] = useState<CatalogSkill[]>([])

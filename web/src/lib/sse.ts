@@ -54,7 +54,7 @@ export function createSSEConnection(options: SSEOptions): () => void {
     if (closed) return
 
     // Append auth token to URL if available
-    const token = localStorage.getItem('goclaw_token')
+    const token = localStorage.getItem('devclaw_token')
     const separator = url.includes('?') ? '&' : '?'
     const fullUrl = token ? `${url}${separator}token=${token}` : url
 
@@ -129,7 +129,7 @@ export function createPOSTSSEConnection(options: POSTSSEOptions): () => void {
   const { url, body, onEvent, onError } = options
   const controller = new AbortController()
 
-  const token = localStorage.getItem('goclaw_token')
+  const token = localStorage.getItem('devclaw_token')
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) headers['Authorization'] = `Bearer ${token}`
 

@@ -10,14 +10,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jholhewres/goclaw/pkg/goclaw/channels/discord"
-	slackchan "github.com/jholhewres/goclaw/pkg/goclaw/channels/slack"
-	"github.com/jholhewres/goclaw/pkg/goclaw/channels/telegram"
-	"github.com/jholhewres/goclaw/pkg/goclaw/channels/whatsapp"
-	"github.com/jholhewres/goclaw/pkg/goclaw/copilot"
-	"github.com/jholhewres/goclaw/pkg/goclaw/gateway"
-	"github.com/jholhewres/goclaw/pkg/goclaw/plugins"
-	"github.com/jholhewres/goclaw/pkg/goclaw/webui"
+	"github.com/jholhewres/devclaw/pkg/devclaw/channels/discord"
+	slackchan "github.com/jholhewres/devclaw/pkg/devclaw/channels/slack"
+	"github.com/jholhewres/devclaw/pkg/devclaw/channels/telegram"
+	"github.com/jholhewres/devclaw/pkg/devclaw/channels/whatsapp"
+	"github.com/jholhewres/devclaw/pkg/devclaw/copilot"
+	"github.com/jholhewres/devclaw/pkg/devclaw/gateway"
+	"github.com/jholhewres/devclaw/pkg/devclaw/plugins"
+	"github.com/jholhewres/devclaw/pkg/devclaw/webui"
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +26,7 @@ func newServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the daemon with messaging channels",
-		Long: `Start GoClaw Copilot as a daemon service, connecting to enabled
+		Long: `Start DevClaw Copilot as a daemon service, connecting to enabled
 channels (WhatsApp, Discord, Telegram) and processing messages.
 
 Examples:
@@ -176,7 +176,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	// ── Wait for shutdown ──
-	logger.Info("GoClaw Copilot running. Press Ctrl+C to stop.",
+	logger.Info("DevClaw Copilot running. Press Ctrl+C to stop.",
 		"name", cfg.Name,
 		"trigger", cfg.Trigger,
 		"policy", cfg.Access.DefaultPolicy,
@@ -250,7 +250,7 @@ func runWebSetupMode() error {
 
 	fmt.Println()
 	fmt.Println("  ╭──────────────────────────────────────────────╮")
-	fmt.Println("  │  🐾 GoClaw — First Run Setup                 │")
+	fmt.Println("  │  🐾 DevClaw — First Run Setup                 │")
 	fmt.Println("  │                                              │")
 	fmt.Println("  │  No config.yaml found.                       │")
 	fmt.Println("  │  Starting web setup wizard...                │")

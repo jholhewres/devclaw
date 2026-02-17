@@ -39,7 +39,7 @@ export const ChatMessage = memo(function ChatMessage({
         <Bot className="h-5 w-5 text-emerald-400" />
       </div>
       <div className="min-w-0 flex-1 pt-1">
-        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.15em] text-emerald-400/80">GoClaw</p>
+        <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.15em] text-emerald-400/80">DevClaw</p>
         <div className="prose prose-base max-w-none text-base leading-relaxed text-gray-300 prose-headings:text-white prose-headings:font-bold prose-strong:text-white prose-code:text-orange-400 prose-a:text-orange-400 prose-pre:bg-transparent prose-pre:p-0 prose-p:text-base prose-li:text-base">
           <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
             {content}

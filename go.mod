@@ -1,4 +1,4 @@
-module github.com/jholhewres/goclaw
+module github.com/jholhewres/devclaw
 
 go 1.24.0
 

@@ -38,7 +38,7 @@ export function WhatsAppConnect() {
       eventSourceRef.current = null
     }
 
-    const token = localStorage.getItem('goclaw_token')
+    const token = localStorage.getItem('devclaw_token')
     const url = token
       ? `/api/channels/whatsapp/qr?token=${encodeURIComponent(token)}`
       : '/api/channels/whatsapp/qr'

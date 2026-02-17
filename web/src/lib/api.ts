@@ -1,4 +1,4 @@
-/** Typed HTTP client for GoClaw API */
+/** Typed HTTP client for DevClaw API */
 
 const BASE = '/api'
 
@@ -7,7 +7,7 @@ async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const token = localStorage.getItem('goclaw_token')
+  const token = localStorage.getItem('devclaw_token')
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),

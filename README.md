@@ -1,11 +1,11 @@
-# GoClaw
+# DevClaw
 
 Open-source AI assistant framework in Go. Single binary, zero runtime dependencies. Supports CLI, WebUI, and messaging channels (WhatsApp, Discord, Telegram). Full filesystem access, tool use, browser automation, interactive canvas, subagents, encrypted vault, and sandboxed skill execution.
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/jholhewres/goclaw.git && cd goclaw
+git clone git@github.com:jholhewres/devclaw.git && cd devclaw
 make build
 ./bin/copilot setup   # interactive wizard (arrow keys, model selection, vault)
 make run              # build + serve
@@ -14,16 +14,16 @@ make run              # build + serve
 Or install directly:
 
 ```bash
-go install github.com/jholhewres/goclaw/cmd/copilot@latest
+go install github.com/jholhewres/devclaw/cmd/copilot@latest
 copilot setup && copilot serve
 ```
 
 ## Architecture
 
 ```
-goclaw/
+devclaw/
 ├── cmd/copilot/commands/     CLI (cobra): setup, serve, chat, config, skill, schedule, health
-├── pkg/goclaw/
+├── pkg/devclaw/
 │   ├── copilot/              Core assistant orchestrator
 │   │   ├── assistant.go      Message flow, agent dispatch, compaction, async media enrichment
 │   │   ├── agent.go          Agent loop (multi-turn tool calling, auto-continue, context pruning)
@@ -214,7 +214,7 @@ Blocks are split at natural boundaries (paragraphs, sentence endings, list items
 
 ## Advanced Memory (SQLite + Vector Search)
 
-In addition to file-based memory (`MEMORY.md`, daily logs), GoClaw supports a SQLite-backed memory store with FTS5 keyword search and in-process vector similarity search.
+In addition to file-based memory (`MEMORY.md`, daily logs), DevClaw supports a SQLite-backed memory store with FTS5 keyword search and in-process vector similarity search.
 
 ### How It Works
 
@@ -559,7 +559,7 @@ Enhanced group chat capabilities:
 ```yaml
 group:
   activation_mode: mention   # always | mention | keyword
-  intro_message: "Hello! I'm GoClaw, your AI assistant."
+  intro_message: "Hello! I'm DevClaw, your AI assistant."
   quiet_hours:
     start: 23
     end: 7
@@ -569,14 +569,14 @@ group:
 
 ### Encrypted Vault
 
-Secrets stored in `.goclaw.vault` — AES-256-GCM encryption with Argon2id key derivation (64 MB memory, 3 iterations, 4 threads). Master password never stored.
+Secrets stored in `.devclaw.vault` — AES-256-GCM encryption with Argon2id key derivation (64 MB memory, 3 iterations, 4 threads). Master password never stored.
 
 ```
 Resolution order (first match wins):
-  1. Encrypted vault (.goclaw.vault)
+  1. Encrypted vault (.devclaw.vault)
   2. OS keyring (GNOME/macOS/Windows)
-  3. Environment variable (GOCLAW_API_KEY)
-  4. config.yaml (${GOCLAW_API_KEY} reference)
+  3. Environment variable (DEVCLAW_API_KEY)
+  4. config.yaml (${DEVCLAW_API_KEY} reference)
 ```
 
 ### Workspace Containment
@@ -620,7 +620,7 @@ Each skill is a folder inside `skills/` containing a `SKILL.md` (instructions fo
 
 > "Crie uma skill de clima que usa a API do OpenWeatherMap"
 
-The built-in skill engine (`pkg/goclaw/skills/`) handles loading, validation, and ClawHub integration. The `skills/` directory is exclusively for user-installed content.
+The built-in skill engine (`pkg/devclaw/skills/`) handles loading, validation, and ClawHub integration. The `skills/` directory is exclusively for user-installed content.
 
 | Source | Example |
 |--------|---------|
@@ -648,7 +648,7 @@ Pre-execution content scanning detects: `eval()`, reverse shells, crypto mining,
 
 Native Go via [whatsmeow](https://go.mau.fi/whatsmeow). Supports: text, images, audio, video, documents, stickers, voice notes, locations, contacts, reactions, reply/quoting, typing indicators, read receipts, group messages.
 
-Device name: "GoClaw". LID (Linked Identity) resolution for phone number normalization.
+Device name: "DevClaw". LID (Linked Identity) resolution for phone number normalization.
 
 ### Media Processing
 
@@ -828,7 +828,7 @@ workspaces:
 
 ### CLI Chat Features
 
-Interactive REPL with `readline` support: arrow key history (↑/↓), reverse search (Ctrl+R), tab completion, line editing (Ctrl+A/E/W/U), persistent history (`~/.goclaw/chat_history`).
+Interactive REPL with `readline` support: arrow key history (↑/↓), reverse search (Ctrl+R), tab completion, line editing (Ctrl+A/E/W/U), persistent history (`~/.devclaw/chat_history`).
 
 ## Deployment
 

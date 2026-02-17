@@ -43,7 +43,7 @@ Thumbs.db
 /HEARTBEAT.md
 /MEMORY.md
 
-# User-installed skills (customized — templates/builtins are in pkg/goclaw/skills/)
+# User-installed skills (customized — templates/builtins are in pkg/devclaw/skills/)
 /skills/
 
 # Agent working directory (projects, temp files, generated content)
@@ -55,17 +55,17 @@ config.local.yaml
 .env
 .env.*
 !.env.example
-.goclaw.vault
+.devclaw.vault
 
 # Web UI (React)
 web/node_modules/
 web/dist/
 web/.vite/
-pkg/goclaw/webui/dist/
+pkg/devclaw/webui/dist/
 
 # Build
 /build/
 /tmp/
-/goclaw
-/goclaw-linux
-pkg/goclaw/copilot/data/
+/devclaw
+/devclaw-linux
+pkg/devclaw/copilot/data/

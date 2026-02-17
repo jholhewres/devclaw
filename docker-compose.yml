@@ -1,7 +1,7 @@
 services:
   copilot:
     build: .
-    container_name: goclaw-copilot
+    container_name: devclaw-copilot
     restart: unless-stopped
     volumes:
       - ./sessions:/home/copilot/sessions

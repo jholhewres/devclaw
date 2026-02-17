@@ -1,12 +1,12 @@
-# GoClaw — Features and Capabilities
+# DevClaw — Features and Capabilities
 
-Detailed documentation of all features available in GoClaw.
+Detailed documentation of all features available in DevClaw.
 
 ---
 
 ## Autonomous Agent Loop
 
-The core of GoClaw is an agentic loop that allows the assistant to execute complex tasks autonomously, iterating between LLM calls and tool execution.
+The core of DevClaw is an agentic loop that allows the assistant to execute complex tasks autonomously, iterating between LLM calls and tool execution.
 
 ### Execution Cycle
 
@@ -292,7 +292,7 @@ Native Go implementation via [whatsmeow](https://go.mau.fi/whatsmeow):
 - **Messages**: text, images, audio, video, documents, stickers, voice notes, locations, contacts.
 - **Interactions**: reactions, reply/quoting, typing indicators, read receipts.
 - **Groups**: full group message support with access control.
-- **Device name**: "GoClaw". LID resolution for phone number normalization.
+- **Device name**: "DevClaw". LID resolution for phone number normalization.
 
 ### Group Chat (Enhanced)
 

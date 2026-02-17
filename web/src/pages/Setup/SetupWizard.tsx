@@ -33,7 +33,7 @@ export interface SetupData {
 }
 
 const INITIAL_DATA: SetupData = {
-  name: 'GoClaw',
+  name: 'DevClaw',
   language: 'pt-BR',
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   provider: 'openai',

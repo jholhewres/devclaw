@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────
-# GoClaw Copilot - Configuration
+# DevClaw Copilot - Configuration
 # Copy to config.yaml and adjust as needed:
 #   cp configs/copilot.example.yaml config.yaml
 # ─────────────────────────────────────────────────────────────
@@ -19,7 +19,7 @@ instructions: |
 # OpenAI-compatible endpoint. Supports OpenAI, Anthropic, GLM, etc.
 api:
   base_url: "https://api.openai.com/v1"        # OpenAI (default)
-  api_key: "${GOCLAW_API_KEY}"                  # NEVER hardcode — use .env file
+  api_key: "${DEVCLAW_API_KEY}"                  # NEVER hardcode — use .env file
   provider: ""                                  # Auto-detected from URL
   #
   # Available models:

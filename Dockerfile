@@ -26,7 +26,7 @@ RUN go mod download
 COPY . .
 
 # Copiar dist do frontend para o embed directory
-COPY --from=frontend /app/web/dist ./pkg/goclaw/webui/dist/
+COPY --from=frontend /app/web/dist ./pkg/devclaw/webui/dist/
 
 # Build do binário com SQLite FTS5
 RUN CGO_ENABLED=1 GOOS=linux go build \

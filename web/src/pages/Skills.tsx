@@ -167,7 +167,7 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
   useEffect(() => {
     fetch('/api/skills/available', {
       headers: {
-        Authorization: `Bearer ${localStorage.getItem('goclaw_token') || ''}`,
+        Authorization: `Bearer ${localStorage.getItem('devclaw_token') || ''}`,
       },
     })
       .then((r) => r.json())

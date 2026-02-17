@@ -85,7 +85,7 @@ export function ChatInput({
         )}
       </div>
       <p className="mt-3 text-center text-xs text-gray-700">
-        GoClaw pode cometer erros. Considere verificar informacoes importantes.
+        DevClaw pode cometer erros. Considere verificar informacoes importantes.
       </p>
     </div>
   )

@@ -1,6 +1,6 @@
 ---
 description: Core copilot package patterns and architecture
-globs: ["pkg/goclaw/copilot/**/*.go"]
+globs: ["pkg/devclaw/copilot/**/*.go"]
 alwaysApply: true
 ---
 
@@ -39,13 +39,13 @@ All outgoing text passes through `FormatForChannel` → `StripInternalTags`:
 
 Secrets flow: vault → env injection → config resolution. Never plain text.
 
-- **Vault file:** `.goclaw.vault` (AES-256-GCM + Argon2id)
-- **Unlock:** `GOCLAW_VAULT_PASSWORD` env var (from `.env`, loaded by godotenv)
+- **Vault file:** `.devclaw.vault` (AES-256-GCM + Argon2id)
+- **Unlock:** `DEVCLAW_VAULT_PASSWORD` env var (from `.env`, loaded by godotenv)
 - **Injection:** `injectVaultSecrets()` in `keyring.go` — sets env vars + config fields
-- **Mapping:** `api_key` → `GOCLAW_API_KEY`, `webui_token` → `GOCLAW_WEBUI_TOKEN`
+- **Mapping:** `api_key` → `DEVCLAW_API_KEY`, `webui_token` → `DEVCLAW_WEBUI_TOKEN`
 - **Tools:** `vault_save`, `vault_get`, `vault_list`, `vault_delete` (registered if unlocked)
 - **Setup wizard:** stores all secrets in vault; `.env` only holds vault password
-- **Config refs:** `${GOCLAW_API_KEY}`, `${GOCLAW_WEBUI_TOKEN}` — resolved from vault
+- **Config refs:** `${DEVCLAW_API_KEY}`, `${DEVCLAW_WEBUI_TOKEN}` — resolved from vault
 
 ## LLM Fallback & Rate-Limit Recovery
 

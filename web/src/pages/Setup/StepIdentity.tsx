@@ -38,7 +38,7 @@ export function StepIdentity({ data, updateData }: Props) {
           <input
             value={data.name}
             onChange={(e) => updateData({ name: e.target.value })}
-            placeholder="GoClaw"
+            placeholder="DevClaw"
             className="flex h-11 w-full rounded-xl border border-zinc-700/50 bg-zinc-800/50 px-4 text-sm text-white placeholder:text-zinc-600 outline-none transition-all focus:border-orange-500/50 focus:ring-2 focus:ring-orange-500/10"
           />
         </div>

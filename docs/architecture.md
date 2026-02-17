@@ -1,10 +1,10 @@
-# GoClaw — Technical Architecture
+# DevClaw — Technical Architecture
 
-Technical documentation of GoClaw's internal architecture, covering components, data flows, and design decisions.
+Technical documentation of DevClaw's internal architecture, covering components, data flows, and design decisions.
 
 ## Overview
 
-GoClaw is an AI assistant framework written in Go. Single binary, zero runtime dependencies. Supports interactive CLI, WebUI, and messaging channels (WhatsApp, with Discord/Telegram planned).
+DevClaw is an AI assistant framework written in Go. Single binary, zero runtime dependencies. Supports interactive CLI, WebUI, and messaging channels (WhatsApp, with Discord/Telegram planned).
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -13,7 +13,7 @@ GoClaw is an AI assistant framework written in Go. Single binary, zero runtime d
 └────────────────────────┬────────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────┐
-│                   pkg/goclaw/copilot                     │
+│                   pkg/devclaw/copilot                     │
 │                                                          │
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐              │
 │  │ Assistant │──│  Agent   │──│ LLMClient │              │
@@ -49,7 +49,7 @@ GoClaw is an AI assistant framework written in Go. Single binary, zero runtime d
 └──────────────────────────────────────────────────────────┘
          │                          │
 ┌────────▼──────────┐    ┌─────────▼──────────┐
-│  pkg/goclaw/      │    │  pkg/goclaw/       │
+│  pkg/devclaw/      │    │  pkg/devclaw/       │
 │  channels/        │    │  gateway/           │
 │  ├─ whatsapp/     │    │  (HTTP API,         │
 │  ├─ discord/      │    │   WebSocket,        │
@@ -57,14 +57,14 @@ GoClaw is an AI assistant framework written in Go. Single binary, zero runtime d
 └───────────────────┘    └────────────────────┘
          │                          │
 ┌────────▼──────────┐    ┌─────────▼──────────┐
-│  pkg/goclaw/      │    │  pkg/goclaw/       │
+│  pkg/devclaw/      │    │  pkg/devclaw/       │
 │  sandbox/         │    │  scheduler/         │
 │  (namespaces,     │    │  (cron + advanced   │
 │   Docker)         │    │   job features)     │
 └───────────────────┘    └────────────────────┘
                                     │
                          ┌──────────▼──────────┐
-                         │  pkg/goclaw/        │
+                         │  pkg/devclaw/        │
                          │  webui/             │
                          │  (React SPA +       │
                          │   SSE streaming)    │

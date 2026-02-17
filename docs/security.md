@@ -1,6 +1,6 @@
-# GoClaw — Security
+# DevClaw — Security
 
-Documentation of the security mechanisms implemented in GoClaw. The framework adopts a **deny-by-default** posture with multiple protection layers.
+Documentation of the security mechanisms implemented in DevClaw. The framework adopts a **deny-by-default** posture with multiple protection layers.
 
 ---
 
@@ -127,7 +127,7 @@ Protected paths cannot be read/written by non-owners:
 protected_paths:
   - ~/.ssh/id_*
   - ~/.ssh/authorized_keys
-  - .goclaw.vault
+  - .devclaw.vault
   - /etc/shadow
   - /etc/passwd
   - credentials.json
@@ -288,10 +288,10 @@ argonKeyLen  = 32          // AES-256 (32 bytes)
 ### Secret Resolution Chain
 
 ```
-1. Encrypted vault (.goclaw.vault)     → AES-256-GCM
+1. Encrypted vault (.devclaw.vault)     → AES-256-GCM
 2. OS keyring (GNOME/macOS/Windows)    → Native OS API
-3. Environment variable                 → GOCLAW_API_KEY
-4. config.yaml                          → ${GOCLAW_API_KEY}
+3. Environment variable                 → DEVCLAW_API_KEY
+4. config.yaml                          → ${DEVCLAW_API_KEY}
 ```
 
 First match wins. The priority ensures the encrypted vault is always preferred.

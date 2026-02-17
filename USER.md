@@ -8,9 +8,9 @@
 
 ## Context
 
-- Building **GoClaw** — an AI copilot/assistant framework in Go, with WhatsApp/Telegram/Discord channels, web UI, skill system, and encrypted vault.
+- Building **DevClaw** — an AI copilot/assistant framework in Go, with WhatsApp/Telegram/Discord channels, web UI, skill system, and encrypted vault.
 - Also maintains projects on a GCloud VM (`openclaw-gateway`, zone `southamerica-east1-a`).
-- Compares GoClaw against **OpenClaw** (Node.js reference at `../openclaw`) for feature parity.
+- Compares DevClaw against **OpenClaw** (Node.js reference at `../openclaw`) for feature parity.
 - Works on multiple integration projects (ASC servers, ASC DB, IntegraBOT, RogaDX).
 - Values security — wants secrets encrypted in vault, not in plain text files.
 - Frustrated by poor UX: message duplication, tag leaking, progress flooding, canned responses.

@@ -141,7 +141,7 @@ export function Sidebar({ sessions }: SidebarProps) {
 
       {/* Footer */}
       <div className="border-t border-white/[0.06] px-3 py-2.5">
-        <p className="text-[10px] text-gray-700">GoClaw v0.1</p>
+        <p className="text-[10px] text-gray-700">DevClaw v0.1</p>
       </div>
     </aside>
   )

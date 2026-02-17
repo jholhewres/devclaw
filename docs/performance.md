@@ -1,12 +1,12 @@
-# GoClaw — Performance and Optimizations
+# DevClaw — Performance and Optimizations
 
-Documentation of the performance strategies implemented in GoClaw, including concurrency, caching, memory management, and tuning.
+Documentation of the performance strategies implemented in DevClaw, including concurrency, caching, memory management, and tuning.
 
 ---
 
 ## Overview
 
-GoClaw is designed for high throughput with low latency, leveraging Go's concurrency model (goroutines + channels) to the fullest. The optimizations cover:
+DevClaw is designed for high throughput with low latency, leveraging Go's concurrency model (goroutines + channels) to the fullest. The optimizations cover:
 
 1. **Adaptive message debounce** — reduced latency with smart drain.
 2. **Unified send+stream** — single HTTP request eliminates round-trips.
@@ -311,7 +311,7 @@ Pruning runs on every agent turn, preventing gradual context bloat without waiti
 
 ### Anthropic Prompt Caching
 
-For Anthropic and Z.AI Anthropic proxy providers, GoClaw automatically adds `cache_control` to the system message and the second-to-last user message:
+For Anthropic and Z.AI Anthropic proxy providers, DevClaw automatically adds `cache_control` to the system message and the second-to-last user message:
 
 ```json
 {

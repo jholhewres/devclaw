@@ -32,7 +32,7 @@ export const useAppStore = create<AppState>()(
       setActiveSession: (id) => set({ activeSessionId: id }),
     }),
     {
-      name: 'goclaw-ui',
+      name: 'devclaw-ui',
       partialize: (state) => ({
         sidebarOpen: state.sidebarOpen,
         theme: state.theme,
@@ -57,7 +57,7 @@ function applyTheme(theme: Theme) {
 
 // Apply on load
 if (typeof window !== 'undefined') {
-  const stored = JSON.parse(localStorage.getItem('goclaw-ui') || '{}')
+  const stored = JSON.parse(localStorage.getItem('devclaw-ui') || '{}')
   applyTheme(stored?.state?.theme || 'system')
 
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {

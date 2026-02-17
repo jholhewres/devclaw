@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to GoClaw are documented in this file.
+All notable changes to DevClaw are documented in this file.
 
 ## [1.5.1] — 2026-02-16
 
