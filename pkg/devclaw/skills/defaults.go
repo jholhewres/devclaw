@@ -14,6 +14,8 @@ type DefaultSkill struct {
 	Name        string // Unique identifier (directory name).
 	Label       string // Human-readable label for interactive selection.
 	Description string // Short description.
+	Category    string // Category: "development", "data", "productivity", "infra".
+	StarterPack bool   // If true, pre-selected during setup wizard.
 	Content     string // Full SKILL.md file content.
 }
 
@@ -91,4 +93,20 @@ func InstallDefaultSkills(skillsDir string, names []string) (installed, skipped,
 // InstallAllDefaults installs all available default skills.
 func InstallAllDefaults(skillsDir string) (installed, skipped, failed int) {
 	return InstallDefaultSkills(skillsDir, DefaultSkillNames())
+}
+
+// StarterPackNames returns the names of skills marked as starter pack.
+func StarterPackNames() []string {
+	var names []string
+	for _, s := range defaultSkillList {
+		if s.StarterPack {
+			names = append(names, s.Name)
+		}
+	}
+	return names
+}
+
+// InstallStarterPack installs only starter pack skills.
+func InstallStarterPack(skillsDir string) (installed, skipped, failed int) {
+	return InstallDefaultSkills(skillsDir, StarterPackNames())
 }

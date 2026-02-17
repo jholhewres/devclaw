@@ -210,17 +210,19 @@ func (s *Server) handleSetupFinalize(w http.ResponseWriter, r *http.Request) {
 // First tries from embedded defaults, then downloads from devclaw-skills on GitHub.
 func (s *Server) installSetupSkills(selected []string) {
 	const skillsDir = "./skills"
-	const ghBase = "https://raw.githubusercontent.com/jholhewres/devclaw-skills/main/skills"
+	const ghRaw = "https://raw.githubusercontent.com/jholhewres/devclaw-skills/main"
 
 	// Go-native builtins that don't need SKILL.md files (they have Go implementations).
 	goNative := map[string]bool{
-		"calculator": true, "web-fetch": true, "datetime": true,
-		"image-gen": true, "claude-code": true, "project-manager": true,
+		"calculator": true, "datetime": true,
 	}
+
+	// Build path lookup from the cached catalog (index.yaml paths).
+	catalogPaths := s.buildCatalogPathMap()
 
 	for _, name := range selected {
 		if goNative[name] {
-			continue // Handled by BuiltinLoader, no SKILL.md needed.
+			continue
 		}
 
 		// Check if already installed.
@@ -230,15 +232,20 @@ func (s *Server) installSetupSkills(selected []string) {
 			continue
 		}
 
-		// Try embedded defaults first.
+		// Try embedded defaults first (starter pack skills).
 		installed, err := skills.InstallDefaultSkill(skillsDir, name)
 		if err == nil && installed {
 			s.logger.Info("skill installed from defaults", "name", name)
 			continue
 		}
 
-		// Download from GitHub.
-		url := fmt.Sprintf("%s/%s/SKILL.md", ghBase, name)
+		// Download from GitHub using catalog path or fallback flat path.
+		remotePath := "skills/" + name
+		if p, ok := catalogPaths[name]; ok {
+			remotePath = p
+		}
+		url := fmt.Sprintf("%s/%s/SKILL.md", ghRaw, remotePath)
+
 		client := &http.Client{Timeout: 15 * time.Second}
 		resp, err := client.Get(url)
 		if err != nil {
@@ -263,6 +270,21 @@ func (s *Server) installSetupSkills(selected []string) {
 	}
 }
 
+// buildCatalogPathMap fetches index.yaml from GitHub and builds a name→path map.
+func (s *Server) buildCatalogPathMap() map[string]string {
+	result := make(map[string]string)
+
+	catalog := fetchSkillsCatalogFromGitHub(s.logger)
+	for _, entry := range catalog {
+		name, _ := entry["name"].(string)
+		path, _ := entry["path"].(string)
+		if name != "" && path != "" {
+			result[name] = path
+		}
+	}
+	return result
+}
+
 // handleSetupSkills returns the list of skills available for installation.
 // First tries to fetch the catalog from devclaw-skills on GitHub; falls back to embedded defaults.
 func (s *Server) handleSetupSkills(w http.ResponseWriter, r *http.Request) {
@@ -271,22 +293,38 @@ func (s *Server) handleSetupSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try fetching the catalog from the devclaw-skills repository.
-	result := fetchSkillsCatalogFromGitHub(s.logger)
-	if len(result) == 0 {
-		// Fallback to embedded defaults.
-		defaults := skills.DefaultSkills()
-		result = make([]map[string]any, len(defaults))
-		for i, sk := range defaults {
-			result[i] = map[string]any{
-				"name":        sk.Name,
-				"description": sk.Description,
-				"category":    "builtin",
-				"enabled":     false,
-				"tool_count":  0,
-			}
+	// Build catalog from embedded defaults (always available, enriched with starter_pack info).
+	defaults := skills.DefaultSkills()
+	result := make([]map[string]any, 0, len(defaults))
+	for _, sk := range defaults {
+		cat := sk.Category
+		if cat == "" {
+			cat = "builtin"
+		}
+		result = append(result, map[string]any{
+			"name":         sk.Name,
+			"description":  sk.Description,
+			"category":     cat,
+			"starter_pack": sk.StarterPack,
+			"enabled":      sk.StarterPack,
+			"tool_count":   0,
+		})
+	}
+
+	// Merge extra skills from devclaw-skills GitHub catalog (non-embedded).
+	remote := fetchSkillsCatalogFromGitHub(s.logger)
+	embeddedNames := make(map[string]bool, len(defaults))
+	for _, sk := range defaults {
+		embeddedNames[sk.Name] = true
+	}
+	for _, r := range remote {
+		name, _ := r["name"].(string)
+		if !embeddedNames[name] {
+			r["starter_pack"] = false
+			result = append(result, r)
 		}
 	}
+
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -346,6 +384,7 @@ func fetchSkillsCatalogFromGitHub(logger interface{ Debug(string, ...any) }) []m
 			"category":    entry.Category,
 			"version":     entry.Version,
 			"tags":        entry.Tags,
+			"path":        entry.Path,
 			"enabled":     false,
 			"tool_count":  0,
 		})

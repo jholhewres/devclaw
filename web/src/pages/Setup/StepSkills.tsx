@@ -1,27 +1,28 @@
-import { useEffect, useState } from 'react'
-import { Puzzle, Check, Search, Package, Code, Zap, Globe, Database, Wrench } from 'lucide-react'
+import { useEffect, useState, useRef } from 'react'
+import { Puzzle, Check, Search, Package, Code, Zap, Globe, Database, Wrench, Sparkles } from 'lucide-react'
 import type { SetupData } from './SetupWizard'
 
-/** Skill vinda do catálogo do repositório devclaw-skills */
+/** Skill vinda do catálogo */
 interface CatalogSkill {
   name: string
   description: string
   category?: string
   version?: string
   tags?: string[]
+  starter_pack?: boolean
   enabled: boolean
   tool_count: number
 }
 
 /** Mapa de categorias para ícone e label */
 const CATEGORY_META: Record<string, { label: string; icon: React.FC<{ className?: string }>; color: string }> = {
-  builtin:      { label: 'Integrado',      icon: Package,  color: 'text-emerald-400' },
-  data:         { label: 'Dados',           icon: Globe,    color: 'text-orange-400' },
   development:  { label: 'Desenvolvimento', icon: Code,     color: 'text-violet-400' },
+  data:         { label: 'Dados',           icon: Globe,    color: 'text-cyan-400' },
   productivity: { label: 'Produtividade',   icon: Zap,      color: 'text-amber-400' },
+  infra:        { label: 'Infraestrutura',  icon: Database,  color: 'text-teal-400' },
   media:        { label: 'Mídia',           icon: Puzzle,   color: 'text-pink-400' },
-  infra:        { label: 'Infraestrutura',  icon: Database,  color: 'text-amber-400' },
   integration:  { label: 'Integração',      icon: Wrench,   color: 'text-orange-400' },
+  builtin:      { label: 'Integrado',      icon: Package,  color: 'text-emerald-400' },
 }
 
 function getCategoryMeta(cat?: string) {
@@ -40,11 +41,23 @@ export function StepSkills({ data, updateData }: Props) {
   const [skills, setSkills] = useState<CatalogSkill[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('')
+  const didInit = useRef(false)
 
   useEffect(() => {
     fetch('/api/setup/skills')
       .then((r) => r.ok ? r.json() : [])
-      .then((d) => setSkills(Array.isArray(d) ? d : []))
+      .then((d: CatalogSkill[]) => {
+        const list = Array.isArray(d) ? d : []
+        setSkills(list)
+
+        if (!didInit.current && data.enabledSkills.length === 0) {
+          didInit.current = true
+          const starterNames = list.filter((s) => s.starter_pack).map((s) => s.name)
+          if (starterNames.length > 0) {
+            updateData({ enabledSkills: starterNames })
+          }
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -57,6 +70,10 @@ export function StepSkills({ data, updateData }: Props) {
     updateData({ enabledSkills: next })
   }
 
+  const selectStarterPack = () => {
+    updateData({ enabledSkills: skills.filter((s) => s.starter_pack).map((s) => s.name) })
+  }
+
   const selectAll = () => {
     updateData({ enabledSkills: skills.map((s) => s.name) })
   }
@@ -64,6 +81,11 @@ export function StepSkills({ data, updateData }: Props) {
   const deselectAll = () => {
     updateData({ enabledSkills: [] })
   }
+
+  const starterCount = skills.filter((s) => s.starter_pack).length
+  const isStarterPackActive = starterCount > 0 &&
+    skills.filter((s) => s.starter_pack).every((s) => data.enabledSkills.includes(s.name)) &&
+    data.enabledSkills.length === starterCount
 
   if (loading) {
     return (
@@ -91,7 +113,7 @@ export function StepSkills({ data, updateData }: Props) {
   }, {})
 
   /* Ordem fixa das categorias */
-  const categoryOrder = ['builtin', 'data', 'development', 'productivity', 'media', 'infra', 'integration']
+  const categoryOrder = ['development', 'data', 'productivity', 'infra', 'media', 'integration', 'builtin']
   const sortedCategories = Object.keys(grouped).sort(
     (a, b) => (categoryOrder.indexOf(a) === -1 ? 99 : categoryOrder.indexOf(a)) - (categoryOrder.indexOf(b) === -1 ? 99 : categoryOrder.indexOf(b)),
   )
@@ -103,10 +125,22 @@ export function StepSkills({ data, updateData }: Props) {
         <div>
           <h2 className="text-lg font-semibold text-white">Skills</h2>
           <p className="mt-1 text-sm text-zinc-400">
-            Escolha as habilidades do catálogo oficial
+            Skills ensinam o assistente a usar ferramentas via terminal.
+            O <strong className="text-orange-400">Starter Pack</strong> inclui as essenciais.
           </p>
         </div>
         <div className="flex gap-2 text-xs">
+          <button
+            onClick={selectStarterPack}
+            className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 transition-colors ${
+              isStarterPackActive
+                ? 'border-orange-500/40 bg-orange-500/10 text-orange-400'
+                : 'border-zinc-700/50 bg-zinc-800/50 text-zinc-400 hover:bg-zinc-700/50 hover:text-white'
+            }`}
+          >
+            <Sparkles className="h-3 w-3" />
+            Starter Pack
+          </button>
           <button onClick={selectAll} className="cursor-pointer rounded-lg border border-zinc-700/50 bg-zinc-800/50 px-3 py-1.5 text-zinc-400 transition-colors hover:bg-zinc-700/50 hover:text-white">
             Todos
           </button>
@@ -179,7 +213,14 @@ export function StepSkills({ data, updateData }: Props) {
 
                         {/* Info */}
                         <div className="min-w-0 flex-1">
-                          <span className="text-xs font-medium text-white">{skill.name}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-xs font-medium text-white">{skill.name}</span>
+                            {skill.starter_pack && (
+                              <span className="rounded bg-orange-500/15 px-1 py-px text-[9px] font-medium leading-none text-orange-400">
+                                pack
+                              </span>
+                            )}
+                          </div>
                           <p className="truncate text-[10px] leading-tight text-zinc-500">{skill.description}</p>
                         </div>
                       </button>
