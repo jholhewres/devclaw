@@ -104,9 +104,9 @@ export function StepSecurity({ data, updateData }: Props) {
               <KeyRound className="h-4 w-4 text-orange-400" />
             </div>
             <div className="flex-1">
-              <h3 className="text-sm font-medium text-white">Cofre Criptografado (Vault)</h3>
+              <h3 className="text-sm font-medium text-white">Vault</h3>
               <p className="mt-1 text-xs text-zinc-400">
-                O vault armazena suas API keys com criptografia AES-256. Por padrão, usa a mesma senha da Web UI.
+                Suas credenciais ficam criptografadas (AES-256). Usa a mesma senha da Web UI.
               </p>
 
               <div className="mt-3 flex items-center gap-2">
@@ -155,7 +155,7 @@ export function StepSecurity({ data, updateData }: Props) {
                 <div className="mt-2 flex items-start gap-1.5">
                   <Info className="mt-0.5 h-3 w-3 shrink-0 text-emerald-400/60" />
                   <p className="text-[11px] text-emerald-400/60">
-                    A API key será armazenada no vault automaticamente.
+                    API key salva no vault automaticamente.
                   </p>
                 </div>
               )}
