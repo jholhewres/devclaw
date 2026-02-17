@@ -50,14 +50,14 @@ export function Config() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0a0a0f]">
+      <div className="flex flex-1 items-center justify-center bg-[var(--color-dc-darker)]">
         <div className="h-10 w-10 rounded-full border-4 border-orange-500/30 border-t-orange-500 animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-[#0a0a0f]">
+    <div className="flex flex-1 flex-col overflow-hidden bg-[var(--color-dc-darker)]">
       <div className="mx-auto w-full max-w-5xl flex-1 overflow-y-auto px-8 py-10">
         {/* Header */}
         <div className="flex items-start justify-between">
@@ -70,7 +70,7 @@ export function Config() {
             {hasChanges && (
               <button
                 onClick={handleReset}
-                className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/[0.08] bg-[#111118] px-5 py-3 text-sm font-semibold text-gray-400 transition-all hover:border-white/[0.12] hover:text-white"
+                className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/[0.08] bg-[var(--color-dc-dark)] px-5 py-3 text-sm font-semibold text-gray-400 transition-all hover:border-white/[0.12] hover:text-white"
               >
                 <RotateCcw className="h-4 w-4" />
                 Desfazer
@@ -100,7 +100,7 @@ export function Config() {
 
         {/* Editor */}
         <div className="mt-8 overflow-hidden rounded-2xl border border-white/[0.06]">
-          <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#111118] px-6 py-3">
+          <div className="flex items-center justify-between border-b border-white/[0.06] bg-[var(--color-dc-dark)] px-6 py-3">
             <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-gray-600">config.json</span>
             {hasChanges && (
               <span className="rounded-full bg-orange-500/15 px-3 py-1 text-[10px] font-bold text-orange-400 ring-1 ring-orange-500/20">
@@ -111,7 +111,7 @@ export function Config() {
           <textarea
             value={rawText}
             onChange={(e) => setRawText(e.target.value)}
-            className="w-full resize-none bg-[#0a0a0f] p-6 font-mono text-sm leading-relaxed text-gray-300 outline-none"
+            className="w-full resize-none bg-[var(--color-dc-darker)] p-6 font-mono text-sm leading-relaxed text-gray-300 outline-none"
             rows={Math.max(20, rawText.split('\n').length + 2)}
             spellCheck={false}
           />
@@ -125,7 +125,7 @@ export function Config() {
               {Object.keys(config).map((key) => (
                 <div
                   key={key}
-                  className="rounded-2xl border border-white/[0.06] bg-[#111118] px-5 py-4"
+                  className="rounded-2xl border border-white/[0.06] bg-[var(--color-dc-dark)] px-5 py-4"
                 >
                   <span className="text-base font-bold text-white">{key}</span>
                   <p className="mt-1 text-sm text-gray-500">

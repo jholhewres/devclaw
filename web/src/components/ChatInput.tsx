@@ -42,10 +42,10 @@ export function ChatInput({
   }
 
   return (
-    <div className="border-t border-white/[0.06] bg-[#0a0a0f] px-6 py-5">
+    <div className="border-t border-white/[0.06] bg-[var(--color-dc-darker)] px-6 py-5">
       <div
         className={cn(
-          'flex items-end gap-4 rounded-2xl border border-white/[0.08] bg-[#111118] px-5 py-4',
+          'flex items-end gap-4 rounded-2xl border border-white/[0.08] bg-[var(--color-dc-dark)] px-5 py-4',
           'transition-all',
           'focus-within:border-orange-500/30 focus-within:ring-2 focus-within:ring-orange-500/10',
         )}

@@ -30,14 +30,14 @@ export function Security() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0a0a10]">
+      <div className="flex flex-1 items-center justify-center bg-[var(--color-dc-darker)]">
         <div className="h-8 w-8 rounded-full border-4 border-blue-500/30 border-t-blue-500 animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#0a0a10]">
+    <div className="flex-1 overflow-y-auto bg-[var(--color-dc-darker)]">
       <div className="mx-auto max-w-4xl px-6 py-8">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
@@ -87,7 +87,7 @@ function AuditLogSection({ entryCount }: { entryCount: number }) {
   }
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[#111118]">
+    <section className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[var(--color-dc-dark)]">
       <button
         onClick={toggle}
         className="flex w-full cursor-pointer items-center justify-between px-5 py-4 text-left transition-colors hover:bg-white/[0.02]"
@@ -117,7 +117,7 @@ function AuditLogSection({ entryCount }: { entryCount: number }) {
           ) : (
             <div className="max-h-[400px] overflow-y-auto">
               <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-[#111118]">
+                <thead className="sticky top-0 bg-[var(--color-dc-dark)]">
                   <tr className="text-left">
                     <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-gray-600">Ferramenta</th>
                     <th className="px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-gray-600">Caller</th>
@@ -201,7 +201,7 @@ function ToolGuardSection({ enabled }: { enabled: boolean }) {
   }
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[#111118]">
+    <section className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[var(--color-dc-dark)]">
       <button
         onClick={toggle}
         className="flex w-full cursor-pointer items-center justify-between px-5 py-4 text-left transition-colors hover:bg-white/[0.02]"
@@ -288,7 +288,7 @@ function ToolGuardSection({ enabled }: { enabled: boolean }) {
                       value={newConfirmTool}
                       onChange={(e) => setNewConfirmTool(e.target.value)}
                       placeholder="+ adicionar..."
-                      className="h-8 w-32 rounded-lg border border-white/[0.08] bg-[#0a0a0f] px-3 text-xs text-white outline-none placeholder:text-gray-600 focus:border-orange-500/30"
+                      className="h-8 w-32 rounded-lg border border-white/[0.08] bg-[var(--color-dc-darker)] px-3 text-xs text-white outline-none placeholder:text-gray-600 focus:border-orange-500/30"
                     />
                   </form>
                 </div>
@@ -314,7 +314,7 @@ function ToolGuardSection({ enabled }: { enabled: boolean }) {
                       value={newAutoTool}
                       onChange={(e) => setNewAutoTool(e.target.value)}
                       placeholder="+ adicionar..."
-                      className="h-8 w-32 rounded-lg border border-white/[0.08] bg-[#0a0a0f] px-3 text-xs text-white outline-none placeholder:text-gray-600 focus:border-orange-500/30"
+                      className="h-8 w-32 rounded-lg border border-white/[0.08] bg-[var(--color-dc-darker)] px-3 text-xs text-white outline-none placeholder:text-gray-600 focus:border-orange-500/30"
                     />
                   </form>
                 </div>
@@ -364,7 +364,7 @@ function VaultSection({ exists, unlocked }: { exists: boolean; unlocked: boolean
   }
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[#111118]">
+    <section className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[var(--color-dc-dark)]">
       <button
         onClick={toggle}
         className="flex w-full cursor-pointer items-center justify-between px-5 py-4 text-left transition-colors hover:bg-white/[0.02]"
@@ -409,7 +409,7 @@ function VaultSection({ exists, unlocked }: { exists: boolean; unlocked: boolean
               <Lock className="h-10 w-10 text-gray-700" />
               <p className="mt-3 text-sm text-gray-500">Vault nao configurado</p>
               <p className="mt-1 text-xs text-gray-600">
-                Use <code className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-gray-400">copilot config vault-init</code> para criar
+                Use <code className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-gray-400">devclaw config vault-init</code> para criar
               </p>
             </div>
           ) : !vault.unlocked ? (
@@ -432,7 +432,7 @@ function VaultSection({ exists, unlocked }: { exists: boolean; unlocked: boolean
                   {vault.keys.map((key) => (
                     <div
                       key={key}
-                      className="flex items-center gap-3 rounded-xl border border-white/[0.04] bg-[#0a0a0f] px-4 py-3"
+                      className="flex items-center gap-3 rounded-xl border border-white/[0.04] bg-[var(--color-dc-darker)] px-4 py-3"
                     >
                       <Key className="h-4 w-4 text-violet-400" />
                       <span className="font-mono text-sm text-white">{key}</span>
@@ -455,7 +455,7 @@ function APIKeysSection({ gatewayConfigured, webuiConfigured }: { gatewayConfigu
   const [open, setOpen] = useState(false)
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[#111118]">
+    <section className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[var(--color-dc-dark)]">
       <button
         onClick={() => setOpen(!open)}
         className="flex w-full cursor-pointer items-center justify-between px-5 py-4 text-left transition-colors hover:bg-white/[0.02]"
@@ -474,7 +474,7 @@ function APIKeysSection({ gatewayConfigured, webuiConfigured }: { gatewayConfigu
 
       {open && (
         <div className="border-t border-white/[0.04] px-5 py-5 space-y-3">
-          <div className="flex items-center justify-between rounded-xl border border-white/[0.04] bg-[#0a0a0f] px-5 py-4">
+          <div className="flex items-center justify-between rounded-xl border border-white/[0.04] bg-[var(--color-dc-darker)] px-5 py-4">
             <div>
               <p className="text-sm font-semibold text-white">Gateway Auth Token</p>
               <p className="mt-0.5 text-xs text-gray-500">Autenticacao Bearer para a API HTTP</p>
@@ -492,7 +492,7 @@ function APIKeysSection({ gatewayConfigured, webuiConfigured }: { gatewayConfigu
             )}
           </div>
 
-          <div className="flex items-center justify-between rounded-xl border border-white/[0.04] bg-[#0a0a0f] px-5 py-4">
+          <div className="flex items-center justify-between rounded-xl border border-white/[0.04] bg-[var(--color-dc-darker)] px-5 py-4">
             <div>
               <p className="text-sm font-semibold text-white">Web UI Auth Token</p>
               <p className="mt-0.5 text-xs text-gray-500">Senha de acesso ao dashboard</p>

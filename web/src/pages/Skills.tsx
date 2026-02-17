@@ -49,14 +49,14 @@ export function Skills() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0a0a0f]">
+      <div className="flex flex-1 items-center justify-center bg-[var(--color-dc-darker)]">
         <div className="h-10 w-10 rounded-full border-4 border-orange-500/30 border-t-orange-500 animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#0a0a0f]">
+    <div className="flex-1 overflow-y-auto bg-[var(--color-dc-darker)]">
       <div className="mx-auto max-w-5xl px-8 py-10">
         {/* Header */}
         <div className="flex items-start justify-between">
@@ -83,7 +83,7 @@ export function Skills() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar skills..."
-            className="w-full rounded-2xl border border-white/[0.08] bg-[#111118] px-5 py-4 pl-14 text-base text-white outline-none placeholder:text-gray-600 transition-all focus:border-orange-500/30 focus:ring-2 focus:ring-orange-500/10"
+            className="w-full rounded-2xl border border-white/[0.08] bg-[var(--color-dc-dark)] px-5 py-4 pl-14 text-base text-white outline-none placeholder:text-gray-600 transition-all focus:border-orange-500/30 focus:ring-2 focus:ring-orange-500/10"
           />
         </div>
 
@@ -95,7 +95,7 @@ export function Skills() {
               className={`group relative overflow-hidden rounded-2xl border p-6 transition-all ${
                 skill.enabled
                   ? 'border-orange-500/25 bg-orange-500/[0.04]'
-                  : 'border-white/[0.06] bg-[#111118] hover:border-orange-500/15'
+                  : 'border-white/[0.06] bg-[var(--color-dc-dark)] hover:border-orange-500/15'
               }`}
             >
               {skill.enabled && (
@@ -200,7 +200,7 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="relative w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0f0f17] shadow-2xl">
+      <div className="relative w-full max-w-2xl max-h-[80vh] overflow-hidden rounded-2xl border border-white/[0.08] bg-[var(--color-dc-dark)] shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/[0.06] px-6 py-4">
           <div>

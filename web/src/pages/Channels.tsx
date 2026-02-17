@@ -18,14 +18,14 @@ export function Channels() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0a0a0f]">
+      <div className="flex flex-1 items-center justify-center bg-[var(--color-dc-darker)]">
         <div className="h-10 w-10 rounded-full border-4 border-orange-500/30 border-t-orange-500 animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#0a0a0f]">
+    <div className="flex-1 overflow-y-auto bg-[var(--color-dc-darker)]">
       <div className="mx-auto max-w-5xl px-8 py-10">
         <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-gray-600">Comunicacao</p>
         <h1 className="mt-1 text-2xl font-black text-white tracking-tight">Canais</h1>
@@ -47,7 +47,7 @@ export function Channels() {
                 className={`relative overflow-hidden rounded-2xl border p-6 transition-all ${
                   ch.connected
                     ? 'border-emerald-500/25 bg-emerald-500/[0.03]'
-                    : 'border-white/[0.06] bg-[#111118]'
+                    : 'border-white/[0.06] bg-[var(--color-dc-dark)]'
                 }`}
               >
                 {/* Active badge */}

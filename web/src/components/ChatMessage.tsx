@@ -59,14 +59,14 @@ function ToolMessage({ toolName, toolInput, content }: { toolName?: string; tool
     <div className="ml-[60px] animate-fade-in py-2">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-white/[0.06] bg-[#111118] px-4 py-2.5 text-sm text-gray-400 transition-colors hover:bg-white/[0.04]"
+        className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-white/[0.06] bg-[var(--color-dc-dark)] px-4 py-2.5 text-sm text-gray-400 transition-colors hover:bg-white/[0.04]"
       >
         <Terminal className="h-4 w-4 text-orange-500" />
         <span className="font-bold text-gray-300">{toolName || 'tool'}</span>
         {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
       </button>
       {expanded && (
-        <div className="mt-2 overflow-hidden rounded-2xl border border-white/[0.06] bg-[#111118]">
+        <div className="mt-2 overflow-hidden rounded-2xl border border-white/[0.06] bg-[var(--color-dc-dark)]">
           {toolInput && (
             <div className="border-b border-white/[0.04] px-5 py-4">
               <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.15em] text-gray-600">Input</p>
@@ -107,7 +107,7 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
   return (
     <div className="group relative not-prose my-4">
       {lang && (
-        <div className="flex items-center justify-between rounded-t-2xl border border-b-0 border-white/[0.06] bg-[#111118] px-5 py-3">
+        <div className="flex items-center justify-between rounded-t-2xl border border-b-0 border-white/[0.06] bg-[var(--color-dc-dark)] px-5 py-3">
           <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-gray-600">{lang}</span>
           <button onClick={handleCopy} className="cursor-pointer text-gray-600 transition-colors hover:text-gray-300">
             {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
@@ -116,7 +116,7 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
       )}
       <pre
         className={cn(
-          'overflow-x-auto rounded-b-2xl border border-white/[0.06] bg-[#0a0a0f] p-5 text-sm leading-relaxed text-gray-300',
+          'overflow-x-auto rounded-b-2xl border border-white/[0.06] bg-[var(--color-dc-darker)] p-5 text-sm leading-relaxed text-gray-300',
           !lang && 'rounded-t-2xl',
         )}
       >

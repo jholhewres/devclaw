@@ -33,14 +33,14 @@ export function Sessions() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0a0a0f]">
+      <div className="flex flex-1 items-center justify-center bg-[var(--color-dc-darker)]">
         <div className="h-10 w-10 rounded-full border-4 border-orange-500/30 border-t-orange-500 animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#0a0a0f]">
+    <div className="flex-1 overflow-y-auto bg-[var(--color-dc-darker)]">
       <div className="mx-auto max-w-5xl px-8 py-10">
         <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-gray-600">Historico</p>
         <h1 className="mt-1 text-2xl font-black text-white tracking-tight">Sessoes</h1>
@@ -53,7 +53,7 @@ export function Sessions() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar sessoes..."
-            className="w-full rounded-2xl border border-white/[0.08] bg-[#111118] px-5 py-4 pl-14 text-base text-white outline-none placeholder:text-gray-600 transition-all focus:border-orange-500/30 focus:ring-2 focus:ring-orange-500/10"
+            className="w-full rounded-2xl border border-white/[0.08] bg-[var(--color-dc-dark)] px-5 py-4 pl-14 text-base text-white outline-none placeholder:text-gray-600 transition-all focus:border-orange-500/30 focus:ring-2 focus:ring-orange-500/10"
           />
         </div>
 
@@ -62,7 +62,7 @@ export function Sessions() {
           {filtered.map((session) => (
             <div
               key={session.id}
-              className="group flex items-center rounded-2xl border border-white/[0.06] bg-[#111118] transition-all hover:border-orange-500/20"
+              className="group flex items-center rounded-2xl border border-white/[0.06] bg-[var(--color-dc-dark)] transition-all hover:border-orange-500/20"
             >
               <button
                 onClick={() => navigate(`/chat/${encodeURIComponent(session.id)}`)}

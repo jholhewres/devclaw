@@ -32,7 +32,7 @@ export function Login() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0a0a0f] p-4">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[var(--color-dc-darker)] p-4">
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute left-1/2 top-1/3 h-[400px] w-[400px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-orange-500/8 blur-[100px]" />
       </div>
@@ -49,12 +49,12 @@ export function Login() {
             </svg>
           </div>
           <h1 className="mt-4 text-2xl font-black tracking-tight text-white">
-            Go<span className="text-orange-400">Claw</span>
+            Dev<span className="text-orange-400">Claw</span>
           </h1>
           <p className="mt-1 text-sm text-gray-500">Entre com sua senha para continuar</p>
         </div>
 
-        <div className="rounded-2xl border border-orange-500/10 bg-[#111118] p-6">
+        <div className="rounded-2xl border border-orange-500/10 bg-[var(--color-dc-dark)] p-6">
           <div className="-mx-6 -mt-6 mb-6 h-1 rounded-t-2xl bg-gradient-to-r from-orange-500 via-amber-400 to-orange-500" />
 
           <form onSubmit={handleSubmit} className="space-y-5">
@@ -70,7 +70,7 @@ export function Login() {
                 onChange={(e) => { setPassword(e.target.value); setError('') }}
                 placeholder="Sua senha da Web UI"
                 autoFocus
-                className="w-full rounded-xl border border-white/[0.08] bg-[#0a0a0f] px-4 py-3 text-sm text-white placeholder-gray-600 outline-none transition-all focus:border-orange-500/40 focus:ring-2 focus:ring-orange-500/10"
+                className="w-full rounded-xl border border-white/[0.08] bg-[var(--color-dc-darker)] px-4 py-3 text-sm text-white placeholder-gray-600 outline-none transition-all focus:border-orange-500/40 focus:ring-2 focus:ring-orange-500/10"
               />
             </div>
 
