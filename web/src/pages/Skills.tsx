@@ -237,9 +237,16 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
   const categories = [...new Set(available.map((s) => s.category).filter(Boolean))]
   const [activeCategory, setActiveCategory] = useState<string | null>(null)
 
-  const displayList = activeCategory
+  const categoryFiltered = activeCategory
     ? filtered.filter((s) => s.category === activeCategory)
     : filtered
+
+  const displayList = [...categoryFiltered].sort((a, b) => {
+    const aInst = installed.has(a.name) ? 1 : 0
+    const bInst = installed.has(b.name) ? 1 : 0
+    if (aInst !== bInst) return aInst - bInst
+    return a.name.localeCompare(b.name)
+  })
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
