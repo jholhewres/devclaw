@@ -573,8 +573,16 @@ func (s *Server) handleAPIConfig(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		writeJSON(w, http.StatusOK, s.api.GetConfigMap())
 	case http.MethodPut:
-		// TODO: implement config update
-		writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+		var updates map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+			return
+		}
+		if err := s.api.UpdateConfigMap(updates); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, s.api.GetConfigMap())
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}

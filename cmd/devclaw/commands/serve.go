@@ -394,6 +394,7 @@ func wireWebhookAdapter(adapter *webui.AssistantAdapter, gw *gateway.Gateway) {
 func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *whatsapp.WhatsApp) *webui.AssistantAdapter {
 	adapter := &webui.AssistantAdapter{
 		GetConfigMapFn: func() map[string]any {
+			media := cfg.Media.Effective()
 			return map[string]any{
 				"name":     cfg.Name,
 				"trigger":  cfg.Trigger,
@@ -402,7 +403,44 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 				"timezone": cfg.Timezone,
 				"provider": cfg.API.Provider,
 				"base_url": cfg.API.BaseURL,
+				"media": map[string]any{
+					"vision_enabled":        media.VisionEnabled,
+					"vision_model":          media.VisionModel,
+					"vision_detail":         media.VisionDetail,
+					"transcription_enabled": media.TranscriptionEnabled,
+					"transcription_model":   media.TranscriptionModel,
+					"transcription_base_url": media.TranscriptionBaseURL,
+					"transcription_api_key":  media.TranscriptionAPIKey != "",
+				},
 			}
+		},
+		UpdateConfigMapFn: func(updates map[string]any) error {
+			if mediaRaw, ok := updates["media"]; ok {
+				if mediaMap, ok := mediaRaw.(map[string]any); ok {
+					if v, ok := mediaMap["vision_enabled"].(bool); ok {
+						cfg.Media.VisionEnabled = v
+					}
+					if v, ok := mediaMap["vision_model"].(string); ok {
+						cfg.Media.VisionModel = v
+					}
+					if v, ok := mediaMap["vision_detail"].(string); ok {
+						cfg.Media.VisionDetail = v
+					}
+					if v, ok := mediaMap["transcription_enabled"].(bool); ok {
+						cfg.Media.TranscriptionEnabled = v
+					}
+					if v, ok := mediaMap["transcription_model"].(string); ok {
+						cfg.Media.TranscriptionModel = v
+					}
+					if v, ok := mediaMap["transcription_base_url"].(string); ok {
+						cfg.Media.TranscriptionBaseURL = v
+					}
+					if v, ok := mediaMap["transcription_api_key"].(string); ok && v != "" {
+						cfg.Media.TranscriptionAPIKey = v
+					}
+				}
+			}
+			return copilot.SaveConfigToFile(cfg, "config.yaml")
 		},
 		ListSessionsFn: func() []webui.SessionInfo {
 			sessions := assistant.SessionStore().ListSessions()

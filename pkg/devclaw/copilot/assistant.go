@@ -2151,7 +2151,7 @@ func (a *Assistant) enrichMessageContent(ctx context.Context, msg *channels.Inco
 		if mimeType == "" {
 			mimeType = "image/jpeg"
 		}
-		desc, err := a.llmClient.CompleteWithVision(ctx, "", imgBase64, mimeType, "Describe this image in detail. Include any text visible.", media.VisionDetail)
+		desc, err := a.llmClient.CompleteWithVision(ctx, "", imgBase64, mimeType, "Describe this image in detail. Include any text visible.", media.VisionDetail, media.VisionModel)
 		if err != nil {
 			logger.Warn("vision description failed", "error", err)
 			return msg.Content

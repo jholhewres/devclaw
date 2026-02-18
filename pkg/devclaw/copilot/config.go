@@ -161,6 +161,10 @@ type MediaConfig struct {
 	// VisionEnabled enables image understanding via LLM vision (default: true).
 	VisionEnabled bool `yaml:"vision_enabled"`
 
+	// VisionModel overrides the model used for image/video understanding.
+	// If empty, uses the main chat model. Examples: "glm-4.6v", "gpt-4o", "claude-sonnet-4-20250514".
+	VisionModel string `yaml:"vision_model"`
+
 	// VisionDetail controls quality: "auto", "low", "high" (default: "auto").
 	VisionDetail string `yaml:"vision_detail"`
 
@@ -168,23 +172,24 @@ type MediaConfig struct {
 	TranscriptionEnabled bool `yaml:"transcription_enabled"`
 
 	// TranscriptionModel is the model for audio transcription (default: "whisper-1").
+	// Examples: "whisper-1", "glm-asr-2512", "gpt-4o-transcribe", "whisper-large-v3".
 	TranscriptionModel string `yaml:"transcription_model"`
 
-	// TranscriptionBaseURL is the base URL for the Whisper-compatible transcription API.
-	// If empty, defaults to "https://api.openai.com/v1" when the main provider doesn't
-	// support audio transcription (e.g. Z.AI/GLM, Anthropic, xAI).
-	// Only OpenAI and compatible providers support the /audio/transcriptions endpoint.
+	// TranscriptionBaseURL is the base URL for the transcription API.
+	// Examples:
+	//   Z.AI:   "https://api.z.ai/api/paas/v4"
+	//   Groq:   "https://api.groq.com/openai/v1"
+	//   OpenAI: "https://api.openai.com/v1" (default)
 	TranscriptionBaseURL string `yaml:"transcription_base_url"`
 
 	// TranscriptionAPIKey is the API key for the transcription provider.
-	// If empty, falls back to the main API key. Useful when the main provider
-	// doesn't support Whisper and you need a separate OpenAI key for transcription.
+	// If empty, falls back to the main API key.
 	TranscriptionAPIKey string `yaml:"transcription_api_key"`
 
 	// MaxImageSize is the max image size in bytes to process (default: 20MB).
 	MaxImageSize int64 `yaml:"max_image_size"`
 
-	// MaxAudioSize is the max audio size in bytes (default: 25MB - Whisper limit).
+	// MaxAudioSize is the max audio size in bytes (default: 25MB).
 	MaxAudioSize int64 `yaml:"max_audio_size"`
 }
 

@@ -956,7 +956,9 @@ func (c *LLMClient) Complete(ctx context.Context, systemPrompt string, history [
 // imageBase64 is the raw base64-encoded image bytes (without data URL prefix).
 // mimeType is e.g. "image/jpeg", "image/png".
 // detail is "auto", "low", or "high" (empty defaults to "auto").
-func (c *LLMClient) CompleteWithVision(ctx context.Context, systemPrompt, imageBase64, mimeType, userPrompt, detail string) (string, error) {
+// CompleteWithVision sends an image plus optional text to a vision-capable model.
+// visionModel overrides the model; if empty, uses the main chat model.
+func (c *LLMClient) CompleteWithVision(ctx context.Context, systemPrompt, imageBase64, mimeType, userPrompt, detail string, visionModel ...string) (string, error) {
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, imageBase64)
 	if detail == "" {
 		detail = "auto"
@@ -987,7 +989,12 @@ func (c *LLMClient) CompleteWithVision(ctx context.Context, systemPrompt, imageB
 		Content: parts,
 	})
 
-	resp, err := c.completeOnce(ctx, c.model, messages, nil)
+	model := c.model
+	if len(visionModel) > 0 && visionModel[0] != "" {
+		model = visionModel[0]
+	}
+
+	resp, err := c.completeOnce(ctx, model, messages, nil)
 	if err != nil {
 		return "", err
 	}

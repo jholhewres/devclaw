@@ -233,7 +233,7 @@ func extractVideoFrame(ctx context.Context, data []byte, mimeType string, llm *L
 	desc, err := llm.CompleteWithVision(ctx, "",
 		imgBase64, "image/jpeg",
 		"This is a frame from a video the user sent. Describe what you see in the video. Include any text visible.",
-		detail,
+		detail, media.VisionModel,
 	)
 	if err != nil {
 		logger.Warn("video frame vision failed", "error", err)

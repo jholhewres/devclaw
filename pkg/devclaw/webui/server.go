@@ -35,6 +35,9 @@ type AssistantAPI interface {
 	// GetConfig returns the current config as a map.
 	GetConfigMap() map[string]any
 
+	// UpdateConfigMap updates config fields and persists to disk.
+	UpdateConfigMap(updates map[string]any) error
+
 	// ListSessions returns active session metadata.
 	ListSessions() []SessionInfo
 

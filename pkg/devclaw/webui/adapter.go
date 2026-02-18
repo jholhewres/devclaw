@@ -23,6 +23,7 @@ type WhatsAppStatus struct {
 // interface. This avoids a direct import cycle between copilot and webui.
 type AssistantAdapter struct {
 	GetConfigMapFn       func() map[string]any
+	UpdateConfigMapFn    func(updates map[string]any) error
 	ListSessionsFn       func() []SessionInfo
 	GetSessionMessagesFn func(sessionID string) []MessageInfo
 	GetUsageGlobalFn     func() UsageInfo
@@ -77,6 +78,13 @@ func (a *AssistantAdapter) GetConfigMap() map[string]any {
 		return a.GetConfigMapFn()
 	}
 	return nil
+}
+
+func (a *AssistantAdapter) UpdateConfigMap(updates map[string]any) error {
+	if a.UpdateConfigMapFn != nil {
+		return a.UpdateConfigMapFn(updates)
+	}
+	return errors.New("config update not available")
 }
 
 func (a *AssistantAdapter) ListSessions() []SessionInfo {
