@@ -280,7 +280,7 @@ export const api = {
   config: {
     get: () => request<Record<string, unknown>>('/config'),
     update: (data: Record<string, unknown>) =>
-      request<void>('/config', {
+      request<Record<string, unknown>>('/config', {
         method: 'PUT',
         body: JSON.stringify(data),
       }),

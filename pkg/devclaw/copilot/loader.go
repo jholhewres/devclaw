@@ -58,10 +58,20 @@ func ParseConfig(data []byte) (*Config, error) {
 		return nil, fmt.Errorf("mapping config: %w", err)
 	}
 
-	// If "media" section is absent in YAML, bool fields get zeroed by unmarshal.
-	// Restore defaults so vision/transcription are enabled out of the box.
+	// YAML unmarshal zeros bool fields when absent. Merge with defaults so
+	// vision/transcription are enabled out of the box, and partial media
+	// sections (e.g. only vision_model) don't accidentally disable features.
 	if _, hasMedia := raw["media"]; !hasMedia {
 		cfg.Media = DefaultMediaConfig()
+	} else {
+		defaults := DefaultMediaConfig()
+		mediaMap, _ := raw["media"].(map[string]any)
+		if _, set := mediaMap["vision_enabled"]; !set {
+			cfg.Media.VisionEnabled = defaults.VisionEnabled
+		}
+		if _, set := mediaMap["transcription_enabled"]; !set {
+			cfg.Media.TranscriptionEnabled = defaults.TranscriptionEnabled
+		}
 	}
 
 	return cfg, nil
@@ -75,6 +85,7 @@ func SaveConfigToFile(cfg *Config, path string) error {
 	// Create a copy to sanitize before writing.
 	sanitized := *cfg
 	sanitized.API.APIKey = sanitizeSecret(cfg.API.APIKey, "DEVCLAW_API_KEY")
+	sanitized.Media.TranscriptionAPIKey = sanitizeSecret(cfg.Media.TranscriptionAPIKey, "DEVCLAW_TRANSCRIPTION_API_KEY")
 
 	data, err := yaml.Marshal(&sanitized)
 	if err != nil {

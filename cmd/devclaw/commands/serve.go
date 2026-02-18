@@ -138,7 +138,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	var webServer *webui.Server
 	var adapter *webui.AssistantAdapter
 	if cfg.WebUI.Enabled {
-		adapter = buildWebUIAdapter(assistant, cfg, wa)
+		adapter = buildWebUIAdapter(assistant, cfg, wa, configPath)
 		webServer = webui.New(cfg.WebUI, adapter, logger)
 		if err := webServer.Start(ctx); err != nil {
 			logger.Error("failed to start web UI", "error", err)
@@ -391,7 +391,7 @@ func wireWebhookAdapter(adapter *webui.AssistantAdapter, gw *gateway.Gateway) {
 }
 
 // buildWebUIAdapter creates the adapter that bridges the Assistant to the WebUI.
-func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *whatsapp.WhatsApp) *webui.AssistantAdapter {
+func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *whatsapp.WhatsApp, configPath string) *webui.AssistantAdapter {
 	adapter := &webui.AssistantAdapter{
 		GetConfigMapFn: func() map[string]any {
 			media := cfg.Media.Effective()
@@ -418,33 +418,40 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 		UpdateConfigMapFn: func(updates map[string]any) error {
 			if mediaRaw, ok := updates["media"]; ok {
 				if mediaMap, ok := mediaRaw.(map[string]any); ok {
+					media := cfg.Media
 					if v, ok := mediaMap["vision_enabled"].(bool); ok {
-						cfg.Media.VisionEnabled = v
+						media.VisionEnabled = v
 					}
 					if v, ok := mediaMap["vision_model"].(string); ok {
-						cfg.Media.VisionModel = v
+						media.VisionModel = v
 					}
 					if v, ok := mediaMap["vision_detail"].(string); ok {
-						cfg.Media.VisionDetail = v
+						media.VisionDetail = v
 					}
 					if v, ok := mediaMap["transcription_enabled"].(bool); ok {
-						cfg.Media.TranscriptionEnabled = v
+						media.TranscriptionEnabled = v
 					}
 					if v, ok := mediaMap["transcription_model"].(string); ok {
-						cfg.Media.TranscriptionModel = v
+						media.TranscriptionModel = v
 					}
 					if v, ok := mediaMap["transcription_base_url"].(string); ok {
-						cfg.Media.TranscriptionBaseURL = v
+						media.TranscriptionBaseURL = v
 					}
 					if v, ok := mediaMap["transcription_api_key"].(string); ok && v != "" {
-						cfg.Media.TranscriptionAPIKey = v
+						media.TranscriptionAPIKey = v
 					}
 					if v, ok := mediaMap["transcription_language"].(string); ok {
-						cfg.Media.TranscriptionLanguage = v
+						media.TranscriptionLanguage = v
 					}
+					cfg.Media = media
+					assistant.UpdateMediaConfig(media)
 				}
 			}
-			return copilot.SaveConfigToFile(cfg, "config.yaml")
+			savePath := configPath
+			if savePath == "" {
+				savePath = "config.yaml"
+			}
+			return copilot.SaveConfigToFile(cfg, savePath)
 		},
 		ListSessionsFn: func() []webui.SessionInfo {
 			sessions := assistant.SessionStore().ListSessions()

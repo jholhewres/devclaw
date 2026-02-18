@@ -582,6 +582,20 @@ func (a *Assistant) ApplyConfigUpdate(newCfg *Config) {
 	)
 }
 
+// UpdateMediaConfig safely updates the media configuration under lock.
+func (a *Assistant) UpdateMediaConfig(media MediaConfig) {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+	a.config.Media = media
+}
+
+// MediaConfig returns the current effective media config under read lock.
+func (a *Assistant) MediaConfig() MediaConfig {
+	a.configMu.RLock()
+	defer a.configMu.RUnlock()
+	return a.config.Media.Effective()
+}
+
 // ChannelManager returns the channel manager for external registration.
 func (a *Assistant) ChannelManager() *channels.Manager {
 	return a.channelMgr
@@ -2029,7 +2043,7 @@ func (a *Assistant) enrichMessageContentFast(msg *channels.IncomingMessage, logg
 	}
 
 	// Check if the channel supports media and if we have relevant config.
-	media := a.config.Media.Effective()
+	media := a.MediaConfig()
 	_, ok := a.channelMgr.Channel(msg.Channel)
 	if !ok {
 		return msg.Content, false
@@ -2129,7 +2143,7 @@ func (a *Assistant) enrichMessageContent(ctx context.Context, msg *channels.Inco
 		return msg.Content
 	}
 
-	media := a.config.Media.Effective()
+	media := a.MediaConfig()
 	ch, ok := a.channelMgr.Channel(msg.Channel)
 	if !ok {
 		return msg.Content
