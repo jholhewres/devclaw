@@ -111,13 +111,14 @@ export const ChatMessage = memo(function ChatMessage({
 
   if (role === 'user') {
     return (
-      <div className="flex gap-4 py-5 animate-fade-in">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 ring-1 ring-blue-500/15">
-          <User className="h-5 w-5 text-blue-400" />
+      <div className="flex items-start justify-end gap-3 animate-fade-in">
+        <div className="max-w-[75%]">
+          <div className="rounded-2xl rounded-tr-md bg-blue-600 px-4 py-3">
+            <p className="whitespace-pre-wrap text-[15px] leading-[1.6] text-white">{content}</p>
+          </div>
         </div>
-        <div className="min-w-0 flex-1 pt-0.5">
-          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.15em] text-blue-400/70">Você</p>
-          <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-zinc-200">{content}</p>
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800">
+          <User className="h-3.5 w-3.5 text-zinc-400" />
         </div>
       </div>
     )
@@ -127,36 +128,25 @@ export const ChatMessage = memo(function ChatMessage({
 
   return (
     <div className={cn(
-      'flex gap-4 py-5',
-      isStreaming ? 'animate-slide-in' : 'animate-fade-in',
+      'flex items-start gap-3',
+      isStreaming ? 'animate-fade-in-up' : 'animate-fade-in',
     )}>
       <div className={cn(
-        'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1 transition-colors',
-        isStreaming
-          ? 'bg-emerald-500/15 ring-emerald-500/25 stream-glow'
-          : 'bg-emerald-500/10 ring-emerald-500/15',
+        'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-colors',
+        isStreaming ? 'bg-emerald-500/15' : 'bg-zinc-800',
       )}>
-        <Bot className="h-5 w-5 text-emerald-400" />
+        <Bot className="h-3.5 w-3.5 text-emerald-400" />
       </div>
-      <div className="min-w-0 flex-1 pt-0.5">
-        <div className="mb-1.5 flex items-center gap-2">
-          <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-emerald-400/70">DevClaw</p>
-          {isStreaming && (
-            <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-semibold text-emerald-400/80 ring-1 ring-emerald-500/20">
-              gerando
-            </span>
-          )}
-        </div>
-
+      <div className="min-w-0 flex-1">
         {isStreaming && isEmpty ? (
           <TypingDots />
         ) : (
           <div className={cn(
-            'prose prose-sm max-w-none text-[15px] leading-relaxed text-zinc-300',
+            'prose prose-sm max-w-none text-[15px] leading-[1.7] text-zinc-300',
             'prose-headings:text-white prose-headings:font-bold prose-strong:text-white',
             'prose-code:text-blue-400 prose-a:text-blue-400',
             'prose-pre:bg-transparent prose-pre:p-0',
-            'prose-p:text-[15px] prose-li:text-[15px]',
+            'prose-p:text-[15px] prose-li:text-[15px] prose-p:my-2 prose-p:first:mt-0 prose-p:last:mb-0',
             isStreaming && 'stream-shimmer',
           )}>
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
@@ -174,10 +164,10 @@ export const ChatMessage = memo(function ChatMessage({
 
 function TypingDots() {
   return (
-    <div className="dot-pulse flex items-center gap-1 py-2">
-      <span className="h-2 w-2 rounded-full bg-emerald-400/60" />
-      <span className="h-2 w-2 rounded-full bg-emerald-400/60" />
-      <span className="h-2 w-2 rounded-full bg-emerald-400/60" />
+    <div className="flex items-center gap-[3px] py-1">
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" style={{ animationDelay: '0ms' }} />
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" style={{ animationDelay: '150ms' }} />
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" style={{ animationDelay: '300ms' }} />
     </div>
   )
 }
@@ -189,27 +179,27 @@ function ToolMessage({ toolName, toolInput, content }: { toolName?: string; tool
     [toolName, toolInput],
   )
   return (
-    <div className="ml-14 animate-fade-in py-2">
+    <div className="ml-10 animate-fade-in py-1">
       <div className="rounded-lg border-l-2 border-blue-500/40 bg-zinc-800/30">
         <button
           onClick={() => setExpanded(!expanded)}
-          className="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left text-xs text-zinc-400 transition-colors hover:bg-zinc-800/50"
+          className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs text-zinc-400 transition-colors hover:bg-zinc-800/50"
         >
-          <Icon className="h-3.5 w-3.5 shrink-0 text-blue-500/80" />
+          <Icon className="h-3.5 w-3.5 shrink-0 text-blue-400" />
           <span className="min-w-0 flex-1 font-medium text-zinc-300">{summary}</span>
           {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
         </button>
         {expanded && (
           <div className="border-t border-zinc-700/20">
             {toolInput && (
-              <div className="border-b border-zinc-700/20 px-4 py-3">
-                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-zinc-600">Input</p>
-                <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs text-zinc-400">{toolInput}</pre>
+              <div className="border-b border-zinc-700/20 px-3 py-2">
+                <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Input</p>
+                <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px] text-zinc-400">{toolInput}</pre>
               </div>
             )}
-            <div className="px-4 py-3">
-              <p className="mb-1.5 text-[10px] font-bold uppercase tracking-[0.15em] text-zinc-600">Output</p>
-              <pre className="max-h-60 overflow-x-auto overflow-y-auto whitespace-pre-wrap font-mono text-xs text-zinc-400">{content}</pre>
+            <div className="px-3 py-2">
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Output</p>
+              <pre className="max-h-48 overflow-x-auto overflow-y-auto whitespace-pre-wrap font-mono text-[11px] text-zinc-400">{content}</pre>
             </div>
           </div>
         )}
@@ -244,18 +234,18 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
   }
 
   return (
-    <div className="group relative not-prose my-4">
+    <div className="group relative not-prose my-3">
       {lang && (
-        <div className="flex items-center justify-between rounded-t-xl border border-b-0 border-zinc-700/30 bg-zinc-800/60 px-4 py-2.5">
-          <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-zinc-500">{lang}</span>
+        <div className="flex items-center justify-between rounded-t-xl border border-b-0 border-zinc-700/30 bg-zinc-800/60 px-3 py-2">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">{lang}</span>
           <button onClick={handleCopy} aria-label="Copiar código" className="cursor-pointer text-zinc-600 transition-colors hover:text-zinc-300">
-            {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+            {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
           </button>
         </div>
       )}
       <pre
         className={cn(
-          'overflow-x-auto border border-zinc-700/30 bg-dc-darker p-4 text-[13px] leading-relaxed text-zinc-300',
+          'overflow-x-auto border border-zinc-700/30 bg-zinc-900 p-3 text-[13px] leading-relaxed text-zinc-300',
           lang ? 'rounded-b-xl' : 'rounded-xl',
         )}
       >
@@ -265,9 +255,9 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
         <button
           onClick={handleCopy}
           aria-label="Copiar código"
-          className="absolute right-3 top-3 cursor-pointer rounded-lg p-1.5 text-zinc-600 opacity-0 transition-all hover:bg-zinc-800 hover:text-zinc-300 group-hover:opacity-100"
+          className="absolute right-2 top-2 cursor-pointer rounded-lg p-1.5 text-zinc-600 opacity-0 transition-all hover:bg-zinc-800 hover:text-zinc-300 group-hover:opacity-100"
         >
-          {copied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+          {copied ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
         </button>
       )}
     </div>

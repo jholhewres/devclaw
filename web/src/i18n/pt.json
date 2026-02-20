@@ -355,6 +355,7 @@
     "high": "Alta (detalhado, mais tokens)"
   },
   "chatPage": {
+    "assistant": "Assistente IA",
     "whatDo": "O que vamos fazer?",
     "askOrPick": "Pergunte qualquer coisa ou escolha uma sugestão",
     "nativeTools": "70+ ferramentas nativas",

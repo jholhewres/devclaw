@@ -25,19 +25,19 @@ export function AppLayout() {
 
       <main className="flex flex-1 flex-col overflow-hidden">
         {!sidebarOpen && (
-          <div className="flex items-center gap-3 border-b border-white/6 bg-dc-dark px-4 py-2.5">
+          <div className="flex h-11 items-center gap-2 border-b border-zinc-800 bg-dc-dark px-4">
             <button
               onClick={() => setSidebarOpen(true)}
               aria-label="Open sidebar"
-              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-white/6 hover:text-zinc-300"
+              className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
             >
-              <PanelLeft className="h-4.5 w-4.5" />
+              <PanelLeft className="h-3.5 w-3.5" />
             </button>
             <div className="flex items-center gap-2">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-500/15">
                 <Terminal className="h-4 w-4 text-blue-400" />
               </div>
-              <span className="text-sm font-semibold text-white">
+              <span className="text-sm font-medium text-zinc-200">
                 Dev<span className="text-blue-400">Claw</span>
               </span>
             </div>

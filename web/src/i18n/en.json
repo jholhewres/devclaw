@@ -355,6 +355,7 @@
     "high": "High (detailed, more tokens)"
   },
   "chatPage": {
+    "assistant": "AI Assistant",
     "whatDo": "What should we do?",
     "askOrPick": "Ask anything or pick a suggestion",
     "nativeTools": "70+ native tools",

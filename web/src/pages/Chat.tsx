@@ -2,7 +2,6 @@ import { useParams } from 'react-router-dom'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
-  Terminal,
   GitBranch,
   Database,
   Globe,
@@ -10,6 +9,7 @@ import {
   Server,
   Wrench,
   Zap,
+  Sparkles,
 } from 'lucide-react'
 import { ChatMessage } from '@/components/ChatMessage'
 import { ChatInput } from '@/components/ChatInput'
@@ -56,26 +56,32 @@ export function Chat() {
   const friendlyErrorLocal = (raw: string) => friendlyError(raw, t)
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-dc-darker">
+    <div className="flex flex-1 flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto">
         {!hasMessages ? (
-          <div className="flex h-full flex-col items-center justify-center px-6">
-            <div className="flex flex-col items-center -mt-12">
-              {/* Logo */}
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-linear-to-br from-blue-500/20 to-blue-500/10 ring-1 ring-blue-500/20">
-                <Terminal className="h-8 w-8 text-blue-400" />
+          <div className="flex flex-1 flex-col items-center justify-center px-6 pb-6 pt-8">
+            <div className="w-full max-w-2xl space-y-6">
+              {/* Branding */}
+              <div className="text-center space-y-3">
+                <div className="inline-flex items-center gap-2 rounded-full bg-blue-500/10 px-3 py-1.5 text-[11px] font-medium text-blue-400 ring-1 ring-blue-500/20">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {t('chatPage.assistant')}
+                </div>
+                <h1 className="text-3xl font-bold tracking-tight text-white">
+                  {t('chatPage.whatDo')}
+                </h1>
+                <p className="mx-auto max-w-md text-sm text-zinc-500">
+                  {t('chatPage.askOrPick')}
+                </p>
               </div>
 
-              <h2 className="mt-5 text-xl font-bold text-white">{t('chatPage.whatDo')}</h2>
-              <p className="mt-1.5 text-sm text-zinc-500">{t('chatPage.askOrPick')}</p>
-
               {/* Suggestions grid */}
-              <div className="mt-8 grid w-full max-w-lg grid-cols-2 gap-2 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {SUGGESTIONS.map((s) => (
                   <button
                     key={s.label}
                     onClick={() => sendMessage(s.prompt)}
-                    className="group flex cursor-pointer items-center gap-2.5 rounded-xl bg-zinc-800/40 px-3.5 py-3 text-left ring-1 ring-zinc-700/20 transition-all hover:bg-zinc-800/60 hover:ring-blue-500/20"
+                    className="group flex cursor-pointer items-center gap-2.5 rounded-xl bg-zinc-800/40 px-3.5 py-3 text-left ring-1 ring-zinc-700/30 transition-all hover:bg-zinc-800/60 hover:ring-blue-500/20"
                   >
                     <s.icon className="h-4 w-4 shrink-0 text-zinc-500 transition-colors group-hover:text-blue-400" />
                     <span className="text-xs font-medium text-zinc-400 transition-colors group-hover:text-zinc-200">{s.label}</span>
@@ -84,7 +90,7 @@ export function Chat() {
               </div>
 
               {/* Quick tips */}
-              <div className="mt-6 flex items-center gap-4 text-[11px] text-zinc-600">
+              <div className="flex items-center justify-center gap-4 text-[11px] text-zinc-600">
                 <span className="flex items-center gap-1.5">
                   <Zap className="h-3 w-3 text-blue-500/50" />
                   {t('chatPage.nativeTools')}
@@ -95,7 +101,7 @@ export function Chat() {
             </div>
           </div>
         ) : (
-          <div className="mx-auto max-w-3xl space-y-1 px-6 py-8">
+          <div className="mx-auto max-w-3xl space-y-6 px-6 py-6">
             {messages.map((msg, i) => (
               <ChatMessage key={`${msg.role}-${msg.timestamp}-${i}`} role={msg.role} content={msg.content} toolName={msg.tool_name} toolInput={msg.tool_input} />
             ))}
@@ -118,7 +124,7 @@ export function Chat() {
         )}
       </div>
 
-      <div className="mx-auto w-full max-w-3xl">
+      <div className="mx-auto w-full max-w-3xl px-6 pb-4 pt-2">
         <ChatInput onSend={sendMessage} onAbort={abort} isStreaming={isStreaming} />
       </div>
     </div>
