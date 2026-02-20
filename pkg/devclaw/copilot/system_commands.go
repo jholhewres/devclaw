@@ -78,6 +78,27 @@ func (t *SystemCommands) ReloadCommand(args []string) string {
 		t.assistant.config.TokenBudget = newCfg.TokenBudget
 		t.assistant.configMu.Unlock()
 		reloaded = []string{"token_budget"}
+	case "env", "environment", "secrets", "vault":
+		// Re-inject vault secrets first (highest priority)
+		vaultCount := 0
+		if t.assistant.vault != nil && t.assistant.vault.IsUnlocked() {
+			t.assistant.InjectVaultEnvVars()
+			vaultCount = len(t.assistant.vault.List())
+		}
+
+		// Force reload .env files with override (fills gaps not in vault)
+		envCount, err := ReloadEnvFiles()
+		if err != nil {
+			return fmt.Sprintf("❌ Failed to reload env files: %s", err)
+		}
+
+		// Now reload config with fresh env vars
+		newCfg, err = LoadConfigFromFile(t.configPath)
+		if err != nil {
+			return fmt.Sprintf("❌ Failed to reload config: %s", err)
+		}
+		t.assistant.ApplyConfigUpdate(newCfg)
+		return fmt.Sprintf("✅ Reloaded %d vault secrets, %d env vars, and all config sections", vaultCount, envCount)
 	default:
 		return fmt.Sprintf("❌ Unknown section: %s\nValid sections: access, instructions, tools, heartbeat, budget, all", section)
 	}

@@ -137,6 +137,18 @@ type Assistant struct {
 	// systemCommands handles system administration commands.
 	systemCommands *SystemCommands
 
+	// pairingMgr manages DM pairing tokens and requests.
+	pairingMgr *PairingManager
+
+	// agentRouter routes messages to specialized agent profiles.
+	agentRouter *AgentRouter
+
+	// groupPolicyMgr manages group-specific policies and activation modes.
+	groupPolicyMgr *GroupPolicyManager
+
+	// webhookMgr manages external webhook delivery.
+	webhookMgr *WebhookManager
+
 	// configMu protects hot-reloadable config fields.
 	configMu sync.RWMutex
 
@@ -285,7 +297,7 @@ func (a *Assistant) Start(ctx context.Context) error {
 	// can access them via os.Getenv / process.env without needing .env files.
 	// This runs once at startup with zero runtime cost.
 	if a.vault != nil && a.vault.IsUnlocked() {
-		a.injectVaultEnvVars()
+		a.InjectVaultEnvVars()
 	}
 
 	// 0pre-b. Auto-resolve media transcription provider from main API config.
@@ -430,6 +442,30 @@ func (a *Assistant) Start(ctx context.Context) error {
 
 	// 0c-5. System commands handler.
 	a.systemCommands = NewSystemCommands(a, a.config.Database.Path, a.maintenanceMgr)
+
+	// 0c-6. Pairing manager for DM access tokens.
+	a.pairingMgr = NewPairingManager(a.devclawDB, a.accessMgr, a.workspaceMgr, a.logger)
+	if err := a.pairingMgr.Load(); err != nil {
+		a.logger.Warn("failed to load pairing tokens", "error", err)
+	}
+
+	// 0d. Agent router for specialized profiles.
+	if len(a.config.Agents.Profiles) > 0 {
+		a.agentRouter = NewAgentRouter(a.config.Agents, a.logger)
+	}
+
+	// 0e. Group policy manager for group-specific behavior.
+	if len(a.config.Groups.Groups) > 0 || len(a.config.Groups.Blocked) > 0 {
+		a.groupPolicyMgr = NewGroupPolicyManager(a.config.Groups, a.logger)
+	}
+
+	// 0f. Webhook manager for external webhook delivery.
+	if a.config.Hooks.Enabled && len(a.config.Hooks.Webhooks) > 0 {
+		a.webhookMgr = NewWebhookManager(WebhooksConfig{
+			Enabled:  a.config.Hooks.Enabled,
+			Webhooks: a.config.Hooks.Webhooks,
+		}, a.hookMgr, a.logger)
+	}
 
 	// 1. Register skill loaders and load all skills.
 	a.registerSkillLoaders()
@@ -633,11 +669,11 @@ func (a *Assistant) Vault() *Vault {
 	return a.vault
 }
 
-// injectVaultEnvVars loads all vault secrets as environment variables.
+// InjectVaultEnvVars loads all vault secrets as environment variables.
 // Key names are uppercased and prefixed if not already (e.g. "brave_api_key" → "BRAVE_API_KEY").
 // Existing env vars are NOT overwritten — vault only fills gaps.
 // This allows skills/scripts to use process.env.BRAVE_API_KEY without .env files.
-func (a *Assistant) injectVaultEnvVars() {
+func (a *Assistant) InjectVaultEnvVars() {
 	keys := a.vault.List()
 	if len(keys) == 0 {
 		return
@@ -880,6 +916,26 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	accessResult := a.accessMgr.Check(msg)
 
 	if !accessResult.Allowed {
+		// Check if this is a DM with a potential pairing token.
+		if !msg.IsGroup && a.pairingMgr != nil {
+			token := ExtractTokenFromMessage(msg.Content)
+			if token != "" {
+				approved, response, err := a.pairingMgr.ProcessTokenRedemption(
+					token, msg.From, msg.FromName)
+				if err != nil {
+					logger.Warn("pairing token error", "error", err)
+				}
+				a.sendReply(msg, response)
+				if approved {
+					// Re-check access now that user is approved.
+					accessResult = a.accessMgr.Check(msg)
+					logger.Info("access granted via pairing token",
+						"from", msg.From)
+				}
+				return
+			}
+		}
+
 		// If policy is "ask", send a one-time message.
 		if accessResult.ShouldAsk {
 			a.sendReply(msg, a.accessMgr.PendingMessage())
@@ -980,7 +1036,29 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	if workspace.Trigger != "" {
 		trigger = workspace.Trigger
 	}
-	if !a.matchesTrigger(msg.Content, trigger, msg.IsGroup) {
+	triggered := a.matchesTrigger(msg.Content, trigger, msg.IsGroup)
+
+	// ── Step 3a: Group policy check ──
+	// For group messages, check if we should respond based on group policy.
+	if msg.IsGroup && a.groupPolicyMgr != nil {
+		isReplyToBot := false // TODO: detect if message is a reply to bot
+		matchedTrigger := ""
+		if triggered {
+			matchedTrigger = trigger
+		}
+		if !a.groupPolicyMgr.ShouldRespond(msg.ChatID, msg.From, msg.Content, isReplyToBot, matchedTrigger) {
+			logger.Debug("group policy: not responding")
+			return
+		}
+		// Override workspace if group has a specific workspace configured.
+		if wsID := a.groupPolicyMgr.GetWorkspace(msg.ChatID); wsID != "" {
+			if altWS, ok := a.workspaceMgr.Get(wsID); ok {
+				workspace = altWS
+				logger = logger.With("workspace_override", wsID)
+			}
+		}
+	} else if !triggered {
+		// Non-group messages still need trigger match.
 		return
 	}
 
@@ -1012,9 +1090,55 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	// ── Step 7: Build prompt with workspace context ──
 	promptStart := time.Now()
 	prompt := a.composeWorkspacePrompt(workspace, session, userContent)
+
+	// ── Step 7b: Agent routing (model/instructions override) ──
+	// If agent profiles are configured, route based on channel/user/group.
+	var agentProfile *AgentProfileConfig
+	var modelOverride string
+	if a.agentRouter != nil {
+		// For group messages, use ChatID as group JID.
+		groupJID := ""
+		if msg.IsGroup {
+			groupJID = msg.ChatID
+		}
+		agentProfile = a.agentRouter.Route(msg.Channel, msg.From, groupJID)
+		if agentProfile != nil {
+			logger.Info("agent routed",
+				"profile", agentProfile.ID,
+				"channel", msg.Channel,
+				"user", msg.From,
+				"group", groupJID,
+			)
+
+			// Override model if specified in profile.
+			if agentProfile.Model != "" {
+				modelOverride = agentProfile.Model
+			}
+
+			// Override prompt if profile has custom instructions.
+			if agentProfile.Instructions != "" {
+				// Replace the base instructions with profile instructions.
+				// Keep workspace context but use profile's system prompt.
+				prompt = a.composePromptWithAgent(agentProfile, workspace, session, userContent)
+			}
+		}
+	}
+
+	// Apply model override from session config if not set by agent profile.
+	if modelOverride == "" {
+		modelOverride = session.GetConfig().Model
+	}
+
 	logger.Info("prompt composed",
 		"duration_ms", time.Since(promptStart).Milliseconds(),
 		"prompt_chars", len(prompt),
+		"model_override", modelOverride,
+		"agent_profile", func() string {
+			if agentProfile != nil {
+				return agentProfile.ID
+			}
+			return ""
+		}(),
 	)
 
 	// ── Step 8: Execute agent (with optional block streaming) ──
@@ -1086,7 +1210,7 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	}
 
 	agentStart := time.Now()
-	response := a.executeAgentWithStream(agentCtx, workspace.ID, session, sessionID, prompt, userContent, blockStreamer)
+	response := a.executeAgentWithStream(agentCtx, workspace.ID, session, sessionID, prompt, userContent, blockStreamer, modelOverride)
 	logger.Info("agent execution complete",
 		"agent_duration_ms", time.Since(agentStart).Milliseconds(),
 		"response_len", len(response),
@@ -1230,10 +1354,37 @@ func (a *Assistant) composeWorkspacePrompt(ws *Workspace, session *Session, inpu
 	return a.promptComposer.Compose(session, input)
 }
 
+// composePromptWithAgent builds a prompt using agent profile instructions.
+// The agent profile's instructions replace the base instructions while
+// preserving workspace context.
+func (a *Assistant) composePromptWithAgent(profile *AgentProfileConfig, ws *Workspace, session *Session, input string) string {
+	// Store original instructions to restore later.
+	originalInstructions := a.config.Instructions
+
+	// Temporarily set agent's instructions.
+	a.config.Instructions = profile.Instructions
+
+	// Also add workspace instructions as business context if available.
+	if ws.Instructions != "" {
+		cfg := session.GetConfig()
+		cfg.BusinessContext = ws.Instructions
+		session.SetConfig(cfg)
+	}
+
+	// Compose with agent instructions.
+	prompt := a.promptComposer.Compose(session, input)
+
+	// Restore original instructions.
+	a.config.Instructions = originalInstructions
+
+	return prompt
+}
+
 // executeAgentWithStream runs the agentic loop, optionally streaming text
 // progressively to the channel via a BlockStreamer.
 // sessionID is the channel:chatID key used for interrupt inbox routing.
-func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID string, session *Session, sessionID string, systemPrompt string, userMessage string, streamer *BlockStreamer) string {
+// modelOverride specifies the model to use (empty = use default).
+func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID string, session *Session, sessionID string, systemPrompt string, userMessage string, streamer *BlockStreamer, modelOverride string) string {
 	runKey := workspaceID + ":" + session.ID
 
 	// Create interrupt inbox so follow-up messages can be injected mid-run.
@@ -1272,7 +1423,6 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 	// prompt. Older history is summarized by session memory if enabled.
 	history := session.RecentHistory(10)
 
-	modelOverride := session.GetConfig().Model
 	agent := NewAgentRunWithConfig(a.llmClient, a.toolExecutor, a.config.Agent, a.logger)
 	agent.SetModelOverride(modelOverride)
 
@@ -2698,6 +2848,9 @@ func (a *Assistant) resumeInterruptedRuns() {
 
 			prompt := a.composeWorkspacePrompt(resolved.Workspace, session, run.UserMessage)
 
+			// Get model override from session config.
+			modelOverride := session.GetConfig().Model
+
 			// Build block streamer for progressive output.
 			blockStreamer := NewBlockStreamer(
 				DefaultBlockStreamConfig(),
@@ -2708,7 +2861,7 @@ func (a *Assistant) resumeInterruptedRuns() {
 
 			response := a.executeAgentWithStream(
 				resumeCtx, resolved.Workspace.ID, session, sessionID,
-				prompt, run.UserMessage, blockStreamer,
+				prompt, run.UserMessage, blockStreamer, modelOverride,
 			)
 
 			// Flush any remaining streamed text.

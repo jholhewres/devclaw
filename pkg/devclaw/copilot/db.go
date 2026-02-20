@@ -108,6 +108,41 @@ CREATE TABLE IF NOT EXISTS system_state (
     value     TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+-- Pairing tokens (shareable invite tokens for DM access).
+CREATE TABLE IF NOT EXISTS pairing_tokens (
+    id           TEXT PRIMARY KEY,
+    token        TEXT NOT NULL UNIQUE,
+    role         TEXT NOT NULL DEFAULT 'user',
+    max_uses     INTEGER DEFAULT 0,
+    use_count    INTEGER DEFAULT 0,
+    auto_approve INTEGER DEFAULT 0,
+    workspace_id TEXT DEFAULT '',
+    note         TEXT DEFAULT '',
+    created_by   TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    expires_at   TEXT DEFAULT '',
+    revoked      INTEGER DEFAULT 0,
+    revoked_at   TEXT DEFAULT '',
+    revoked_by   TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_pairing_tokens_token ON pairing_tokens(token);
+CREATE INDEX IF NOT EXISTS idx_pairing_tokens_created ON pairing_tokens(created_at);
+
+-- Pairing requests (pending access requests awaiting admin approval).
+CREATE TABLE IF NOT EXISTS pairing_requests (
+    id           TEXT PRIMARY KEY,
+    token_id     TEXT NOT NULL,
+    user_jid     TEXT NOT NULL,
+    user_name    TEXT DEFAULT '',
+    status       TEXT NOT NULL DEFAULT 'pending',
+    reviewed_by  TEXT DEFAULT '',
+    reviewed_at  TEXT DEFAULT '',
+    created_at   TEXT NOT NULL,
+    FOREIGN KEY (token_id) REFERENCES pairing_tokens(id)
+);
+CREATE INDEX IF NOT EXISTS idx_pairing_requests_status ON pairing_requests(status);
+CREATE INDEX IF NOT EXISTS idx_pairing_requests_user ON pairing_requests(user_jid);
 `
 
 // OpenDatabase opens (or creates) the central devclaw.db at the given path.

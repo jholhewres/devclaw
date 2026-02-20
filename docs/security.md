@@ -131,7 +131,6 @@ protected_paths:
   - /etc/shadow
   - /etc/passwd
   - credentials.json
-  - .env
   - *.pem
   - *.key
 ```

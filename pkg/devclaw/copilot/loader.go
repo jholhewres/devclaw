@@ -3,6 +3,7 @@
 package copilot
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,11 +14,22 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// envVarPattern matches ${VAR_NAME} or $VAR_NAME in config values.
-var envVarPattern = regexp.MustCompile(`\$\{([^}]+)\}|\$([A-Z_][A-Z0-9_]*)`)
+// envVarPattern matches environment variable patterns in config values:
+//   - ${VAR_NAME}         - simple variable
+//   - ${VAR_NAME:-default} - default value if not set
+//   - ${VAR_NAME:?error}   - error message if not set
+//   - $VAR_NAME           - bare variable (no default/error support)
+//
+// Capture groups:
+//   - Group 1: Variable name (for ${} syntax)
+//   - Group 2: Modifier type ("-" for default, "?" for error)
+//   - Group 3: Default value or error message
+//   - Group 4: Variable name (for bare $VAR syntax)
+var envVarPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?::(-|\?)([^}]*))?\}|\$([A-Z_][A-Z0-9_]*)`)
 
 // LoadConfigFromFile reads and parses a YAML configuration file.
 // Automatically loads .env files and expands environment variables.
+// Returns an error if any ${VAR:?error} pattern has its variable unset.
 func LoadConfigFromFile(path string) (*Config, error) {
 	// Load .env files (silently ignore if not found).
 	loadEnvFiles()
@@ -28,7 +40,11 @@ func LoadConfigFromFile(path string) (*Config, error) {
 	}
 
 	// Expand environment variables in YAML before parsing.
-	expanded := expandEnvVars(string(data))
+	// This validates ${VAR:?error} patterns and returns error if required vars are missing.
+	expanded, err := expandEnvVarsWithValidation(string(data))
+	if err != nil {
+		return nil, fmt.Errorf("expanding environment variables: %w", err)
+	}
 
 	cfg, err := ParseConfig([]byte(expanded))
 	if err != nil {
@@ -149,6 +165,7 @@ func AuditSecrets(cfg *Config, logger *slog.Logger) {
 // ---------- Internal ----------
 
 // loadEnvFiles loads .env files from standard locations.
+// By default, godotenv does NOT overwrite existing env vars.
 func loadEnvFiles() {
 	envFiles := []string{
 		".env",
@@ -161,25 +178,163 @@ func loadEnvFiles() {
 	}
 }
 
-// expandEnvVars replaces ${VAR} and $VAR references in a string
-// with their environment variable values.
+// loadEnvFilesWithOverride loads .env files and OVERRITES existing env vars.
+// This is used for hot-reloading credentials without restart.
+func loadEnvFilesWithOverride() error {
+	envFiles := []string{
+		".env",
+		".env.local",
+	}
+
+	for _, f := range envFiles {
+		// Read and parse the file manually to allow override.
+		data, err := os.ReadFile(f)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("reading %s: %w", f, err)
+		}
+
+		// Parse the env file.
+		envMap, err := godotenv.Parse(bytes.NewReader(data))
+		if err != nil {
+			return fmt.Errorf("parsing %s: %w", f, err)
+		}
+
+		// Set each variable, overriding existing values.
+		for key, value := range envMap {
+			if err := os.Setenv(key, value); err != nil {
+				return fmt.Errorf("setting %s: %w", key, err)
+			}
+		}
+	}
+	return nil
+}
+
+// ReloadEnvFiles forces a reload of .env files with override.
+// Returns the number of variables loaded.
+func ReloadEnvFiles() (int, error) {
+	envFiles := []string{".env.local", ".env"} // .env.local takes precedence
+	loaded := 0
+
+	for _, f := range envFiles {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return 0, fmt.Errorf("reading %s: %w", f, err)
+		}
+
+		envMap, err := godotenv.Parse(bytes.NewReader(data))
+		if err != nil {
+			return 0, fmt.Errorf("parsing %s: %w", f, err)
+		}
+
+		for key, value := range envMap {
+			if err := os.Setenv(key, value); err != nil {
+				return 0, fmt.Errorf("setting %s: %w", key, err)
+			}
+			loaded++
+		}
+	}
+
+	return loaded, nil
+}
+
+// expandEnvVars replaces ${VAR}, ${VAR:-default}, ${VAR:?error}, and $VAR
+// references in a string with their environment variable values.
+//
+// Supported patterns:
+//   - ${VAR}           - use VAR value, keep placeholder if unset
+//   - ${VAR:-default}  - use VAR value, or "default" if unset
+//   - ${VAR:?error}    - use VAR value, or return error message if unset
+//   - $VAR             - use VAR value, keep placeholder if unset
+//
+// The ${VAR:?error} pattern is handled specially: if the variable is unset,
+// the function returns the original match prefixed with "ERROR:" to signal
+// an error condition that should be caught during validation.
 func expandEnvVars(input string) string {
 	return envVarPattern.ReplaceAllStringFunc(input, func(match string) string {
-		// Extract variable name from ${VAR} or $VAR.
-		var varName string
-		if strings.HasPrefix(match, "${") {
-			varName = match[2 : len(match)-1]
-		} else {
-			varName = match[1:]
+		// Use FindStringSubmatch to get capture groups.
+		// Groups: 1=varName, 2=modifierType(-|?), 3=value, 4=bareVar
+		submatches := envVarPattern.FindStringSubmatch(match)
+
+		var varName, modifierType, modifierValue, bareVar string
+		if len(submatches) >= 2 {
+			varName = submatches[1] // ${VAR...} syntax
+		}
+		if len(submatches) >= 3 {
+			modifierType = submatches[2] // "-" or "?"
+		}
+		if len(submatches) >= 4 {
+			modifierValue = submatches[3] // default value or error message
+		}
+		if len(submatches) >= 5 {
+			bareVar = submatches[4] // $VAR syntax
 		}
 
-		if val, ok := os.LookupEnv(varName); ok {
-			return val
+		// Handle bare $VAR syntax.
+		if bareVar != "" {
+			if val, ok := os.LookupEnv(bareVar); ok {
+				return val
+			}
+			return match // Keep placeholder if unset.
 		}
 
-		// Return original if env var not set (allows placeholder to remain).
+		// Handle ${VAR} syntax with optional modifier.
+		if varName != "" {
+			if val, ok := os.LookupEnv(varName); ok {
+				return val
+			}
+
+			// Variable not set - check for modifier.
+			if modifierType != "" {
+				// Check for :?error pattern.
+				if modifierType == "?" {
+					// Return error indicator. The caller can detect this
+					// by checking for the ERROR: prefix.
+					errorMsg := modifierValue
+					if errorMsg == "" {
+						errorMsg = "required environment variable not set"
+					}
+					return "ERROR:" + varName + ":" + errorMsg
+				}
+				// It's a :-default pattern.
+				return modifierValue
+			}
+			// No modifier, keep placeholder.
+			return match
+		}
+
 		return match
 	})
+}
+
+// expandEnvVarsWithValidation is like expandEnvVars but returns an error
+// if any ${VAR:?error} pattern has its variable unset.
+func expandEnvVarsWithValidation(input string) (string, error) {
+	result := expandEnvVars(input)
+	if strings.Contains(result, "ERROR:") {
+		// Extract the error details.
+		// Format: ERROR:VAR_NAME:error message
+		// The error message can contain any characters including spaces and colons.
+		idx := strings.Index(result, "ERROR:")
+		rest := result[idx+6:] // Skip "ERROR:"
+		// Find the colon after VAR_NAME.
+		colonIdx := strings.Index(rest, ":")
+		if colonIdx == -1 {
+			return "", fmt.Errorf("config error: malformed error marker")
+		}
+		varName := rest[:colonIdx]
+		errorMsg := rest[colonIdx+1:]
+		if errorMsg == "" {
+			errorMsg = "required environment variable not set"
+		}
+		return "", fmt.Errorf("config error: %s - %s", varName, errorMsg)
+	}
+	return result, nil
 }
 
 // resolveSecrets fills in config secrets from environment variables

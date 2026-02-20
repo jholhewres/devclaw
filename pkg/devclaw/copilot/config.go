@@ -117,6 +117,18 @@ type Config struct {
 
 	// Group configures group chat behavior.
 	Group GroupConfig `yaml:"group"`
+
+	// Agents configures specialized agent profiles and routing.
+	Agents AgentsConfig `yaml:"agents"`
+
+	// Groups configures group-specific policies and activation modes.
+	Groups GroupsPolicyConfig `yaml:"groups"`
+
+	// Hooks configures lifecycle hooks and webhooks.
+	Hooks HooksConfig `yaml:"hooks"`
+
+	// MCP configures Model Context Protocol servers.
+	MCP MCPConfig `yaml:"mcp"`
 }
 
 // DatabaseConfig configures the central devclaw.db SQLite database.
@@ -462,6 +474,9 @@ type SecurityConfig struct {
 
 	// SSRF configures URL validation for web_fetch (private IPs, metadata, etc.).
 	SSRF security.SSRFConfig `yaml:"ssrf"`
+
+	// ExecAnalysis configures command risk analysis for bash/exec tools.
+	ExecAnalysis ExecAnalysisConfig `yaml:"exec_analysis"`
 }
 
 // ToolExecutorConfig configures tool execution behavior.

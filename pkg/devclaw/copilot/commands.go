@@ -245,6 +245,27 @@ func (a *Assistant) HandleCommand(msg *channels.IncomingMessage) CommandResult {
 	case "/profile":
 		return CommandResult{Response: a.profileCommand(args, msg, isAdmin), Handled: true}
 
+	// DM pairing commands.
+	case "/pairing":
+		if !isAdmin {
+			return CommandResult{Response: "Permission denied.", Handled: true}
+		}
+		return CommandResult{Response: a.pairingCommand(args, msg), Handled: true}
+
+	// Vault management commands.
+	case "/vault":
+		if !isAdmin {
+			return CommandResult{Response: "Permission denied.", Handled: true}
+		}
+		return CommandResult{Response: a.vaultCommand(args), Handled: true}
+
+	// Hooks management commands.
+	case "/hooks":
+		if !isAdmin {
+			return CommandResult{Response: "Permission denied.", Handled: true}
+		}
+		return CommandResult{Response: a.hooksCommand(args), Handled: true}
+
 	default:
 		return CommandResult{Handled: false}
 	}
@@ -286,7 +307,10 @@ func (a *Assistant) helpCommand(isAdmin bool) string {
 		b.WriteString("/logs [level] [lines] - View audit logs\n")
 		b.WriteString("/health - Health check\n")
 		b.WriteString("/metrics [period] - Usage metrics\n")
-		b.WriteString("/profile [list|set <name>] - View or set tool profile\n\n")
+		b.WriteString("/profile [list|set <name>] - View or set tool profile\n")
+		b.WriteString("/pairing generate|list|requests - DM access tokens\n")
+		b.WriteString("/vault list|set|get|delete - Manage secrets\n")
+		b.WriteString("/hooks list|enable <name>|disable <name> - Manage hooks\n\n")
 
 		b.WriteString("/status - Bot status (legacy)\n")
 	}
@@ -1072,3 +1096,706 @@ func (a *Assistant) profileCommand(args []string, msg *channels.IncomingMessage,
 		return "Usage: /profile [list|set <name>]"
 	}
 }
+
+// pairingCommand handles the /pairing command for DM access tokens.
+func (a *Assistant) pairingCommand(args []string, msg *channels.IncomingMessage) string {
+	if a.pairingMgr == nil {
+		return "Pairing system not available (no database)."
+	}
+
+	if len(args) == 0 {
+		return a.pairingHelp()
+	}
+
+	sub := strings.ToLower(args[0])
+	subArgs := args[1:]
+
+	switch sub {
+	case "generate", "gen", "create":
+		return a.pairingGenerateCommand(subArgs, msg.From)
+
+	case "list", "ls":
+		return a.pairingListCommand(subArgs)
+
+	case "info":
+		return a.pairingInfoCommand(subArgs)
+
+	case "revoke":
+		return a.pairingRevokeCommand(subArgs, msg.From)
+
+	case "requests", "pending":
+		return a.pairingRequestsCommand()
+
+	case "approve":
+		return a.pairingApproveCommand(subArgs, msg.From)
+
+	case "deny":
+		return a.pairingDenyCommand(subArgs, msg.From)
+
+	default:
+		return a.pairingHelp()
+	}
+}
+
+func (a *Assistant) pairingHelp() string {
+	return `*DM Pairing Commands*
+
+/pairing generate [expires] [max_uses] [role] [options]
+  Generate a new pairing token
+  expires: 1h, 24h, 7d, 30d, or "never" (default: never)
+  max_uses: number or "unlimited" (default: unlimited)
+  role: user or admin (default: user)
+  Options:
+    --auto         Auto-approve users (no admin review)
+    --ws <id>      Assign to workspace
+    --note <text>  Admin note
+
+/pairing list [--all]
+  List active tokens (--all includes revoked)
+
+/pairing info <token_or_id>
+  Show token details
+
+/pairing revoke <token_or_id>
+  Revoke a token
+
+/pairing requests
+  List pending access requests
+
+/pairing approve <request_id>
+  Approve a pending request
+
+/pairing deny <request_id> [reason]
+  Deny a pending request
+
+*Examples:*
+/pairing generate 24h 5 user --auto
+/pairing generate 7d unlimited user --ws team-a --note "Team Alpha"
+/pairing generate never 1 admin --note "Backup admin"
+`
+}
+
+func (a *Assistant) pairingGenerateCommand(args []string, createdBy string) string {
+	opts := TokenOptions{
+		Role:        TokenRoleUser,
+		MaxUses:     0, // unlimited
+		AutoApprove: false,
+	}
+
+	// Parse positional arguments.
+	for i := 0; i < len(args) && !strings.HasPrefix(args[i], "--"); i++ {
+		arg := strings.ToLower(args[i])
+
+		// Parse expiration.
+		if arg == "never" || strings.HasSuffix(arg, "h") || strings.HasSuffix(arg, "d") {
+			dur, err := parseDuration(arg)
+			if err != nil {
+				return fmt.Sprintf("Invalid duration: %s", arg)
+			}
+			opts.ExpiresIn = dur
+			continue
+		}
+
+		// Parse max uses.
+		if arg == "unlimited" || arg == "0" {
+			opts.MaxUses = 0
+			continue
+		}
+		if maxUses, err := parseInt(arg); err == nil && maxUses > 0 {
+			opts.MaxUses = maxUses
+			continue
+		}
+
+		// Parse role.
+		if arg == "user" || arg == "admin" {
+			opts.Role = TokenRole(arg)
+			continue
+		}
+	}
+
+	// Parse flag options.
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--auto" {
+			opts.AutoApprove = true
+		}
+		if args[i] == "--ws" && i+1 < len(args) {
+			opts.WorkspaceID = args[i+1]
+			i++
+		}
+		if args[i] == "--note" && i+1 < len(args) {
+			opts.Note = args[i+1]
+			i++
+		}
+	}
+
+	token, err := a.pairingMgr.GenerateToken(createdBy, opts)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	var expires string
+	if token.ExpiresAt != nil {
+		expires = token.ExpiresAt.Format("2006-01-02 15:04")
+	} else {
+		expires = "never"
+	}
+
+	maxUses := "unlimited"
+	if token.MaxUses > 0 {
+		maxUses = fmt.Sprintf("%d", token.MaxUses)
+	}
+
+	var workspace string
+	if token.WorkspaceID != "" {
+		workspace = fmt.Sprintf("\nWorkspace: %s", token.WorkspaceID)
+	}
+
+	var note string
+	if token.Note != "" {
+		note = fmt.Sprintf("\nNote: %s", token.Note)
+	}
+
+	var b strings.Builder
+	b.WriteString("*Pairing Token Generated*\n\n")
+	b.WriteString(fmt.Sprintf("Token: `%s`\n", token.Token))
+	b.WriteString(fmt.Sprintf("Role: %s\n", token.Role))
+	b.WriteString(fmt.Sprintf("Expires: %s\n", expires))
+	b.WriteString(fmt.Sprintf("Max Uses: %s\n", maxUses))
+	b.WriteString(fmt.Sprintf("Auto-Approve: %v%s%s\n", token.AutoApprove, workspace, note))
+	b.WriteString("\nShare this token with the user. They can send it to the bot to request access.\n")
+	b.WriteString("If auto-approve is off, you must run /pairing approve to grant access.")
+
+	return b.String()
+}
+
+func (a *Assistant) pairingListCommand(args []string) string {
+	includeRevoked := containsFlag(args, "--all")
+
+	tokens, err := a.pairingMgr.ListTokens(includeRevoked)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	if len(tokens) == 0 {
+		return "No pairing tokens found."
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("*Pairing Tokens (%d):*\n\n", len(tokens)))
+
+	for _, t := range tokens {
+		status := "active"
+		if t.Revoked {
+			status = "revoked"
+		} else if t.IsExpired() {
+			status = "expired"
+		} else if t.MaxUses > 0 && t.UseCount >= t.MaxUses {
+			status = "exhausted"
+		}
+
+		uses := fmt.Sprintf("%d", t.UseCount)
+		if t.MaxUses > 0 {
+			uses = fmt.Sprintf("%d/%d", t.UseCount, t.MaxUses)
+		}
+
+		auto := ""
+		if t.AutoApprove {
+			auto = " [auto]"
+		}
+
+		b.WriteString(fmt.Sprintf("• `%s...` %s%s\n", t.Token[:12], status, auto))
+		b.WriteString(fmt.Sprintf("  Role: %s | Uses: %s | By: %s\n", t.Role, uses, t.CreatedBy))
+	}
+
+	b.WriteString("\nUse /pairing info <token> for details.")
+	return b.String()
+}
+
+func (a *Assistant) pairingInfoCommand(args []string) string {
+	if len(args) < 1 {
+		return "Usage: /pairing info <token_or_id>"
+	}
+
+	token, err := a.pairingMgr.GetTokenByIDOrPrefix(args[0])
+	if err != nil {
+		return fmt.Sprintf("Token not found: %v", err)
+	}
+
+	var expires string
+	if token.ExpiresAt != nil {
+		expires = token.ExpiresAt.Format("2006-01-02 15:04")
+	} else {
+		expires = "never"
+	}
+
+	maxUses := "unlimited"
+	if token.MaxUses > 0 {
+		maxUses = fmt.Sprintf("%d", token.MaxUses)
+	}
+
+	status := "active"
+	if token.Revoked {
+		status = fmt.Sprintf("revoked by %s", token.RevokedBy)
+	} else if token.IsExpired() {
+		status = "expired"
+	}
+
+	var workspace string
+	if token.WorkspaceID != "" {
+		workspace = fmt.Sprintf("\nWorkspace: %s", token.WorkspaceID)
+	}
+
+	var b strings.Builder
+	b.WriteString("*Pairing Token*\n\n")
+	b.WriteString(fmt.Sprintf("ID: %s\n", token.ID))
+	b.WriteString(fmt.Sprintf("Token: `%s`\n", token.Token))
+	b.WriteString(fmt.Sprintf("Status: %s\n", status))
+	b.WriteString(fmt.Sprintf("Role: %s\n", token.Role))
+	b.WriteString(fmt.Sprintf("Expires: %s\n", expires))
+	b.WriteString(fmt.Sprintf("Uses: %d/%s\n", token.UseCount, maxUses))
+	b.WriteString(fmt.Sprintf("Auto-Approve: %v\n", token.AutoApprove))
+	b.WriteString(fmt.Sprintf("Created By: %s\n", token.CreatedBy))
+	b.WriteString(fmt.Sprintf("Created At: %s%s\n", token.CreatedAt.Format("2006-01-02 15:04"), workspace))
+	b.WriteString(fmt.Sprintf("Note: %s", token.Note))
+
+	return b.String()
+}
+
+func (a *Assistant) pairingRevokeCommand(args []string, revokedBy string) string {
+	if len(args) < 1 {
+		return "Usage: /pairing revoke <token_or_id>"
+	}
+
+	token, err := a.pairingMgr.GetTokenByIDOrPrefix(args[0])
+	if err != nil {
+		return fmt.Sprintf("Token not found: %v", err)
+	}
+
+	if err := a.pairingMgr.RevokeToken(token.ID, revokedBy); err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	return fmt.Sprintf("Token `%s...` has been revoked.", token.Token[:12])
+}
+
+func (a *Assistant) pairingRequestsCommand() string {
+	requests, err := a.pairingMgr.ListPendingRequests()
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	if len(requests) == 0 {
+		return "No pending access requests."
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("*Pending Requests (%d):*\n\n", len(requests)))
+
+	for _, r := range requests {
+		b.WriteString(fmt.Sprintf("• ID: `%s`\n", r.ID[:8]))
+		b.WriteString(fmt.Sprintf("  User: %s\n", r.UserJID))
+		if r.UserName != "" {
+			b.WriteString(fmt.Sprintf("  Name: %s\n", r.UserName))
+		}
+		b.WriteString(fmt.Sprintf("  Role: %s | Created: %s\n", r.TokenRole, r.CreatedAt.Format("2006-01-02 15:04")))
+		if r.TokenNote != "" {
+			b.WriteString(fmt.Sprintf("  Token Note: %s\n", r.TokenNote))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("Use /pairing approve <id> or /pairing deny <id> to respond.")
+	return b.String()
+}
+
+func (a *Assistant) pairingApproveCommand(args []string, approvedBy string) string {
+	if len(args) < 1 {
+		return "Usage: /pairing approve <request_id>"
+	}
+
+	if err := a.pairingMgr.ApproveRequest(args[0], approvedBy); err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	return "Request approved. User has been granted access."
+}
+
+func (a *Assistant) pairingDenyCommand(args []string, deniedBy string) string {
+	if len(args) < 1 {
+		return "Usage: /pairing deny <request_id> [reason]"
+	}
+
+	reason := ""
+	if len(args) > 1 {
+		reason = strings.Join(args[1:], " ")
+	}
+
+	if err := a.pairingMgr.DenyRequest(args[0], deniedBy, reason); err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	return "Request denied."
+}
+
+// parseDuration parses a duration string like "1h", "24h", "7d", "30d", or "never".
+func parseDuration(s string) (time.Duration, error) {
+	s = strings.ToLower(s)
+	if s == "never" {
+		return 0, nil
+	}
+
+	// Parse days.
+	if strings.HasSuffix(s, "d") {
+		daysStr := strings.TrimSuffix(s, "d")
+		days, err := parseInt(daysStr)
+		if err != nil {
+			return 0, err
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+
+	// Parse hours.
+	if strings.HasSuffix(s, "h") {
+		hoursStr := strings.TrimSuffix(s, "h")
+		hours, err := parseInt(hoursStr)
+		if err != nil {
+			return 0, err
+		}
+		return time.Duration(hours) * time.Hour, nil
+	}
+
+	return 0, fmt.Errorf("invalid duration format: %s", s)
+}
+
+// parseInt parses a string to int.
+func parseInt(s string) (int, error) {
+	var result int
+	_, err := fmt.Sscanf(s, "%d", &result)
+	return result, err
+}
+
+// --- Vault Commands ---
+
+// vaultCommand handles the /vault command for secret management.
+func (a *Assistant) vaultCommand(args []string) string {
+	if a.vault == nil {
+		return "Vault not available."
+	}
+
+	if len(args) == 0 {
+		return a.vaultHelp()
+	}
+
+	sub := strings.ToLower(args[0])
+	subArgs := args[1:]
+
+	switch sub {
+	case "list", "ls":
+		return a.vaultListCommand()
+
+	case "set", "add", "update":
+		return a.vaultSetCommand(subArgs)
+
+	case "get", "show":
+		return a.vaultGetCommand(subArgs)
+
+	case "delete", "remove", "rm":
+		return a.vaultDeleteCommand(subArgs)
+
+	case "unlock":
+		return a.vaultUnlockCommand()
+
+	case "lock":
+		return a.vaultLockCommand()
+
+	case "status":
+		return a.vaultStatusCommand()
+
+	default:
+		return a.vaultHelp()
+	}
+}
+
+func (a *Assistant) vaultHelp() string {
+	return `*Vault Commands*
+
+/vault list
+  List all secret names (values are hidden)
+
+/vault set <key> <value>
+  Add or update a secret
+  Example: /vault set OPENAI_API_KEY sk-xxx
+
+/vault get <key>
+  Show a secret value (use with caution!)
+
+/vault delete <key>
+  Remove a secret
+
+/vault unlock
+  Unlock the vault (prompts for password if needed)
+
+/vault lock
+  Lock the vault (clears key from memory)
+
+/vault status
+  Show vault status (locked/unlocked, count)
+
+*Note:* Vault secrets are automatically injected as environment variables
+and take precedence over .env files. Use /reload vault to refresh.
+`
+}
+
+func (a *Assistant) vaultListCommand() string {
+	if !a.vault.IsUnlocked() {
+		return "Vault is locked. Use /vault unlock first."
+	}
+
+	keys := a.vault.List()
+	if len(keys) == 0 {
+		return "No secrets stored in vault."
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("*Vault Secrets (%d):*\n\n", len(keys)))
+	for _, key := range keys {
+		b.WriteString(fmt.Sprintf("• `%s`\n", key))
+	}
+	b.WriteString("\nUse /vault get <key> to show a value.")
+	return b.String()
+}
+
+func (a *Assistant) vaultSetCommand(args []string) string {
+	if !a.vault.IsUnlocked() {
+		return "Vault is locked. Use /vault unlock first."
+	}
+
+	if len(args) < 2 {
+		return "Usage: /vault set <key> <value>"
+	}
+
+	key := strings.ToUpper(args[0])
+	value := strings.Join(args[1:], " ")
+
+	if err := a.vault.Set(key, value); err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	// Re-inject to update env vars.
+	a.InjectVaultEnvVars()
+
+	return fmt.Sprintf("Secret `%s` saved. Environment variable updated.", key)
+}
+
+func (a *Assistant) vaultGetCommand(args []string) string {
+	if !a.vault.IsUnlocked() {
+		return "Vault is locked. Use /vault unlock first."
+	}
+
+	if len(args) < 1 {
+		return "Usage: /vault get <key>"
+	}
+
+	key := strings.ToUpper(args[0])
+	value, err := a.vault.Get(key)
+	if err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	if value == "" {
+		return fmt.Sprintf("Secret `%s` not found.", key)
+	}
+
+	// Mask most of the value for security.
+	if len(value) > 8 {
+		masked := value[:4] + "****" + value[len(value)-4:]
+		return fmt.Sprintf("`%s` = `%s`", key, masked)
+	}
+	return fmt.Sprintf("`%s` = `%s`", key, value)
+}
+
+func (a *Assistant) vaultDeleteCommand(args []string) string {
+	if !a.vault.IsUnlocked() {
+		return "Vault is locked. Use /vault unlock first."
+	}
+
+	if len(args) < 1 {
+		return "Usage: /vault delete <key>"
+	}
+
+	key := strings.ToUpper(args[0])
+
+	if err := a.vault.Delete(key); err != nil {
+		return fmt.Sprintf("Error: %v", err)
+	}
+
+	return fmt.Sprintf("Secret `%s` deleted.", key)
+}
+
+func (a *Assistant) vaultUnlockCommand() string {
+	if a.vault.IsUnlocked() {
+		return "Vault is already unlocked."
+	}
+
+	if !a.vault.Exists() {
+		return "Vault does not exist. Create it with a master password first (via CLI or setup wizard)."
+	}
+
+	return "Vault requires password. Use CLI to unlock: devclaw vault unlock"
+}
+
+func (a *Assistant) vaultLockCommand() string {
+	if !a.vault.IsUnlocked() {
+		return "Vault is already locked."
+	}
+
+	a.vault.Lock()
+	return "Vault locked. Secrets cleared from memory."
+}
+
+func (a *Assistant) vaultStatusCommand() string {
+	var b strings.Builder
+	b.WriteString("*Vault Status*\n\n")
+
+	if a.vault == nil {
+		b.WriteString("Status: Not available")
+		return b.String()
+	}
+
+	if a.vault.Exists() {
+		b.WriteString("File: " + a.vault.Path() + "\n")
+	} else {
+		b.WriteString("File: Not created\n")
+	}
+
+	if a.vault.IsUnlocked() {
+		b.WriteString("Status: Unlocked\n")
+		keys := a.vault.List()
+		b.WriteString(fmt.Sprintf("Secrets: %d", len(keys)))
+	} else {
+		b.WriteString("Status: Locked")
+	}
+
+	return b.String()
+}
+
+// hooksCommand handles the /hooks command for hook management.
+func (a *Assistant) hooksCommand(args []string) string {
+	if a.hookMgr == nil {
+		return "Hooks system not available."
+	}
+
+	if len(args) == 0 {
+		return a.hooksHelp()
+	}
+
+	sub := strings.ToLower(args[0])
+	subArgs := args[1:]
+
+	switch sub {
+	case "list", "ls":
+		return a.hooksListCommand()
+
+	case "enable":
+		return a.hooksEnableCommand(subArgs, true)
+
+	case "disable":
+		return a.hooksEnableCommand(subArgs, false)
+
+	case "events":
+		return a.hooksEventsCommand()
+
+	default:
+		return a.hooksHelp()
+	}
+}
+
+func (a *Assistant) hooksHelp() string {
+	return `*Hooks Commands*
+
+/hooks list
+  List all registered hooks
+
+/hooks events
+  List all available hook events
+
+/hooks enable <name>
+  Enable a hook by name
+
+/hooks disable <name>
+  Disable a hook by name
+
+*About Hooks*
+Hooks are event handlers that run at specific points in the bot lifecycle.
+They can be used for logging, auditing, notifications, and custom behavior.
+
+Webhooks can be configured in config.yaml to send events to external URLs.
+`
+}
+
+func (a *Assistant) hooksListCommand() string {
+	hooks := a.hookMgr.ListDetailed()
+	if len(hooks) == 0 {
+		return "No hooks registered."
+	}
+
+	var b strings.Builder
+	b.WriteString("*Registered Hooks*\n\n")
+
+	for _, h := range hooks {
+		status := "enabled"
+		if !h.Enabled {
+			status = "disabled"
+		}
+		b.WriteString(fmt.Sprintf("`%s` (%s)\n", h.Name, status))
+		b.WriteString(fmt.Sprintf("  Events: %s\n", strings.Join(hookEventsToStrings(h.Events), ", ")))
+		if h.Description != "" {
+			b.WriteString(fmt.Sprintf("  Description: %s\n", h.Description))
+		}
+		b.WriteString(fmt.Sprintf("  Source: %s, Priority: %d\n\n", h.Source, h.Priority))
+	}
+
+	return b.String()
+}
+
+func (a *Assistant) hooksEventsCommand() string {
+	var b strings.Builder
+	b.WriteString("*Available Hook Events*\n\n")
+
+	for _, ev := range AllHookEvents {
+		b.WriteString(fmt.Sprintf("• `%s` - %s\n", ev, HookEventDescription(ev)))
+	}
+
+	return b.String()
+}
+
+func (a *Assistant) hooksEnableCommand(args []string, enable bool) string {
+	if len(args) < 1 {
+		verb := "enable"
+		if !enable {
+			verb = "disable"
+		}
+		return fmt.Sprintf("Usage: /hooks %s <name>", verb)
+	}
+
+	name := args[0]
+
+	if a.hookMgr.SetEnabled(name, enable) {
+		action := "enabled"
+		if !enable {
+			action = "disabled"
+		}
+		return fmt.Sprintf("Hook `%s` %s.", name, action)
+	}
+
+	return fmt.Sprintf("Hook `%s` not found.", name)
+}
+
+func hookEventsToStrings(events []HookEvent) []string {
+	result := make([]string, len(events))
+	for i, ev := range events {
+		result[i] = string(ev)
+	}
+	return result
+}
+

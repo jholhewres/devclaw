@@ -39,6 +39,119 @@ func TestExpandEnvVars(t *testing.T) {
 			t.Errorf("got %q", got)
 		}
 	})
+
+	t.Run("default value when unset", func(t *testing.T) {
+		got := expandEnvVars("key: ${UNSET_VAR_DEFAULT_123:-fallback}")
+		if got != "key: fallback" {
+			t.Errorf("expected default value, got %q", got)
+		}
+	})
+
+	t.Run("default value ignored when set", func(t *testing.T) {
+		t.Setenv("TEST_DEFAULT_SET", "actual")
+		got := expandEnvVars("key: ${TEST_DEFAULT_SET:-ignored}")
+		if got != "key: actual" {
+			t.Errorf("expected actual value, got %q", got)
+		}
+	})
+
+	t.Run("empty default", func(t *testing.T) {
+		got := expandEnvVars("key: ${UNSET_EMPTY_DEFAULT:-}")
+		if got != "key: " {
+			t.Errorf("expected empty value, got %q", got)
+		}
+	})
+
+	t.Run("default with special chars", func(t *testing.T) {
+		got := expandEnvVars("url: ${UNSET_URL:-https://api.example.com/v1}")
+		if got != "url: https://api.example.com/v1" {
+			t.Errorf("expected URL default, got %q", got)
+		}
+	})
+
+	t.Run("error marker when unset", func(t *testing.T) {
+		got := expandEnvVars("key: ${UNSET_REQUIRED_VAR_123:?API key is required}")
+		if !strings.Contains(got, "ERROR:") {
+			t.Errorf("expected ERROR marker, got %q", got)
+		}
+		if !strings.Contains(got, "API key is required") {
+			t.Errorf("expected error message, got %q", got)
+		}
+	})
+
+	t.Run("error marker empty message", func(t *testing.T) {
+		got := expandEnvVars("key: ${UNSET_REQUIRED_EMPTY:?}")
+		if !strings.Contains(got, "ERROR:") {
+			t.Errorf("expected ERROR marker, got %q", got)
+		}
+		if !strings.Contains(got, "required environment variable not set") {
+			t.Errorf("expected default error message, got %q", got)
+		}
+	})
+
+	t.Run("error ignored when set", func(t *testing.T) {
+		t.Setenv("TEST_REQUIRED_SET", "value")
+		got := expandEnvVars("key: ${TEST_REQUIRED_SET:?should not appear}")
+		if got != "key: value" {
+			t.Errorf("expected actual value, got %q", got)
+		}
+	})
+
+	t.Run("mixed patterns", func(t *testing.T) {
+		t.Setenv("MIXED_SET", "yes")
+		got := expandEnvVars("a: ${MIXED_SET}, b: ${UNSET_MIXED:-no}, c: ${UNSET_KEEP}")
+		expected := "a: yes, b: no, c: ${UNSET_KEEP}"
+		if got != expected {
+			t.Errorf("got %q, want %q", got, expected)
+		}
+	})
+}
+
+func TestExpandEnvVarsWithValidation(t *testing.T) {
+	t.Run("no errors returns result", func(t *testing.T) {
+		t.Setenv("TEST_VALIDATE_A", "value")
+		got, err := expandEnvVarsWithValidation("key: ${TEST_VALIDATE_A}")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if got != "key: value" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("default value no error", func(t *testing.T) {
+		got, err := expandEnvVarsWithValidation("key: ${UNSET_VALIDATE_DEFAULT:-fallback}")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if got != "key: fallback" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("required var missing returns error", func(t *testing.T) {
+		_, err := expandEnvVarsWithValidation("key: ${UNSET_VALIDATE_REQUIRED:?missing var}")
+		if err == nil {
+			t.Error("expected error for missing required var")
+		}
+		if !strings.Contains(err.Error(), "UNSET_VALIDATE_REQUIRED") {
+			t.Errorf("error should mention var name: %v", err)
+		}
+		if !strings.Contains(err.Error(), "missing var") {
+			t.Errorf("error should contain message: %v", err)
+		}
+	})
+
+	t.Run("required var set succeeds", func(t *testing.T) {
+		t.Setenv("TEST_VALIDATE_REQUIRED_SET", "value")
+		got, err := expandEnvVarsWithValidation("key: ${TEST_VALIDATE_REQUIRED_SET:?should not error}")
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if got != "key: value" {
+			t.Errorf("got %q", got)
+		}
+	})
 }
 
 func TestIsEnvReference(t *testing.T) {

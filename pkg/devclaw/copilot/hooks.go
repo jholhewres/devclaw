@@ -33,22 +33,26 @@ import (
 type HookEvent string
 
 const (
-	HookSessionStart     HookEvent = "session_start"
-	HookSessionEnd       HookEvent = "session_end"
-	HookUserPromptSubmit HookEvent = "user_prompt_submit"
-	HookPreToolUse       HookEvent = "pre_tool_use"
-	HookPostToolUse      HookEvent = "post_tool_use"
-	HookAgentStart       HookEvent = "agent_start"
-	HookAgentStop        HookEvent = "agent_stop"
-	HookSubagentStart    HookEvent = "subagent_start"
-	HookSubagentStop     HookEvent = "subagent_stop"
-	HookPreCompact       HookEvent = "pre_compact"
-	HookPostCompact      HookEvent = "post_compact"
-	HookMemorySave       HookEvent = "memory_save"
-	HookMemoryRecall     HookEvent = "memory_recall"
-	HookNotification     HookEvent = "notification"
-	HookHeartbeat        HookEvent = "heartbeat"
-	HookError            HookEvent = "error"
+	HookSessionStart      HookEvent = "session_start"
+	HookSessionEnd        HookEvent = "session_end"
+	HookUserPromptSubmit  HookEvent = "user_prompt_submit"
+	HookPreToolUse        HookEvent = "pre_tool_use"
+	HookPostToolUse       HookEvent = "post_tool_use"
+	HookAgentStart        HookEvent = "agent_start"
+	HookAgentStop         HookEvent = "agent_stop"
+	HookSubagentStart     HookEvent = "subagent_start"
+	HookSubagentStop      HookEvent = "subagent_stop"
+	HookPreCompact        HookEvent = "pre_compact"
+	HookPostCompact       HookEvent = "post_compact"
+	HookMemorySave        HookEvent = "memory_save"
+	HookMemoryRecall      HookEvent = "memory_recall"
+	HookNotification      HookEvent = "notification"
+	HookHeartbeat         HookEvent = "heartbeat"
+	HookError             HookEvent = "error"
+	HookUserJoin          HookEvent = "user_join"
+	HookUserLeave         HookEvent = "user_leave"
+	HookChannelConnect    HookEvent = "channel_connect"
+	HookChannelDisconnect HookEvent = "channel_disconnect"
 )
 
 // AllHookEvents lists every supported hook event for discovery/documentation.
@@ -63,6 +67,35 @@ var AllHookEvents = []HookEvent{
 	HookNotification,
 	HookHeartbeat,
 	HookError,
+	HookUserJoin, HookUserLeave,
+	HookChannelConnect, HookChannelDisconnect,
+}
+
+// HooksConfig holds all hook configuration.
+type HooksConfig struct {
+	// Enabled turns the hooks system on/off.
+	Enabled bool `yaml:"enabled"`
+
+	// Webhooks is the list of external webhook configurations.
+	Webhooks []WebhookConfig `yaml:"webhooks"`
+
+	// Handlers is the list of internal hook handlers.
+	Handlers []HandlerConfig `yaml:"handlers"`
+}
+
+// HandlerConfig configures an internal hook handler.
+type HandlerConfig struct {
+	// Event is the hook event to listen to.
+	Event string `yaml:"event"`
+
+	// Action is the action to take (notify_admins, send_message).
+	Action string `yaml:"action"`
+
+	// Template is a Go template for the action output.
+	Template string `yaml:"template"`
+
+	// Enabled controls whether this handler is active.
+	Enabled bool `yaml:"enabled"`
 }
 
 // HookPayload carries contextual data for a hook invocation.
@@ -451,6 +484,14 @@ func HookEventDescription(ev HookEvent) string {
 		return "Tick periódico do heartbeat"
 	case HookError:
 		return "Erro irrecuperável ocorreu"
+	case HookUserJoin:
+		return "Usuário aprovado/adicionado"
+	case HookUserLeave:
+		return "Usuário removido/bloqueado"
+	case HookChannelConnect:
+		return "Canal conectado"
+	case HookChannelDisconnect:
+		return "Canal desconectado"
 	default:
 		return string(ev)
 	}
