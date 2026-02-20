@@ -5,6 +5,7 @@ package whatsapp
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels"
 
@@ -12,6 +13,44 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 )
+
+// ConnectionState represents the current connection state.
+type ConnectionState string
+
+const (
+	StateDisconnected  ConnectionState = "disconnected"
+	StateConnecting    ConnectionState = "connecting"
+	StateConnected     ConnectionState = "connected"
+	StateReconnecting  ConnectionState = "reconnecting"
+	StateWaitingQR     ConnectionState = "waiting_qr"
+	StateQRScanned     ConnectionState = "qr_scanned"
+	StateLoggingOut    ConnectionState = "logging_out"
+	StateBanned        ConnectionState = "banned"
+)
+
+// ConnectionEvent represents a connection state change event.
+type ConnectionEvent struct {
+	State     ConnectionState `json:"state"`
+	Previous  ConnectionState `json:"previous,omitempty"`
+	Timestamp time.Time       `json:"timestamp"`
+	Reason    string          `json:"reason,omitempty"`
+	Details   map[string]any  `json:"details,omitempty"`
+}
+
+// QREventEnhanced represents an enhanced QR code event with more details.
+type QREventEnhanced struct {
+	Type        string    `json:"type"`                    // "code", "success", "timeout", "error", "refresh"
+	Code        string    `json:"code,omitempty"`          // Raw QR code string
+	Message     string    `json:"message"`                 // Human-readable message
+	ExpiresAt   time.Time `json:"expires_at,omitempty"`    // When QR code expires
+	SecondsLeft int       `json:"seconds_left,omitempty"`  // Seconds until expiration
+	Attempts    int       `json:"attempts,omitempty"`      // Number of QR attempts
+}
+
+// ConnectionObserver receives connection state changes.
+type ConnectionObserver interface {
+	OnConnectionChange(evt ConnectionEvent)
+}
 
 // handleEvent is the main whatsmeow event dispatcher.
 func (w *WhatsApp) handleEvent(rawEvt interface{}) {
@@ -23,27 +62,25 @@ func (w *WhatsApp) handleEvent(rawEvt interface{}) {
 		w.handleReceipt(evt)
 
 	case *events.Connected:
-		w.connected.Store(true)
-		w.errorCount.Store(0)
-		w.logger.Info("whatsapp: connected")
+		w.handleConnected(evt)
 
 	case *events.Disconnected:
-		w.connected.Store(false)
-		w.logger.Warn("whatsapp: disconnected")
+		w.handleDisconnected(evt)
 
 	case *events.StreamReplaced:
-		w.connected.Store(false)
-		w.logger.Warn("whatsapp: stream replaced (another device connected)")
+		w.handleStreamReplaced(evt)
 
 	case *events.LoggedOut:
-		w.connected.Store(false)
-		w.logger.Error("whatsapp: logged out, session invalidated",
-			"reason", evt.Reason)
+		w.handleLoggedOut(evt)
 
 	case *events.TemporaryBan:
-		w.logger.Error("whatsapp: temporary ban",
-			"code", evt.Code,
-			"expire", evt.Expire)
+		w.handleTemporaryBan(evt)
+
+	case *events.KeepAliveTimeout:
+		w.handleKeepAliveTimeout(evt)
+
+	case *events.KeepAliveRestored:
+		w.handleKeepAliveRestored(evt)
 
 	case *events.HistorySync:
 		w.logger.Debug("whatsapp: history sync received")
@@ -51,7 +88,177 @@ func (w *WhatsApp) handleEvent(rawEvt interface{}) {
 	case *events.PushName:
 		w.logger.Debug("whatsapp: push name update",
 			"jid", evt.JID, "name", evt.NewPushName)
+
+	case *events.PairSuccess:
+		w.handlePairSuccess(evt)
+
+	case *events.QRScannedWithoutMultidevice:
+		w.logger.Warn("whatsapp: QR scanned but multidevice not enabled")
 	}
+}
+
+// handleConnected handles successful connection.
+func (w *WhatsApp) handleConnected(_ *events.Connected) {
+	previous := w.getState()
+	w.setState(StateConnected)
+	w.errorCount.Store(0)
+	w.reconnectAttempts = 0
+
+	w.logger.Info("whatsapp: connected",
+		"jid", w.getClientJID(),
+		"platform", w.getClientPlatform())
+
+	// Notify connection observers.
+	w.notifyConnectionChange(ConnectionEvent{
+		State:     StateConnected,
+		Previous:  previous,
+		Timestamp: time.Now(),
+		Details: map[string]any{
+			"jid":      w.getClientJID(),
+			"platform": w.getClientPlatform(),
+		},
+	})
+
+	// Clear any QR state.
+	w.notifyQR(QREvent{
+		Type:    "success",
+		Message: "WhatsApp connected successfully!",
+	})
+}
+
+// handleDisconnected handles disconnection.
+func (w *WhatsApp) handleDisconnected(_ *events.Disconnected) {
+	previous := w.getState()
+	w.setState(StateDisconnected)
+
+	w.logger.Warn("whatsapp: disconnected",
+		"was_connected", w.connected.Load())
+
+	w.connected.Store(false)
+
+	// Notify connection observers.
+	w.notifyConnectionChange(ConnectionEvent{
+		State:     StateDisconnected,
+		Previous:  previous,
+		Timestamp: time.Now(),
+		Reason:    "connection_lost",
+	})
+
+	// Attempt reconnection if not intentional.
+	if previous == StateConnected && w.ctx.Err() == nil {
+		go w.attemptReconnect()
+	}
+}
+
+// handleStreamReplaced handles when another device takes over.
+func (w *WhatsApp) handleStreamReplaced(_ *events.StreamReplaced) {
+	previous := w.getState()
+	w.setState(StateDisconnected)
+	w.connected.Store(false)
+
+	w.logger.Error("whatsapp: stream replaced - another device connected")
+
+	// Notify connection observers.
+	w.notifyConnectionChange(ConnectionEvent{
+		State:     StateDisconnected,
+		Previous:  previous,
+		Timestamp: time.Now(),
+		Reason:    "stream_replaced",
+		Details: map[string]any{
+			"message": "Another device has connected to this WhatsApp account",
+		},
+	})
+}
+
+// handleLoggedOut handles session invalidation.
+func (w *WhatsApp) handleLoggedOut(evt *events.LoggedOut) {
+	previous := w.getState()
+	w.setState(StateDisconnected)
+	w.connected.Store(false)
+
+	reason := "unknown"
+	if evt.Reason != 0 {
+		reason = evt.Reason.String()
+	}
+
+	w.logger.Error("whatsapp: logged out",
+		"reason", reason,
+		"on_connect", evt.OnConnect)
+
+	// Notify connection observers.
+	w.notifyConnectionChange(ConnectionEvent{
+		State:     StateDisconnected,
+		Previous:  previous,
+		Timestamp: time.Now(),
+		Reason:    "logged_out",
+		Details: map[string]any{
+			"reason":      reason,
+			"needs_qr":    true,
+			"message":     "Session invalidated, please scan QR code again",
+		},
+	})
+
+	// Request new QR code.
+	w.lastQR = nil
+	go func() {
+		if err := w.loginWithQR(w.ctx); err != nil {
+			w.logger.Warn("whatsapp: QR re-login failed", "error", err)
+		}
+	}()
+}
+
+// handleTemporaryBan handles temporary bans.
+func (w *WhatsApp) handleTemporaryBan(evt *events.TemporaryBan) {
+	previous := w.getState()
+	w.setState(StateBanned)
+	w.connected.Store(false)
+
+	w.logger.Error("whatsapp: temporary ban",
+		"code", evt.Code,
+		"expire", evt.Expire)
+
+	// Notify connection observers.
+	w.notifyConnectionChange(ConnectionEvent{
+		State:     StateBanned,
+		Previous:  previous,
+		Timestamp: time.Now(),
+		Reason:    "temporary_ban",
+		Details: map[string]any{
+			"code":   evt.Code.String(),
+			"expire": evt.Expire.String(),
+			"message": fmt.Sprintf("WhatsApp temporary ban. Expires: %s", evt.Expire),
+		},
+	})
+}
+
+// handleKeepAliveTimeout handles keep-alive failures.
+func (w *WhatsApp) handleKeepAliveTimeout(evt *events.KeepAliveTimeout) {
+	w.logger.Warn("whatsapp: keep-alive timeout",
+		"error_count", evt.ErrorCount,
+		"last_success", evt.LastSuccess)
+
+	// Increase error count for health monitoring.
+	w.errorCount.Add(1)
+}
+
+// handleKeepAliveRestored handles keep-alive recovery.
+func (w *WhatsApp) handleKeepAliveRestored(_ *events.KeepAliveRestored) {
+	w.logger.Info("whatsapp: keep-alive restored")
+	w.errorCount.Store(0)
+}
+
+// handlePairSuccess handles successful device pairing.
+func (w *WhatsApp) handlePairSuccess(evt *events.PairSuccess) {
+	w.logger.Info("whatsapp: device paired",
+		"jid", evt.ID,
+		"platform", evt.Platform,
+		"business", evt.BusinessName)
+
+	// Notify QR observers of success.
+	w.notifyQR(QREvent{
+		Type:    "success",
+		Message: fmt.Sprintf("Paired with %s successfully!", evt.ID.String()),
+	})
 }
 
 // handleMessageEvt processes an incoming WhatsApp message event.
@@ -106,11 +313,11 @@ func (w *WhatsApp) handleMessageEvt(evt *events.Message) {
 		IsGroup:   isGroup,
 		Timestamp: evt.Info.Timestamp,
 		Metadata: map[string]any{
-			"sender_jid":  senderJID.String(),
-			"sender_lid":  senderJID.String(),
+			"sender_jid":   senderJID.String(),
+			"sender_lid":   senderJID.String(),
 			"sender_phone": resolvedSender,
-			"chat_jid":    chatJID.String(),
-			"push_name":   evt.Info.PushName,
+			"chat_jid":     chatJID.String(),
+			"push_name":    evt.Info.PushName,
 		},
 	}
 

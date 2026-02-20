@@ -9,7 +9,8 @@
 //   - Reactions (emoji)
 //   - Typing indicators and read receipts
 //   - Media upload/download with encryption
-//   - Automatic reconnection
+//   - Automatic reconnection with backoff
+//   - Connection state management and events
 //
 // This is a core channel (compiled into the binary, not a plugin).
 package whatsapp
@@ -58,30 +59,42 @@ type Config struct {
 
 	// MaxMediaSizeMB is the maximum media file size to process.
 	MaxMediaSizeMB int `yaml:"max_media_size_mb"`
+
+	// ReconnectBackoff is the initial backoff duration for reconnection.
+	ReconnectBackoff time.Duration `yaml:"reconnect_backoff"`
+
+	// MaxReconnectAttempts is the maximum number of reconnection attempts (0 = unlimited).
+	MaxReconnectAttempts int `yaml:"max_reconnect_attempts"`
 }
 
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		SessionDir:      "./sessions/whatsapp",
-		Trigger:         "@devclaw",
-		RespondToGroups: true,
-		RespondToDMs:    true,
-		AutoRead:        true,
-		SendTyping:      true,
-		MediaDir:        "./data/media",
-		MaxMediaSizeMB:  16,
+		SessionDir:          "./sessions/whatsapp",
+		Trigger:             "@devclaw",
+		RespondToGroups:     true,
+		RespondToDMs:        true,
+		AutoRead:            true,
+		SendTyping:          true,
+		MediaDir:            "./data/media",
+		MaxMediaSizeMB:      16,
+		ReconnectBackoff:    5 * time.Second,
+		MaxReconnectAttempts: 10,
 	}
 }
 
 // QREvent represents a QR code event sent to observers.
 type QREvent struct {
-	// Type is "code", "success", "timeout", or "error".
+	// Type is "code", "success", "timeout", "error", or "refresh".
 	Type string `json:"type"`
 	// Code is the raw QR code string (only for Type == "code").
 	Code string `json:"code,omitempty"`
 	// Message is a human-readable description.
 	Message string `json:"message,omitempty"`
+	// ExpiresAt is when the QR code expires.
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+	// SecondsLeft is seconds until expiration.
+	SecondsLeft int `json:"seconds_left,omitempty"`
 }
 
 // WhatsApp implements the channels.Channel, channels.MediaChannel,
@@ -97,17 +110,29 @@ type WhatsApp struct {
 	// connected tracks connection state.
 	connected atomic.Bool
 
+	// state tracks detailed connection state.
+	state atomic.Value // ConnectionState
+
 	// lastMsg tracks the last message timestamp for health.
 	lastMsg atomic.Value // time.Time
 
 	// errorCount tracks consecutive errors.
 	errorCount atomic.Int64
 
+	// reconnectAttempts tracks reconnection tries.
+	reconnectAttempts int
+
 	// qrObservers receives QR events (for web UI).
 	qrObservers   []chan QREvent
 	qrObserversMu sync.Mutex
 	// lastQR caches the most recent QR code so late-joining observers get it.
 	lastQR *QREvent
+	// qrGeneratedAt tracks when QR was generated for expiration.
+	qrGeneratedAt time.Time
+
+	// connObservers receives connection state changes.
+	connObservers   []ConnectionObserver
+	connObserversMu sync.Mutex
 
 	// ctx and cancel for lifecycle management.
 	ctx    context.Context
@@ -115,6 +140,64 @@ type WhatsApp struct {
 
 	mu sync.RWMutex
 }
+
+// New creates a new WhatsApp channel instance.
+func New(cfg Config, logger *slog.Logger) *WhatsApp {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	// Apply defaults.
+	if cfg.ReconnectBackoff == 0 {
+		cfg.ReconnectBackoff = 5 * time.Second
+	}
+
+	w := &WhatsApp{
+		cfg:       cfg,
+		logger:    logger.With("component", "whatsapp"),
+		messages:  make(chan *channels.IncomingMessage, 256),
+	}
+	w.setState(StateDisconnected)
+	return w
+}
+
+// ---------- State Management ----------
+
+// getState returns the current connection state.
+func (w *WhatsApp) getState() ConnectionState {
+	if v := w.state.Load(); v != nil {
+		return v.(ConnectionState)
+	}
+	return StateDisconnected
+}
+
+// setState updates the connection state.
+func (w *WhatsApp) setState(state ConnectionState) {
+	w.state.Store(state)
+}
+
+// GetState returns the current connection state (public API).
+func (w *WhatsApp) GetState() ConnectionState {
+	return w.getState()
+}
+
+// getClientJID returns the current client JID if connected.
+func (w *WhatsApp) getClientJID() string {
+	if w.client != nil && w.client.Store.ID != nil {
+		return w.client.Store.ID.String()
+	}
+	return ""
+}
+
+// getClientPlatform returns the current platform.
+func (w *WhatsApp) getClientPlatform() string {
+	if w.client != nil && w.client.Store.Platform != "" {
+		return w.client.Store.Platform
+	}
+	return ""
+}
+
+// ---------- QR Code Subscription ----------
 
 // SubscribeQR registers a channel to receive QR code events.
 // Returns an unsubscribe function.
@@ -124,8 +207,14 @@ func (w *WhatsApp) SubscribeQR() (chan QREvent, func()) {
 	w.qrObservers = append(w.qrObservers, ch)
 	// Replay the last QR code to the new observer so it doesn't miss it.
 	if w.lastQR != nil {
+		// Calculate remaining time.
+		evt := *w.lastQR
+		if !w.qrGeneratedAt.IsZero() {
+			elapsed := time.Since(w.qrGeneratedAt)
+			evt.SecondsLeft = max(0, 60-int(elapsed.Seconds()))
+		}
 		select {
-		case ch <- *w.lastQR:
+		case ch <- evt:
 		default:
 		}
 	}
@@ -148,13 +237,17 @@ func (w *WhatsApp) SubscribeQR() (chan QREvent, func()) {
 func (w *WhatsApp) notifyQR(evt QREvent) {
 	w.qrObserversMu.Lock()
 	defer w.qrObserversMu.Unlock()
+
 	// Cache the latest QR code for late-joining observers.
 	if evt.Type == "code" {
 		w.lastQR = &evt
+		w.qrGeneratedAt = time.Now()
 	} else {
 		// Clear cache on success/timeout/error — QR is no longer valid.
 		w.lastQR = nil
+		w.qrGeneratedAt = time.Time{}
 	}
+
 	for _, ch := range w.qrObservers {
 		select {
 		case ch <- evt:
@@ -164,20 +257,31 @@ func (w *WhatsApp) notifyQR(evt QREvent) {
 	}
 }
 
-// NeedsQR returns true if the WhatsApp session is not linked (needs QR scan).
-func (w *WhatsApp) NeedsQR() bool {
-	return w.client != nil && w.client.Store.ID == nil && !w.connected.Load()
+// ---------- Connection Observer ----------
+
+// AddConnectionObserver registers a connection observer.
+func (w *WhatsApp) AddConnectionObserver(obs ConnectionObserver) {
+	w.connObserversMu.Lock()
+	defer w.connObserversMu.Unlock()
+	w.connObservers = append(w.connObservers, obs)
 }
 
-// New creates a new WhatsApp channel instance.
-func New(cfg Config, logger *slog.Logger) *WhatsApp {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &WhatsApp{
-		cfg:      cfg,
-		logger:   logger.With("component", "whatsapp"),
-		messages: make(chan *channels.IncomingMessage, 256),
+// notifyConnectionChange notifies all connection observers.
+func (w *WhatsApp) notifyConnectionChange(evt ConnectionEvent) {
+	w.connObserversMu.Lock()
+	observers := make([]ConnectionObserver, len(w.connObservers))
+	copy(observers, w.connObservers)
+	w.connObserversMu.Unlock()
+
+	for _, obs := range observers {
+		go func(o ConnectionObserver) {
+			defer func() {
+				if r := recover(); r != nil {
+					w.logger.Warn("whatsapp: connection observer panic", "error", r)
+				}
+			}()
+			o.OnConnectionChange(evt)
+		}(obs)
 	}
 }
 
@@ -193,18 +297,23 @@ func (w *WhatsApp) Name() string { return "whatsapp" }
 func (w *WhatsApp) Connect(ctx context.Context) error {
 	w.ctx, w.cancel = context.WithCancel(ctx)
 
+	w.setState(StateConnecting)
+	w.logger.Info("whatsapp: initializing connection...")
+
 	// Initialize session store (SQLite).
 	dbPath := w.cfg.SessionDir + "/whatsapp.db"
 	container, err := sqlstore.New(w.ctx, "sqlite3",
 		fmt.Sprintf("file:%s?_foreign_keys=1&_journal_mode=WAL", dbPath),
 		waLog.Noop)
 	if err != nil {
+		w.setState(StateDisconnected)
 		return fmt.Errorf("creating session store: %w", err)
 	}
 
 	// Get or create device.
 	device, err := w.getDevice(w.ctx, container)
 	if err != nil {
+		w.setState(StateDisconnected)
 		return fmt.Errorf("getting device: %w", err)
 	}
 
@@ -218,8 +327,7 @@ func (w *WhatsApp) Connect(ctx context.Context) error {
 	// Connect.
 	if w.client.Store.ID == nil {
 		// First login — start QR process in background (non-blocking).
-		// The QR code is delivered to web UI observers via notifyQR.
-		// The user scans it via the web dashboard, not the terminal.
+		w.setState(StateWaitingQR)
 		w.logger.Info("whatsapp: no existing session, QR code required — scan via web UI")
 		go func() {
 			if err := w.loginWithQR(w.ctx); err != nil {
@@ -232,17 +340,22 @@ func (w *WhatsApp) Connect(ctx context.Context) error {
 	// Existing session — reconnect.
 	err = w.client.Connect()
 	if err != nil {
+		w.setState(StateDisconnected)
 		return fmt.Errorf("connecting: %w", err)
 	}
 
 	w.connected.Store(true)
-	w.logger.Info("whatsapp: connected (existing session)")
+	w.logger.Info("whatsapp: connected (existing session)",
+		"jid", w.getClientJID())
 	return nil
 }
 
 // Disconnect gracefully closes the WhatsApp connection.
 func (w *WhatsApp) Disconnect() error {
+	previous := w.getState()
+	w.setState(StateDisconnected)
 	w.connected.Store(false)
+
 	if w.cancel != nil {
 		w.cancel()
 	}
@@ -250,8 +363,122 @@ func (w *WhatsApp) Disconnect() error {
 		w.client.Disconnect()
 	}
 	close(w.messages)
+
 	w.logger.Info("whatsapp: disconnected")
+
+	// Notify observers.
+	w.notifyConnectionChange(ConnectionEvent{
+		State:     StateDisconnected,
+		Previous:  previous,
+		Timestamp: time.Now(),
+		Reason:    "user_request",
+	})
+
 	return nil
+}
+
+// Logout logs out and clears the session.
+func (w *WhatsApp) Logout() error {
+	if w.client == nil {
+		return nil
+	}
+
+	previous := w.getState()
+	w.setState(StateLoggingOut)
+	w.connected.Store(false)
+
+	// Logout from WhatsApp (this also disconnects and deletes store).
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := w.client.Logout(ctx)
+	if err != nil {
+		w.logger.Warn("whatsapp: logout error, forcing cleanup", "error", err)
+		w.client.Disconnect()
+		if w.client.Store != nil {
+			if delErr := w.client.Store.Delete(ctx); delErr != nil {
+				w.logger.Warn("whatsapp: failed to delete store", "error", delErr)
+			}
+		}
+	}
+
+	w.setState(StateDisconnected)
+	w.lastQR = nil
+
+	w.logger.Info("whatsapp: logged out, session cleared")
+
+	// Notify observers.
+	w.notifyConnectionChange(ConnectionEvent{
+		State:     StateDisconnected,
+		Previous:  previous,
+		Timestamp: time.Now(),
+		Reason:    "logout",
+		Details: map[string]any{
+			"session_cleared": true,
+			"needs_qr":        true,
+		},
+	})
+
+	return nil
+}
+
+// attemptReconnect tries to reconnect with exponential backoff.
+func (w *WhatsApp) attemptReconnect() {
+	if w.ctx.Err() != nil {
+		return // Context cancelled, don't reconnect.
+	}
+
+	w.reconnectAttempts++
+	if w.cfg.MaxReconnectAttempts > 0 && w.reconnectAttempts > w.cfg.MaxReconnectAttempts {
+		w.logger.Error("whatsapp: max reconnect attempts reached",
+			"attempts", w.reconnectAttempts)
+		w.notifyConnectionChange(ConnectionEvent{
+			State:     StateDisconnected,
+			Timestamp: time.Now(),
+			Reason:    "max_reconnect_attempts",
+		})
+		return
+	}
+
+	previous := w.getState()
+	w.setState(StateReconnecting)
+
+	backoff := w.cfg.ReconnectBackoff * time.Duration(w.reconnectAttempts)
+	if backoff > 5*time.Minute {
+		backoff = 5 * time.Minute // Cap at 5 minutes.
+	}
+
+	w.logger.Info("whatsapp: attempting reconnect",
+		"attempt", w.reconnectAttempts,
+		"backoff", backoff)
+
+	// Notify observers.
+	w.notifyConnectionChange(ConnectionEvent{
+		State:     StateReconnecting,
+		Previous:  previous,
+		Timestamp: time.Now(),
+		Reason:    "connection_lost",
+		Details: map[string]any{
+			"attempt":     w.reconnectAttempts,
+			"backoff_sec": backoff.Seconds(),
+		},
+	})
+
+	select {
+	case <-time.After(backoff):
+	case <-w.ctx.Done():
+		return
+	}
+
+	if w.client == nil {
+		return
+	}
+
+	err := w.client.Connect()
+	if err != nil {
+		w.logger.Warn("whatsapp: reconnect failed", "error", err)
+		go w.attemptReconnect()
+	}
 }
 
 // Send sends a text message to the specified JID.
@@ -286,6 +513,11 @@ func (w *WhatsApp) IsConnected() bool {
 	return w.connected.Load()
 }
 
+// NeedsQR returns true if the WhatsApp session is not linked (needs QR scan).
+func (w *WhatsApp) NeedsQR() bool {
+	return w.client != nil && w.client.Store.ID == nil && !w.connected.Load()
+}
+
 // Health returns the WhatsApp channel health status.
 func (w *WhatsApp) Health() channels.HealthStatus {
 	h := channels.HealthStatus{
@@ -296,10 +528,12 @@ func (w *WhatsApp) Health() channels.HealthStatus {
 	if t, ok := w.lastMsg.Load().(time.Time); ok {
 		h.LastMessageAt = t
 	}
+	h.Details["state"] = string(w.getState())
 	if w.client != nil && w.client.Store.ID != nil {
 		h.Details["jid"] = w.client.Store.ID.String()
 		h.Details["platform"] = w.client.Store.Platform
 	}
+	h.Details["reconnect_attempts"] = w.reconnectAttempts
 	return h
 }
 
@@ -423,27 +657,54 @@ func (w *WhatsApp) loginWithQR(ctx context.Context) error {
 		return fmt.Errorf("connecting for QR: %w", err)
 	}
 
+	w.setState(StateWaitingQR)
 	w.logger.Info("whatsapp: waiting for QR code scan via web UI")
+
+	qrAttempts := 0
 
 	for evt := range qrChan {
 		switch evt.Event {
 		case "code":
-			w.logger.Info("whatsapp: QR code ready, scan via web UI at /channels/whatsapp")
-			w.notifyQR(QREvent{Type: "code", Code: evt.Code, Message: "Scan the QR code to link WhatsApp"})
+			qrAttempts++
+			w.setState(StateWaitingQR)
+			w.logger.Info("whatsapp: QR code ready",
+				"attempt", qrAttempts,
+				"url", "/channels/whatsapp")
+
+			w.notifyQR(QREvent{
+				Type:    "code",
+				Code:    evt.Code,
+				Message: "Scan the QR code with WhatsApp to link your device",
+			})
 
 		case "success":
 			w.connected.Store(true)
+			w.reconnectAttempts = 0
+			w.setState(StateConnected)
 			w.logger.Info("whatsapp: login successful!")
-			w.notifyQR(QREvent{Type: "success", Message: "WhatsApp linked successfully!"})
+			w.notifyQR(QREvent{
+				Type:    "success",
+				Message: "WhatsApp linked successfully!",
+			})
 			return nil
 
 		case "timeout":
-			w.notifyQR(QREvent{Type: "timeout", Message: "QR code expired — refresh to try again"})
-			return fmt.Errorf("QR code timeout — scan via web UI to retry")
+			w.setState(StateDisconnected)
+			w.logger.Warn("whatsapp: QR code expired")
+			w.notifyQR(QREvent{
+				Type:    "timeout",
+				Message: "QR code expired — click refresh to try again",
+			})
+			return fmt.Errorf("QR code timeout")
 
 		default:
 			if evt.Error != nil {
-				w.notifyQR(QREvent{Type: "error", Message: evt.Error.Error()})
+				w.setState(StateDisconnected)
+				w.logger.Error("whatsapp: QR login error", "error", evt.Error)
+				w.notifyQR(QREvent{
+					Type:    "error",
+					Message: fmt.Sprintf("Error: %s", evt.Error.Error()),
+				})
 				return fmt.Errorf("QR login error: %v", evt.Error)
 			}
 		}
@@ -464,12 +725,18 @@ func (w *WhatsApp) RequestNewQR(ctx context.Context) error {
 
 	// Disconnect current attempt if any.
 	w.client.Disconnect()
+	w.lastQR = nil
+
+	// Notify that we're refreshing.
+	w.notifyQR(QREvent{
+		Type:    "refresh",
+		Message: "Generating new QR code...",
+	})
 
 	// Re-login with QR in a goroutine (non-blocking for the web handler).
 	go func() {
 		if err := w.loginWithQR(ctx); err != nil {
 			w.logger.Error("whatsapp: QR re-login failed", "error", err)
-			w.notifyQR(QREvent{Type: "error", Message: err.Error()})
 		}
 	}()
 

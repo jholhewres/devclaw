@@ -129,15 +129,6 @@ func executeChat(assistant *copilot.Assistant, message string) string {
 	return response
 }
 
-// chatCommands lists all available CLI commands for autocomplete.
-var chatCommands = []string{
-	"/quit", "/exit", "/q",
-	"/clear", "/reset", "/new",
-	"/tools", "/model", "/help",
-	"/usage", "/compact", "/stop",
-	"/think", "/history", "/export",
-}
-
 // chatCompleter provides tab-completion for commands and arguments.
 func chatCompleter() *readline.PrefixCompleter {
 	return readline.NewPrefixCompleter(

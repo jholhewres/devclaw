@@ -7,16 +7,23 @@ import (
 
 // WhatsAppQREvent mirrors whatsapp.QREvent without importing the channel package.
 type WhatsAppQREvent struct {
-	Type    string `json:"type"`    // "code", "success", "timeout", "error"
-	Code    string `json:"code,omitempty"`
-	Message string `json:"message,omitempty"`
+	Type        string `json:"type"`                   // "code", "success", "timeout", "error", "refresh"
+	Code        string `json:"code,omitempty"`
+	Message     string `json:"message"`
+	ExpiresAt   string `json:"expires_at,omitempty"`   // ISO timestamp
+	SecondsLeft int    `json:"seconds_left,omitempty"` // Seconds until QR expires
 }
 
 // WhatsAppStatus holds the current WhatsApp connection state for the UI.
 type WhatsAppStatus struct {
-	Connected bool   `json:"connected"`
-	NeedsQR   bool   `json:"needs_qr"`
-	Phone     string `json:"phone,omitempty"`
+	Connected         bool   `json:"connected"`
+	State             string `json:"state"`              // "disconnected", "connecting", "connected", "waiting_qr", etc.
+	NeedsQR           bool   `json:"needs_qr"`
+	Phone             string `json:"phone,omitempty"`
+	Platform          string `json:"platform,omitempty"`
+	ErrorCount        int    `json:"error_count"`
+	ReconnectAttempts int    `json:"reconnect_attempts"`
+	Message           string `json:"message,omitempty"` // Human-readable status message
 }
 
 // AssistantAdapter wraps a generic set of callbacks to satisfy the AssistantAPI

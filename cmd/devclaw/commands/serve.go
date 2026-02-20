@@ -70,6 +70,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// Returns unlocked vault (if available) for agent vault tools.
 	vault := copilot.ResolveAPIKey(cfg, logger)
 
+	// ── Run startup verification ──
+	verifier := copilot.NewStartupVerifier(cfg, vault, logger)
+	startupReport := verifier.RunAll()
+	verifier.PrintReport(startupReport)
+	if !startupReport.Healthy {
+		logger.Error("startup verification failed, some required checks did not pass")
+		return fmt.Errorf("startup verification failed")
+	}
+
 	// ── Create assistant ──
 	assistant := copilot.New(cfg, logger)
 	if vault != nil {
@@ -898,10 +907,45 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 	// Wire up WhatsApp QR callbacks if WhatsApp channel is available.
 	if wa != nil {
 		adapter.GetWhatsAppStatusFn = func() webui.WhatsAppStatus {
-			return webui.WhatsAppStatus{
-				Connected: wa.IsConnected(),
-				NeedsQR:   wa.NeedsQR(),
+			health := wa.Health()
+			state := wa.GetState()
+			status := webui.WhatsAppStatus{
+				Connected:  wa.IsConnected(),
+				State:      string(state),
+				NeedsQR:    wa.NeedsQR(),
+				ErrorCount: health.ErrorCount,
 			}
+
+			// Add details from health.
+			if jid, ok := health.Details["jid"].(string); ok {
+				status.Phone = jid
+			}
+			if platform, ok := health.Details["platform"].(string); ok {
+				status.Platform = platform
+			}
+			if attempts, ok := health.Details["reconnect_attempts"].(int); ok {
+				status.ReconnectAttempts = attempts
+			}
+
+			// Add human-readable message based on state.
+			switch state {
+			case "connected":
+				status.Message = "Connected"
+			case "disconnected":
+				status.Message = "Disconnected"
+			case "connecting":
+				status.Message = "Connecting..."
+			case "reconnecting":
+				status.Message = fmt.Sprintf("Reconnecting (attempt %d)...", status.ReconnectAttempts)
+			case "waiting_qr":
+				status.Message = "Waiting for QR code scan"
+			case "banned":
+				status.Message = "Account temporarily banned"
+			case "logging_out":
+				status.Message = "Logging out..."
+			}
+
+			return status
 		}
 		adapter.SubscribeWhatsAppQRFn = func() (chan webui.WhatsAppQREvent, func()) {
 			ch, unsub := wa.SubscribeQR()
@@ -911,9 +955,11 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 				defer close(out)
 				for evt := range ch {
 					out <- webui.WhatsAppQREvent{
-						Type:    evt.Type,
-						Code:    evt.Code,
-						Message: evt.Message,
+						Type:        evt.Type,
+						Code:        evt.Code,
+						Message:     evt.Message,
+						ExpiresAt:   evt.ExpiresAt.Format(time.RFC3339),
+						SecondsLeft: evt.SecondsLeft,
 					}
 				}
 			}()
