@@ -219,8 +219,38 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 	// Build initial messages from history.
 	messages := a.buildMessages(systemPrompt, history, userMessage)
 
-	// Collect tool definitions from the executor.
-	tools := a.executor.Tools()
+	// Collect tool definitions from the executor, filtered by profile if present.
+	allTools := a.executor.Tools()
+	var tools []ToolDefinition
+
+	profile := ToolProfileFromContext(runCtx)
+	if profile != nil {
+		// Filter tools by profile
+		allToolNames := a.executor.ToolNames()
+		checker := NewProfileChecker(profile.Allow, profile.Deny, allToolNames)
+		for _, tool := range allTools {
+			if allowed, _ := checker.Check(tool.Function.Name); allowed {
+				tools = append(tools, tool)
+			}
+		}
+		a.logger.Debug("tools filtered by profile",
+			"profile", profile.Name,
+			"total_tools", len(allTools),
+			"allowed_tools", len(tools),
+		)
+	} else {
+		tools = allTools
+	}
+
+	// Limit tools to 128 for OpenAI API compatibility
+	const maxTools = 128
+	if len(tools) > maxTools {
+		a.logger.Warn("too many tools, truncating to max",
+			"total", len(tools),
+			"max", maxTools,
+		)
+		tools = tools[:maxTools]
+	}
 
 	a.logger.Debug("agent run started",
 		"history_entries", len(history),
