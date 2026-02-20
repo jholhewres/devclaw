@@ -237,6 +237,90 @@ func (m *Manager) HasChannels() bool {
 	return len(m.channels) > 0
 }
 
+// ConnectChannel connects a specific channel by name.
+// Returns error if channel not found or connection fails.
+func (m *Manager) ConnectChannel(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ch, exists := m.channels[name]
+	if !exists {
+		return fmt.Errorf("channel %q not found", name)
+	}
+
+	if ch.IsConnected() {
+		return fmt.Errorf("channel %q already connected", name)
+	}
+
+	if m.ctx == nil {
+		return fmt.Errorf("manager not started")
+	}
+
+	if err := ch.Connect(m.ctx); err != nil {
+		m.logger.Error("failed to connect channel", "channel", name, "error", err)
+		return err
+	}
+
+	m.logger.Info("channel connected", "channel", name)
+
+	// Start listening if not already running
+	m.listenWg.Add(1)
+	go func(c Channel) {
+		defer m.listenWg.Done()
+		m.listenChannel(c)
+	}(ch)
+
+	return nil
+}
+
+// DisconnectChannel disconnects a specific channel by name.
+func (m *Manager) DisconnectChannel(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ch, exists := m.channels[name]
+	if !exists {
+		return fmt.Errorf("channel %q not found", name)
+	}
+
+	if !ch.IsConnected() {
+		return fmt.Errorf("channel %q already disconnected", name)
+	}
+
+	if err := ch.Disconnect(); err != nil {
+		m.logger.Error("failed to disconnect channel", "channel", name, "error", err)
+		return err
+	}
+
+	m.logger.Info("channel disconnected", "channel", name)
+	return nil
+}
+
+// ChannelStatus returns health status for a specific channel.
+func (m *Manager) ChannelStatus(name string) (HealthStatus, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ch, exists := m.channels[name]
+	if !exists {
+		return HealthStatus{}, fmt.Errorf("channel %q not found", name)
+	}
+
+	return ch.Health(), nil
+}
+
+// ListChannels returns the names of all registered channels.
+func (m *Manager) ListChannels() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	names := make([]string, 0, len(m.channels))
+	for name := range m.channels {
+		names = append(names, name)
+	}
+	return names
+}
+
 // listenChannel listens for messages from a channel and forwards them
 // to the aggregated stream. Exits when the channel closes or context is cancelled.
 func (m *Manager) listenChannel(ch Channel) {

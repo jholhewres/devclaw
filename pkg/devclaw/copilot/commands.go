@@ -49,6 +49,16 @@ func IsCommand(content string) bool {
 	return strings.HasPrefix(strings.TrimSpace(content), "/")
 }
 
+// containsFlag checks if args contains a flag like --json or --full.
+func containsFlag(args []string, flag string) bool {
+	for _, arg := range args {
+		if strings.ToLower(arg) == strings.ToLower(flag) {
+			return true
+		}
+	}
+	return false
+}
+
 // HandleCommand processes an admin command from a chat message.
 // Returns handled=true if it was a valid command (even if permission denied).
 func (a *Assistant) HandleCommand(msg *channels.IncomingMessage) CommandResult {
@@ -169,6 +179,68 @@ func (a *Assistant) HandleCommand(msg *channels.IncomingMessage) CommandResult {
 		}
 		return CommandResult{Response: a.activationCommand(args, msg), Handled: true}
 
+	// System administration commands (admin/owner only)
+	case "/reload":
+		if !isAdmin {
+			return CommandResult{Response: "Permission denied.", Handled: true}
+		}
+		return CommandResult{Response: a.systemCommands.ReloadCommand(args), Handled: true}
+
+	case "/diagnostics":
+		if !isAdmin {
+			return CommandResult{Response: "Permission denied.", Handled: true}
+		}
+		full := containsFlag(args, "--full")
+		return CommandResult{Response: a.systemCommands.DiagnosticsCommand(full), Handled: true}
+
+	case "/exec":
+		if !isAdmin {
+			return CommandResult{Response: "Permission denied.", Handled: true}
+		}
+		if len(args) == 0 {
+			return CommandResult{Response: "Usage: /exec <queue|approve|deny> [args]", Handled: true}
+		}
+		switch strings.ToLower(args[0]) {
+		case "queue":
+			return CommandResult{Response: a.systemCommands.ExecQueueCommand(), Handled: true}
+		case "approve":
+			return CommandResult{Response: a.approveCommand(args[1:], msg), Handled: true}
+		case "deny":
+			return CommandResult{Response: a.denyCommand(args[1:], msg), Handled: true}
+		default:
+			return CommandResult{Response: "Usage: /exec <queue|approve|deny> [args]", Handled: true}
+		}
+
+	case "/channels":
+		if !isAdmin {
+			return CommandResult{Response: "Permission denied.", Handled: true}
+		}
+		return CommandResult{Response: a.systemCommands.ChannelsCommand(args), Handled: true}
+
+	case "/maintenance":
+		if !isAdmin {
+			return CommandResult{Response: "Permission denied.", Handled: true}
+		}
+		return CommandResult{Response: a.systemCommands.MaintenanceCommand(args, msg.From), Handled: true}
+
+	case "/logs":
+		if !isAdmin {
+			return CommandResult{Response: "Permission denied.", Handled: true}
+		}
+		return CommandResult{Response: a.systemCommands.LogsCommand(args), Handled: true}
+
+	case "/health":
+		if !isAdmin {
+			return CommandResult{Response: "Permission denied.", Handled: true}
+		}
+		return CommandResult{Response: a.systemCommands.HealthCommand(), Handled: true}
+
+	case "/metrics":
+		if !isAdmin {
+			return CommandResult{Response: "Permission denied.", Handled: true}
+		}
+		return CommandResult{Response: a.systemCommands.MetricsCommand(args), Handled: true}
+
 	default:
 		return CommandResult{Handled: false}
 	}
@@ -201,7 +273,17 @@ func (a *Assistant) helpCommand(isAdmin bool) string {
 		b.WriteString("/group block - Block this group\n")
 		b.WriteString("/group assign <ws_id> - Assign to workspace\n\n")
 
-		b.WriteString("/status - Bot status\n")
+		b.WriteString("*System:*\n")
+		b.WriteString("/reload [section] - Reload configuration\n")
+		b.WriteString("/status [--json] - System status\n")
+		b.WriteString("/diagnostics [--full] - System diagnostics\n")
+		b.WriteString("/channels [connect|disconnect] - Channel management\n")
+		b.WriteString("/maintenance [on|off] [msg] - Maintenance mode\n")
+		b.WriteString("/logs [level] [lines] - View audit logs\n")
+		b.WriteString("/health - Health check\n")
+		b.WriteString("/metrics [period] - Usage metrics\n\n")
+
+		b.WriteString("/status - Bot status (legacy)\n")
 	}
 
 	b.WriteString("\n*Approval:*\n")

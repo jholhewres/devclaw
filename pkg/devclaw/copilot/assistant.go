@@ -131,6 +131,12 @@ type Assistant struct {
 	// userMgr handles multi-user operations when team mode is enabled.
 	userMgr *UserManager
 
+	// maintenanceMgr manages maintenance mode state.
+	maintenanceMgr *MaintenanceManager
+
+	// systemCommands handles system administration commands.
+	systemCommands *SystemCommands
+
 	// configMu protects hot-reloadable config fields.
 	configMu sync.RWMutex
 
@@ -415,6 +421,15 @@ func (a *Assistant) Start(ctx context.Context) error {
 		a.subagentMgr.cleanupStaleRunning()
 		a.logger.Info("subagent persistence enabled (SQLite)")
 	}
+
+	// 0c-4. Maintenance manager for maintenance mode state.
+	a.maintenanceMgr = NewMaintenanceManager(a.devclawDB, a.logger.With("component", "maintenance"))
+	if err := a.maintenanceMgr.Load(); err != nil {
+		a.logger.Warn("failed to load maintenance state", "error", err)
+	}
+
+	// 0c-5. System commands handler.
+	a.systemCommands = NewSystemCommands(a, a.config.Database.Path, a.maintenanceMgr)
 
 	// 1. Register skill loaders and load all skills.
 	a.registerSkillLoaders()
@@ -880,6 +895,21 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	}
 
 	logger.Info("access granted", "level", accessResult.Level)
+
+	// ── Step 0b: Maintenance mode check ──
+	// Allow commands through, block regular messages.
+	if a.maintenanceMgr != nil && a.maintenanceMgr.IsEnabled() {
+		if !IsCommand(msg.Content) {
+			maint := a.maintenanceMgr.Get()
+			response := "System is under maintenance."
+			if maint != nil && maint.Message != "" {
+				response = maint.Message
+			}
+			a.sendReply(msg, response)
+			logger.Info("message blocked (maintenance mode)")
+			return
+		}
+	}
 
 	// ── Step 1: Admin commands ──
 	// Check for /commands BEFORE trigger check (commands always work).

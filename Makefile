@@ -1,4 +1,4 @@
-.PHONY: build build-linux run serve setup chat test test-v lint clean install init help web-install web-build web-dev
+.PHONY: build build-linux run build-run serve setup chat test test-v lint clean install init help web-install web-build web-dev
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
@@ -41,8 +41,12 @@ build-go:
 build-linux:
 	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags 'sqlite_fts5' $(LDFLAGS) -o bin/devclaw-linux-amd64 ./cmd/devclaw
 
-## run: Build and start devclaw serve
-run: build
+## run: Start devclaw serve (uses existing binary)
+run:
+	./bin/devclaw serve $(SERVE_FLAGS)
+
+## build-run: Build and start devclaw serve
+build-run: build
 	./bin/devclaw serve $(SERVE_FLAGS)
 
 ## serve: Alias for run
@@ -110,10 +114,11 @@ docker-down:
 help:
 	@echo "Usage:"
 	@echo "  make setup             # Interactive setup wizard"
-	@echo "  make run               # Build frontend + Go + serve"
+	@echo "  make run               # Start server (uses existing binary)"
+	@echo "  make build-run         # Build frontend + Go + serve"
 	@echo "  make dev               # Dev mode (Vite HMR + Go server)"
-	@echo "  make run VERBOSE=1     # Build + serve with debug logs"
-	@echo "  make run CONFIG=x.yaml # Build + serve with specific config"
+	@echo "  make run VERBOSE=1     # Serve with debug logs"
+	@echo "  make run CONFIG=x.yaml # Serve with specific config"
 	@echo "  make init              # Create default config.yaml (non-interactive)"
 	@echo "  make validate          # Validate configuration"
 	@echo "  make chat MSG=\"hello\"  # Send a single message"

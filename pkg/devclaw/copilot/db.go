@@ -101,6 +101,13 @@ CREATE TABLE IF NOT EXISTS subagent_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_subagent_runs_parent ON subagent_runs(parent_session_id);
 CREATE INDEX IF NOT EXISTS idx_subagent_runs_status ON subagent_runs(status);
+
+-- System state (maintenance mode, etc.)
+CREATE TABLE IF NOT EXISTS system_state (
+    key       TEXT PRIMARY KEY,
+    value     TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 `
 
 // OpenDatabase opens (or creates) the central devclaw.db at the given path.
