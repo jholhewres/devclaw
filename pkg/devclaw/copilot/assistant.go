@@ -239,12 +239,12 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 		return approvalMgr.Request(sessionID, callerJID, toolName, args, sendMsg)
 	})
 
-	// Wire subagent announce callback: when a subagent completes, push the
-	// result to the origin channel/chat directly. If OriginChannel is set on
-	// the run (captured at spawn time from the tool execution context), deliver
-	// there; otherwise fall back to splitting ParentSessionID.
+	// Wire subagent announce callback: when a subagent completes, inject the
+	// result back into the parent session so the main agent can process and
+	// reformulate it (matching OpenClaw's approach). This allows the agent to
+	// synthesize multiple subagent results and maintain conversation context.
 	a.subagentMgr.SetAnnounceCallback(func(run *SubagentRun) {
-		// Prefer the explicit origin coordinates captured at spawn time.
+		// Build session ID from origin coordinates.
 		channel := run.OriginChannel
 		chatID := run.OriginTo
 		if channel == "" || chatID == "" {
@@ -255,28 +255,31 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 				return
 			}
 		}
+		sessionID := MakeSessionID(channel, chatID)
 
+		// Build the system message for the main agent (similar to OpenClaw).
 		var msg string
 		switch run.Status {
 		case SubagentStatusCompleted:
 			result := run.Result
-			if len(result) > 3000 {
-				result = result[:3000] + "\n... (truncated)"
+			if len(result) > 4000 {
+				result = result[:4000] + "\n... (truncated)"
 			}
-			msg = fmt.Sprintf("✅ Subagent **%s** completed in %s:\n\n%s",
-				run.Label, run.Duration.Round(time.Second), result)
+			msg = fmt.Sprintf("[System Message] A subagent task %q just completed successfully.\n\nResult:\n%s\n\nConvert this result into your normal assistant voice and send that user-facing update now. Keep this internal context private (don't mention system/log/stats details), and do not copy the system message verbatim. Reply ONLY: NO_REPLY if this exact result was already delivered to the user in this same turn.",
+				run.Label, result)
 		case SubagentStatusFailed:
-			msg = fmt.Sprintf("❌ Subagent **%s** failed after %s: %s",
+			msg = fmt.Sprintf("[System Message] A subagent task %q failed after %s: %s\n\nLet the user know about this failure briefly and offer to retry or investigate.",
 				run.Label, run.Duration.Round(time.Second), run.Error)
 		case SubagentStatusTimeout:
-			msg = fmt.Sprintf("⏱️ Subagent **%s** timed out after %s.",
+			msg = fmt.Sprintf("[System Message] A subagent task %q timed out after %s.\n\nLet the user know about this timeout briefly and offer to retry.",
 				run.Label, run.Duration.Round(time.Second))
 		default:
 			return
 		}
 
-		outMsg := &channels.OutgoingMessage{Content: FormatForChannel(msg, channel)}
-		_ = a.channelMgr.Send(a.ctx, channel, chatID, outMsg)
+		// Inject as a follow-up message into the parent session.
+		// This triggers a new agent run to process the subagent result.
+		a.enqueueFollowupMessage(sessionID, msg, channel, chatID)
 	})
 
 	return a
@@ -842,6 +845,39 @@ func (a *Assistant) enqueueFollowup(msg *channels.IncomingMessage, sessionID str
 		"queue_length", qLen,
 		"content_preview", truncate(msg.Content, 50),
 	)
+}
+
+// enqueueFollowupMessage creates a synthetic message and enqueues it for processing.
+// This is used by subagent announce to inject results back into the parent session.
+func (a *Assistant) enqueueFollowupMessage(sessionID, content, channel, chatID string) {
+	msg := &channels.IncomingMessage{
+		Content: content,
+		Channel: channel,
+		ChatID:  chatID,
+		From:    "system",
+		ID:      fmt.Sprintf("subagent-announce-%d", time.Now().UnixNano()),
+		IsGroup: strings.Contains(chatID, "@g.us"),
+	}
+
+	a.followupQueuesMu.Lock()
+	const maxFollowupQueue = 20
+	if len(a.followupQueues[sessionID]) >= maxFollowupQueue {
+		a.followupQueues[sessionID] = a.followupQueues[sessionID][1:]
+		a.logger.Warn("followup queue full, dropped oldest", "session", sessionID)
+	}
+	a.followupQueues[sessionID] = append(a.followupQueues[sessionID], msg)
+	qLen := len(a.followupQueues[sessionID])
+	a.followupQueuesMu.Unlock()
+
+	a.logger.Info("subagent result enqueued as followup",
+		"session", sessionID,
+		"queue_length", qLen,
+	)
+
+	// If the session is not currently processing, trigger immediate processing.
+	if !a.messageQueue.IsProcessing(sessionID) {
+		go a.drainFollowupQueue(sessionID)
+	}
 }
 
 // drainFollowupQueue processes messages that were enqueued while a session was
