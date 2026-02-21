@@ -33,6 +33,23 @@ Complete team coordination system with persistent agents, shared memory, and rea
 - **Tool filtering by profile**: Filter available tools based on agent profile configuration
 - **Tool count limits**: Configurable limits on number of tools exposed to agent
 
+### Background Routines
+
+- **Metrics Collector**: Periodic system metrics collection with webhook support
+  - Message and token counts with per-minute rates
+  - Agent runs (total, active, success, failed, timeout)
+  - Tool calls and subagent statistics
+  - System metrics (goroutines, memory, uptime)
+  - Latency tracking with P50/P99 percentiles
+  - Subscriber pattern for real-time metrics delivery
+
+- **Memory Indexer**: Incremental indexing of memory files for enhanced search
+  - SHA-256 hash-based change detection
+  - Automatic detection of deleted files
+  - Configurable interval and memory directory
+
+- **Internal Routines Documentation**: Complete documentation of all 26+ background routines in `docs/internal-routines.md`
+
 ---
 
 ## [1.7.0] — 2026-02-18
