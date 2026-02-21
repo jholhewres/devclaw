@@ -129,6 +129,26 @@ type Config struct {
 
 	// MCP configures Model Context Protocol servers.
 	MCP MCPConfig `yaml:"mcp"`
+
+	// Routines configures background routines (metrics, memory indexer, etc).
+	Routines RoutinesConfig `yaml:"routines"`
+}
+
+// RoutinesConfig configures background routines for metrics and memory indexing.
+type RoutinesConfig struct {
+	// Metrics configures the metrics collector.
+	Metrics MetricsCollectorConfig `yaml:"metrics"`
+
+	// MemoryIndexer configures the background memory indexer.
+	MemoryIndexer MemoryIndexerConfig `yaml:"memory_indexer"`
+}
+
+// DefaultRoutinesConfig returns sensible defaults for background routines.
+func DefaultRoutinesConfig() RoutinesConfig {
+	return RoutinesConfig{
+		Metrics:       DefaultMetricsCollectorConfig(),
+		MemoryIndexer: DefaultMemoryIndexerConfig(),
+	}
 }
 
 // DatabaseConfig configures the central devclaw.db SQLite database.

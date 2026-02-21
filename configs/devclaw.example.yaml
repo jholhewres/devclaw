@@ -143,3 +143,16 @@ scheduler:
 logging:
   level: "info"                        # debug | info | warn | error
   format: "json"                       # json | text
+
+# ── Background Routines ─────────────────────────────────────
+routines:
+  # Metrics Collector - collects and reports system metrics
+  metrics:
+    enabled: false                     # Enable metrics collection
+    interval: 1m                       # Collection interval
+    webhook: ""                        # Optional webhook URL for external reporting
+
+  # Memory Indexer - incremental indexing of memory files
+  memory_indexer:
+    enabled: true                      # Enable background memory indexing
+    interval: 5m                       # Indexing interval

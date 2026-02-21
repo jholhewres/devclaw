@@ -152,6 +152,12 @@ type Assistant struct {
 	// webhookMgr manages external webhook delivery.
 	webhookMgr *WebhookManager
 
+	// metricsCollector collects and reports system metrics.
+	metricsCollector *MetricsCollector
+
+	// memoryIndexer performs background memory indexing.
+	memoryIndexer *MemoryIndexer
+
 	// configMu protects hot-reloadable config fields.
 	configMu sync.RWMutex
 
@@ -525,6 +531,51 @@ func (a *Assistant) Start(ctx context.Context) error {
 	if a.config.Heartbeat.Enabled {
 		a.heartbeat = NewHeartbeat(a.config.Heartbeat, a, a.logger)
 		a.heartbeat.Start(a.ctx)
+	}
+
+	// 5b. Start metrics collector if enabled.
+	if a.config.Routines.Metrics.Enabled {
+		a.metricsCollector = NewMetricsCollector(a.config.Routines.Metrics, a.logger)
+		// Wire callbacks for session and subagent counts
+		a.metricsCollector.SetSessionsCountFunc(func() int64 {
+			return int64(a.sessionStore.Count())
+		})
+		if a.subagentMgr != nil {
+			a.metricsCollector.SetSubagentsCountFunc(func() int64 {
+				return int64(a.subagentMgr.ActiveCount())
+			})
+		}
+		if a.devclawDB != nil && a.config.Database.Path != "" {
+			a.metricsCollector.SetDBSizeFunc(func() int64 {
+				// Get DB file size
+				info, err := os.Stat(a.config.Database.Path)
+				if err != nil {
+					return 0
+				}
+				return info.Size() / 1024 / 1024 // MB
+			})
+		}
+		go a.metricsCollector.Start(a.ctx)
+	}
+
+	// 5c. Start memory indexer if enabled.
+	if a.config.Routines.MemoryIndexer.Enabled && a.sqliteMemory != nil {
+		a.memoryIndexer = NewMemoryIndexer(a.config.Routines.MemoryIndexer, a.logger)
+		memDir := filepath.Join(filepath.Dir(a.config.Memory.Path), "memory")
+		a.memoryIndexer.SetMemoryDir(memDir)
+		// Wire callbacks for memory indexing
+		a.memoryIndexer.SetIndexChunkFunc(func(chunks []MemoryChunk) error {
+			// Convert to memory.Chunk format and index
+			for _, c := range chunks {
+				ctx := context.Background()
+				mChunks := []memory.Chunk{{FileID: c.Filepath, Text: c.Content, Hash: c.Hash}}
+				if err := a.sqliteMemory.IndexChunks(ctx, c.Filepath, mChunks, c.Hash); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		go a.memoryIndexer.Start(a.ctx)
 	}
 
 	// 6. Start main message processing loop.
