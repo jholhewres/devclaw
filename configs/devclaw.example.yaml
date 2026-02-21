@@ -98,7 +98,7 @@ channels:
 
 # ── Memory ─────────────────────────────────────────────────
 memory:
-  type: "sqlite"
+  type: "file"
   path: "./data/memory.db"
   max_messages: 100
   compression_strategy: "summarize"
