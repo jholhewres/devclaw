@@ -2,6 +2,163 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [Unreleased]
+
+### Teams System — Persistent Agents & Shared Memory
+
+Complete team coordination system with persistent agents, shared memory, and real-time collaboration:
+
+- **Persistent Agents**: Long-lived agents with specific roles, personalities, and instructions
+- **Team Memory**: Shared state accessible by all team members (tasks, messages, facts, documents)
+- **Thread Subscriptions**: Auto-subscribe to threads for continuous notifications
+- **Working State (WORKING.md)**: Persist work-in-progress across heartbeats
+- **Active Notification Push**: Trigger agents immediately on @mentions
+- **Documents Storage**: Store deliverables linked to tasks with versioning
+
+**New Team Tools:**
+- Team management: `team_create`, `team_list`, `team_create_agent`, `team_list_agents`, `team_stop_agent`, `team_delete_agent`
+- Tasks: `team_create_task`, `team_list_tasks`, `team_update_task`, `team_assign_task`
+- Communication: `team_comment`, `team_check_mentions`, `team_send_message`, `team_mention`
+- Memory: `team_save_fact`, `team_get_facts`, `team_delete_fact`, `team_standup`
+- Documents: `team_create_document`, `team_list_documents`, `team_get_document`, `team_update_document`, `team_delete_document`
+- Working State: `team_get_working`, `team_update_working`, `team_clear_working`
+
+### LLM Improvements
+
+- **Gemini model ID normalization**: Automatic conversion of Gemini model IDs (e.g., `gemini-2.0-flash` → `gemini-2.0-flash-001`) for compatibility with Google AI API
+- **Enhanced subagent spawning controls**: Better control over which models can spawn subagents
+
+### Agent Improvements
+
+- **Tool filtering by profile**: Filter available tools based on agent profile configuration
+- **Tool count limits**: Configurable limits on number of tools exposed to agent
+
+---
+
+## [1.7.0] — 2026-02-18
+
+WhatsApp UX overhaul, setup improvements, tool profiles, native media, and comprehensive documentation.
+
+### WhatsApp & Session Management
+
+- **Enhanced session management**: Improved WhatsApp connection handling and session persistence
+- **Better connection management**: Robust event handling for WhatsApp connections
+- **Session persistence**: Workspace session stores now survive container restarts
+
+### Setup & Configuration
+
+- **New setup components**: Streamlined setup wizard with improved UX
+- **Tool profiles**: Simplified permission management with predefined profiles (admin, developer, readonly, etc.)
+- **System administration commands**: New `/maintenance` and system commands for admin control
+- **Maintenance mode**: Enable maintenance mode to block non-admin access during updates
+
+### Media & Vision
+
+- **Native vision and transcription**: Vision and transcription are now native tools with auto-detection
+- **Vision model selector**: UI for selecting vision model in settings
+- **Synchronous media enrichment**: All media enrichment runs synchronously for better reliability
+- **Audio transcription**: End-to-end audio transcription working
+
+### Documentation
+
+- **Agent architecture review**: Comprehensive documentation of agent routing, DM pairing, environment variables
+- **Hooks system documentation**: Full documentation of lifecycle hooks
+- **Group policy documentation**: Group chat policy configuration
+
+### UI Improvements
+
+- **Enhanced dark mode**: Better dark mode styling across all components
+- **Chat message UI**: Improved chat message display and localization
+- **Language switcher**: Multilingual support with language selection
+
+### Docker & Deployment
+
+- **Restructured Docker setup**: Simplified Dockerfile and docker-compose for easier deployment
+- **Runtime tools in Docker**: All necessary tools included in Docker image
+- **Workspace bind mount**: Workspace directory bind-mounted into container
+
+---
+
+## [1.6.1] — 2026-02-17
+
+Starter pack system and UI fixes.
+
+### Skills
+
+- **Starter pack system**: Skills can now teach the LLM how to use native tools via embedded instructions
+
+### UI Fixes
+
+- Fixed vault nomenclature in security page
+- Fixed toggle bug using canonical Tailwind classes
+- Fixed PT-BR accents, gateway port 8085
+- More concise vault texts in setup wizard
+
+### Docker
+
+- **Named volume for state**: State now persists between container restarts via named volume
+- **Simplified Dockerfile**: Cleaner Dockerfile and compose for VM deployment
+- Removed .env from tracking, conditional phone, improved Channels
+
+---
+
+## [1.6.0] — 2026-02-17
+
+Major release with 20+ native tools, MCP server, plugin system, and redesigned UI.
+
+### Native Tools (20+ New Tools)
+
+- **Git tools**: status, diff, log, commit, branch, stash, blame with structured JSON output
+- **Docker tools**: ps, logs, exec, images, compose (up/down/ps/logs), stop, rm
+- **Database tools**: query, execute, schema, connections (PostgreSQL, MySQL, SQLite)
+- **Dev utility tools**: json_format, jwt_decode, regex_test, base64, hash, uuid, url_parse, timestamp
+- **System tools**: env_info, port_scan, process_list
+- **Codebase tools**: index (file tree), code_search (ripgrep), symbols, cursor_rules_generate
+- **Testing tools**: test_run (auto-detect framework), api_test, test_coverage
+- **Ops tools**: server_health (HTTP/TCP/DNS), deploy_run, tunnel_manage, ssh_exec
+- **Product tools**: sprint_report, dora_metrics, project_summary
+- **Daemon manager**: start_daemon, daemon_logs, daemon_list, daemon_stop, daemon_restart
+
+### MCP Server
+
+- **Model Context Protocol**: Full MCP server implementation for IDE integration
+- **stdio and SSE transports**: Support for both transport modes
+- Works with Cursor, VSCode, Claude Code, OpenCode, Windsurf, Zed, Neovim
+
+### Plugin System
+
+- **Extensible plugins**: GitHub, Jira, Sentry integrations
+- **Webhook dispatcher**: Event-driven webhook support
+
+### CLI Enhancements
+
+- **Pipe mode**: `git diff | devclaw diff` or `npm build 2>&1 | devclaw fix`
+- **Quick commands**: `devclaw fix`, `devclaw explain .`, `devclaw commit`, `devclaw how "task"`
+- **Shell hook**: Auto-capture failed commands with `devclaw shell-hook bash`
+
+### Multi-User System
+
+- **RBAC**: Role-based access control with owner/admin/user roles
+- **IDE extension configuration**: Configure IDE extensions per user
+
+### N-Provider Fallback
+
+- **Budget tracking**: Configurable cost limits and alerts
+- **Fallback chain**: Automatic model fallback with per-model cooldowns
+
+### UI Redesign
+
+- **v1.6.0 redesign**: Clean, professional look
+- **Hooks management**: Lifecycle hooks via UI
+- **Webhooks management**: Webhook configuration via UI
+- **Domain/network settings**: Configuration page for domain and network
+
+### Project Rename
+
+- Renamed from GoClaw to DevClaw across entire project
+
+---
+
 ## [1.5.1] — 2026-02-16
 
 Agent loop safety improvements ported from OpenClaw: tool loop detection, skills token budget guard, heartbeat transcript pruning, compaction retry with backoff, and cron spin loop fix.

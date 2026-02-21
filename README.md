@@ -90,7 +90,8 @@ All secrets are stored in the encrypted vault (`.devclaw.vault`), never in plain
 - **Single binary** — one `go build`, zero runtime dependencies
 - **9 LLM providers** — OpenAI, Anthropic, Ollama, Groq, Google AI, Z.AI, xAI, OpenRouter, and any OpenAI-compatible endpoint
 - **N-provider fallback chain** — rate-limited model → fallback → local Ollama, with per-model cooldowns and budget tracking
-- **70+ built-in tools** — Git, Docker, databases, testing, deploy, DORA metrics, and much more
+- **90+ built-in tools** — Git, Docker, databases, testing, deploy, DORA metrics, team coordination, and much more
+- **Teams system** — persistent agents with roles, shared memory, tasks, documents, and @mention notifications
 - **MCP server** — any IDE (Cursor, VSCode, Claude Code, Windsurf) connects via Model Context Protocol
 - **Pipe mode** — `git diff | devclaw diff` or `npm build 2>&1 | devclaw fix`
 - **Quick commands** — `devclaw fix`, `devclaw explain .`, `devclaw commit`, `devclaw how "task"`
@@ -122,13 +123,19 @@ All secrets are stored in the encrypted vault (`.devclaw.vault`), never in plain
            │      │          │    │
     ┌──────▼──┐ ┌─▼──────┐ ┌▼──────────┐
     │  Tools  │ │  LLM   │ │  Memory   │
-    │  (70+)  │ │ Client │ │ (SQLite)  │
+    │  (90+)  │ │ Client │ │ (SQLite)  │
     └─────────┘ └────────┘ └───────────┘
            │
     ┌──────▼────────────────────────────┐
     │          Subagent Manager         │
     │  (up to 8 concurrent child agents │
     │   with isolated sessions + tools) │
+    └───────────────────────────────────┘
+           │
+    ┌──────▼────────────────────────────┐
+    │          Teams System             │
+    │  (persistent agents with roles,   │
+    │   shared memory, tasks, @mentions)│
     └───────────────────────────────────┘
            │
     ┌──────▼────────────────────────────────┐
@@ -146,7 +153,7 @@ All secrets are stored in the encrypted vault (`.devclaw.vault`), never in plain
 
 ## Tools
 
-70+ built-in tools across 20 categories:
+90+ built-in tools across 22 categories:
 
 | Category | Tools |
 |----------|-------|
@@ -164,6 +171,7 @@ All secrets are stored in the encrypted vault (`.devclaw.vault`), never in plain
 | **Daemons** | start_daemon, daemon_logs, daemon_list, daemon_stop, daemon_restart |
 | **Subagents** | spawn_subagent, list_subagents, wait_subagent, stop_subagent |
 | **Plugins** | plugin_list, plugin_install, plugin_call (GitHub, Jira, Sentry) |
+| **Teams** | create/list teams & agents, tasks CRUD, @mentions, shared facts, documents, working state |
 | **Team** | team_users (RBAC), shared_memory |
 | **IDE** | ide_configure (VSCode, Cursor, JetBrains, Neovim) |
 | **Remote** | SSH exec, SCP upload/download |
@@ -334,6 +342,58 @@ subagents:
 
 ---
 
+## Teams System
+
+DevClaw Teams adds **persistent agents** with roles, shared memory, and real-time collaboration:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     TeamManager                          │
+│  - Create teams and persistent agents                   │
+│  - Agent roles: junior, mid, senior, lead               │
+│  - Heartbeat scheduling for proactive behavior          │
+│  - @mention parsing and active notification push        │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+┌──────────────────────────▼──────────────────────────────┐
+│                     TeamMemory                           │
+│  - Tasks (CRUD, status workflow)                        │
+│  - Messages (@mentions, thread subscriptions)           │
+│  - Facts (shared key-value store)                       │
+│  - Documents (deliverables with versioning)             │
+│  - Working State (WORKING.md pattern)                   │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Key features:**
+
+- **Persistent agents**: Long-lived agents with personalities and instructions
+- **Team memory**: Shared tasks, facts, documents accessible by all team members
+- **Thread subscriptions**: Auto-subscribe to threads for continuous notifications
+- **Working state**: Agents persist work-in-progress across heartbeats
+- **Active push**: Agents triggered immediately on @mentions (not just on heartbeat)
+
+**Example workflow:**
+
+```bash
+# Create a team
+team_create(name="Engineering", description="Dev team")
+
+# Create agents with roles
+team_create_agent(team_id="abc123", name="Friday", role="Squad Lead", level="lead")
+team_create_agent(team_id="abc123", name="Hobbs", role="Writer", level="mid")
+
+# Assign tasks with @mentions
+team_create_task(title="Write API docs", assignees=["hobbs"])
+team_comment(thread_id="task-123", content="@hobbs please start with auth endpoints")
+
+# Agent receives notification immediately and on heartbeat
+```
+
+See [docs/teams.md](docs/teams.md) for full documentation.
+
+---
+
 ## Channels
 
 | Channel | Status | Protocol |
@@ -435,6 +495,7 @@ pm2 startup   # auto-start on reboot
 |-------|------|
 | Architecture | [docs/architecture.md](docs/architecture.md) |
 | Features | [docs/features.md](docs/features.md) |
+| Teams System | [docs/teams.md](docs/teams.md) |
 | Security | [docs/security.md](docs/security.md) |
 | Performance | [docs/performance.md](docs/performance.md) |
 | Skills Catalog | [docs/skills-catalog.md](docs/skills-catalog.md) |
