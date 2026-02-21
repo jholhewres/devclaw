@@ -37,6 +37,13 @@ DevClaw is an AI agent for tech teams, written in Go. Single binary, zero runtim
 │  └──────────┘  └──────────┘  └───────────┘              │
 │                                                          │
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐              │
+│  │   Team   │  │   Team   │  │ Heartbeat │              │
+│  │ Manager  │──│  Memory  │  │ Scheduler │              │
+│  │(persist. │  │ (shared) │  │ (cron)    │              │
+│  │ agents)  │  │          │  │           │              │
+│  └──────────┘  └──────────┘  └───────────┘              │
+│                                                          │
+│  ┌──────────┐  ┌──────────┐  ┌───────────┐              │
 │  │ EventBus │  │  Lanes   │  │  Browser  │              │
 │  │ (pub/sub)│  │ (conc.)  │  │  Manager  │              │
 │  │          │  │          │  │  (CDP)    │              │
@@ -390,3 +397,19 @@ Multi-user support with RBAC:
 | Operations | `ops_tools.go` | server_health, deploy_run, tunnel_manage, ssh_exec |
 | Product | `product_tools.go` | sprint_report, dora_metrics, project_summary |
 | IDE | `ide_extensions.go` | ide_configure |
+| Teams | `team_tools.go` | team_create, team_list, team_create_agent, team_list_agents, team_stop_agent, team_delete_agent, team_create_task, team_list_tasks, team_update_task, team_assign_task, team_comment, team_check_mentions, team_send_message, team_save_fact, team_get_facts, team_delete_fact, team_standup |
+
+### 19. Teams System (`team_manager.go`, `team_memory.go`, `team_tools.go`)
+
+Persistent agents and shared team memory:
+
+- **TeamManager**: lifecycle management for teams and persistent agents
+- **TeamMemory**: shared state (tasks, messages, facts, activities)
+- **Heartbeat integration**: periodic wake-ups via scheduler
+- **@mentions**: inter-agent communication with mailbox delivery
+
+Key differences from subagents:
+- **Persistent agents**: long-lived, maintain state, managed via TeamManager
+- **Subagents**: ephemeral, spawned for parallel work, discarded after completion
+
+Both systems work together — persistent agents can spawn subagents for parallel tasks.

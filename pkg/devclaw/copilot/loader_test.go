@@ -281,3 +281,113 @@ func TestSaveConfigToFile_CreatesBackup(t *testing.T) {
 		t.Error("backup should contain original config")
 	}
 }
+
+func TestResolvePathFromConfig(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		configDir string
+		want      string
+	}{
+		{
+			name:      "relative path",
+			path:      "./skills",
+			configDir: "/home/user/devclaw",
+			want:      "/home/user/devclaw/skills",
+		},
+		{
+			name:      "relative path without dot",
+			path:      "skills",
+			configDir: "/home/user/devclaw",
+			want:      "/home/user/devclaw/skills",
+		},
+		{
+			name:      "absolute path unchanged",
+			path:      "/absolute/skills",
+			configDir: "/home/user/devclaw",
+			want:      "/absolute/skills",
+		},
+		{
+			name:      "empty path unchanged",
+			path:      "",
+			configDir: "/home/user/devclaw",
+			want:      "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolvePathFromConfig(tt.path, tt.configDir)
+			if got != tt.want {
+				t.Errorf("resolvePathFromConfig(%q, %q) = %q, want %q", tt.path, tt.configDir, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfigFromFile_ResolvesRelativePaths(t *testing.T) {
+	// Create a temp directory structure.
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "devclaw")
+	if err := os.Mkdir(configDir, 0755); err != nil {
+		t.Fatalf("creating config dir: %v", err)
+	}
+
+	// Create a skills directory to verify path resolution.
+	skillsDir := filepath.Join(configDir, "skills")
+	if err := os.Mkdir(skillsDir, 0755); err != nil {
+		t.Fatalf("creating skills dir: %v", err)
+	}
+
+	// Create a subdirectory for a skill.
+	if err := os.Mkdir(filepath.Join(skillsDir, "test-skill"), 0755); err != nil {
+		t.Fatalf("creating test skill dir: %v", err)
+	}
+
+	// Write a config with relative paths.
+	cfgPath := filepath.Join(configDir, "config.yaml")
+	cfgContent := `
+name: "TestBot"
+model: "test-model"
+skills:
+  clawdhub_dirs: ["./skills", "./plugins"]
+memory:
+  path: "./data/memory.db"
+scheduler:
+  storage: "./data/scheduler.db"
+plugins:
+  dir: "./plugins"
+`
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0644); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+
+	// Load config from a DIFFERENT working directory.
+	// This simulates running devclaw from / while config is in /home/user/devclaw.
+	originalWd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("changing to temp dir: %v", err)
+	}
+	defer os.Chdir(originalWd)
+
+	cfg, err := LoadConfigFromFile(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfigFromFile: %v", err)
+	}
+
+	// Verify paths are resolved relative to config file location.
+	expectedSkillsDir := filepath.Join(configDir, "skills")
+	if len(cfg.Skills.ClawdHubDirs) < 1 || cfg.Skills.ClawdHubDirs[0] != expectedSkillsDir {
+		t.Errorf("Skills.ClawdHubDirs[0] = %v, want %v", cfg.Skills.ClawdHubDirs, expectedSkillsDir)
+	}
+
+	expectedMemoryPath := filepath.Join(configDir, "data", "memory.db")
+	if cfg.Memory.Path != expectedMemoryPath {
+		t.Errorf("Memory.Path = %v, want %v", cfg.Memory.Path, expectedMemoryPath)
+	}
+
+	expectedSchedulerPath := filepath.Join(configDir, "data", "scheduler.db")
+	if cfg.Scheduler.Storage != expectedSchedulerPath {
+		t.Errorf("Scheduler.Storage = %v, want %v", cfg.Scheduler.Storage, expectedSchedulerPath)
+	}
+}

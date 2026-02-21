@@ -176,7 +176,9 @@ func (h *Heartbeat) tick(ctx context.Context) {
 
 	// Deliver proactive message to configured channel.
 	if h.config.Channel != "" && h.config.ChatID != "" {
-		outMsg := &channels.OutgoingMessage{Content: response}
+		// Strip internal tags before sending to user
+		cleanResponse := StripInternalTags(response)
+		outMsg := &channels.OutgoingMessage{Content: cleanResponse}
 		if err := h.assistant.channelMgr.Send(ctx, h.config.Channel, h.config.ChatID, outMsg); err != nil {
 			h.logger.Error("heartbeat: failed to deliver message", "error", err)
 		} else {

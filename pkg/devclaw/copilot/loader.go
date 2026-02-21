@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -53,6 +54,9 @@ func LoadConfigFromFile(path string) (*Config, error) {
 
 	// Resolve secrets from environment (override empty/placeholder values).
 	resolveSecrets(cfg)
+
+	// Resolve relative paths based on config file location.
+	resolveRelativePaths(cfg, path)
 
 	// Check file permissions and warn if too open.
 	checkFilePermissions(path)
@@ -350,6 +354,59 @@ func resolveSecrets(cfg *Config) {
 			cfg.API.APIKey = key
 		}
 	}
+}
+
+// resolveRelativePaths converts relative paths to absolute paths based on
+// the config file's directory. This ensures paths work correctly regardless
+// of the current working directory when devclaw is started.
+func resolveRelativePaths(cfg *Config, configPath string) {
+	// Get the directory containing the config file.
+	configDir := filepath.Dir(configPath)
+
+	// Resolve skills directories.
+	for i, dir := range cfg.Skills.ClawdHubDirs {
+		cfg.Skills.ClawdHubDirs[i] = resolvePathFromConfig(dir, configDir)
+	}
+
+	// Resolve memory path.
+	if cfg.Memory.Path != "" {
+		cfg.Memory.Path = resolvePathFromConfig(cfg.Memory.Path, configDir)
+	}
+
+	// Resolve scheduler storage path.
+	if cfg.Scheduler.Storage != "" {
+		cfg.Scheduler.Storage = resolvePathFromConfig(cfg.Scheduler.Storage, configDir)
+	}
+
+	// Resolve plugins directory.
+	if cfg.Plugins.Dir != "" {
+		cfg.Plugins.Dir = resolvePathFromConfig(cfg.Plugins.Dir, configDir)
+	}
+}
+
+// resolvePathFromConfig converts a path to absolute, resolving relative paths
+// against the config file's directory. Expands ~ to home directory.
+func resolvePathFromConfig(path, configDir string) string {
+	if path == "" {
+		return path
+	}
+
+	// Expand ~ to home directory.
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		path = filepath.Join(home, path[2:])
+	}
+
+	// If already absolute, return as-is.
+	if filepath.IsAbs(path) {
+		return path
+	}
+
+	// Make relative path absolute based on config directory.
+	return filepath.Join(configDir, path)
 }
 
 // sanitizeSecret replaces a real secret with an env var reference

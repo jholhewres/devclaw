@@ -143,6 +143,169 @@ CREATE TABLE IF NOT EXISTS pairing_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_pairing_requests_status ON pairing_requests(status);
 CREATE INDEX IF NOT EXISTS idx_pairing_requests_user ON pairing_requests(user_jid);
+
+-- ═══════════════════════════════════════════════════════════════════
+-- TEAM MANAGEMENT SYSTEM
+-- ═══════════════════════════════════════════════════════════════════
+
+-- Teams
+CREATE TABLE IF NOT EXISTS teams (
+    id            TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
+    description   TEXT DEFAULT '',
+    owner_jid     TEXT NOT NULL,
+    default_model TEXT DEFAULT '',
+    workspace_path TEXT DEFAULT '',
+    created_at    TEXT NOT NULL,
+    enabled       INTEGER DEFAULT 1
+);
+
+-- Persistent agents (long-lived agents with specific roles)
+CREATE TABLE IF NOT EXISTS persistent_agents (
+    id                 TEXT PRIMARY KEY,
+    name               TEXT NOT NULL,
+    role               TEXT NOT NULL,
+    team_id            TEXT NOT NULL,
+    level              TEXT DEFAULT 'specialist',
+    status             TEXT DEFAULT 'idle',
+    personality        TEXT DEFAULT '',
+    instructions       TEXT DEFAULT '',
+    model              TEXT DEFAULT '',
+    skills             TEXT DEFAULT '[]',
+    session_id         TEXT DEFAULT '',
+    current_task_id    TEXT DEFAULT '',
+    heartbeat_schedule TEXT DEFAULT '*/15 * * * *',
+    created_at         TEXT NOT NULL,
+    last_active_at     TEXT DEFAULT '',
+    last_heartbeat_at  TEXT DEFAULT '',
+    FOREIGN KEY (team_id) REFERENCES teams(id)
+);
+CREATE INDEX IF NOT EXISTS idx_agents_team ON persistent_agents(team_id);
+CREATE INDEX IF NOT EXISTS idx_agents_status ON persistent_agents(status);
+
+-- Team tasks
+CREATE TABLE IF NOT EXISTS team_tasks (
+    id             TEXT PRIMARY KEY,
+    team_id        TEXT NOT NULL,
+    title          TEXT NOT NULL,
+    description    TEXT DEFAULT '',
+    status         TEXT DEFAULT 'inbox',
+    assignees      TEXT DEFAULT '[]',
+    priority       INTEGER DEFAULT 3,
+    labels         TEXT DEFAULT '[]',
+    created_by     TEXT NOT NULL,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
+    completed_at   TEXT DEFAULT '',
+    blocked_reason TEXT DEFAULT '',
+    FOREIGN KEY (team_id) REFERENCES teams(id)
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_team ON team_tasks(team_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON team_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_assignees ON team_tasks(assignees);
+
+-- Team messages (task threads and discussions)
+CREATE TABLE IF NOT EXISTS team_messages (
+    id         TEXT PRIMARY KEY,
+    team_id    TEXT NOT NULL,
+    thread_id  TEXT DEFAULT '',
+    from_agent TEXT DEFAULT '',
+    from_user  TEXT DEFAULT '',
+    content    TEXT NOT NULL,
+    mentions   TEXT DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    delivered  INTEGER DEFAULT 0,
+    FOREIGN KEY (team_id) REFERENCES teams(id)
+);
+CREATE INDEX IF NOT EXISTS idx_messages_team ON team_messages(team_id);
+CREATE INDEX IF NOT EXISTS idx_messages_thread ON team_messages(thread_id);
+
+-- Team pending messages (mailbox for @mentions)
+CREATE TABLE IF NOT EXISTS team_pending_messages (
+    id           TEXT PRIMARY KEY,
+    to_agent     TEXT NOT NULL,
+    from_agent   TEXT DEFAULT '',
+    from_user    TEXT DEFAULT '',
+    content      TEXT NOT NULL,
+    thread_id    TEXT DEFAULT '',
+    created_at   TEXT NOT NULL,
+    delivered    INTEGER DEFAULT 0,
+    delivered_at TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_pending_to ON team_pending_messages(to_agent);
+CREATE INDEX IF NOT EXISTS idx_pending_delivered ON team_pending_messages(delivered);
+
+-- Team facts (shared memory)
+CREATE TABLE IF NOT EXISTS team_facts (
+    id         TEXT PRIMARY KEY,
+    team_id    TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    author     TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (team_id) REFERENCES teams(id),
+    UNIQUE(team_id, key)
+);
+CREATE INDEX IF NOT EXISTS idx_facts_team ON team_facts(team_id);
+
+-- Team activity feed
+CREATE TABLE IF NOT EXISTS team_activities (
+    id         TEXT PRIMARY KEY,
+    team_id    TEXT NOT NULL,
+    type       TEXT NOT NULL,
+    agent_id   TEXT DEFAULT '',
+    message    TEXT NOT NULL,
+    related_id TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (team_id) REFERENCES teams(id)
+);
+CREATE INDEX IF NOT EXISTS idx_activities_team ON team_activities(team_id);
+CREATE INDEX IF NOT EXISTS idx_activities_created ON team_activities(created_at);
+
+-- Team documents (deliverables linked to tasks)
+CREATE TABLE IF NOT EXISTS team_documents (
+    id          TEXT PRIMARY KEY,
+    team_id     TEXT NOT NULL,
+    task_id     TEXT DEFAULT '',
+    title       TEXT NOT NULL,
+    doc_type    TEXT DEFAULT 'deliverable',
+    content     TEXT NOT NULL,
+    format      TEXT DEFAULT 'markdown',
+    file_path   TEXT DEFAULT '',
+    version     INTEGER DEFAULT 1,
+    author      TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    FOREIGN KEY (team_id) REFERENCES teams(id)
+);
+CREATE INDEX IF NOT EXISTS idx_documents_team ON team_documents(team_id);
+CREATE INDEX IF NOT EXISTS idx_documents_task ON team_documents(task_id);
+CREATE INDEX IF NOT EXISTS idx_documents_type ON team_documents(doc_type);
+
+-- Thread subscriptions (agents subscribed to task threads)
+CREATE TABLE IF NOT EXISTS team_thread_subscriptions (
+    id            TEXT PRIMARY KEY,
+    team_id       TEXT NOT NULL,
+    thread_id     TEXT NOT NULL,
+    agent_id      TEXT NOT NULL,
+    subscribed_at TEXT NOT NULL,
+    reason        TEXT DEFAULT 'auto',
+    UNIQUE(team_id, thread_id, agent_id)
+);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_thread ON team_thread_subscriptions(thread_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_agent ON team_thread_subscriptions(agent_id);
+
+-- Agent working state (WORKING.md pattern)
+CREATE TABLE IF NOT EXISTS agent_working_state (
+    agent_id        TEXT PRIMARY KEY,
+    team_id         TEXT NOT NULL,
+    current_task_id TEXT DEFAULT '',
+    status          TEXT DEFAULT 'idle',
+    next_steps      TEXT DEFAULT '',
+    context         TEXT DEFAULT '',
+    updated_at      TEXT NOT NULL
+);
 `
 
 // OpenDatabase opens (or creates) the central devclaw.db at the given path.

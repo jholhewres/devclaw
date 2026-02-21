@@ -125,8 +125,13 @@ plugins:
   dir: "./plugins"
 
 # ── Skills ─────────────────────────────────────────────────
+# All relative paths are resolved from the config file's directory.
+# This means ./skills will always work regardless of working directory.
 skills:
   builtin: [weather, calculator, web-search, web-fetch]
+  # Directories containing ClawdHub-format skills (SKILL.md files)
+  clawdhub_dirs: ["./skills"]
+  # Legacy: installed skill names (for backward compatibility)
   installed: [github, gog, summarize]
 
 # ── Scheduler ──────────────────────────────────────────────

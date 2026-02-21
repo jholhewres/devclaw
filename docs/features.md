@@ -287,6 +287,28 @@ Three strategies to keep the context within limits:
 | `team_users` | Manage team users and roles (owner, admin, editor, viewer) | admin |
 | `shared_memory` | Read/write team-wide shared memory entries | user |
 
+#### Teams (Persistent Agents)
+
+| Tool | Description | Permission |
+|------|-------------|------------|
+| `team_create` | Create a new team | admin |
+| `team_list` | List all teams | user |
+| `team_create_agent` | Create a persistent agent with role and personality | admin |
+| `team_list_agents` | List agents in a team | user |
+| `team_stop_agent` | Stop an agent (disable heartbeats) | admin |
+| `team_delete_agent` | Permanently delete an agent | admin |
+| `team_create_task` | Create a task with assignees | user |
+| `team_list_tasks` | List tasks (filterable by status/assignee) | user |
+| `team_update_task` | Update task status with optional comment | user |
+| `team_assign_task` | Assign agents to a task | admin |
+| `team_comment` | Add comment to task thread with @mentions | user |
+| `team_check_mentions` | Check pending @mentions for current agent | user |
+| `team_send_message` | Send direct message to an agent | user |
+| `team_save_fact` | Save a fact to shared team memory | user |
+| `team_get_facts` | Get all shared facts | user |
+| `team_delete_fact` | Delete a fact | admin |
+| `team_standup` | Generate daily standup summary | user |
+
 #### IDE Configuration
 
 | Tool | Description | Permission |

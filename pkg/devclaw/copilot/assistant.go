@@ -131,6 +131,9 @@ type Assistant struct {
 	// userMgr handles multi-user operations when team mode is enabled.
 	userMgr *UserManager
 
+	// teamMgr manages persistent agents and team memory.
+	teamMgr *TeamManager
+
 	// maintenanceMgr manages maintenance mode state.
 	maintenanceMgr *MaintenanceManager
 
@@ -485,6 +488,19 @@ func (a *Assistant) Start(ctx context.Context) error {
 	// 1d. Create and start scheduler if enabled.
 	if a.config.Scheduler.Enabled {
 		a.initScheduler()
+	}
+
+	// 1d-2. Initialize TeamManager for persistent agents.
+	if a.devclawDB != nil && a.scheduler != nil {
+		a.teamMgr = NewTeamManager(a.devclawDB, a.scheduler, a.logger.With("component", "team-manager"))
+		// Wire spawn callback for active notification push.
+		a.teamMgr.SetSpawnAgentCallback(func(ctx context.Context, agent *PersistentAgent, task string) error {
+			sessionID := fmt.Sprintf("agent:%s:run", agent.ID)
+			a.enqueueFollowupMessage(sessionID, task, "team", agent.TeamID)
+			a.logger.Info("persistent agent triggered via spawn callback", "agent_id", agent.ID)
+			return nil
+		})
+		a.logger.Info("team manager initialized with spawn callback")
 	}
 
 	// 1e. Register system tools (needs scheduler to be created first).
@@ -1789,7 +1805,9 @@ func (a *Assistant) initScheduler() {
 
 		// If job has a target channel/chat, send the result.
 		if job.Channel != "" && job.ChatID != "" {
-			outMsg := &channels.OutgoingMessage{Content: result}
+			// Strip internal tags before sending to user
+			cleanResult := StripInternalTags(result)
+			outMsg := &channels.OutgoingMessage{Content: cleanResult}
 			if sendErr := a.channelMgr.Send(ctx, job.Channel, job.ChatID, outMsg); sendErr != nil {
 				a.logger.Error("failed to deliver scheduled message",
 					"job_id", job.ID, "error", sendErr,
@@ -1933,6 +1951,11 @@ func (a *Assistant) registerSystemTools() {
 
 	// Register session management tools (sessions_list, sessions_send) for multi-agent routing.
 	RegisterSessionTools(a.toolExecutor, a.workspaceMgr)
+
+	// Register team tools for persistent agents and team memory.
+	if a.teamMgr != nil {
+		RegisterTeamTools(a.toolExecutor, a.teamMgr, a.devclawDB, a.scheduler, a.logger)
+	}
 
 	// Register media tools (describe_image, transcribe_audio).
 	RegisterMediaTools(a.toolExecutor, a.llmClient, a.config, a.logger)
