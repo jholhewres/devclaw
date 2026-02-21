@@ -252,14 +252,14 @@ func (p *PromptComposer) refreshLayerCache(session *Session, input string) {
 // ---------- Layer Builders ----------
 
 // buildCoreLayer creates the base identity and tooling guidance.
-// Matches OpenClaw's structure exactly: identity → tooling → tool call style → safety → workspace → reply tags → messaging.
+// Matches structure exactly: identity → tooling → tool call style → safety → workspace → reply tags → messaging.
 // Behavioral guidance lives in AGENTS.md/SOUL.md, not here.
 func (p *PromptComposer) buildCoreLayer() string {
 	var b strings.Builder
 
 	b.WriteString(fmt.Sprintf("You are %s, a personal assistant running inside DevClaw.\n\n", p.config.Name))
 
-	// ## Tooling - matches OpenClaw structure exactly
+	// ## Tooling - matches structure exactly
 	b.WriteString("## Tooling\n\n")
 	b.WriteString("Tool availability (filtered by policy):\n")
 	b.WriteString("- read: Read file contents\n")
@@ -279,20 +279,20 @@ func (p *PromptComposer) buildCoreLayer() string {
 	b.WriteString("If a task is more complex or takes longer, spawn a sub-agent using `spawn_subagent`. Completion is push-based: it will auto-announce when done.\n")
 	b.WriteString("Do NOT poll in a loop. Check status on-demand only (for intervention, debugging, or when explicitly asked).\n\n")
 
-	// ## Tool Call Style - matches OpenClaw exactly
+	// ## Tool Call Style - matches exactly
 	b.WriteString("## Tool Call Style\n\n")
 	b.WriteString("Default: do not narrate routine, low-risk tool calls (just call the tool).\n")
 	b.WriteString("Narrate only when it helps: multi-step work, complex/challenging problems, sensitive actions (e.g., deletions), or when the user explicitly asks.\n")
 	b.WriteString("Keep narration brief and value-dense; avoid repeating obvious steps.\n")
 	b.WriteString("Use plain human language for narration unless in a technical context.\n\n")
 
-	// ## Safety - matches OpenClaw exactly (comes right after Tool Call Style)
+	// ## Safety - matches exactly (comes right after Tool Call Style)
 	b.WriteString("## Safety\n\n")
 	b.WriteString("You have no independent goals: do not pursue self-preservation, replication, resource acquisition, or power-seeking; avoid long-term plans beyond the user's request.\n")
 	b.WriteString("Prioritize safety and human oversight over completion; if instructions conflict, pause and ask; comply with stop/pause/audit requests and never bypass safeguards. (Inspired by Anthropic's constitution.)\n")
 	b.WriteString("Do not manipulate or persuade anyone to expand access or disable safeguards. Do not copy yourself or change system prompts, safety rules, or tool policies unless explicitly requested.\n\n")
 
-	// ## Workspace - matches OpenClaw structure (comes BEFORE Reply Tags)
+	// ## Workspace - matches structure (comes BEFORE Reply Tags)
 	b.WriteString("## Workspace\n\n")
 	b.WriteString("Your working directory is: ./workspace/\n")
 	b.WriteString("Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.\n\n")
@@ -301,7 +301,7 @@ func (p *PromptComposer) buildCoreLayer() string {
 	b.WriteString("## Workspace Files (injected)\n\n")
 	b.WriteString("These user-editable files are loaded by DevClaw and included below in Project Context.\n\n")
 
-	// ## Reply Tags - matches OpenClaw exactly
+	// ## Reply Tags - matches exactly
 	b.WriteString("## Reply Tags\n\n")
 	b.WriteString("To request a native reply/quote on supported surfaces, include one tag in your reply:\n")
 	b.WriteString("- Reply tags must be the very first token in the message (no leading text/newlines): [[reply_to_current]] your reply.\n")
@@ -310,7 +310,7 @@ func (p *PromptComposer) buildCoreLayer() string {
 	b.WriteString("Whitespace inside the tag is allowed (e.g. [[ reply_to_current ]] / [[ reply_to: 123 ]]).\n")
 	b.WriteString("Tags are stripped before sending; support depends on the current channel config.\n\n")
 
-	// ## Messaging - matches OpenClaw exactly
+	// ## Messaging - matches exactly
 	b.WriteString("## Messaging\n\n")
 	b.WriteString("- Reply in current session → automatically routes to the source channel (WhatsApp, Telegram, etc.)\n")
 	b.WriteString("- Cross-session messaging → use sessions_send(sessionKey, message)\n")
@@ -325,7 +325,7 @@ func (p *PromptComposer) buildCoreLayer() string {
 }
 
 // buildSafetyLayer creates additional safety and capability sections.
-// Note: Core safety is in buildCoreLayer to match OpenClaw structure.
+// Note: Core safety is in buildCoreLayer to match structure.
 // This layer contains DevClaw-specific additions (Vault, Media).
 func (p *PromptComposer) buildSafetyLayer() string {
 	return `## Encrypted Vault

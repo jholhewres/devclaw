@@ -241,7 +241,7 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 
 	// Wire subagent announce callback: when a subagent completes, inject the
 	// result back into the parent session so the main agent can process and
-	// reformulate it (matching OpenClaw's approach). This allows the agent to
+	// reformulate it (matching approach). This allows the agent to
 	// synthesize multiple subagent results and maintain conversation context.
 	a.subagentMgr.SetAnnounceCallback(func(run *SubagentRun) {
 		// Build session ID from origin coordinates.
@@ -257,7 +257,7 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 		}
 		sessionID := MakeSessionID(channel, chatID)
 
-		// Build the system message for the main agent (similar to OpenClaw).
+		// Build the system message for the main agent.
 		var msg string
 		switch run.Status {
 		case SubagentStatusCompleted:
