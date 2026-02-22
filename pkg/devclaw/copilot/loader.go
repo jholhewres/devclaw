@@ -104,7 +104,11 @@ func ParseConfig(data []byte) (*Config, error) {
 func SaveConfigToFile(cfg *Config, path string) error {
 	// Create a copy to sanitize before writing.
 	sanitized := *cfg
-	sanitized.API.APIKey = sanitizeSecret(cfg.API.APIKey, "DEVCLAW_API_KEY")
+
+	// Sanitize API key - try provider-specific env var first, then fallback.
+	// The vault injects keys as OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.
+	apiKeyEnvVar := GetProviderKeyName(cfg.API.Provider)
+	sanitized.API.APIKey = sanitizeSecretWithFallback(cfg.API.APIKey, apiKeyEnvVar, "DEVCLAW_API_KEY")
 	sanitized.Media.TranscriptionAPIKey = sanitizeSecret(cfg.Media.TranscriptionAPIKey, "DEVCLAW_TRANSCRIPTION_API_KEY")
 
 	data, err := yaml.Marshal(&sanitized)
@@ -421,6 +425,26 @@ func sanitizeSecret(value, envVar string) string {
 	}
 	// Return as-is (user explicitly put it in config).
 	return value
+}
+
+// sanitizeSecretWithFallback tries multiple env vars before returning the value.
+// This handles the case where the vault injects OPENAI_API_KEY but the config
+// might reference DEVCLAW_API_KEY.
+func sanitizeSecretWithFallback(value, primaryEnvVar, fallbackEnvVar string) string {
+	if value == "" || IsEnvReference(value) {
+		return value
+	}
+	// Try primary env var first (e.g., OPENAI_API_KEY)
+	if os.Getenv(primaryEnvVar) == value {
+		return "${" + primaryEnvVar + "}"
+	}
+	// Try fallback env var (e.g., DEVCLAW_API_KEY)
+	if os.Getenv(fallbackEnvVar) == value {
+		return "${" + fallbackEnvVar + "}"
+	}
+	// Value doesn't match any env var - clear it to force vault lookup
+	// This prevents hardcoded keys from being saved to config
+	return ""
 }
 
 // IsEnvReference checks if a string is an environment variable reference.

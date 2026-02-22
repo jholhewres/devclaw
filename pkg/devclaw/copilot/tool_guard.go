@@ -95,9 +95,9 @@ func DefaultToolGuardConfig() ToolGuardConfig {
 	return ToolGuardConfig{
 		Enabled:          true,
 		AuditLogPath:     "./data/audit.log",
-		BlockSudo:        true,
+		BlockSudo:        false, // Deprecated: use AllowSudo instead
 		AllowDestructive: false,
-		AllowSudo:        false,
+		AllowSudo:        true, // Allow owners to run sudo (bash is already restricted to owner)
 		AllowReboot:      false,
 		ToolPermissions: map[string]string{
 			// System tools with machine access.
