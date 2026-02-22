@@ -154,6 +154,13 @@ var ToolGroups = map[string][]string{
 	"group:scheduler": {"cron_add", "cron_list", "cron_remove"},
 	"group:vault":     {"vault_save", "vault_get", "vault_list", "vault_delete"},
 	"group:media":     {"describe_image", "transcribe_audio", "image-gen_generate_image"},
+	"group:teams": {
+		"team_manage",
+		"team_agent",
+		"team_task",
+		"team_memory",
+		"team_comm",
+	},
 }
 
 // ExpandToolGroups expands group references (e.g. "group:memory") into

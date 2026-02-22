@@ -276,75 +276,67 @@ When an agent is @mentioned or a subscribed thread has activity, the agent is tr
 
 ## Tools Reference
 
-### Team Management
+Team tools use a **dispatcher pattern** to reduce tool count while maintaining full functionality. Each dispatcher tool accepts an `action` parameter that determines the operation.
 
-| Tool | Description | Permission |
-|------|-------------|------------|
-| `team_create` | Create a new team | admin |
-| `team_list` | List all teams | user |
-| `team_get` | Get a specific team by ID | user |
-| `team_update` | Update team properties (name, description, default_model) | admin |
-| `team_delete` | Delete a team and all its data | admin |
-| `team_create_agent` | Create a persistent agent | admin |
-| `team_list_agents` | List agents in a team | user |
-| `team_update_agent` | Update agent properties | admin |
-| `team_stop_agent` | Stop an agent (disable heartbeats) | admin |
-| `team_start_agent` | Restart a stopped agent | admin |
-| `team_delete_agent` | Permanently delete an agent | admin |
+### team_manage - Team CRUD
 
-### Task Management
+| Action | Description | Required Params |
+|--------|-------------|-----------------|
+| `create` | Create a new team | `name` |
+| `list` | List all teams | - |
+| `get` | Get a specific team | `team_id` |
+| `update` | Update team properties | `team_id` |
+| `delete` | Delete a team and all data | `team_id` |
 
-| Tool | Description | Permission |
-|------|-------------|------------|
-| `team_create_task` | Create a task | user |
-| `team_list_tasks` | List tasks (filterable) | user |
-| `team_get_task` | Get a specific task with thread messages | user |
-| `team_update_task` | Update task status | user |
-| `team_assign_task` | Assign agents to task | admin |
-| `team_delete_task` | Permanently delete a task | admin |
+### team_agent - Agent Management
 
-### Communication
+| Action | Description | Required Params |
+|--------|-------------|-----------------|
+| `create` | Create a persistent agent | `team_id`, `name` |
+| `list` | List agents in a team | `team_id` |
+| `get` | Get agent details | `agent_id` |
+| `update` | Update agent properties | `agent_id` |
+| `start` | Start an agent | `agent_id` |
+| `stop` | Stop an agent | `agent_id` |
+| `delete` | Delete an agent | `agent_id` |
+| `working_get` | Get agent's working state | `agent_id` |
+| `working_update` | Update working state | `agent_id` |
+| `working_clear` | Clear working state | `agent_id` |
 
-| Tool | Description | Permission |
-|------|-------------|------------|
-| `team_comment` | Add comment to task thread | user |
-| `team_check_mentions` | Check pending @mentions | user |
-| `team_send_message` | Send direct message to agent | user |
-| `team_mention` | Mention another agent | user |
+### team_task - Task Management
 
-### Shared Memory
+| Action | Description | Required Params |
+|--------|-------------|-----------------|
+| `create` | Create a task | `team_id`, `title` |
+| `list` | List tasks (filterable) | `team_id` |
+| `get` | Get task details | `team_id`, `task_id` |
+| `update` | Update task status | `team_id`, `task_id`, `status` |
+| `assign` | Assign agents to task | `team_id`, `task_id`, `assignees` |
+| `delete` | Delete a task | `team_id`, `task_id` |
 
-| Tool | Description | Permission |
-|------|-------------|------------|
-| `team_save_fact` | Save a fact | user |
-| `team_get_facts` | Get all facts | user |
-| `team_delete_fact` | Delete a fact | admin |
-| `team_standup` | Generate daily standup | user |
+### team_memory - Shared Memory
 
-### Documents
+| Action | Description | Required Params |
+|--------|-------------|-----------------|
+| `fact_save` | Save a fact | `team_id`, `key`, `value` |
+| `fact_list` | Get all facts | `team_id` |
+| `fact_delete` | Delete a fact | `team_id`, `key` |
+| `doc_create` | Create a document | `team_id`, `title`, `content` |
+| `doc_list` | List documents | `team_id` |
+| `doc_get` | Get document by ID | `team_id`, `doc_id` |
+| `doc_update` | Update document | `team_id`, `doc_id`, `content` |
+| `doc_delete` | Delete a document | `team_id`, `doc_id` |
+| `standup` | Generate daily standup | `team_id` |
 
-| Tool | Description | Permission |
-|------|-------------|------------|
-| `team_create_document` | Create a document | user |
-| `team_list_documents` | List documents (filterable) | user |
-| `team_get_document` | Get document by ID | user |
-| `team_update_document` | Update document content | user |
-| `team_delete_document` | Delete a document | admin |
+### team_comm - Communication
 
-### Working State
-
-| Tool | Description | Permission |
-|------|-------------|------------|
-| `team_get_working` | Get agent's working state | user |
-| `team_update_working` | Update working state | user |
-| `team_clear_working` | Clear working state (task done) | user |
-
-### Notifications
-
-| Tool | Description | Permission |
-|------|-------------|------------|
-| `team_notify` | Send a notification about work | user |
-| `team_get_notifications` | Get team notifications | user |
+| Action | Description | Required Params |
+|--------|-------------|-----------------|
+| `comment` | Add comment to task thread | `team_id`, `task_id`, `content` |
+| `mention_check` | Check pending @mentions | `agent_id` |
+| `send_message` | Send direct message | `team_id`, `to_agent`, `content` |
+| `notify` | Send a notification | `team_id`, `type`, `message` |
+| `notify_list` | Get team notifications | `team_id` |
 
 ---
 
@@ -357,21 +349,25 @@ When an agent is @mentioned or a subscribed thread has activity, the agent is tr
 "Create a team called Engineering with description 'Main development team'"
 
 # Via tool call
-team_create(
+team_manage(
+  action="create",
   name="Engineering",
-  description="Main development team",
-  owner_jid="user@example.com"
+  description="Main development team"
 )
 ```
 
 ### Managing Teams
 
 ```bash
+# List all teams
+team_manage(action="list")
+
 # Get team details
-team_get(team_id="abc12345")
+team_manage(action="get", team_id="abc12345")
 
 # Update team properties
-team_update(
+team_manage(
+  action="update",
   team_id="abc12345",
   name="Engineering Team",
   description="Core engineering team",
@@ -379,14 +375,15 @@ team_update(
 )
 
 # Delete a team (WARNING: deletes all agents, tasks, and memory)
-team_delete(team_id="abc12345")
+team_manage(action="delete", team_id="abc12345")
 ```
 
 ### Creating Agents
 
 ```bash
 # Create a squad lead
-team_create_agent(
+team_agent(
+  action="create",
   team_id="abc12345",
   name="Jarvis",
   role="Squad Lead",
@@ -399,14 +396,13 @@ team_create_agent(
 )
 
 # Create a writer
-team_create_agent(
+team_agent(
+  action="create",
   team_id="abc12345",
   name="Loki",
   role="Technical Writer",
   personality="Creative, thorough, articulate",
   instructions="Write documentation, blog posts, and technical guides",
-  model="claude-sonnet",
-  skills=["writing", "documentation"],
   level="mid",
   heartbeat_schedule="*/30 * * * *"
 )
@@ -415,81 +411,91 @@ team_create_agent(
 ### Managing Agents
 
 ```bash
+# List agents
+team_agent(action="list", team_id="abc12345")
+
+# Get agent details
+team_agent(action="get", agent_id="jarvis")
+
 # Update agent properties
-team_update_agent(
+team_agent(
+  action="update",
   agent_id="jarvis",
   role="Senior Squad Lead",
   personality="More decisive and autonomous",
-  heartbeat="*/10 * * * *"
+  heartbeat_schedule="*/10 * * * *"
 )
 
 # Stop an agent (disables heartbeats)
-team_stop_agent(agent_id="loki")
+team_agent(action="stop", agent_id="loki")
 
-# Restart a stopped agent
-team_start_agent(agent_id="loki")
+# Start a stopped agent
+team_agent(action="start", agent_id="loki")
 
 # Delete an agent permanently
-team_delete_agent(agent_id="loki")
+team_agent(action="delete", agent_id="loki")
 ```
 
 ### Task Workflow
 
 ```bash
 # Create a task
-team_create_task(
+team_task(
+  action="create",
+  team_id="abc12345",
   title="Implement authentication",
   description="Add OAuth2 support with Google and GitHub providers",
   assignees=["jarvis", "loki"]
 )
 
-# Get task details with thread messages
-team_get_task(
-  team_id="abc12345",
-  task_id="xyz78901",
-  include_messages=true
-)
+# List tasks
+team_task(action="list", team_id="abc12345")
+
+# Get task details
+team_task(action="get", team_id="abc12345", task_id="xyz78901")
 
 # Update status
-team_update_task(
+team_task(
+  action="update",
   team_id="abc12345",
   task_id="xyz78901",
   status="in_progress",
   comment="Starting implementation"
 )
 
-# Complete
-team_update_task(
+# Complete task
+team_task(
+  action="update",
   team_id="abc12345",
   task_id="xyz78901",
   status="done",
   comment="OAuth2 implemented and tested"
 )
 
-# Delete a task and its messages
-team_delete_task(
-  team_id="abc12345",
-  task_id="xyz78901"
-)
+# Delete a task
+team_task(action="delete", team_id="abc12345", task_id="xyz78901")
 ```
 
 ### Agent Communication
 
 ```bash
-# Mention another agent
-team_comment(
-  thread_id="xyz78901",
-  content="@loki can you write the docs for this endpoint?",
-  mentions=["loki"]
+# Comment on task with mention
+team_comm(
+  action="comment",
+  team_id="abc12345",
+  task_id="xyz78901",
+  content="@loki can you write the docs for this endpoint?"
 )
 
 # Check mentions (agent calls this on heartbeat)
-team_check_mentions(mark_delivered=true)
+team_comm(action="mention_check", agent_id="loki")
 
 # Send direct message
-team_send_message(
+team_comm(
+  action="send_message",
+  team_id="abc12345",
   to_agent="jarvis",
-  message="The deployment is complete"
+  content="The deployment is complete"
 )
 ```
 
@@ -497,81 +503,89 @@ team_send_message(
 
 ```bash
 # Save facts
-team_save_fact(key="api_version", value="v2.1.0")
-team_save_fact(key="deploy_endpoint", value="https://deploy.example.com")
+team_memory(
+  action="fact_save",
+  team_id="abc12345",
+  key="api_version",
+  value="v2.1.0"
+)
 
-# Retrieve facts
-team_get_facts()
+# List facts
+team_memory(action="fact_list", team_id="abc12345")
+
+# Delete fact
+team_memory(action="fact_delete", team_id="abc12345", key="api_version")
 
 # Generate standup
-team_standup()
+team_memory(action="standup", team_id="abc12345")
 ```
 
 ### Documents
 
 ```bash
 # Create a deliverable document
-team_create_document(
+team_memory(
+  action="doc_create",
+  team_id="abc12345",
   title="API Design Document",
   doc_type="deliverable",
   content="# API Design\n\n## Endpoints\n...",
-  format="markdown",
   task_id="xyz78901"
 )
 
-# Create research notes
-team_create_document(
-  title="Performance Analysis",
-  doc_type="research",
-  content="## Results\n...",
-  format="markdown"
-)
+# List documents
+team_memory(action="doc_list", team_id="abc12345")
 
-# List documents for a task
-team_list_documents(task_id="xyz78901")
+# Get document
+team_memory(action="doc_get", team_id="abc12345", doc_id="doc123")
 
-# Update document (version auto-incremented)
-team_update_document(
-  doc_id="abc12345",
+# Update document
+team_memory(
+  action="doc_update",
+  team_id="abc12345",
+  doc_id="doc123",
   content="# API Design v2\n..."
 )
+
+# Delete document
+team_memory(action="doc_delete", team_id="abc12345", doc_id="doc123")
 ```
 
 ### Working State (WORKING.md)
 
 ```bash
 # Save work in progress
-team_update_working(
-  status="working",
+team_agent(
+  action="working_update",
+  agent_id="jarvis",
   current_task_id="xyz78901",
+  status="working",
   next_steps="1. Complete authentication\n2. Add tests\n3. Review with team",
   context="Implementing OAuth2 with Google provider"
 )
 
 # Check current working state
-team_get_working()
+team_agent(action="working_get", agent_id="jarvis")
 
 # Clear when task is done
-team_clear_working()
+team_agent(action="working_clear", agent_id="jarvis")
 ```
 
-### Thread Subscriptions
+### Notifications
 
 ```bash
-# Agents auto-subscribe when:
-# 1. They post a message in a thread
-# 2. They are @mentioned in a thread
-# 3. They are assigned to a linked task
-
-# Example: Post message (auto-subscribes sender and mentioned)
-team_comment(
-  thread_id="task-xyz78901",
-  content="@loki can you review the docs?",
-  mentions=["loki"]
+# Send notification
+team_comm(
+  action="notify",
+  team_id="abc12345",
+  type="task_completed",
+  message="Authentication feature completed",
+  task_id="xyz78901",
+  priority=3
 )
 
-# Both jarvis (sender) and loki (mentioned) are now subscribed
-# Any future messages in this thread will notify both
+# Get notifications
+team_comm(action="notify_list", team_id="abc12345", limit=20, unread_only=true)
 ```
 
 ---
@@ -967,7 +981,8 @@ Suppress non-urgent notifications during specific hours:
 | `team_types.go` | Data structures (Team, PersistentAgent, TeamTask, etc.) |
 | `team_memory.go` | TeamMemory implementation (tasks, messages, facts) |
 | `team_manager.go` | TeamManager implementation (lifecycle, heartbeats) |
-| `team_tools.go` | Tool registration and handlers |
+| `team_tools.go` | Dispatcher tools (5 tools with action parameter) |
+| `team_tools_dispatcher_test.go` | Unit tests for dispatcher tools |
 | `notification_dispatcher.go` | Notification routing and delivery |
 | `notification_dispatcher_test.go` | Unit tests for NotificationDispatcher |
 | `team_memory_test.go` | Unit tests for TeamMemory |

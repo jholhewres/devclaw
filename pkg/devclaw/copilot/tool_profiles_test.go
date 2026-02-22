@@ -189,9 +189,9 @@ func TestListProfiles(t *testing.T) {
 
 	profiles := ListProfiles(customProfiles)
 
-	// Should have 4 built-in + 2 custom = 6 profiles.
-	if len(profiles) != 6 {
-		t.Errorf("expected 6 profiles, got %d: %v", len(profiles), profiles)
+	// Should have 5 built-in + 2 custom = 7 profiles.
+	if len(profiles) != 7 {
+		t.Errorf("expected 7 profiles, got %d: %v", len(profiles), profiles)
 	}
 
 	// Verify built-in profiles are included.
@@ -200,7 +200,7 @@ func TestListProfiles(t *testing.T) {
 		profileMap[p] = true
 	}
 
-	for _, builtIn := range []string{"minimal", "coding", "messaging", "full"} {
+	for _, builtIn := range []string{"minimal", "coding", "messaging", "team", "full"} {
 		if !profileMap[builtIn] {
 			t.Errorf("expected built-in profile '%s' in list", builtIn)
 		}

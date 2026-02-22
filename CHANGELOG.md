@@ -24,6 +24,24 @@ All notable changes to DevClaw are documented in this file.
 
 ## [Unreleased]
 
+### Team Tools — Dispatcher Pattern Refactor
+
+Reduced team tool count from 34 to 5 to stay under OpenAI's 128 tool limit:
+
+- **`team_manage`**: Team CRUD operations (create, list, get, update, delete)
+- **`team_agent`**: Agent management + working state (create, list, get, update, start, stop, delete, working_get, working_update, working_clear)
+- **`team_task`**: Task management (create, list, get, update, assign, delete)
+- **`team_memory`**: Shared memory (fact_save, fact_list, fact_delete, doc_create, doc_list, doc_get, doc_update, doc_delete, standup)
+- **`team_comm`**: Communication (comment, mention_check, send_message, notify, notify_list)
+
+**Breaking Change**: Individual team tools (e.g., `team_create`, `team_list_agents`) are replaced by dispatcher tools with `action` parameter.
+
+Example:
+```
+# Old: team_create(name="Engineering", description="Dev team")
+# New: team_manage(action="create", name="Engineering", description="Dev team")
+```
+
 ### WebUI Configuration Pages — Complete Settings UI
 
 Full configuration management via WebUI with 7 new pages covering 100% of YAML settings:
