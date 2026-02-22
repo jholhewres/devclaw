@@ -121,6 +121,65 @@ func testTeamManagerDB(t *testing.T) *sql.DB {
 		context         TEXT DEFAULT '',
 		updated_at      TEXT NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS team_documents (
+		id          TEXT PRIMARY KEY,
+		team_id     TEXT NOT NULL,
+		task_id     TEXT DEFAULT '',
+		title       TEXT NOT NULL,
+		doc_type    TEXT DEFAULT 'deliverable',
+		content     TEXT NOT NULL,
+		format      TEXT DEFAULT 'markdown',
+		file_path   TEXT DEFAULT '',
+		version     INTEGER DEFAULT 1,
+		author      TEXT NOT NULL,
+		created_at  TEXT NOT NULL,
+		updated_at  TEXT NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS team_thread_subscriptions (
+		id            TEXT PRIMARY KEY,
+		team_id       TEXT NOT NULL,
+		thread_id     TEXT NOT NULL,
+		agent_id      TEXT NOT NULL,
+		subscribed_at TEXT NOT NULL,
+		reason        TEXT DEFAULT 'auto',
+		UNIQUE(team_id, thread_id, agent_id)
+	);
+
+	CREATE TABLE IF NOT EXISTS notification_rules (
+		id           TEXT PRIMARY KEY,
+		team_id      TEXT DEFAULT '',
+		name         TEXT NOT NULL,
+		enabled      INTEGER DEFAULT 1,
+		events       TEXT NOT NULL,
+		conditions   TEXT DEFAULT '{}',
+		destinations TEXT NOT NULL,
+		template     TEXT DEFAULT '',
+		priority     INTEGER DEFAULT 0,
+		rate_limit   INTEGER DEFAULT 0,
+		quiet_hours  TEXT DEFAULT '',
+		created_at   TEXT NOT NULL,
+		updated_at   TEXT NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS team_notifications (
+		id         TEXT PRIMARY KEY,
+		team_id    TEXT NOT NULL,
+		type       TEXT NOT NULL,
+		agent_id   TEXT NOT NULL,
+		agent_name TEXT NOT NULL,
+		task_id    TEXT DEFAULT '',
+		task_title TEXT DEFAULT '',
+		action     TEXT NOT NULL,
+		result     TEXT NOT NULL,
+		message    TEXT NOT NULL,
+		details    TEXT DEFAULT '{}',
+		priority   INTEGER DEFAULT 3,
+		timestamp  TEXT NOT NULL,
+		read       INTEGER DEFAULT 0,
+		read_at    TEXT DEFAULT ''
+	);
 	`
 
 	_, err = db.Exec(schema)
@@ -204,6 +263,69 @@ func TestTeamManager_ListTeams(t *testing.T) {
 	}
 	if len(teams) != 3 {
 		t.Errorf("Expected 3 teams, got %d", len(teams))
+	}
+}
+
+func TestTeamManager_UpdateTeam(t *testing.T) {
+	db := testTeamManagerDB(t)
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	tm := NewTeamManager(db, nil, logger)
+
+	// Create a team
+	team, _ := tm.CreateTeam("Original Name", "Original Description", "user1", "model-1")
+
+	// Update team
+	team.Name = "Updated Name"
+	team.Description = "Updated Description"
+	team.DefaultModel = "model-2"
+
+	err := tm.UpdateTeam(team)
+	if err != nil {
+		t.Fatalf("UpdateTeam failed: %v", err)
+	}
+
+	// Verify update
+	updated, _ := tm.GetTeam(team.ID)
+	if updated.Name != "Updated Name" {
+		t.Errorf("Expected name 'Updated Name', got '%s'", updated.Name)
+	}
+	if updated.Description != "Updated Description" {
+		t.Errorf("Expected description 'Updated Description', got '%s'", updated.Description)
+	}
+	if updated.DefaultModel != "model-2" {
+		t.Errorf("Expected model 'model-2', got '%s'", updated.DefaultModel)
+	}
+}
+
+func TestTeamManager_DeleteTeam(t *testing.T) {
+	db := testTeamManagerDB(t)
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	tm := NewTeamManager(db, nil, logger)
+
+	// Create a team with an agent
+	team, _ := tm.CreateTeam("Team to Delete", "Description", "user1", "")
+	tm.CreateAgent(team.ID, "TestAgent", "Role", "", "", "", nil, AgentLevelSpecialist, "")
+
+	// Delete team
+	err := tm.DeleteTeam(team.ID)
+	if err != nil {
+		t.Fatalf("DeleteTeam failed: %v", err)
+	}
+
+	// Verify team is deleted
+	deleted, _ := tm.GetTeam(team.ID)
+	if deleted != nil {
+		t.Error("Deleted team should be nil")
+	}
+
+	// Verify agent is also deleted
+	agent, _ := tm.GetAgent("testagent")
+	if agent != nil {
+		t.Error("Agent should be deleted with team")
 	}
 }
 
@@ -403,6 +525,81 @@ func TestTeamManager_StopAndDeleteAgent(t *testing.T) {
 	deleted, _ := tm.GetAgent(agent.ID)
 	if deleted != nil {
 		t.Error("Deleted agent should be nil")
+	}
+}
+
+func TestTeamManager_UpdateAgent(t *testing.T) {
+	db := testTeamManagerDB(t)
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	tm := NewTeamManager(db, nil, logger)
+
+	team, _ := tm.CreateTeam("Test Team", "Desc", "user1", "")
+	agent, _ := tm.CreateAgent(team.ID, "TestAgent", "Original Role", "Original personality", "", "", nil, AgentLevelSpecialist, "")
+
+	// Update agent
+	agent.Role = "Updated Role"
+	agent.Personality = "New personality"
+	agent.Instructions = "New instructions"
+	agent.Model = "new-model"
+	agent.Level = AgentLevelLead
+	agent.HeartbeatSchedule = "*/5 * * * *"
+
+	err := tm.UpdateAgent(agent)
+	if err != nil {
+		t.Fatalf("UpdateAgent failed: %v", err)
+	}
+
+	// Verify update
+	updated, _ := tm.GetAgent(agent.ID)
+	if updated.Role != "Updated Role" {
+		t.Errorf("Expected role 'Updated Role', got '%s'", updated.Role)
+	}
+	if updated.Personality != "New personality" {
+		t.Errorf("Expected new personality, got '%s'", updated.Personality)
+	}
+	if updated.Instructions != "New instructions" {
+		t.Errorf("Expected new instructions, got '%s'", updated.Instructions)
+	}
+	if updated.Model != "new-model" {
+		t.Errorf("Expected model 'new-model', got '%s'", updated.Model)
+	}
+	if updated.Level != AgentLevelLead {
+		t.Errorf("Expected level 'lead', got '%s'", updated.Level)
+	}
+	if updated.HeartbeatSchedule != "*/5 * * * *" {
+		t.Errorf("Expected new heartbeat, got '%s'", updated.HeartbeatSchedule)
+	}
+}
+
+func TestTeamManager_StartAgent(t *testing.T) {
+	db := testTeamManagerDB(t)
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	tm := NewTeamManager(db, nil, logger)
+
+	team, _ := tm.CreateTeam("Test Team", "Desc", "user1", "")
+	agent, _ := tm.CreateAgent(team.ID, "TestAgent", "Role", "", "", "", nil, AgentLevelSpecialist, "")
+
+	// Stop agent first
+	tm.StopAgent(agent.ID)
+	stopped, _ := tm.GetAgent(agent.ID)
+	if stopped.Status != AgentStatusStopped {
+		t.Fatalf("Agent should be stopped, got '%s'", stopped.Status)
+	}
+
+	// Start agent
+	err := tm.StartAgent(agent.ID)
+	if err != nil {
+		t.Fatalf("StartAgent failed: %v", err)
+	}
+
+	// Verify started
+	started, _ := tm.GetAgent(agent.ID)
+	if started.Status != AgentStatusIdle {
+		t.Errorf("Expected status 'idle', got '%s'", started.Status)
 	}
 }
 

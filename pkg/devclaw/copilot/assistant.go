@@ -520,7 +520,24 @@ func (a *Assistant) Start(ctx context.Context) error {
 			a.logger.Info("persistent agent triggered via spawn callback", "agent_id", agent.ID)
 			return nil
 		})
-		a.logger.Info("team manager initialized with spawn callback")
+
+		// Initialize notification dispatcher for team agents.
+		notifConfig := &NotificationConfig{
+			Enabled: true,
+			Defaults: NotificationDefaults{
+				ActivityFeed: true,
+			},
+		}
+		notifDisp := NewNotificationDispatcher(
+			a.devclawDB,
+			a.teamMgr,
+			a.channelMgr,
+			a.hookMgr,
+			notifConfig,
+			a.logger.With("component", "notifications"),
+		)
+		a.teamMgr.SetNotificationDispatcher(notifDisp)
+		a.logger.Info("team manager initialized with spawn callback and notification dispatcher")
 	}
 
 	// 1e. Register system tools (needs scheduler to be created first).

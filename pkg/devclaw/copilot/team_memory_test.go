@@ -51,6 +51,7 @@ func testTeamMemoryDB(t *testing.T) *sql.DB {
 
 	CREATE TABLE IF NOT EXISTS team_pending_messages (
 		id           TEXT PRIMARY KEY,
+		team_id      TEXT NOT NULL DEFAULT '',
 		to_agent     TEXT NOT NULL,
 		from_agent   TEXT DEFAULT '',
 		from_user    TEXT DEFAULT '',
@@ -105,6 +106,16 @@ func testTeamMemoryDB(t *testing.T) *sql.DB {
 		author      TEXT NOT NULL,
 		created_at  TEXT NOT NULL,
 		updated_at  TEXT NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS agent_working_state (
+		agent_id        TEXT PRIMARY KEY,
+		team_id         TEXT NOT NULL,
+		current_task_id TEXT DEFAULT '',
+		status          TEXT DEFAULT 'idle',
+		next_steps      TEXT DEFAULT '',
+		context         TEXT DEFAULT '',
+		updated_at      TEXT NOT NULL
 	);
 	`
 
@@ -264,6 +275,44 @@ func TestTeamMemory_AssignTask(t *testing.T) {
 	}
 	if updated.Status != TaskStatusAssigned {
 		t.Errorf("Expected status 'assigned', got '%s'", updated.Status)
+	}
+}
+
+func TestTeamMemory_DeleteTask(t *testing.T) {
+	db := testTeamMemoryDB(t)
+	defer db.Close()
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	tm := NewTeamMemory("test-team", db, logger)
+
+	// Create a task
+	task, _ := tm.CreateTask("Task to Delete", "Desc", "user", nil)
+
+	// Add a message to the task thread
+	tm.PostMessage(task.ID, "agent1", "Comment on task", nil)
+
+	// Verify task exists
+	tasks, _ := tm.ListTasks("", "")
+	if len(tasks) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(tasks))
+	}
+
+	// Delete task
+	err := tm.DeleteTask(task.ID)
+	if err != nil {
+		t.Fatalf("DeleteTask failed: %v", err)
+	}
+
+	// Verify task is deleted
+	deleted, _ := tm.GetTask(task.ID)
+	if deleted != nil {
+		t.Error("Deleted task should be nil")
+	}
+
+	// Verify task is removed from list
+	tasksAfter, _ := tm.ListTasks("", "")
+	if len(tasksAfter) != 0 {
+		t.Errorf("Expected 0 tasks after delete, got %d", len(tasksAfter))
 	}
 }
 

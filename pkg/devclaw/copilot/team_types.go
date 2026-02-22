@@ -276,6 +276,7 @@ const (
 	ActivityDocumentCreated ActivityType = "document_created"
 	ActivityDocumentUpdated ActivityType = "document_updated"
 	ActivitySubscribed     ActivityType = "subscribed"
+	ActivityNotification   ActivityType = "notification"
 )
 
 // TeamActivity represents an entry in the activity feed.
@@ -410,4 +411,197 @@ type AgentWorkingState struct {
 
 	// UpdatedAt is when the state was last updated.
 	UpdatedAt time.Time `json:"updated_at" yaml:"updated_at"`
+}
+
+// ─── Team Notifications ───
+
+// NotificationType represents the type of notification event.
+type NotificationType string
+
+const (
+	NotifTaskCompleted   NotificationType = "task_completed"
+	NotifTaskFailed      NotificationType = "task_failed"
+	NotifTaskBlocked     NotificationType = "task_blocked"
+	NotifTaskProgress    NotificationType = "task_progress"
+	NotifMentionReceived NotificationType = "mention_received"
+	NotifAgentError      NotificationType = "agent_error"
+	NotifDocumentCreated NotificationType = "document_created"
+	NotifHeartbeatAlert  NotificationType = "heartbeat_alert"
+)
+
+// NotificationResult represents the outcome of an action.
+type NotificationResult string
+
+const (
+	ResultSuccess NotificationResult = "success"
+	ResultFailure NotificationResult = "failure"
+	ResultWarning NotificationResult = "warning"
+	ResultInfo    NotificationResult = "info"
+)
+
+// DestinationType represents where a notification is sent.
+type DestinationType string
+
+const (
+	DestChannel  DestinationType = "channel"  // WhatsApp, Discord, etc
+	DestInbox    DestinationType = "inbox"    // Agent pending messages
+	DestWebhook  DestinationType = "webhook"  // HTTP webhook
+	DestOwner    DestinationType = "owner"    // Team owner
+	DestActivity DestinationType = "activity" // Activity feed
+)
+
+// TeamNotification represents a notification about agent activity.
+type TeamNotification struct {
+	// ID is the unique notification identifier.
+	ID string `json:"id" yaml:"id"`
+
+	// TeamID is the team this notification belongs to.
+	TeamID string `json:"team_id" yaml:"team_id"`
+
+	// Type is the notification type.
+	Type NotificationType `json:"type" yaml:"type"`
+
+	// AgentID is the agent that generated this notification.
+	AgentID string `json:"agent_id" yaml:"agent_id"`
+
+	// AgentName is the human-readable agent name.
+	AgentName string `json:"agent_name" yaml:"agent_name"`
+
+	// TaskID is the related task ID (optional).
+	TaskID string `json:"task_id,omitempty" yaml:"task_id,omitempty"`
+
+	// TaskTitle is the title of the related task.
+	TaskTitle string `json:"task_title,omitempty" yaml:"task_title,omitempty"`
+
+	// Action describes what action was performed.
+	Action string `json:"action" yaml:"action"`
+
+	// Result indicates success, failure, or warning.
+	Result NotificationResult `json:"result" yaml:"result"`
+
+	// Message is the human-readable notification message.
+	Message string `json:"message" yaml:"message"`
+
+	// Details contains additional information.
+	Details map[string]any `json:"details,omitempty" yaml:"details,omitempty"`
+
+	// Priority is the notification priority (1-5, 1=urgent).
+	Priority int `json:"priority" yaml:"priority"`
+
+	// Timestamp is when the notification was created.
+	Timestamp time.Time `json:"timestamp" yaml:"timestamp"`
+
+	// Read indicates if the notification has been read.
+	Read bool `json:"read" yaml:"read"`
+
+	// ReadAt is when the notification was read.
+	ReadAt *time.Time `json:"read_at,omitempty" yaml:"read_at,omitempty"`
+}
+
+// NotificationDestination defines where to send a notification.
+type NotificationDestination struct {
+	// Type is the destination type.
+	Type DestinationType `json:"type" yaml:"type"`
+
+	// Target is the specific target (agent ID, webhook URL).
+	Target string `json:"target,omitempty" yaml:"target,omitempty"`
+
+	// Channel is the communication channel (whatsapp, discord, telegram, slack).
+	Channel string `json:"channel,omitempty" yaml:"channel,omitempty"`
+
+	// ChatID is the chat/group/DM identifier.
+	ChatID string `json:"chat_id,omitempty" yaml:"chat_id,omitempty"`
+
+	// Format is the message format (text, markdown).
+	Format string `json:"format,omitempty" yaml:"format,omitempty"`
+}
+
+// NotificationConditions defines filters for when to trigger notifications.
+type NotificationConditions struct {
+	// AgentIDs filters by specific agents (empty = all).
+	AgentIDs []string `json:"agent_ids,omitempty" yaml:"agent_ids,omitempty"`
+
+	// TaskStatus filters by task status.
+	TaskStatus []TaskStatus `json:"task_status,omitempty" yaml:"task_status,omitempty"`
+
+	// MinPriority is the minimum task priority to trigger.
+	MinPriority int `json:"min_priority,omitempty" yaml:"min_priority,omitempty"`
+
+	// Labels filters by task labels.
+	Labels []string `json:"labels,omitempty" yaml:"labels,omitempty"`
+}
+
+// NotificationRule defines when and how to send notifications.
+type NotificationRule struct {
+	// ID is the unique rule identifier.
+	ID string `json:"id" yaml:"id"`
+
+	// TeamID is the team this rule applies to (empty = global).
+	TeamID string `json:"team_id,omitempty" yaml:"team_id,omitempty"`
+
+	// Name is the human-readable rule name.
+	Name string `json:"name" yaml:"name"`
+
+	// Enabled indicates if the rule is active.
+	Enabled bool `json:"enabled" yaml:"enabled"`
+
+	// Events are the notification types that trigger this rule.
+	Events []NotificationType `json:"events" yaml:"events"`
+
+	// Conditions are additional filters.
+	Conditions NotificationConditions `json:"conditions,omitempty" yaml:"conditions,omitempty"`
+
+	// Destinations are where to send notifications.
+	Destinations []NotificationDestination `json:"destinations" yaml:"destinations"`
+
+	// Template is a Go template for message formatting (optional).
+	Template string `json:"template,omitempty" yaml:"template,omitempty"`
+
+	// Priority is the minimum notification priority to trigger (1-5).
+	Priority int `json:"priority,omitempty" yaml:"priority,omitempty"`
+
+	// RateLimit is the max notifications per hour (0 = unlimited).
+	RateLimit int `json:"rate_limit,omitempty" yaml:"rate_limit,omitempty"`
+
+	// QuietHours defines when to suppress notifications.
+	QuietHours *QuietHoursConfig `json:"quiet_hours,omitempty" yaml:"quiet_hours,omitempty"`
+
+	// CreatedAt is when the rule was created.
+	CreatedAt time.Time `json:"created_at" yaml:"created_at"`
+
+	// UpdatedAt is when the rule was last modified.
+	UpdatedAt time.Time `json:"updated_at" yaml:"updated_at"`
+}
+
+// NotificationConfig holds the notification system configuration.
+type NotificationConfig struct {
+	// Enabled activates the notification system.
+	Enabled bool `json:"enabled" yaml:"enabled"`
+
+	// Defaults are the default notification settings.
+	Defaults NotificationDefaults `json:"defaults,omitempty" yaml:"defaults,omitempty"`
+
+	// QuietHours are global quiet hours settings.
+	QuietHours *QuietHoursConfig `json:"quiet_hours,omitempty" yaml:"quiet_hours,omitempty"`
+
+	// RateLimitPerHour is the global rate limit.
+	RateLimitPerHour int `json:"rate_limit_per_hour,omitempty" yaml:"rate_limit_per_hour,omitempty"`
+
+	// Rules are the notification rules.
+	Rules []NotificationRule `json:"rules,omitempty" yaml:"rules,omitempty"`
+}
+
+// NotificationDefaults holds default notification settings.
+type NotificationDefaults struct {
+	// ActivityFeed always logs to activity feed.
+	ActivityFeed bool `json:"activity_feed" yaml:"activity_feed"`
+
+	// Owner sends to team owner.
+	Owner bool `json:"owner" yaml:"owner"`
+
+	// Channel is the default channel name.
+	Channel string `json:"channel,omitempty" yaml:"channel,omitempty"`
+
+	// ChatID is the default chat ID.
+	ChatID string `json:"chat_id,omitempty" yaml:"chat_id,omitempty"`
 }

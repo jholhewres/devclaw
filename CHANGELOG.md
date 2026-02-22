@@ -196,6 +196,50 @@ Complete team coordination system with persistent agents, shared memory, and rea
 
 - **Internal Routines Documentation**: Complete documentation of all 26+ background routines in `docs/internal-routines.md`
 
+### Team Notification System
+
+Complete notification system for team agents with routing, destinations, and delivery:
+
+- **NotificationDispatcher**: Central component for routing notifications to configured destinations
+- **Multiple Destinations**: Channel (WhatsApp/Discord/Telegram), Inbox, Webhook, Owner, Activity Feed
+- **Rate Limiting**: Per-rule rate limits with hourly reset
+- **Quiet Hours**: Configurable time windows for suppressing non-urgent notifications
+- **Priority System**: 1-5 priority levels (1=urgent always delivered, 5=low priority)
+- **Notification History**: Persistent storage with read/unread tracking
+
+**New Agent Tools:**
+- `team_notify`: Send notifications about completed work or important events
+- `team_get_notifications`: View team notification history
+
+**Notification Types:**
+- `task_completed` / `task_failed` / `task_blocked` / `task_progress` / `agent_error`
+
+**Configuration:**
+```yaml
+notifications:
+  enabled: true
+  defaults:
+    activity_feed: true
+    owner: false
+  quiet_hours:
+    enabled: true
+    start: "22:00"
+    end: "08:00"
+    timezone: "America/Sao_Paulo"
+  rules:
+    - name: "Critical Alerts"
+      events: [task_failed, agent_error]
+      destinations:
+        - type: channel
+          channel: "whatsapp"
+          chat_id: "120363XXXXXX@g.us"
+```
+
+**Files:**
+- `notification_dispatcher.go`: Core dispatcher with routing logic
+- `notification_dispatcher_test.go`: Comprehensive test coverage
+- Updated `team_types.go`, `team_manager.go`, `team_tools.go`, `db.go`
+
 ---
 
 ## [1.7.0] — 2026-02-18

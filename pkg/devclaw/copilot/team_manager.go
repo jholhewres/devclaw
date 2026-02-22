@@ -22,6 +22,7 @@ type TeamManager struct {
 	db        *sql.DB
 	scheduler *scheduler.Scheduler
 	logger    *slog.Logger
+	notifDisp *NotificationDispatcher
 
 	// In-memory cache of active persistent agents
 	agents map[string]*PersistentAgent
@@ -49,6 +50,21 @@ func NewTeamManager(db *sql.DB, sched *scheduler.Scheduler, logger *slog.Logger)
 // SetSpawnAgentCallback sets the callback for spawning agent runs.
 func (tm *TeamManager) SetSpawnAgentCallback(fn func(ctx context.Context, agent *PersistentAgent, task string) error) {
 	tm.spawnAgent = fn
+}
+
+// SetNotificationDispatcher sets the notification dispatcher for team notifications.
+func (tm *TeamManager) SetNotificationDispatcher(nd *NotificationDispatcher) {
+	tm.notifDisp = nd
+}
+
+// NotifyTaskCompletion sends a notification about task completion.
+func (tm *TeamManager) NotifyTaskCompletion(ctx context.Context, teamID, agentID, agentName, taskID, taskTitle, message string, success bool) {
+	if tm.notifDisp == nil {
+		return
+	}
+	if err := tm.notifDisp.DispatchTaskCompletion(ctx, teamID, agentID, agentName, taskID, taskTitle, message, success); err != nil {
+		tm.logger.Warn("failed to dispatch task completion notification", "error", err)
+	}
 }
 
 // ─── Teams ───
@@ -133,6 +149,50 @@ func (tm *TeamManager) ListTeams() ([]*Team, error) {
 		teams = append(teams, &team)
 	}
 	return teams, nil
+}
+
+// UpdateTeam updates a team's properties.
+func (tm *TeamManager) UpdateTeam(team *Team) error {
+	_, err := tm.db.Exec(`
+		UPDATE teams SET name = ?, description = ?, default_model = ?, workspace_path = ?
+		WHERE id = ?`,
+		team.Name, team.Description, team.DefaultModel, team.WorkspacePath, team.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update team: %w", err)
+	}
+
+	tm.logger.Info("team updated", "team_id", team.ID, "name", team.Name)
+	return nil
+}
+
+// DeleteTeam permanently deletes a team and all its agents.
+func (tm *TeamManager) DeleteTeam(teamID string) error {
+	// First, stop and delete all agents
+	agents, err := tm.ListAgents(teamID)
+	if err != nil {
+		return fmt.Errorf("list agents for deletion: %w", err)
+	}
+	for _, agent := range agents {
+		if err := tm.DeleteAgent(agent.ID); err != nil {
+			tm.logger.Warn("failed to delete agent during team deletion", "agent_id", agent.ID, "error", err)
+		}
+	}
+
+	// Delete team memory data
+	teamMem := NewTeamMemory(teamID, tm.db, tm.logger)
+	if err := teamMem.DeleteAllData(); err != nil {
+		tm.logger.Warn("failed to delete team memory data", "team_id", teamID, "error", err)
+	}
+
+	// Delete team from database
+	_, err = tm.db.Exec(`DELETE FROM teams WHERE id = ?`, teamID)
+	if err != nil {
+		return fmt.Errorf("delete team: %w", err)
+	}
+
+	tm.logger.Info("team deleted", "team_id", teamID)
+	return nil
 }
 
 // ─── Persistent Agents ───
@@ -367,6 +427,70 @@ func (tm *TeamManager) StopAgent(agentID string) error {
 	}
 
 	tm.logger.Info("agent stopped", "agent_id", agentID)
+	return nil
+}
+
+// StartAgent restarts a stopped persistent agent.
+func (tm *TeamManager) StartAgent(agentID string) error {
+	agent, err := tm.GetAgent(agentID)
+	if err != nil {
+		return err
+	}
+	if agent == nil {
+		return fmt.Errorf("agent %s not found", agentID)
+	}
+
+	// Update status
+	if err := tm.UpdateAgentStatus(agentID, AgentStatusIdle); err != nil {
+		return err
+	}
+
+	// Recreate heartbeat job if scheduler is available
+	if tm.scheduler != nil {
+		tm.createHeartbeatJob(agent)
+	}
+
+	// Add to in-memory cache
+	tm.mu.Lock()
+	tm.agents[agentID] = agent
+	tm.mu.Unlock()
+
+	tm.logger.Info("agent started", "agent_id", agentID)
+	return nil
+}
+
+// UpdateAgent updates an agent's properties.
+func (tm *TeamManager) UpdateAgent(agent *PersistentAgent) error {
+	skillsJSON, _ := json.Marshal(agent.Skills)
+
+	_, err := tm.db.Exec(`
+		UPDATE persistent_agents SET
+			name = ?, role = ?, personality = ?, instructions = ?,
+			model = ?, skills = ?, level = ?, heartbeat_schedule = ?
+		WHERE id = ?`,
+		agent.Name, agent.Role, agent.Personality, agent.Instructions,
+		agent.Model, string(skillsJSON), string(agent.Level), agent.HeartbeatSchedule,
+		agent.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("update agent: %w", err)
+	}
+
+	// Update cache
+	tm.mu.Lock()
+	if cached, ok := tm.agents[agent.ID]; ok {
+		cached.Name = agent.Name
+		cached.Role = agent.Role
+		cached.Personality = agent.Personality
+		cached.Instructions = agent.Instructions
+		cached.Model = agent.Model
+		cached.Skills = agent.Skills
+		cached.Level = agent.Level
+		cached.HeartbeatSchedule = agent.HeartbeatSchedule
+	}
+	tm.mu.Unlock()
+
+	tm.logger.Info("agent updated", "agent_id", agent.ID, "name", agent.Name)
 	return nil
 }
 

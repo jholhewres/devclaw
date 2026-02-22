@@ -49,6 +49,9 @@ func RegisterTeamTools(
 	// ── Standup Tool ──
 	registerStandupTool(executor, teamMgr, db, logger)
 
+	// ── Notification Tools ──
+	registerNotificationTools(executor, teamMgr, db, logger)
+
 	logger.Info("team tools registered")
 }
 
@@ -136,6 +139,134 @@ func registerTeamManagementTools(executor *ToolExecutor, teamMgr *TeamManager, l
 			}
 
 			return sb.String(), nil
+		},
+	)
+
+	// team_get - Get a single team by ID
+	executor.Register(
+		MakeToolDefinition("team_get",
+			"Get details of a specific team by ID.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"team_id": map[string]any{
+						"type":        "string",
+						"description": "Team ID",
+					},
+				},
+				"required": []string{"team_id"},
+			},
+		),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			teamID, _ := args["team_id"].(string)
+			if teamID == "" {
+				return nil, fmt.Errorf("team_id is required")
+			}
+
+			team, err := teamMgr.GetTeam(teamID)
+			if err != nil {
+				return nil, err
+			}
+
+			agents, _ := teamMgr.ListAgents(teamID)
+
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("**%s** (%s)\n", team.Name, team.ID))
+			sb.WriteString(fmt.Sprintf("Description: %s\n", team.Description))
+			sb.WriteString(fmt.Sprintf("Owner: %s\n", team.OwnerJID))
+			sb.WriteString(fmt.Sprintf("Default Model: %s\n", team.DefaultModel))
+			sb.WriteString(fmt.Sprintf("Created: %s\n", team.CreatedAt.Format("2006-01-02 15:04")))
+			sb.WriteString(fmt.Sprintf("\nAgents (%d):\n", len(agents)))
+			for _, a := range agents {
+				sb.WriteString(fmt.Sprintf("  - %s (%s) [%s] - %s\n", a.Name, a.Role, a.Level, a.Status))
+			}
+
+			return sb.String(), nil
+		},
+	)
+
+	// team_update - Update team properties
+	executor.Register(
+		MakeToolDefinition("team_update",
+			"Update team name, description, or default model.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"team_id": map[string]any{
+						"type":        "string",
+						"description": "Team ID to update",
+					},
+					"name": map[string]any{
+						"type":        "string",
+						"description": "New team name (optional)",
+					},
+					"description": map[string]any{
+						"type":        "string",
+						"description": "New description (optional)",
+					},
+					"default_model": map[string]any{
+						"type":        "string",
+						"description": "New default model for agents (optional)",
+					},
+				},
+				"required": []string{"team_id"},
+			},
+		),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			teamID, _ := args["team_id"].(string)
+			if teamID == "" {
+				return nil, fmt.Errorf("team_id is required")
+			}
+
+			team, err := teamMgr.GetTeam(teamID)
+			if err != nil {
+				return nil, err
+			}
+
+			if name, ok := args["name"].(string); ok && name != "" {
+				team.Name = name
+			}
+			if desc, ok := args["description"].(string); ok {
+				team.Description = desc
+			}
+			if model, ok := args["default_model"].(string); ok {
+				team.DefaultModel = model
+			}
+
+			if err := teamMgr.UpdateTeam(team); err != nil {
+				return nil, err
+			}
+
+			return fmt.Sprintf("Team %s updated successfully!", teamID), nil
+		},
+	)
+
+	// team_delete - Delete a team
+	executor.Register(
+		MakeToolDefinition("team_delete",
+			"Delete a team and all its agents, tasks, and memory. This cannot be undone.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"team_id": map[string]any{
+						"type":        "string",
+						"description": "Team ID to delete",
+					},
+				},
+				"required": []string{"team_id"},
+			},
+		),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			teamID, _ := args["team_id"].(string)
+			if teamID == "" {
+				return nil, fmt.Errorf("team_id is required")
+			}
+
+			if err := teamMgr.DeleteTeam(teamID); err != nil {
+				return nil, err
+			}
+
+			return fmt.Sprintf("Team %s deleted successfully!", teamID), nil
 		},
 	)
 }
@@ -333,6 +464,124 @@ func registerAgentManagementTools(executor *ToolExecutor, teamMgr *TeamManager, 
 			}
 
 			return fmt.Sprintf("Agent %s deleted.", agentID), nil
+		},
+	)
+
+	// team_update_agent - Update agent properties
+	executor.Register(
+		MakeToolDefinition("team_update_agent",
+			"Update an agent's properties like role, personality, instructions, model, or heartbeat schedule.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"agent_id": map[string]any{
+						"type":        "string",
+						"description": "Agent ID to update",
+					},
+					"name": map[string]any{
+						"type":        "string",
+						"description": "New agent name (optional)",
+					},
+					"role": map[string]any{
+						"type":        "string",
+						"description": "New role (optional)",
+					},
+					"personality": map[string]any{
+						"type":        "string",
+						"description": "New personality/SOUL.md content (optional)",
+					},
+					"instructions": map[string]any{
+						"type":        "string",
+						"description": "New operating instructions (optional)",
+					},
+					"model": map[string]any{
+						"type":        "string",
+						"description": "New LLM model override (optional)",
+					},
+					"level": map[string]any{
+						"type":        "string",
+						"enum":        []string{"intern", "specialist", "lead"},
+						"description": "New autonomy level (optional)",
+					},
+					"heartbeat": map[string]any{
+						"type":        "string",
+						"description": "New heartbeat cron schedule (optional)",
+					},
+				},
+				"required": []string{"agent_id"},
+			},
+		),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			agentID, _ := args["agent_id"].(string)
+			if agentID == "" {
+				return nil, fmt.Errorf("agent_id is required")
+			}
+
+			agent, err := teamMgr.GetAgent(agentID)
+			if err != nil {
+				return nil, err
+			}
+			if agent == nil {
+				return nil, fmt.Errorf("agent %s not found", agentID)
+			}
+
+			// Update fields if provided
+			if name, ok := args["name"].(string); ok && name != "" {
+				agent.Name = name
+			}
+			if role, ok := args["role"].(string); ok && role != "" {
+				agent.Role = role
+			}
+			if personality, ok := args["personality"].(string); ok {
+				agent.Personality = personality
+			}
+			if instructions, ok := args["instructions"].(string); ok {
+				agent.Instructions = instructions
+			}
+			if model, ok := args["model"].(string); ok {
+				agent.Model = model
+			}
+			if level, ok := args["level"].(string); ok && level != "" {
+				agent.Level = AgentLevel(level)
+			}
+			if heartbeat, ok := args["heartbeat"].(string); ok && heartbeat != "" {
+				agent.HeartbeatSchedule = heartbeat
+			}
+
+			if err := teamMgr.UpdateAgent(agent); err != nil {
+				return nil, err
+			}
+
+			return fmt.Sprintf("Agent %s updated successfully!", agentID), nil
+		},
+	)
+
+	// team_start_agent - Restart a stopped agent
+	executor.Register(
+		MakeToolDefinition("team_start_agent",
+			"Restart a stopped agent. Re-enables heartbeats and adds agent back to active pool.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"agent_id": map[string]any{
+						"type":        "string",
+						"description": "Agent ID to start",
+					},
+				},
+				"required": []string{"agent_id"},
+			},
+		),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			agentID, _ := args["agent_id"].(string)
+			if agentID == "" {
+				return nil, fmt.Errorf("agent_id is required")
+			}
+
+			if err := teamMgr.StartAgent(agentID); err != nil {
+				return nil, err
+			}
+
+			return fmt.Sprintf("Agent %s started and heartbeats re-enabled.", agentID), nil
 		},
 	)
 }
@@ -582,6 +831,126 @@ func registerTaskTools(executor *ToolExecutor, teamMgr *TeamManager, db *sql.DB,
 			}
 
 			return fmt.Sprintf("Task %s assigned to: %s", taskID, strings.Join(assignees, ", ")), nil
+		},
+	)
+
+	// team_get_task - Get a single task by ID
+	executor.Register(
+		MakeToolDefinition("team_get_task",
+			"Get details of a specific task including its thread messages.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"team_id": map[string]any{
+						"type":        "string",
+						"description": "Team ID",
+					},
+					"task_id": map[string]any{
+						"type":        "string",
+						"description": "Task ID",
+					},
+					"include_messages": map[string]any{
+						"type":        "boolean",
+						"description": "Include thread messages (default: true)",
+					},
+				},
+				"required": []string{"team_id", "task_id"},
+			},
+		),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			teamID, _ := args["team_id"].(string)
+			taskID, _ := args["task_id"].(string)
+
+			if teamID == "" || taskID == "" {
+				return nil, fmt.Errorf("team_id and task_id are required")
+			}
+
+			includeMessages := true
+			if v, ok := args["include_messages"].(bool); ok {
+				includeMessages = v
+			}
+
+			teamMem := NewTeamMemory(teamID, db, logger)
+			task, err := teamMem.GetTask(taskID)
+			if err != nil {
+				return nil, err
+			}
+			if task == nil {
+				return nil, fmt.Errorf("task %s not found", taskID)
+			}
+
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("**[%s]** %s (%s)\n", strings.ToUpper(string(task.Status)), task.Title, task.ID))
+			sb.WriteString(fmt.Sprintf("Description: %s\n", task.Description))
+			assignees := "unassigned"
+			if len(task.Assignees) > 0 {
+				assignees = strings.Join(task.Assignees, ", ")
+			}
+			sb.WriteString(fmt.Sprintf("Assignees: %s\n", assignees))
+			sb.WriteString(fmt.Sprintf("Created by: %s\n", task.CreatedBy))
+			sb.WriteString(fmt.Sprintf("Created: %s\n", task.CreatedAt.Format("2006-01-02 15:04")))
+			if task.CompletedAt != nil {
+				sb.WriteString(fmt.Sprintf("Completed: %s\n", task.CompletedAt.Format("2006-01-02 15:04")))
+			}
+			if task.BlockedReason != "" {
+				sb.WriteString(fmt.Sprintf("Blocked reason: %s\n", task.BlockedReason))
+			}
+
+			// Include messages if requested
+			if includeMessages {
+				messages, err := teamMem.GetThreadMessages(taskID, 20)
+				if err == nil && len(messages) > 0 {
+					sb.WriteString(fmt.Sprintf("\n**Thread (%d messages):**\n", len(messages)))
+					for _, m := range messages {
+						from := m.FromAgent
+						if from == "" {
+							from = m.FromUser
+						}
+						if from == "" {
+							from = "user"
+						}
+						sb.WriteString(fmt.Sprintf("  - %s: %s\n", from, truncateString(m.Content, 100)))
+					}
+				}
+			}
+
+			return sb.String(), nil
+		},
+	)
+
+	// team_delete_task - Delete a task
+	executor.Register(
+		MakeToolDefinition("team_delete_task",
+			"Permanently delete a task and all its messages.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"team_id": map[string]any{
+						"type":        "string",
+						"description": "Team ID",
+					},
+					"task_id": map[string]any{
+						"type":        "string",
+						"description": "Task ID to delete",
+					},
+				},
+				"required": []string{"team_id", "task_id"},
+			},
+		),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			teamID, _ := args["team_id"].(string)
+			taskID, _ := args["task_id"].(string)
+
+			if teamID == "" || taskID == "" {
+				return nil, fmt.Errorf("team_id and task_id are required")
+			}
+
+			teamMem := NewTeamMemory(teamID, db, logger)
+			if err := teamMem.DeleteTask(taskID); err != nil {
+				return nil, err
+			}
+
+			return fmt.Sprintf("Task %s deleted.", taskID), nil
 		},
 	)
 }
@@ -1297,6 +1666,190 @@ func registerWorkingStateTools(executor *ToolExecutor, teamMgr *TeamManager, log
 			}
 
 			return "Working state cleared. You are now idle.", nil
+		},
+	)
+}
+
+// ── Notification Tools ──
+
+func registerNotificationTools(executor *ToolExecutor, teamMgr *TeamManager, db *sql.DB, logger *slog.Logger) {
+	// team_notify - Send notification about work
+	executor.Register(
+		MakeToolDefinition("team_notify",
+			"Send a notification about completed work or important events. Use this to inform the team about task progress, completion, or issues.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"team_id": map[string]any{
+						"type":        "string",
+						"description": "Team ID to send notification to",
+					},
+					"type": map[string]any{
+						"type":        "string",
+						"enum":        []string{"task_completed", "task_failed", "task_blocked", "task_progress", "agent_error"},
+						"description": "Notification type",
+					},
+					"message": map[string]any{
+						"type":        "string",
+						"description": "Notification message describing what happened",
+					},
+					"task_id": map[string]any{
+						"type":        "string",
+						"description": "Related task ID (optional)",
+					},
+					"priority": map[string]any{
+						"type":        "integer",
+						"description": "Priority 1-5 (1=urgent, 5=low, default=3)",
+					},
+				},
+				"required": []string{"team_id", "type", "message"},
+			},
+		),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			teamID, _ := args["team_id"].(string)
+			if teamID == "" {
+				return nil, fmt.Errorf("team_id is required")
+			}
+
+			notifType, _ := args["type"].(string)
+			if notifType == "" {
+				return nil, fmt.Errorf("type is required")
+			}
+
+			message, _ := args["message"].(string)
+			if message == "" {
+				return nil, fmt.Errorf("message is required")
+			}
+
+			taskID, _ := args["task_id"].(string)
+			priority, _ := args["priority"].(float64)
+			if priority == 0 {
+				priority = 3
+			}
+
+			// Get agent info from context
+			agentID := getAgentIDFromContext(ctx)
+			agentName := agentID
+			if agentName == "" {
+				agentName = "unknown"
+			}
+
+			// Get task title if task_id provided
+			var taskTitle string
+			if taskID != "" && db != nil {
+				_ = db.QueryRow(`
+					SELECT title FROM team_tasks WHERE id = ? AND team_id = ?`,
+					taskID, teamID,
+				).Scan(&taskTitle)
+			}
+
+			// Get notification dispatcher from team manager
+			if teamMgr.notifDisp == nil {
+				return "Notification sent (no dispatcher configured - notification logged only)", nil
+			}
+
+			notif := &TeamNotification{
+				ID:        fmt.Sprintf("n%d", time.Now().UnixNano()%1000000),
+				TeamID:    teamID,
+				Type:      NotificationType(notifType),
+				AgentID:   agentID,
+				AgentName: agentName,
+				TaskID:    taskID,
+				TaskTitle: taskTitle,
+				Action:    notifType,
+				Message:   message,
+				Timestamp: time.Now(),
+				Priority:  int(priority),
+			}
+
+			// Set result based on type
+			switch notifType {
+			case "task_completed":
+				notif.Result = ResultSuccess
+			case "task_failed", "task_blocked", "agent_error":
+				notif.Result = ResultFailure
+			default:
+				notif.Result = ResultInfo
+			}
+
+			if err := teamMgr.notifDisp.Dispatch(ctx, notif); err != nil {
+				return nil, fmt.Errorf("failed to send notification: %w", err)
+			}
+
+			return fmt.Sprintf("Notification sent: [%s] %s", notifType, message), nil
+		},
+	)
+
+	// team_get_notifications - Get team notifications
+	executor.Register(
+		MakeToolDefinition("team_get_notifications",
+			"Get recent notifications for a team. Shows activity feed and alerts.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"team_id": map[string]any{
+						"type":        "string",
+						"description": "Team ID",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Max notifications to return (default 20)",
+					},
+					"unread_only": map[string]any{
+						"type":        "boolean",
+						"description": "Only return unread notifications",
+					},
+				},
+				"required": []string{"team_id"},
+			},
+		),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			teamID, _ := args["team_id"].(string)
+			if teamID == "" {
+				return nil, fmt.Errorf("team_id is required")
+			}
+
+			limit, _ := args["limit"].(float64)
+			if limit == 0 {
+				limit = 20
+			}
+
+			unreadOnly, _ := args["unread_only"].(bool)
+
+			if teamMgr.notifDisp == nil {
+				return []map[string]any{}, nil
+			}
+
+			var notifications []*TeamNotification
+			var err error
+
+			if unreadOnly {
+				notifications, err = teamMgr.notifDisp.GetUnreadNotifications(ctx, teamID)
+			} else {
+				notifications, err = teamMgr.notifDisp.GetNotifications(ctx, teamID, int(limit))
+			}
+
+			if err != nil {
+				return nil, fmt.Errorf("get notifications: %w", err)
+			}
+
+			result := make([]map[string]any, len(notifications))
+			for i, n := range notifications {
+				result[i] = map[string]any{
+					"id":         n.ID,
+					"type":       n.Type,
+					"agent_name": n.AgentName,
+					"task_title": n.TaskTitle,
+					"action":     n.Action,
+					"result":     n.Result,
+					"message":    n.Message,
+					"priority":   n.Priority,
+					"timestamp":  n.Timestamp.Format(time.RFC3339),
+					"read":       n.Read,
+				}
+			}
+
+			return result, nil
 		},
 	)
 }

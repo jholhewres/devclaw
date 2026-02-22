@@ -35,14 +35,18 @@ const (
 	ActivationKeyword ActivationMode = "keyword"
 )
 
-// QuietHoursConfig defines quiet hours for a group.
+// QuietHoursConfig defines quiet hours for a group or notification rule.
 type QuietHoursConfig struct {
+	// Enabled activates quiet hours.
+	Enabled bool `json:"enabled" yaml:"enabled"`
 	// Start is the start time in HH:MM format.
-	Start string `yaml:"start"`
+	Start string `json:"start" yaml:"start"`
 	// End is the end time in HH:MM format.
-	End string `yaml:"end"`
+	End string `json:"end" yaml:"end"`
 	// Timezone is the timezone for quiet hours (default: UTC).
-	Timezone string `yaml:"timezone"`
+	Timezone string `json:"timezone" yaml:"timezone"`
+	// Days are the days of week when quiet hours apply (0=Sunday, 6=Saturday).
+	Days []int `json:"days,omitempty" yaml:"days,omitempty"`
 }
 
 // GroupPolicyConfig holds configuration for a specific group's policy.

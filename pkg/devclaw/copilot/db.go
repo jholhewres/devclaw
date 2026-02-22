@@ -306,6 +306,47 @@ CREATE TABLE IF NOT EXISTS agent_working_state (
     context         TEXT DEFAULT '',
     updated_at      TEXT NOT NULL
 );
+
+-- Notification rules (routing configuration)
+CREATE TABLE IF NOT EXISTS notification_rules (
+    id           TEXT PRIMARY KEY,
+    team_id      TEXT DEFAULT '',
+    name         TEXT NOT NULL,
+    enabled      INTEGER DEFAULT 1,
+    events       TEXT NOT NULL,
+    conditions   TEXT DEFAULT '{}',
+    destinations TEXT NOT NULL,
+    template     TEXT DEFAULT '',
+    priority     INTEGER DEFAULT 0,
+    rate_limit   INTEGER DEFAULT 0,
+    quiet_hours  TEXT DEFAULT '',
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notif_rules_team ON notification_rules(team_id);
+CREATE INDEX IF NOT EXISTS idx_notif_rules_enabled ON notification_rules(enabled);
+
+-- Notification history
+CREATE TABLE IF NOT EXISTS team_notifications (
+    id         TEXT PRIMARY KEY,
+    team_id    TEXT NOT NULL,
+    type       TEXT NOT NULL,
+    agent_id   TEXT NOT NULL,
+    agent_name TEXT NOT NULL,
+    task_id    TEXT DEFAULT '',
+    task_title TEXT DEFAULT '',
+    action     TEXT NOT NULL,
+    result     TEXT NOT NULL,
+    message    TEXT NOT NULL,
+    details    TEXT DEFAULT '{}',
+    priority   INTEGER DEFAULT 3,
+    timestamp  TEXT NOT NULL,
+    read       INTEGER DEFAULT 0,
+    read_at    TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_team ON team_notifications(team_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_timestamp ON team_notifications(timestamp);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON team_notifications(read);
 `
 
 // OpenDatabase opens (or creates) the central devclaw.db at the given path.

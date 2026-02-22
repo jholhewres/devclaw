@@ -282,9 +282,14 @@ When an agent is @mentioned or a subscribed thread has activity, the agent is tr
 |------|-------------|------------|
 | `team_create` | Create a new team | admin |
 | `team_list` | List all teams | user |
+| `team_get` | Get a specific team by ID | user |
+| `team_update` | Update team properties (name, description, default_model) | admin |
+| `team_delete` | Delete a team and all its data | admin |
 | `team_create_agent` | Create a persistent agent | admin |
 | `team_list_agents` | List agents in a team | user |
+| `team_update_agent` | Update agent properties | admin |
 | `team_stop_agent` | Stop an agent (disable heartbeats) | admin |
+| `team_start_agent` | Restart a stopped agent | admin |
 | `team_delete_agent` | Permanently delete an agent | admin |
 
 ### Task Management
@@ -293,8 +298,10 @@ When an agent is @mentioned or a subscribed thread has activity, the agent is tr
 |------|-------------|------------|
 | `team_create_task` | Create a task | user |
 | `team_list_tasks` | List tasks (filterable) | user |
+| `team_get_task` | Get a specific task with thread messages | user |
 | `team_update_task` | Update task status | user |
 | `team_assign_task` | Assign agents to task | admin |
+| `team_delete_task` | Permanently delete a task | admin |
 
 ### Communication
 
@@ -332,6 +339,13 @@ When an agent is @mentioned or a subscribed thread has activity, the agent is tr
 | `team_update_working` | Update working state | user |
 | `team_clear_working` | Clear working state (task done) | user |
 
+### Notifications
+
+| Tool | Description | Permission |
+|------|-------------|------------|
+| `team_notify` | Send a notification about work | user |
+| `team_get_notifications` | Get team notifications | user |
+
 ---
 
 ## Usage Examples
@@ -348,6 +362,24 @@ team_create(
   description="Main development team",
   owner_jid="user@example.com"
 )
+```
+
+### Managing Teams
+
+```bash
+# Get team details
+team_get(team_id="abc12345")
+
+# Update team properties
+team_update(
+  team_id="abc12345",
+  name="Engineering Team",
+  description="Core engineering team",
+  default_model="gpt-4.1-mini"
+)
+
+# Delete a team (WARNING: deletes all agents, tasks, and memory)
+team_delete(team_id="abc12345")
 ```
 
 ### Creating Agents
@@ -380,6 +412,27 @@ team_create_agent(
 )
 ```
 
+### Managing Agents
+
+```bash
+# Update agent properties
+team_update_agent(
+  agent_id="jarvis",
+  role="Senior Squad Lead",
+  personality="More decisive and autonomous",
+  heartbeat="*/10 * * * *"
+)
+
+# Stop an agent (disables heartbeats)
+team_stop_agent(agent_id="loki")
+
+# Restart a stopped agent
+team_start_agent(agent_id="loki")
+
+# Delete an agent permanently
+team_delete_agent(agent_id="loki")
+```
+
 ### Task Workflow
 
 ```bash
@@ -390,8 +443,16 @@ team_create_task(
   assignees=["jarvis", "loki"]
 )
 
+# Get task details with thread messages
+team_get_task(
+  team_id="abc12345",
+  task_id="xyz78901",
+  include_messages=true
+)
+
 # Update status
 team_update_task(
+  team_id="abc12345",
   task_id="xyz78901",
   status="in_progress",
   comment="Starting implementation"
@@ -399,9 +460,16 @@ team_update_task(
 
 # Complete
 team_update_task(
+  team_id="abc12345",
   task_id="xyz78901",
   status="done",
   comment="OAuth2 implemented and tested"
+)
+
+# Delete a task and its messages
+team_delete_task(
+  team_id="abc12345",
+  task_id="xyz78901"
 )
 ```
 
@@ -741,6 +809,134 @@ The `team_standup` tool generates a daily standup summary:
 
 ---
 
+## Notification System
+
+Agents can send notifications about their work to configured destinations. This enables real-time alerts and activity tracking.
+
+### Notification Types
+
+| Type | Description |
+|------|-------------|
+| `task_completed` | Task finished successfully |
+| `task_failed` | Task execution failed |
+| `task_blocked` | Task is blocked by dependency |
+| `task_progress` | Progress update on task |
+| `agent_error` | Agent encountered an error |
+
+### Notification Results
+
+| Result | Description |
+|--------|-------------|
+| `success` | Operation completed successfully |
+| `failure` | Operation failed |
+| `warning` | Warning condition |
+| `info` | Informational message |
+
+### Destinations
+
+| Type | Description |
+|------|-------------|
+| `channel` | Send to connected channel (WhatsApp, Discord, etc.) |
+| `inbox` | Add to agent's pending messages |
+| `webhook` | HTTP POST to external URL |
+| `owner` | Direct message to team owner |
+| `activity` | Add to team activity feed |
+
+### Using team_notify Tool
+
+Agents can manually send notifications:
+
+```
+team_notify(
+  team_id="abc12345",
+  type="task_completed",
+  message="Authentication feature completed and tested",
+  task_id="xyz78901",
+  priority=3
+)
+```
+
+### Getting Notifications
+
+View team notifications:
+
+```
+team_get_notifications(
+  team_id="abc12345",
+  limit=20,
+  unread_only=false
+)
+```
+
+### Configuration
+
+Configure notification rules in `config.yaml`:
+
+```yaml
+notifications:
+  enabled: true
+  defaults:
+    activity_feed: true
+    owner: false
+  quiet_hours:
+    enabled: true
+    start: "22:00"
+    end: "08:00"
+    timezone: "America/Sao_Paulo"
+  rate_limit_per_hour: 20
+  rules:
+    - name: "Critical Alerts"
+      enabled: true
+      events: [task_failed, agent_error]
+      destinations:
+        - type: channel
+          channel: "whatsapp"
+          chat_id: "120363XXXXXX@g.us"
+      priority: 1
+```
+
+### Notification Rules
+
+Rules define when and how notifications are sent:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique rule identifier |
+| `team_id` | string | Team ID (empty = global) |
+| `name` | string | Human-readable rule name |
+| `enabled` | bool | Rule active status |
+| `events` | []string | Notification types that trigger |
+| `conditions` | object | Additional filters |
+| `destinations` | []object | Where to send notifications |
+| `template` | string | Go template for message (optional) |
+| `priority` | int | Minimum priority to trigger (1-5) |
+| `rate_limit` | int | Max notifications per hour (0 = unlimited) |
+| `quiet_hours` | object | When to suppress notifications |
+
+### Quiet Hours
+
+Suppress non-urgent notifications during specific hours:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | bool | Quiet hours active |
+| `start` | string | Start time (HH:MM) |
+| `end` | string | End time (HH:MM) |
+| `timezone` | string | Timezone for times |
+| `days` | []int | Days of week (0=Sunday, 6=Saturday) |
+
+### Notification Priority
+
+| Priority | Description |
+|----------|-------------|
+| 1 | Urgent - always delivered, even during quiet hours |
+| 2 | High - important notifications |
+| 3 | Normal | Standard priority |
+| 4 | Low | Informational |
+| 5 | Minimal | Background updates |
+
+---
+
 ## Troubleshooting
 
 ### Agent Not Responding to Heartbeats
@@ -772,5 +968,7 @@ The `team_standup` tool generates a daily standup summary:
 | `team_memory.go` | TeamMemory implementation (tasks, messages, facts) |
 | `team_manager.go` | TeamManager implementation (lifecycle, heartbeats) |
 | `team_tools.go` | Tool registration and handlers |
+| `notification_dispatcher.go` | Notification routing and delivery |
+| `notification_dispatcher_test.go` | Unit tests for NotificationDispatcher |
 | `team_memory_test.go` | Unit tests for TeamMemory |
 | `team_manager_test.go` | Unit tests for TeamManager |

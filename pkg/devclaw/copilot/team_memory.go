@@ -257,6 +257,30 @@ func (tm *TeamMemory) GetTasksForAgent(agentID string) ([]*TeamTask, error) {
 	return tm.ListTasks("", agentID)
 }
 
+// DeleteTask permanently deletes a task and all its messages.
+func (tm *TeamMemory) DeleteTask(taskID string) error {
+	// Delete messages first
+	_, err := tm.db.Exec(`DELETE FROM team_messages WHERE team_id = ? AND thread_id = ?`, tm.teamID, taskID)
+	if err != nil {
+		tm.logger.Warn("failed to delete task messages", "task_id", taskID, "error", err)
+	}
+
+	// Delete subscriptions
+	_, err = tm.db.Exec(`DELETE FROM team_thread_subscriptions WHERE team_id = ? AND thread_id = ?`, tm.teamID, taskID)
+	if err != nil {
+		tm.logger.Warn("failed to delete task subscriptions", "task_id", taskID, "error", err)
+	}
+
+	// Delete the task
+	_, err = tm.db.Exec(`DELETE FROM team_tasks WHERE id = ? AND team_id = ?`, taskID, tm.teamID)
+	if err != nil {
+		return fmt.Errorf("delete task: %w", err)
+	}
+
+	tm.logger.Info("task deleted", "task_id", taskID)
+	return nil
+}
+
 // ─── Messages ───
 
 // PostMessage posts a message to a thread/task.
@@ -966,4 +990,38 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// DeleteAllData removes all data for a team (used when deleting a team).
+func (tm *TeamMemory) DeleteAllData() error {
+	// Delete all related data
+	tables := []string{
+		"team_tasks",
+		"team_messages",
+		"team_facts",
+		"team_activities",
+		"team_documents",
+		"team_thread_subscriptions",
+		"team_pending_messages",
+		"agent_working_state",
+	}
+
+	for _, table := range tables {
+		// Add team_id condition only for tables that have it
+		var query string
+		switch table {
+		case "agent_working_state":
+			// This table doesn't have team_id, need subquery
+			query = fmt.Sprintf("DELETE FROM %s WHERE team_id = ?", table)
+		default:
+			query = fmt.Sprintf("DELETE FROM %s WHERE team_id = ?", table)
+		}
+		_, err := tm.db.Exec(query, tm.teamID)
+		if err != nil {
+			tm.logger.Warn("failed to delete from table during cleanup", "table", table, "error", err)
+		}
+	}
+
+	tm.logger.Info("all team data deleted", "team_id", tm.teamID)
+	return nil
 }
