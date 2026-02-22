@@ -91,14 +91,15 @@ type ToolGuardConfig struct {
 }
 
 // DefaultToolGuardConfig returns safe defaults for the tool security guard.
+// Owners have full access by default - adjust if you need stricter security.
 func DefaultToolGuardConfig() ToolGuardConfig {
 	return ToolGuardConfig{
 		Enabled:          true,
 		AuditLogPath:     "./data/audit.log",
 		BlockSudo:        false, // Deprecated: use AllowSudo instead
-		AllowDestructive: false,
-		AllowSudo:        true, // Allow owners to run sudo (bash is already restricted to owner)
-		AllowReboot:      false,
+		AllowDestructive: true,  // Allow owners to run chown, chmod, rm -rf, etc.
+		AllowSudo:        true,  // Allow owners to run sudo (bash is already restricted to owner)
+		AllowReboot:      false, // Don't allow reboot by default
 		ToolPermissions: map[string]string{
 			// System tools with machine access.
 			"bash":         "owner",

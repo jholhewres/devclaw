@@ -721,7 +721,30 @@ func generateConfigYAML(s *SetupRequest) string {
 	b.WriteString("  max_input_length: 4096\n")
 	b.WriteString("  rate_limit: 30\n")
 	b.WriteString("  enable_pii_detection: false\n")
-	b.WriteString("  enable_url_validation: true\n\n")
+	b.WriteString("  enable_url_validation: true\n")
+	b.WriteString("  tool_guard:\n")
+	b.WriteString("    enabled: true\n")
+	switch s.AccessMode {
+	case "relaxed":
+		// Tudo liberado para owner
+		b.WriteString("    allow_destructive: true\n")
+		b.WriteString("    allow_sudo: true\n")
+		b.WriteString("    allow_reboot: true\n")
+		b.WriteString("    block_sudo: false\n")
+	case "strict":
+		// Balanceado - sudo ok, destrutivo não
+		b.WriteString("    allow_destructive: false\n")
+		b.WriteString("    allow_sudo: true\n")
+		b.WriteString("    allow_reboot: false\n")
+		b.WriteString("    block_sudo: false\n")
+	default: // paranoid
+		// Maximamente restritivo
+		b.WriteString("    allow_destructive: false\n")
+		b.WriteString("    allow_sudo: false\n")
+		b.WriteString("    allow_reboot: false\n")
+		b.WriteString("    block_sudo: true\n")
+	}
+	b.WriteString("\n")
 
 	// -- Token Budget --
 	b.WriteString("# -- Token Budget ------------------------------------------\n")
