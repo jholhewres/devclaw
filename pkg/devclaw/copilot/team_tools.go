@@ -405,8 +405,24 @@ func (h *handlerContext) handleAgentGet(args map[string]any) (any, error) {
 		return nil, fmt.Errorf("agent not found: %s", agentID)
 	}
 
-	return fmt.Sprintf("Agent: %s\n  ID: %s\n  Role: %s\n  Level: %s\n  Status: %s\n  Team: %s\n  Heartbeat: %s",
-		agent.Name, agent.ID, agent.Role, agent.Level, agent.Status, agent.TeamID, agent.HeartbeatSchedule), nil
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Agent: %s\n", agent.Name))
+	sb.WriteString(fmt.Sprintf("  ID: %s\n", agent.ID))
+	sb.WriteString(fmt.Sprintf("  Role: %s\n", agent.Role))
+	sb.WriteString(fmt.Sprintf("  Level: %s\n", agent.Level))
+	sb.WriteString(fmt.Sprintf("  Status: %s\n", agent.Status))
+	sb.WriteString(fmt.Sprintf("  Team: %s\n", agent.TeamID))
+	sb.WriteString(fmt.Sprintf("  Model: %s\n", agent.Model))
+	sb.WriteString(fmt.Sprintf("  Heartbeat: %s\n", agent.HeartbeatSchedule))
+	sb.WriteString(fmt.Sprintf("  Skills: %s\n", strings.Join(agent.Skills, ", ")))
+	if agent.Personality != "" {
+		sb.WriteString(fmt.Sprintf("  Personality: %s\n", agent.Personality))
+	}
+	if agent.Instructions != "" {
+		sb.WriteString(fmt.Sprintf("  Instructions:\n    %s\n", strings.ReplaceAll(agent.Instructions, "\n", "\n    ")))
+	}
+
+	return sb.String(), nil
 }
 
 func (h *handlerContext) handleAgentUpdate(args map[string]any) (any, error) {
