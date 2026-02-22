@@ -4,6 +4,44 @@ All notable changes to DevClaw are documented in this file.
 
 ## [Unreleased]
 
+### WebUI Configuration Pages — Complete Settings UI
+
+Full configuration management via WebUI with 7 new pages covering 100% of YAML settings:
+
+- **API Configuration Page** (`/config`): LLM provider selection, API key management, base URL config, connection testing
+- **Access Control Page** (`/access`): Owner/admin/user management, allowlist/blocklist, default policy settings
+- **Budget Page** (`/budget`): Monthly spending limits, warning thresholds, usage visualization
+- **Memory Page** (`/memory`): Embedding settings, search configuration, compression strategies
+- **Database Hub Page** (`/database`): Backend selection (SQLite/PostgreSQL), connection status, pool metrics, vector search config
+- **Groups Page** (`/groups`): Activation modes, intro messages, quiet hours, participant limits
+- **MCP Servers Page** (`/mcp`): Server CRUD, start/stop controls, status monitoring
+
+**New REST Endpoints:**
+- `GET/PUT /api/config` - General configuration
+- `GET/PUT /api/access` - Access control settings
+- `GET/PUT /api/config/budget` - Budget configuration
+- `GET/PUT /api/config/memory` - Memory configuration
+- `GET/PUT /api/config/groups` - Groups configuration
+- `GET /api/database/status` - Database health and pool metrics
+- `GET/POST /api/mcp/servers` - List/create MCP servers
+- `GET/PUT/DELETE /api/mcp/servers/{name}` - Manage specific server
+- `POST /api/mcp/servers/{name}/start` - Start MCP server
+- `POST /api/mcp/servers/{name}/stop` - Stop MCP server
+
+**Reusable UI Components:**
+- `ConfigPage`, `ConfigSection`, `ConfigField` - Layout components
+- `ConfigInput`, `ConfigSelect`, `ConfigToggle`, `ConfigTextarea` - Form controls
+- `ConfigCard`, `ConfigActions`, `ConfigTagList` - Interactive elements
+- `LoadingSpinner`, `ErrorState`, `ConfigEmptyState`, `ConfigInfoBox` - State components
+
+**Testing:**
+- 49 frontend unit tests (Vitest + React Testing Library)
+- All configuration pages tested for rendering, interactions, and API calls
+
+**Internationalization:**
+- Full i18n support with English and Portuguese translations
+- All new pages support language switching
+
 ### Database Hub — Multi-Backend Support
 
 Complete database abstraction layer with SQLite (default) and PostgreSQL/Supabase support:
