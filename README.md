@@ -465,22 +465,62 @@ ansible-playbook -i inventory playbook.yml
 
 See [install/providers/ansible/README.md](install/providers/ansible/README.md) for details.
 
-**systemd (bare metal):**
+**systemd (Linux servers):**
+
+Recommended for production Linux servers. Provides automatic restart, logging, and resource management.
 
 ```bash
-# Create user and home directory
+# Option 1: Create dedicated user (recommended)
 sudo useradd -m -s /bin/bash devclaw
 
-# Build and install binary
+# Option 2: Use existing user (replace YOUR_USER)
+# Skip useradd, use your username in the service file below
+
+# Build and install
 make build
 sudo cp bin/devclaw /usr/local/bin/
 
-# Copy config and vault to user home
-sudo cp config.yaml .devclaw.vault /home/devclaw/
-sudo chown -R devclaw:devclaw /home/devclaw/
+# Setup directory and config
+sudo mkdir -p /opt/devclaw
+sudo cp config.yaml /opt/devclaw/
+sudo chown -R devclaw:devclaw /opt/devclaw  # or YOUR_USER:YOUR_USER
+```
 
-# Install and start service
-sudo cp install/providers/ansible/files/devclaw.service /etc/systemd/system/
+Create service file `/etc/systemd/system/devclaw.service`:
+
+```ini
+[Unit]
+Description=DevClaw - AI Agent for Tech Teams
+After=network.target
+Documentation=https://github.com/jholhewres/devclaw
+
+[Service]
+Type=simple
+User=devclaw
+Group=devclaw
+WorkingDirectory=/opt/devclaw
+ExecStart=/usr/local/bin/devclaw serve --config /opt/devclaw/config.yaml
+Restart=on-failure
+RestartSec=5
+
+# Security options (adjust based on your needs)
+NoNewPrivileges=false    # Set to true to disable sudo access
+PrivateTmp=true
+ProtectKernelTunables=true
+
+# Resource limits
+LimitNOFILE=65535
+
+# Environment (optional - for vault password)
+# EnvironmentFile=-/opt/devclaw/.env
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+
+```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now devclaw
 
@@ -489,13 +529,64 @@ sudo systemctl status devclaw
 sudo journalctl -u devclaw -f
 ```
 
-**PM2:**
+**Note:** If you need the agent to run `sudo` commands, set `NoNewPrivileges=false`. For hardened security, set it to `true` and the agent will not be able to elevate privileges.
+
+**PM2 (Node.js process manager):**
+
+Good option for development or when you already use PM2 in your stack.
 
 ```bash
+# Install PM2 if not already installed
+npm install -g pm2
+
+# Build DevClaw
 make build
+
+# Start with PM2
 pm2 start ./bin/devclaw --name devclaw -- serve
+
+# Save process list and enable auto-start on reboot
 pm2 save
-pm2 startup   # auto-start on reboot
+pm2 startup   # follow the command it prints
+
+# Useful commands
+pm2 logs devclaw      # view logs
+pm2 restart devclaw   # restart
+pm2 stop devclaw      # stop
+pm2 delete devclaw    # remove from PM2
+pm2 monit             # resource monitor
+```
+
+PM2 ecosystem file (`ecosystem.config.js`) for more control:
+
+```javascript
+module.exports = {
+  apps: [{
+    name: 'devclaw',
+    script: './bin/devclaw',
+    args: 'serve',
+    cwd: '/home/youruser/devclaw',
+    instances: 1,
+    autorestart: true,
+    watch: false,
+    max_memory_restart: '1G',
+    env: {
+      NODE_ENV: 'production'
+    }
+  }]
+}
+```
+
+Then run: `pm2 start ecosystem.config.js`
+
+**Makefile (simple background):**
+
+```bash
+# Run in background with nohup
+make serve &
+
+# Or with output redirect
+nohup make serve > devclaw.log 2>&1 &
 ```
 
 ---
