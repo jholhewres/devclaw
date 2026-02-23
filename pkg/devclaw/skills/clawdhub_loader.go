@@ -178,7 +178,12 @@ func (l *ClawdHubLoader) parseSkillMD(path, dir string) (*ClawdHubSkillDef, erro
 	}
 
 	def.Body = body
-	def.Dir = dir
+	// Convert to absolute path to avoid issues with relative paths in sandbox execution
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("resolving absolute path for %s: %w", dir, err)
+	}
+	def.Dir = absDir
 
 	// Parse openclaw metadata if present.
 	if meta, ok := def.Metadata["openclaw"]; ok {
