@@ -4,6 +4,63 @@ Documentation for the Teams system that adds persistent agent management and tea
 
 ---
 
+## Quick Start
+
+### 1. Criar um Time
+
+```bash
+team_manage(action="create", name="DevClaw OS", description="Main development team")
+# Retorna: { "id": "5916dabf", "name": "DevClaw OS", ... }
+```
+
+### 2. Criar um Agente
+
+```bash
+team_agent(
+  action="create",
+  team_id="devclaw-os",  # Pode usar ID ou nome do time!
+  name="Siri",
+  role="Personal Assistant",
+  personality="Helpful, proactive, organized",
+  instructions="Help with daily tasks, manage calendar, answer questions",
+  level="mid",
+  heartbeat_schedule="*/15 * * * *"
+)
+```
+
+### 3. O Agente em Ação
+
+No heartbeat ou quando mencionado, o agente:
+
+```bash
+# 1. Verifica menções
+team_comm(action="mention_check", agent_id="siri")
+
+# 2. Lista tarefas atribuídas
+team_task(action="list", team_id="devclaw-os", assignee="siri")
+
+# 3. Atualiza estado de trabalho
+team_agent(
+  action="working_update",
+  agent_id="siri",
+  current_task_id="abc12345",
+  status="working",
+  next_steps="1. Process request\n2. Send response",
+  context="Handling user query about documentation"
+)
+
+# 4. Ao terminar, notifica
+team_comm(
+  action="notify",
+  type="task_completed",
+  message="Documentation updated successfully",
+  task_id="abc12345",
+  priority=3
+)
+```
+
+---
+
 ## Overview
 
 DevClaw Teams extends the existing subagent architecture with:
@@ -25,6 +82,7 @@ DevClaw Teams extends the existing subagent architecture with:
 │  - @mention parsing and routing                             │
 │  - Working state persistence (WORKING.md)                   │
 │  - Active notification push (spawn callback)                │
+│  - Team resolution by ID or name                            │
 └──────────────────────────┬──────────────────────────────────┘
                            │
 ┌──────────────────────────▼──────────────────────────────────┐
@@ -64,6 +122,26 @@ A team is a collection of persistent agents working together:
 | `workspace_path` | string | Optional workspace directory |
 | `enabled` | bool | Team active status |
 
+### Team Resolution (ID or Name)
+
+The `team_id` parameter in all tools supports **flexible resolution**:
+
+```bash
+# Por ID (exato)
+team_task(action="list", team_id="5916dabf")
+
+# Por nome (case insensitive, normalizado)
+team_task(action="list", team_id="DevClaw OS")    # → encontra "devclaw-os"
+team_task(action="list", team_id="devclaw-os")    # → encontra "devclaw-os"
+team_task(action="list", team_id="DEVCLAW_OS")    # → encontra "devclaw-os"
+
+# Sem team_id (usa time único automaticamente)
+team_task(action="list")  # Se só houver 1 time, usa ele
+                          # Se houver múltiplos, retorna erro pedindo para especificar
+```
+
+**Normalização**: Hífens, underscores e espaços são tratados como equivalentes.
+
 ### Persistent Agents
 
 Unlike subagents (ephemeral), persistent agents have:
@@ -99,6 +177,116 @@ Unlike subagents (ephemeral), persistent agents have:
 | `working` | Currently executing a task |
 | `paused` | Temporarily inactive |
 | `stopped` | Disabled (no heartbeats) |
+
+---
+
+## Agent Workflow
+
+### Ciclo de Vida do Agente
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    HEARTBEAT / MENTION                       │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 1. CHECK INCOMING                                            │
+│    team_comm(action="mention_check", agent_id="siri")       │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 2. CHECK WORKING STATE                                       │
+│    team_agent(action="working_get", agent_id="siri")        │
+│    → Resume in-progress work if exists                       │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 3. CHECK TASKS                                               │
+│    team_task(action="list", assignee="siri")                │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 4. DO WORK & UPDATE STATE                                    │
+│    team_agent(action="working_update", ...)                 │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+            ┌──────────────┼──────────────┐
+            │              │              │
+            ▼              ▼              ▼
+      ┌──────────┐   ┌──────────┐   ┌──────────┐
+      │ SUCCESS  │   │  ERROR   │   │ BLOCKED  │
+      └────┬─────┘   └────┬─────┘   └────┬─────┘
+           │              │              │
+           ▼              ▼              ▼
+   task_completed    task_failed    task_blocked
+   task_progress     agent_error
+           │              │              │
+           └──────────────┼──────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 5. NOTIFY                                                    │
+│    team_comm(action="notify", type="...", message="...")    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Padrão de Notificação
+
+O agente **DEVE** notificar em eventos importantes:
+
+```bash
+# Iniciando trabalho
+team_agent(
+  action="working_update",
+  agent_id="siri",
+  status="working",
+  current_task_id="abc12345",
+  next_steps="1. Analyze data\n2. Generate report"
+)
+
+# Progresso (opcional, para tarefas longas)
+team_comm(
+  action="notify",
+  type="task_progress",
+  message="50% complete - data analysis done",
+  task_id="abc12345",
+  priority=4
+)
+
+# Sucesso
+team_comm(
+  action="notify",
+  type="task_completed",
+  message="Report generated and saved to /reports/monthly.md",
+  task_id="abc12345",
+  priority=3
+)
+
+# Erro
+team_comm(
+  action="notify",
+  type="task_failed",
+  message="Failed to connect to database: connection refused",
+  task_id="abc12345",
+  priority=2
+)
+
+# Bloqueado
+team_comm(
+  action="notify",
+  type="task_blocked",
+  message="Waiting for API credentials from admin",
+  task_id="abc12345",
+  priority=3
+)
+
+# Ao finalizar, limpar working state
+team_agent(action="working_clear", agent_id="siri")
+```
 
 ---
 
@@ -241,7 +429,7 @@ heartbeat_schedule: "*/15 * * * *"  # Every 15 minutes
 
 When triggered, the agent:
 
-1. Checks `WORKING.md` for ongoing tasks (via `team_get_working`)
+1. Checks `WORKING.md` for ongoing tasks (via `working_get`)
 2. Resumes any in-progress work (using saved context and next steps)
 3. Checks TeamMemory for @mentions and subscribed thread notifications
 4. Reviews assigned tasks
@@ -265,7 +453,7 @@ This allows agents to seamlessly resume work across heartbeats.
 
 ### Response Protocol
 
-- **Has work**: Execute the work, update working state with `team_update_working`
+- **Has work**: Execute the work, update working state with `working_update`
 - **No work**: Respond with exactly `HEARTBEAT_OK`
 
 ### Active Notification Push
@@ -284,7 +472,7 @@ Team tools use a **dispatcher pattern** to reduce tool count while maintaining f
 |--------|-------------|-----------------|
 | `create` | Create a new team | `name` |
 | `list` | List all teams | - |
-| `get` | Get a specific team | `team_id` |
+| `get` | Get a specific team | `team_id` (ID or name) |
 | `update` | Update team properties | `team_id` |
 | `delete` | Delete a team and all data | `team_id` |
 
@@ -293,22 +481,22 @@ Team tools use a **dispatcher pattern** to reduce tool count while maintaining f
 | Action | Description | Required Params |
 |--------|-------------|-----------------|
 | `create` | Create a persistent agent | `team_id`, `name` |
-| `list` | List agents in a team | `team_id` |
+| `list` | List agents in a team | `team_id` (ID or name) |
 | `get` | Get agent details | `agent_id` |
 | `update` | Update agent properties | `agent_id` |
 | `start` | Start an agent | `agent_id` |
 | `stop` | Stop an agent | `agent_id` |
 | `delete` | Delete an agent | `agent_id` |
 | `working_get` | Get agent's working state | `agent_id` |
-| `working_update` | Update working state | `agent_id` |
+| `working_update` | Update working state | `agent_id`, `status`, `next_steps`, `context` |
 | `working_clear` | Clear working state | `agent_id` |
 
 ### team_task - Task Management
 
 | Action | Description | Required Params |
 |--------|-------------|-----------------|
-| `create` | Create a task | `team_id`, `title` |
-| `list` | List tasks (filterable) | `team_id` |
+| `create` | Create a task | `team_id` (ID or name), `title` |
+| `list` | List tasks (filterable) | `team_id` (ID or name) |
 | `get` | Get task details | `team_id`, `task_id` |
 | `update` | Update task status | `team_id`, `task_id`, `status` |
 | `assign` | Assign agents to task | `team_id`, `task_id`, `assignees` |
@@ -318,7 +506,7 @@ Team tools use a **dispatcher pattern** to reduce tool count while maintaining f
 
 | Action | Description | Required Params |
 |--------|-------------|-----------------|
-| `fact_save` | Save a fact | `team_id`, `key`, `value` |
+| `fact_save` | Save a fact | `team_id` (ID or name), `key`, `value` |
 | `fact_list` | Get all facts | `team_id` |
 | `fact_delete` | Delete a fact | `team_id`, `key` |
 | `doc_create` | Create a document | `team_id`, `title`, `content` |
@@ -335,8 +523,152 @@ Team tools use a **dispatcher pattern** to reduce tool count while maintaining f
 | `comment` | Add comment to task thread | `team_id`, `task_id`, `content` |
 | `mention_check` | Check pending @mentions | `agent_id` |
 | `send_message` | Send direct message | `team_id`, `to_agent`, `content` |
-| `notify` | Send a notification | `team_id`, `type`, `message` |
+| `notify` | Send a notification | `team_id` (ID or name), `type`, `message` |
 | `notify_list` | Get team notifications | `team_id` |
+
+---
+
+## Notification System
+
+Agents can send notifications about their work to configured destinations. This enables real-time alerts and activity tracking.
+
+### Notification Types
+
+| Type | Description | When to Use |
+|------|-------------|-------------|
+| `task_completed` | Task finished successfully | When agent finishes a task |
+| `task_failed` | Task execution failed | When agent encounters an error |
+| `task_blocked` | Task is blocked by dependency | When agent can't proceed |
+| `task_progress` | Progress update on task | During long-running tasks |
+| `agent_error` | Agent encountered an error | Internal agent errors |
+
+### Notification Priority
+
+| Priority | Description | Use Case |
+|----------|-------------|----------|
+| 1 | Urgent - always delivered | Critical failures, security issues |
+| 2 | High - important | Task failures, blockers |
+| 3 | Normal | Standard completions, progress |
+| 4 | Low | Informational updates |
+| 5 | Minimal | Background updates |
+
+### Sending Notifications
+
+```bash
+# Task completed
+team_comm(
+  action="notify",
+  type="task_completed",
+  message="Authentication feature completed and tested",
+  task_id="xyz78901",
+  priority=3
+)
+
+# Task failed
+team_comm(
+  action="notify",
+  type="task_failed",
+  message="Database connection failed after 3 retries",
+  task_id="xyz78901",
+  priority=2
+)
+
+# Task blocked
+team_comm(
+  action="notify",
+  type="task_blocked",
+  message="Waiting for API key from infrastructure team",
+  task_id="xyz78901",
+  priority=3
+)
+
+# Progress update
+team_comm(
+  action="notify",
+  type="task_progress",
+  message="75% complete - running final tests",
+  task_id="xyz78901",
+  priority=4
+)
+```
+
+### Listing Notifications
+
+```bash
+team_comm(
+  action="notify_list",
+  team_id="devclaw-os",
+  limit=20,
+  unread_only=true
+)
+```
+
+### Notification Destinations
+
+| Type | Description |
+|------|-------------|
+| `channel` | Send to connected channel (WhatsApp, Discord, etc.) |
+| `inbox` | Add to agent's pending messages |
+| `webhook` | HTTP POST to external URL |
+| `owner` | Direct message to team owner |
+| `activity` | Add to team activity feed |
+
+### Configuration
+
+Configure notification rules in `config.yaml`:
+
+```yaml
+notifications:
+  enabled: true
+  defaults:
+    activity_feed: true
+    owner: false
+  quiet_hours:
+    enabled: true
+    start: "22:00"
+    end: "08:00"
+    timezone: "America/Sao_Paulo"
+  rate_limit_per_hour: 20
+  rules:
+    - name: "Critical Alerts"
+      enabled: true
+      events: [task_failed, agent_error]
+      destinations:
+        - type: channel
+          channel: "whatsapp"
+          chat_id: "120363XXXXXX@g.us"
+      priority: 1
+```
+
+### Notification Rules
+
+Rules define when and how notifications are sent:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique rule identifier |
+| `team_id` | string | Team ID (empty = global) |
+| `name` | string | Human-readable rule name |
+| `enabled` | bool | Rule active status |
+| `events` | []string | Notification types that trigger |
+| `conditions` | object | Additional filters |
+| `destinations` | []object | Where to send notifications |
+| `template` | string | Go template for message (optional) |
+| `priority` | int | Minimum priority to trigger (1-5) |
+| `rate_limit` | int | Max notifications per hour (0 = unlimited) |
+| `quiet_hours` | object | When to suppress notifications |
+
+### Quiet Hours
+
+Suppress non-urgent notifications during specific hours:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `enabled` | bool | Quiet hours active |
+| `start` | string | Start time (HH:MM) |
+| `end` | string | End time (HH:MM) |
+| `timezone` | string | Timezone for times |
+| `days` | []int | Days of week (0=Sunday, 6=Saturday) |
 
 ---
 
@@ -362,20 +694,21 @@ team_manage(
 # List all teams
 team_manage(action="list")
 
-# Get team details
-team_manage(action="get", team_id="abc12345")
+# Get team details (by ID or name)
+team_manage(action="get", team_id="5916dabf")
+team_manage(action="get", team_id="engineering")
 
 # Update team properties
 team_manage(
   action="update",
-  team_id="abc12345",
+  team_id="engineering",
   name="Engineering Team",
   description="Core engineering team",
   default_model="gpt-4.1-mini"
 )
 
 # Delete a team (WARNING: deletes all agents, tasks, and memory)
-team_manage(action="delete", team_id="abc12345")
+team_manage(action="delete", team_id="engineering")
 ```
 
 ### Creating Agents
@@ -384,7 +717,7 @@ team_manage(action="delete", team_id="abc12345")
 # Create a squad lead
 team_agent(
   action="create",
-  team_id="abc12345",
+  team_id="engineering",
   name="Jarvis",
   role="Squad Lead",
   personality="Professional, proactive, detail-oriented",
@@ -398,7 +731,7 @@ team_agent(
 # Create a writer
 team_agent(
   action="create",
-  team_id="abc12345",
+  team_id="engineering",
   name="Loki",
   role="Technical Writer",
   personality="Creative, thorough, articulate",
@@ -412,9 +745,9 @@ team_agent(
 
 ```bash
 # List agents
-team_agent(action="list", team_id="abc12345")
+team_agent(action="list", team_id="engineering")
 
-# Get agent details
+# Get agent details (includes instructions, personality, skills)
 team_agent(action="get", agent_id="jarvis")
 
 # Update agent properties
@@ -442,38 +775,42 @@ team_agent(action="delete", agent_id="loki")
 # Create a task
 team_task(
   action="create",
-  team_id="abc12345",
+  team_id="engineering",
   title="Implement authentication",
   description="Add OAuth2 support with Google and GitHub providers",
   assignees=["jarvis", "loki"]
 )
 
 # List tasks
-team_task(action="list", team_id="abc12345")
+team_task(action="list", team_id="engineering")
+
+# Filter tasks by status
+team_task(action="list", team_id="engineering", status="in_progress")
+
+# Filter tasks by assignee
+team_task(action="list", team_id="engineering", assignee="jarvis")
 
 # Get task details
-team_task(action="get", team_id="abc12345", task_id="xyz78901")
+team_task(action="get", team_id="engineering", task_id="xyz78901")
 
 # Update status
 team_task(
   action="update",
-  team_id="abc12345",
+  team_id="engineering",
   task_id="xyz78901",
-  status="in_progress",
-  comment="Starting implementation"
+  status="in_progress"
 )
 
 # Complete task
 team_task(
   action="update",
-  team_id="abc12345",
+  team_id="engineering",
   task_id="xyz78901",
-  status="done",
-  comment="OAuth2 implemented and tested"
+  status="done"
 )
 
 # Delete a task
-team_task(action="delete", team_id="abc12345", task_id="xyz78901")
+team_task(action="delete", team_id="engineering", task_id="xyz78901")
 ```
 
 ### Agent Communication
@@ -482,7 +819,7 @@ team_task(action="delete", team_id="abc12345", task_id="xyz78901")
 # Comment on task with mention
 team_comm(
   action="comment",
-  team_id="abc12345",
+  team_id="engineering",
   task_id="xyz78901",
   content="@loki can you write the docs for this endpoint?"
 )
@@ -493,7 +830,7 @@ team_comm(action="mention_check", agent_id="loki")
 # Send direct message
 team_comm(
   action="send_message",
-  team_id="abc12345",
+  team_id="engineering",
   to_agent="jarvis",
   content="The deployment is complete"
 )
@@ -505,19 +842,19 @@ team_comm(
 # Save facts
 team_memory(
   action="fact_save",
-  team_id="abc12345",
+  team_id="engineering",
   key="api_version",
   value="v2.1.0"
 )
 
 # List facts
-team_memory(action="fact_list", team_id="abc12345")
+team_memory(action="fact_list", team_id="engineering")
 
 # Delete fact
-team_memory(action="fact_delete", team_id="abc12345", key="api_version")
+team_memory(action="fact_delete", team_id="engineering", key="api_version")
 
 # Generate standup
-team_memory(action="standup", team_id="abc12345")
+team_memory(action="standup", team_id="engineering")
 ```
 
 ### Documents
@@ -526,7 +863,7 @@ team_memory(action="standup", team_id="abc12345")
 # Create a deliverable document
 team_memory(
   action="doc_create",
-  team_id="abc12345",
+  team_id="engineering",
   title="API Design Document",
   doc_type="deliverable",
   content="# API Design\n\n## Endpoints\n...",
@@ -534,21 +871,24 @@ team_memory(
 )
 
 # List documents
-team_memory(action="doc_list", team_id="abc12345")
+team_memory(action="doc_list", team_id="engineering")
+
+# Filter by type
+team_memory(action="doc_list", team_id="engineering", doc_type="research")
 
 # Get document
-team_memory(action="doc_get", team_id="abc12345", doc_id="doc123")
+team_memory(action="doc_get", team_id="engineering", doc_id="doc123")
 
 # Update document
 team_memory(
   action="doc_update",
-  team_id="abc12345",
+  team_id="engineering",
   doc_id="doc123",
   content="# API Design v2\n..."
 )
 
 # Delete document
-team_memory(action="doc_delete", team_id="abc12345", doc_id="doc123")
+team_memory(action="doc_delete", team_id="engineering", doc_id="doc123")
 ```
 
 ### Working State (WORKING.md)
@@ -569,23 +909,6 @@ team_agent(action="working_get", agent_id="jarvis")
 
 # Clear when task is done
 team_agent(action="working_clear", agent_id="jarvis")
-```
-
-### Notifications
-
-```bash
-# Send notification
-team_comm(
-  action="notify",
-  team_id="abc12345",
-  type="task_completed",
-  message="Authentication feature completed",
-  task_id="xyz78901",
-  priority=3
-)
-
-# Get notifications
-team_comm(action="notify_list", team_id="abc12345", limit=20, unread_only=true)
 ```
 
 ---
@@ -777,7 +1100,7 @@ Each agent run uses session isolation:
 
 ## Standup Generation
 
-The `team_standup` tool generates a daily standup summary:
+The `team_memory(action="standup")` tool generates a daily standup summary:
 
 ```
 📊 DAILY STANDUP — Feb 21, 2026
@@ -821,133 +1144,12 @@ The `team_standup` tool generates a daily standup summary:
 3. **Facts for Knowledge**: Store persistent knowledge as facts
 4. **Activity Awareness**: Monitor activity feed for team updates
 
----
+### Notifications
 
-## Notification System
-
-Agents can send notifications about their work to configured destinations. This enables real-time alerts and activity tracking.
-
-### Notification Types
-
-| Type | Description |
-|------|-------------|
-| `task_completed` | Task finished successfully |
-| `task_failed` | Task execution failed |
-| `task_blocked` | Task is blocked by dependency |
-| `task_progress` | Progress update on task |
-| `agent_error` | Agent encountered an error |
-
-### Notification Results
-
-| Result | Description |
-|--------|-------------|
-| `success` | Operation completed successfully |
-| `failure` | Operation failed |
-| `warning` | Warning condition |
-| `info` | Informational message |
-
-### Destinations
-
-| Type | Description |
-|------|-------------|
-| `channel` | Send to connected channel (WhatsApp, Discord, etc.) |
-| `inbox` | Add to agent's pending messages |
-| `webhook` | HTTP POST to external URL |
-| `owner` | Direct message to team owner |
-| `activity` | Add to team activity feed |
-
-### Using team_notify Tool
-
-Agents can manually send notifications:
-
-```
-team_notify(
-  team_id="abc12345",
-  type="task_completed",
-  message="Authentication feature completed and tested",
-  task_id="xyz78901",
-  priority=3
-)
-```
-
-### Getting Notifications
-
-View team notifications:
-
-```
-team_get_notifications(
-  team_id="abc12345",
-  limit=20,
-  unread_only=false
-)
-```
-
-### Configuration
-
-Configure notification rules in `config.yaml`:
-
-```yaml
-notifications:
-  enabled: true
-  defaults:
-    activity_feed: true
-    owner: false
-  quiet_hours:
-    enabled: true
-    start: "22:00"
-    end: "08:00"
-    timezone: "America/Sao_Paulo"
-  rate_limit_per_hour: 20
-  rules:
-    - name: "Critical Alerts"
-      enabled: true
-      events: [task_failed, agent_error]
-      destinations:
-        - type: channel
-          channel: "whatsapp"
-          chat_id: "120363XXXXXX@g.us"
-      priority: 1
-```
-
-### Notification Rules
-
-Rules define when and how notifications are sent:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Unique rule identifier |
-| `team_id` | string | Team ID (empty = global) |
-| `name` | string | Human-readable rule name |
-| `enabled` | bool | Rule active status |
-| `events` | []string | Notification types that trigger |
-| `conditions` | object | Additional filters |
-| `destinations` | []object | Where to send notifications |
-| `template` | string | Go template for message (optional) |
-| `priority` | int | Minimum priority to trigger (1-5) |
-| `rate_limit` | int | Max notifications per hour (0 = unlimited) |
-| `quiet_hours` | object | When to suppress notifications |
-
-### Quiet Hours
-
-Suppress non-urgent notifications during specific hours:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `enabled` | bool | Quiet hours active |
-| `start` | string | Start time (HH:MM) |
-| `end` | string | End time (HH:MM) |
-| `timezone` | string | Timezone for times |
-| `days` | []int | Days of week (0=Sunday, 6=Saturday) |
-
-### Notification Priority
-
-| Priority | Description |
-|----------|-------------|
-| 1 | Urgent - always delivered, even during quiet hours |
-| 2 | High - important notifications |
-| 3 | Normal | Standard priority |
-| 4 | Low | Informational |
-| 5 | Minimal | Background updates |
+1. **Always Notify on Completion**: Use `task_completed` when done
+2. **Notify on Errors**: Use `task_failed` or `agent_error` immediately
+3. **Notify on Blocks**: Use `task_blocked` when waiting for external input
+4. **Use Appropriate Priority**: Priority 2 for failures, 3 for normal, 4 for progress
 
 ---
 
@@ -955,7 +1157,7 @@ Suppress non-urgent notifications during specific hours:
 
 ### Agent Not Responding to Heartbeats
 
-1. Check agent status (`team_list_agents`)
+1. Check agent status (`team_agent(action="get", agent_id="...")`)
 2. Verify scheduler job exists
 3. Check heartbeat schedule expression
 4. Review agent logs
@@ -963,14 +1165,20 @@ Suppress non-urgent notifications during specific hours:
 ### Missing @Mentions
 
 1. Verify agent ID matches the mention
-2. Check pending messages (`team_check_mentions`)
+2. Check pending messages (`team_comm(action="mention_check", agent_id="...")`)
 3. Ensure agent is in the same team
 
 ### Task Not Showing
 
-1. Verify team ID matches
+1. Verify team ID/name matches
 2. Check task status filter
 3. Ensure proper assignment
+
+### Team Resolution Fails
+
+1. Check team exists with `team_manage(action="list")`
+2. Try using exact team ID instead of name
+3. Check for duplicate team names
 
 ---
 
@@ -980,7 +1188,7 @@ Suppress non-urgent notifications during specific hours:
 |------|---------|
 | `team_types.go` | Data structures (Team, PersistentAgent, TeamTask, etc.) |
 | `team_memory.go` | TeamMemory implementation (tasks, messages, facts) |
-| `team_manager.go` | TeamManager implementation (lifecycle, heartbeats) |
+| `team_manager.go` | TeamManager implementation (lifecycle, heartbeats, team resolution) |
 | `team_tools.go` | Dispatcher tools (5 tools with action parameter) |
 | `team_tools_dispatcher_test.go` | Unit tests for dispatcher tools |
 | `notification_dispatcher.go` | Notification routing and delivery |
