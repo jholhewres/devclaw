@@ -132,7 +132,23 @@
     "statusTitle": "Status da Conexão",
     "statusConfigured": "Configurado e pronto",
     "statusNotConfigured": "API key não configurada",
-    "currentProvider": "Provedor Atual"
+    "currentProvider": "Provedor Atual",
+    "freeProviders": "Provedores Gratuitos",
+    "paidProviders": "Provedores Pagos",
+    "localProviders": "Local / Self-Hosted",
+    "getApiKey": "Obter API Key",
+    "endpoint": "Endpoint",
+    "endpointHint": "Selecione o endpoint da API",
+    "context1m": "Ativar Contexto 1M",
+    "context1mDesc": "Ativar beta de contexto 1M tokens da Anthropic",
+    "toolStream": "Streaming de Tools em Tempo Real",
+    "toolStreamDesc": "Ativar streaming de chamadas de ferramentas",
+    "restartWarning": "Mudanças podem exigir reinicialização",
+    "validation": {
+      "providerRequired": "Selecione um provedor",
+      "modelRequired": "Selecione um modelo",
+      "apiKeyRequired": "API key obrigatória"
+    }
   },
   "access": {
     "title": "Controle de Acesso",

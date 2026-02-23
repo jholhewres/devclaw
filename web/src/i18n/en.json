@@ -132,7 +132,23 @@
     "statusTitle": "Connection Status",
     "statusConfigured": "Configured and ready",
     "statusNotConfigured": "API key not configured",
-    "currentProvider": "Current Provider"
+    "currentProvider": "Current Provider",
+    "freeProviders": "Free Providers",
+    "paidProviders": "Paid Providers",
+    "localProviders": "Local / Self-Hosted",
+    "getApiKey": "Get API Key",
+    "endpoint": "Endpoint",
+    "endpointHint": "Select the API endpoint",
+    "context1m": "Enable 1M Context",
+    "context1mDesc": "Enable Anthropic's 1M token context beta",
+    "toolStream": "Real-time Tool Streaming",
+    "toolStreamDesc": "Enable streaming tool calls",
+    "restartWarning": "Changes may require restart",
+    "validation": {
+      "providerRequired": "Please select a provider",
+      "modelRequired": "Please select a model",
+      "apiKeyRequired": "API key required"
+    }
   },
   "access": {
     "title": "Access Control",

@@ -1,5 +1,5 @@
 # ── Frontend build stage ──
-FROM node:22-alpine AS frontend
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
 
 WORKDIR /app/web
 
@@ -10,7 +10,7 @@ COPY web/ .
 RUN npm run build
 
 # ── Go build stage ──
-FROM golang:1.24-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS builder
 
 RUN apk --no-cache add ca-certificates git gcc musl-dev
 
@@ -29,7 +29,7 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
     -o devclaw ./cmd/devclaw
 
 # ── Runtime stage ──
-FROM alpine:3.21
+FROM --platform=linux/arm64 alpine:3.21
 
 # Install runtime dependencies and build tools
 RUN apk --no-cache add \

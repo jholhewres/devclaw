@@ -10,11 +10,8 @@ import {
   Zap,
   Cpu,
   AlertTriangle,
-  Bot,
-  Sparkles,
-  Cloud,
-  Server,
-  Globe,
+  ExternalLink,
+  AlertCircle,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import {
@@ -28,19 +25,15 @@ import {
   LoadingSpinner,
   ErrorState,
 } from '@/components/ui/ConfigComponents'
-
-// Provider configurations with default URLs
-const PROVIDERS = [
-  { id: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', icon: Sparkles, color: '#10a37f' },
-  { id: 'anthropic', name: 'Anthropic', baseUrl: 'https://api.anthropic.com/v1', icon: Bot, color: '#d97706' },
-  { id: 'google', name: 'Google AI', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', icon: Cloud, color: '#4285f4' },
-  { id: 'zai', name: 'Z.AI', baseUrl: 'https://api.z.ai/v1', icon: Zap, color: '#8b5cf6' },
-  { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', icon: Cpu, color: '#f55036' },
-  { id: 'ollama', name: 'Ollama', baseUrl: 'http://localhost:11434/v1', icon: Server, color: '#6366f1' },
-  { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', icon: Globe, color: '#64748b' },
-  { id: 'xai', name: 'xAI', baseUrl: 'https://api.x.ai/v1', icon: Zap, color: '#000000' },
-  { id: 'custom', name: 'Custom', baseUrl: '', icon: Server, color: '#64748b' },
-]
+import { ProviderCard } from '@/components/ui/ProviderCard'
+import { EndpointSelector } from '@/components/ui/EndpointSelector'
+import {
+  categorizeProviders,
+  getProviderByValue,
+  getVisibleModels,
+  getDefaultBaseUrl,
+  PROVIDER_CATEGORIES,
+} from '@/lib/providers'
 
 interface APIConfigData {
   provider: string
@@ -49,6 +42,10 @@ interface APIConfigData {
   api_key_masked?: string
   model: string
   models?: string[]
+  params?: {
+    context1m?: boolean
+    tool_stream?: boolean
+  }
 }
 
 interface ConnectionTestResult {
@@ -86,40 +83,6 @@ function PasswordInput({ value, onChange, placeholder }: {
   )
 }
 
-// Provider card component
-function ProviderCard({ provider, isSelected, onClick }: {
-  provider: typeof PROVIDERS[0]
-  isSelected: boolean
-  onClick: () => void
-}) {
-  const Icon = provider.icon
-  return (
-    <button
-      onClick={onClick}
-      className={`relative flex flex-col items-center justify-center gap-2 p-4 rounded-xl border transition-all ${
-        isSelected
-          ? 'border-[#3b82f6] bg-[#3b82f6]/10'
-          : 'border-white/10 bg-[#111827] hover:border-white/20 hover:bg-[#1e293b]'
-      }`}
-    >
-      {isSelected && (
-        <div className="absolute top-2 right-2">
-          <CheckCircle2 className="h-4 w-4 text-[#3b82f6]" />
-        </div>
-      )}
-      <div
-        className="flex h-10 w-10 items-center justify-center rounded-lg"
-        style={{ backgroundColor: `${provider.color}20` }}
-      >
-        <Icon className="h-5 w-5" style={{ color: provider.color }} />
-      </div>
-      <span className={`text-sm font-medium ${isSelected ? 'text-[#f8fafc]' : 'text-[#94a3b8]'}`}>
-        {provider.name}
-      </span>
-    </button>
-  )
-}
-
 export function ApiConfig() {
   const { t } = useTranslation()
   const [config, setConfig] = useState<APIConfigData | null>(null)
@@ -131,7 +94,11 @@ export function ApiConfig() {
   const [apiKey, setApiKey] = useState('')
   const [testingConnection, setTestingConnection] = useState(false)
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null)
-  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [selectedEndpoint, setSelectedEndpoint] = useState<string>('')
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
+
+  // Categorized providers
+  const { free, paid, local } = categorizeProviders()
 
   useEffect(() => {
     loadConfig()
@@ -142,8 +109,13 @@ export function ApiConfig() {
       const data = await api.config.get() as unknown as APIConfigData
       setConfig(data)
       setOriginal(JSON.parse(JSON.stringify(data)))
-      if (data.models && data.models.length > 0) {
-        setAvailableModels(data.models)
+      // Set selected endpoint from base_url if matches a provider's baseUrls
+      const provider = getProviderByValue(data.provider)
+      if (provider?.baseUrls) {
+        const matchingEndpoint = provider.baseUrls.find(ep => ep.value === data.base_url)
+        if (matchingEndpoint) {
+          setSelectedEndpoint(matchingEndpoint.value)
+        }
       }
     } catch {
       setLoadError(true)
@@ -154,19 +126,49 @@ export function ApiConfig() {
 
   const hasChanges = JSON.stringify(config) !== JSON.stringify(original) || apiKey !== ''
 
+  // Get current provider definition
+  const provider = config ? getProviderByValue(config.provider) : undefined
+  const visibleModels = getVisibleModels(provider, selectedEndpoint)
+
   const handleProviderChange = useCallback((providerId: string) => {
-    const provider = PROVIDERS.find(p => p.id === providerId)
+    const newProvider = getProviderByValue(providerId)
+    const defaultUrl = newProvider ? getDefaultBaseUrl(newProvider) : ''
+
     setConfig(prev => prev ? {
       ...prev,
       provider: providerId,
-      base_url: provider?.baseUrl || prev.base_url,
+      base_url: defaultUrl,
+      model: '',
     } : prev)
+    setSelectedEndpoint('')
     setTestResult(null)
-    setAvailableModels([])
+    setValidationErrors({})
+  }, [])
+
+  const handleEndpointChange = useCallback((endpoint: string) => {
+    setConfig(prev => prev ? {
+      ...prev,
+      base_url: endpoint,
+    } : prev)
+    setSelectedEndpoint(endpoint)
+    setTestResult(null)
   }, [])
 
   const handleTestConnection = async () => {
     if (!config) return
+
+    // Validate before testing
+    const errors: Record<string, string> = {}
+    if (!config.provider) errors.provider = t('apiConfig.validation.providerRequired')
+    if (!config.model) errors.model = t('apiConfig.validation.modelRequired')
+    if (!provider?.noKey && !config.api_key_configured && !apiKey) {
+      errors.apiKey = t('apiConfig.validation.apiKeyRequired')
+    }
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors)
+      return
+    }
+
     setTestingConnection(true)
     setTestResult(null)
     setMessage(null)
@@ -194,6 +196,19 @@ export function ApiConfig() {
 
   const handleSave = async () => {
     if (!config) return
+
+    // Validate before saving
+    const errors: Record<string, string> = {}
+    if (!config.provider) errors.provider = t('apiConfig.validation.providerRequired')
+    if (!config.model) errors.model = t('apiConfig.validation.modelRequired')
+    if (!provider?.noKey && !config.api_key_configured && !apiKey) {
+      errors.apiKey = t('apiConfig.validation.apiKeyRequired')
+    }
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors)
+      return
+    }
+
     setSaving(true)
     setMessage(null)
     try {
@@ -201,6 +216,7 @@ export function ApiConfig() {
         provider: config.provider,
         model: config.model,
         base_url: config.base_url,
+        params: config.params,
       }
       if (apiKey) {
         payload.api_key = apiKey
@@ -209,6 +225,7 @@ export function ApiConfig() {
       setConfig(result)
       setOriginal(JSON.parse(JSON.stringify(result)))
       setApiKey('')
+      setValidationErrors({})
       setMessage({ type: 'success', text: t('common.success') })
     } catch {
       setMessage({ type: 'error', text: t('common.error') })
@@ -221,15 +238,22 @@ export function ApiConfig() {
     if (original) {
       setConfig(JSON.parse(JSON.stringify(original)))
       setApiKey('')
+      // Reset selected endpoint
+      const prov = getProviderByValue(original.provider)
+      if (prov?.baseUrls) {
+        const matchingEndpoint = prov.baseUrls.find(ep => ep.value === original.base_url)
+        setSelectedEndpoint(matchingEndpoint?.value || '')
+      } else {
+        setSelectedEndpoint('')
+      }
     }
     setMessage(null)
     setTestResult(null)
+    setValidationErrors({})
   }
 
   if (loading) return <LoadingSpinner />
   if (loadError || !config) return <ErrorState onRetry={() => window.location.reload()} />
-
-  const selectedProvider = PROVIDERS.find(p => p.id === config.provider)
 
   return (
     <ConfigPage
@@ -249,19 +273,69 @@ export function ApiConfig() {
         />
       }
     >
-      {/* Provider Selection */}
+      {/* Restart Warning */}
+      {hasChanges && (
+        <div className="mb-6 flex items-center gap-2 rounded-xl border border-[#f59e0b]/20 bg-[#f59e0b]/5 px-4 py-3">
+          <AlertCircle className="h-4 w-4 text-[#f59e0b] flex-shrink-0" />
+          <p className="text-sm text-[#fcd34d]">{t('apiConfig.restartWarning')}</p>
+        </div>
+      )}
+
+      {/* Provider Selection - Free */}
       <ConfigSection
         icon={Cpu}
-        title={t('apiConfig.providerSection')}
-        description={t('apiConfig.providerSectionDesc')}
+        title={t('apiConfig.freeProviders')}
+        description=""
       >
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 -mt-2">
-          {PROVIDERS.map((provider) => (
+        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2 -mt-2">
+          {free.map((p) => (
             <ProviderCard
-              key={provider.id}
-              provider={provider}
-              isSelected={config.provider === provider.id}
-              onClick={() => handleProviderChange(provider.id)}
+              key={p.value}
+              provider={p}
+              isSelected={config.provider === p.value}
+              onClick={() => handleProviderChange(p.value)}
+              accentColor={PROVIDER_CATEGORIES.free.accentColor}
+              size="sm"
+            />
+          ))}
+        </div>
+      </ConfigSection>
+
+      {/* Provider Selection - Paid */}
+      <ConfigSection
+        icon={Cpu}
+        title={t('apiConfig.paidProviders')}
+        description=""
+      >
+        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2 -mt-2">
+          {paid.map((p) => (
+            <ProviderCard
+              key={p.value}
+              provider={p}
+              isSelected={config.provider === p.value}
+              onClick={() => handleProviderChange(p.value)}
+              accentColor={PROVIDER_CATEGORIES.paid.accentColor}
+              size="sm"
+            />
+          ))}
+        </div>
+      </ConfigSection>
+
+      {/* Provider Selection - Local */}
+      <ConfigSection
+        icon={Cpu}
+        title={t('apiConfig.localProviders')}
+        description=""
+      >
+        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2 -mt-2">
+          {local.map((p) => (
+            <ProviderCard
+              key={p.value}
+              provider={p}
+              isSelected={config.provider === p.value}
+              onClick={() => handleProviderChange(p.value)}
+              accentColor={PROVIDER_CATEGORIES.local.accentColor}
+              size="sm"
             />
           ))}
         </div>
@@ -273,28 +347,78 @@ export function ApiConfig() {
         title={t('apiConfig.connectionSection')}
         description={t('apiConfig.connectionSectionDesc')}
       >
-        <ConfigField label={t('apiConfig.baseUrl')} hint={t('apiConfig.baseUrlHint')}>
-          <ConfigInput
-            value={config.base_url}
-            onChange={(v) => setConfig(prev => prev ? { ...prev, base_url: v } : prev)}
-            placeholder={selectedProvider?.baseUrl || 'https://api.example.com/v1'}
-          />
-        </ConfigField>
+        {/* Provider info with link */}
+        {provider && provider.freeUrl && (
+          <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-[#0c1222] px-3 py-2 mb-4">
+            <div className="flex-1">
+              <p className="text-xs text-[#94a3b8]">
+                {provider.freeNote || provider.description}
+              </p>
+            </div>
+            <a
+              href={provider.freeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 text-xs text-[#3b82f6] hover:text-[#60a5fa] transition-colors"
+            >
+              {t('apiConfig.getApiKey')}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+        )}
 
-        <ConfigField label={t('apiConfig.apiKey')} hint={t('apiConfig.apiKeyHint')}>
-          <PasswordInput
-            value={apiKey}
-            onChange={setApiKey}
-            placeholder={config.api_key_configured ? (config.api_key_masked || '••••••• (configured)') : t('apiConfig.apiKeyPlaceholder')}
-          />
-        </ConfigField>
+        {/* Endpoint selector */}
+        {provider?.baseUrls && (
+          <ConfigField label={t('apiConfig.endpoint')} hint={t('apiConfig.endpointHint')}>
+            <EndpointSelector
+              endpoints={provider.baseUrls}
+              value={selectedEndpoint}
+              onChange={handleEndpointChange}
+            />
+          </ConfigField>
+        )}
 
-        <ConfigField label={t('apiConfig.model')} hint={t('apiConfig.modelHint')}>
-          {availableModels.length > 0 ? (
+        {/* Custom base URL */}
+        {provider?.customBaseUrl && (
+          <ConfigField label={t('apiConfig.baseUrl')} hint={t('apiConfig.baseUrlHint')}>
+            <ConfigInput
+              value={config.base_url}
+              onChange={(v) => setConfig(prev => prev ? { ...prev, base_url: v } : prev)}
+              placeholder="https://api.example.com/v1"
+            />
+          </ConfigField>
+        )}
+
+        {/* API Key */}
+        {!provider?.noKey && (
+          <div className="space-y-2">
+            <ConfigField
+              label={t('apiConfig.apiKey')}
+              hint={t('apiConfig.apiKeyHint')}
+            >
+              <PasswordInput
+                value={apiKey}
+                onChange={setApiKey}
+                placeholder={config.api_key_configured ? (config.api_key_masked || '••••••• (configured)') : provider?.keyPlaceholder || t('apiConfig.apiKeyPlaceholder')}
+              />
+            </ConfigField>
+            {validationErrors.apiKey && (
+              <p className="text-xs text-[#f87171]">{validationErrors.apiKey}</p>
+            )}
+          </div>
+        )}
+
+        {/* Model */}
+        <div className="space-y-2">
+          <ConfigField
+            label={t('apiConfig.model')}
+            hint={t('apiConfig.modelHint')}
+          >
+          {visibleModels.length > 0 ? (
             <ConfigSelect
               value={config.model}
               onChange={(v) => setConfig(prev => prev ? { ...prev, model: v } : prev)}
-              options={availableModels.map(m => ({ value: m, label: m }))}
+              options={visibleModels.map(m => ({ value: m, label: m }))}
               placeholder={t('apiConfig.selectModel')}
             />
           ) : (
@@ -305,6 +429,47 @@ export function ApiConfig() {
             />
           )}
         </ConfigField>
+        {validationErrors.model && (
+          <p className="text-xs text-[#f87171] -mt-3">{validationErrors.model}</p>
+        )}
+        </div>
+
+        {/* Provider-specific params */}
+        {provider?.value === 'anthropic' && (
+          <div className="flex items-center gap-3 py-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={config.params?.context1m || false}
+                onChange={(e) => setConfig(prev => prev ? {
+                  ...prev,
+                  params: { ...prev.params, context1m: e.target.checked }
+                } : prev)}
+                className="h-4 w-4 rounded border-white/20 bg-[#111827] text-[#3b82f6] focus:ring-[#3b82f6]/20"
+              />
+              <span className="text-sm text-[#94a3b8]">{t('apiConfig.context1m')}</span>
+            </label>
+            <span className="text-xs text-[#64748b]">{t('apiConfig.context1mDesc')}</span>
+          </div>
+        )}
+
+        {provider?.value === 'zai' && (
+          <div className="flex items-center gap-3 py-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={config.params?.tool_stream || false}
+                onChange={(e) => setConfig(prev => prev ? {
+                  ...prev,
+                  params: { ...prev.params, tool_stream: e.target.checked }
+                } : prev)}
+                className="h-4 w-4 rounded border-white/20 bg-[#111827] text-[#3b82f6] focus:ring-[#3b82f6]/20"
+              />
+              <span className="text-sm text-[#94a3b8]">{t('apiConfig.toolStream')}</span>
+            </label>
+            <span className="text-xs text-[#64748b]">{t('apiConfig.toolStreamDesc')}</span>
+          </div>
+        )}
 
         {/* Connection Test */}
         <div className="pt-4 border-t border-white/5">

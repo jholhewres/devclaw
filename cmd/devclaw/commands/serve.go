@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"os/signal"
@@ -544,6 +545,7 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 				"provider":           cfg.API.Provider,
 				"base_url":           cfg.API.BaseURL,
 				"api_key_configured": cfg.API.APIKey != "",
+				"params":             cfg.API.Params,
 				"media": map[string]any{
 					"vision_enabled":          media.VisionEnabled,
 					"vision_model":            media.VisionModel,
@@ -577,6 +579,15 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 			}
 			if v, ok := updates["api_key"].(string); ok && v != "" {
 				cfg.API.APIKey = v
+			}
+			// Update API params (provider-specific settings like context1m, tool_stream).
+			if paramsRaw, ok := updates["params"]; ok {
+				if paramsMap, ok := paramsRaw.(map[string]any); ok {
+					if cfg.API.Params == nil {
+						cfg.API.Params = make(map[string]any)
+					}
+					maps.Copy(cfg.API.Params, paramsMap)
+				}
 			}
 
 			// Update media config.
