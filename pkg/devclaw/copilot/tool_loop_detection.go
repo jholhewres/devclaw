@@ -85,13 +85,13 @@ var knownNoProgressTools = map[string]map[string]bool{
 
 // destructiveTools are tools that can cause data loss or irreversible changes.
 // These get additional batch detection to prevent accidental mass operations.
+// Note: Dispatcher tools (team_agent, team_manage, team_task) are NOT included
+// because they have multiple actions, not all destructive. The DestructiveTracker
+// handles those with action-specific checking.
 var destructiveTools = map[string]bool{
 	"cron_remove":     true,
 	"vault_delete":    true,
 	"sessions_delete": true,
-	"team_agent":      true, // Can delete agents
-	"team_manage":     true, // Can delete teams
-	"team_task":       true, // Can delete tasks
 }
 
 // ToolLoopDetector tracks tool call history and detects loops.

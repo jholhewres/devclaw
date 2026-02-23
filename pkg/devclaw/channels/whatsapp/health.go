@@ -20,10 +20,6 @@ type HealthMonitorConfig struct {
 	// a health check is considered failed.
 	// Default: 5m
 	MaxSilentDuration time.Duration `yaml:"max_silent_duration"`
-
-	// PingEnabled enables proactive pings to keep the connection alive.
-	// Default: true
-	PingEnabled bool `yaml:"ping_enabled"`
 }
 
 // DefaultHealthMonitorConfig returns sensible defaults.
@@ -32,7 +28,6 @@ func DefaultHealthMonitorConfig() HealthMonitorConfig {
 		Enabled:           true,
 		CheckInterval:     30 * time.Second,
 		MaxSilentDuration: 5 * time.Minute,
-		PingEnabled:       true,
 	}
 }
 
@@ -57,8 +52,7 @@ func (w *WhatsApp) StartHealthMonitor(ctx context.Context, cfg HealthMonitorConf
 
 		w.logger.Info("whatsapp health monitor started",
 			"check_interval", cfg.CheckInterval,
-			"max_silent", cfg.MaxSilentDuration,
-			"ping_enabled", cfg.PingEnabled)
+			"max_silent", cfg.MaxSilentDuration)
 
 		for {
 			select {

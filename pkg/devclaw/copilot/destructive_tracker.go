@@ -111,6 +111,7 @@ func (d *DestructiveTracker) IsDestructive(toolName string) bool {
 }
 
 // Check evaluates whether a destructive tool call should be allowed.
+// It does NOT modify state - call RecordCall() after the tool executes.
 func (d *DestructiveTracker) Check(toolName string) DestructiveCheckResult {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -144,27 +145,28 @@ func (d *DestructiveTracker) Check(toolName string) DestructiveCheckResult {
 	}
 
 	// 3. Check for batch pattern (consecutive calls to same destructive tool).
-	if toolName == d.lastDestructiveTool {
-		d.consecutiveCount++
-		if d.consecutiveCount >= d.config.BatchThreshold {
-			result.BatchWarning = fmt.Sprintf(
-				"DESTRUCTIVE BATCH WARNING: You have called '%s' %d times consecutively. "+
-					"Please confirm with the user before proceeding with more deletions.",
-				toolName, d.consecutiveCount)
+	// Note: We check but don't modify state here - RecordCall() will update.
+	pendingCount := d.consecutiveCount + 1
+	if toolName != d.lastDestructiveTool {
+		pendingCount = 1
+	}
 
-			if d.config.RequireInteractiveConfirmation {
-				result.RequiresUserInput = true
-			}
+	if pendingCount >= d.config.BatchThreshold {
+		result.BatchWarning = fmt.Sprintf(
+			"DESTRUCTIVE BATCH WARNING: You are about to call '%s' %d times consecutively. "+
+				"Please confirm with the user before proceeding with more deletions.",
+			toolName, pendingCount)
+
+		if d.config.RequireInteractiveConfirmation {
+			result.RequiresUserInput = true
 		}
-	} else {
-		d.lastDestructiveTool = toolName
-		d.consecutiveCount = 1
 	}
 
 	return result
 }
 
 // RecordCall records a destructive tool call for rate limiting.
+// This should be called AFTER the tool executes successfully.
 func (d *DestructiveTracker) RecordCall(toolName string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -176,6 +178,14 @@ func (d *DestructiveTracker) RecordCall(toolName string) {
 
 	// Update cooldown.
 	d.lastDestructiveTime = now
+
+	// Update consecutive count.
+	if toolName == d.lastDestructiveTool {
+		d.consecutiveCount++
+	} else {
+		d.lastDestructiveTool = toolName
+		d.consecutiveCount = 1
+	}
 
 	// Clean old entries (keep only last minute).
 	d.cleanOldEntries(toolName, now)
