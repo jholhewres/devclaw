@@ -32,11 +32,11 @@ func TestHandleConnected(t *testing.T) {
 	})
 
 	t.Run("resets reconnect attempts", func(t *testing.T) {
-		w.reconnectAttempts = 5
+		w.reconnectAttempts.Store(5)
 		w.handleConnected(&events.Connected{})
 
-		if w.reconnectAttempts != 0 {
-			t.Errorf("expected reconnect attempts 0, got %d", w.reconnectAttempts)
+		if w.reconnectAttempts.Load() != 0 {
+			t.Errorf("expected reconnect attempts 0, got %d", w.reconnectAttempts.Load())
 		}
 	})
 }
