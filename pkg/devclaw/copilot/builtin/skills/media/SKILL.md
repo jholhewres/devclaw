@@ -8,6 +8,33 @@ trigger: automatic
 
 Process and send media files (images, audio, documents) through messaging channels like WhatsApp.
 
+## ⚠️ REGRAS CRÍTICAS
+
+| Regra | Motivo |
+|-------|--------|
+| **SEMPRE** use `send_document` para enviar PDFs | Criar arquivo ≠ enviar |
+| **SEMPRE** use `send_image` para enviar imagens | Não apenas criar |
+| Use `caption` para contexto | Ajuda usuário entender o arquivo |
+| Verifique se arquivo existe antes de enviar | Evita erros |
+
+### ❌ Errado
+```
+Usuário: "Me envia o PDF"
+Agente: bash(command="ls /tmp/arquivo.pdf")  ❌
+Agente: "O PDF está em /tmp/arquivo.pdf"     ❌ (não enviou!)
+```
+
+### ✓ Correto
+```
+Usuário: "Me envia o PDF"
+Agente: send_document(                        ✓
+  document_path="/tmp/arquivo.pdf",
+  caption="Lista de compras",
+  filename="lista.pdf"
+)
+Agente: "Enviado!"                            ✓
+```
+
 ## Architecture
 
 ```
@@ -35,23 +62,13 @@ Process and send media files (images, audio, documents) through messaging channe
 
 ## Tools
 
-| Tool | Action | Direction |
-|------|--------|-----------|
-| `describe_image` | Analyze image with AI vision | Input |
-| `transcribe_audio` | Convert audio to text | Input |
-| `send_image` | Send image to user | Output |
-| `send_audio` | Send audio file | Output |
-| `send_document` | Send PDF/document | Output |
-
-## When to Use
-
-| Tool | When |
-|------|------|
-| `describe_image` | User sends image, needs analysis |
-| `transcribe_audio` | User sends voice message |
-| `send_image` | Visual response needed |
-| `send_audio` | Voice response, music |
-| `send_document` | PDFs, reports, files |
+| Tool | Action | Use When |
+|------|--------|----------|
+| `describe_image` | Analyze image with AI vision | User sends image |
+| `transcribe_audio` | Convert audio to text | User sends voice message |
+| `send_image` | **SEND** image to user | User needs visual response |
+| `send_audio` | **SEND** audio file | User needs audio response |
+| `send_document` | **SEND** PDF/document | User needs document |
 
 ## Input Processing
 
@@ -61,8 +78,7 @@ Process and send media files (images, audio, documents) through messaging channe
 describe_image(image_path="/tmp/photo.jpg")
 # Output:
 # The image shows a green fern plant in a white ceramic pot.
-# The plant appears healthy with several fronds. It's sitting
-# on a wooden table near a window with natural light.
+# The plant appears healthy with several fronds.
 ```
 
 ### Audio Transcription
@@ -70,11 +86,25 @@ describe_image(image_path="/tmp/photo.jpg")
 ```bash
 transcribe_audio(audio_path="/tmp/voice.ogg")
 # Output:
-# "Olá, gostaria de saber se vocês entregam na minha região.
-#  Moro no centro da cidade."
+# "Olá, gostaria de saber sobre a entrega."
 ```
 
-## Sending Media
+## Sending Media (OUTPUT)
+
+### ⚠️ CRÍTICO: Sempre Envie!
+
+Quando usuário pedir para enviar arquivo, USE a ferramenta de envio:
+
+### Send Document (PDF, DOC, etc)
+
+```bash
+send_document(
+  document_path="/tmp/report.pdf",
+  caption="Relatório Mensal - Fevereiro 2026",
+  filename="relatorio-fev-2026.pdf"
+)
+# Output: Document sent successfully
+```
 
 ### Send Image
 
@@ -83,7 +113,7 @@ send_image(
   image_path="/tmp/chart.png",
   caption="Gráfico de vendas do mês"
 )
-# Output: Image sent successfully to whatsapp:5511999999
+# Output: Image sent successfully
 ```
 
 ### Send Audio
@@ -96,17 +126,6 @@ send_audio(
 # Output: Audio sent successfully
 ```
 
-### Send Document
-
-```bash
-send_document(
-  document_path="/tmp/report.pdf",
-  caption="Relatório Mensal - Fevereiro 2026",
-  filename="relatorio-fev-2026.pdf"
-)
-# Output: Document sent successfully
-```
-
 ## Supported Formats
 
 | Type | Formats | Max Size |
@@ -117,186 +136,155 @@ send_document(
 
 ## Common Patterns
 
-### Image Analysis Response
+### Generate and Send PDF
 ```bash
-# User sends photo of a plant
+# 1. Gerar PDF
+bash(command="python3 scripts/create_pdf.py --output /tmp/lista.pdf")
 
-# 1. Analyze the image
-describe_image(image_path="/tmp/plant.jpg")
-# Output: "A healthy monstera plant with large green leaves..."
+# 2. Verificar se criou
+bash(command="ls -lh /tmp/lista.pdf")
 
-# 2. Respond with analysis
-send_message("That's a beautiful Monstera deliciosa! It likes bright indirect light and watering when the top inch of soil is dry.")
-```
+# 3. ENVIAR (não apenas informar que existe!)
+send_document(
+  document_path="/tmp/lista.pdf",
+  caption="Lista de Compras",
+  filename="lista.pdf"
+)
 
-### Voice Message Flow
-```bash
-# User sends voice message
-
-# 1. Transcribe
-transcribe_audio(audio_path="/tmp/voice.ogg")
-# Output: "What's the weather like today?"
-
-# 2. Process and respond
-send_message("It's currently sunny and 24°C in your area!")
+# 4. Confirmar
+send_message("PDF enviado!")
 ```
 
 ### Generate and Send Chart
 ```bash
-# 1. Generate visualization
+# 1. Gerar visualização
 bash(command="python scripts/generate_chart.py --output /tmp/sales.png")
 
-# 2. Send to user
+# 2. ENVIAR
 send_image(
   image_path="/tmp/sales.png",
   caption="Vendas por categoria - Últimos 30 dias"
 )
 ```
 
-### Create and Send Report
+### User Sends Image → Analyze
 ```bash
-# 1. Generate PDF report
-bash(command="pandoc report.md -o /tmp/report.pdf --pdf-engine=weasyprint")
+# User sends photo
 
-# 2. Send to user
-send_document(
-  document_path="/tmp/report.pdf",
-  caption="Relatório de Atividades",
-  filename="relatorio-atividades.pdf"
-)
+# 1. Analyze
+describe_image(image_path="/tmp/plant.jpg")
+
+# 2. Respond based on analysis
+send_message("Essa é uma Samambaia! Ela gosta de luz indireta e rega quando o topo da terra estiver seco.")
 ```
 
-### Audio Response
+### User Sends Voice → Transcribe
 ```bash
-# 1. Generate audio (TTS)
-bash(command="tts --text 'Your order has been confirmed' --output /tmp/confirm.mp3")
+# User sends voice message
 
-# 2. Send audio
-send_audio(
-  audio_path="/tmp/confirm.mp3",
-  caption="Confirmação de pedido"
+# 1. Transcribe
+transcribe_audio(audio_path="/tmp/voice.ogg")
+
+# 2. Process and respond
+send_message("Entendi! Vou verificar isso para você.")
+```
+
+## Workflow Completo: Criar e Enviar PDF
+
+```bash
+# Usuário: "Gera um PDF dessa lista e me envia"
+
+# PASSO 1: Criar o PDF
+bash(command="python3 << 'PYEOF'
+from fpdf import FPDF
+pdf = FPDF()
+pdf.add_page()
+pdf.set_font('Arial', 'B', 16)
+pdf.cell(0, 10, 'Lista de Compras', 0, 1, 'C')
+pdf.set_font('Arial', '', 12)
+items = ['Papel higiênico', 'Peito de frango', 'Ovos', 'Tomates', 'Coentro']
+for item in items:
+    pdf.cell(0, 10, f'• {item}', 0, 1)
+pdf.output('/tmp/lista.pdf')
+PYEOF")
+
+# PASSO 2: Verificar criação (opcional)
+bash(command="ls -lh /tmp/lista.pdf")
+# Output: -rw-r--r-- 1 user user 1.7K Feb 24 14:36 /tmp/lista.pdf
+
+# PASSO 3: ENVIAR (CRÍTICO!)
+send_document(
+  document_path="/tmp/lista.pdf",
+  caption="Lista de Compras",
+  filename="lista-compras.pdf"
 )
+# Output: Document sent successfully
+
+# PASSO 4: Confirmar
+send_message("PDF enviado! 📄")
 ```
 
 ## Troubleshooting
 
 ### "File not found"
 
-**Cause:** Path incorrect or file doesn't exist.
+**Causa:** Arquivo não existe no caminho especificado.
 
 **Debug:**
 ```bash
-# Check file exists
-bash(command="ls -la /tmp/photo.jpg")
+# Verificar se arquivo existe
+bash(command="ls -la /tmp/arquivo.pdf")
+```
+
+### Arquivo não chegou no WhatsApp
+
+**Causa:** Não usou `send_document`/`send_image`.
+
+**Solução:**
+```bash
+# ❌ Errado - apenas verifica
+bash(command="ls /tmp/arquivo.pdf")
+
+# ✓ Correto - envia
+send_document(document_path="/tmp/arquivo.pdf", caption="...")
 ```
 
 ### "Unsupported format"
 
-**Cause:** File format not supported by channel.
+**Causa:** Formato não suportado pelo canal.
 
-**Solution:**
+**Solução:**
 ```bash
-# Convert format
+# Converter formato
 bash(command="ffmpeg -i input.wav output.mp3")
 send_audio(audio_path="/tmp/output.mp3")
 ```
 
 ### "File too large"
 
-**Cause:** Exceeds channel size limit.
+**Causa:** Excede limite do canal.
 
-**Solution:**
+**Solução:**
 ```bash
-# Compress image
-bash(command="convert large.png -resize 50% -quality 85 small.jpg")
-
-# Compress PDF
+# Comprimir
 bash(command="gs -sDEVICE=pdfwrite -dPDFSETTINGS=/ebook -o small.pdf large.pdf")
-```
-
-### "Transcription failed"
-
-**Cause:** Audio quality poor or language not supported.
-
-**Debug:**
-```bash
-# Check audio file
-bash(command="ffprobe /tmp/voice.ogg")
-
-# Convert to better format
-bash(command="ffmpeg -i voice.ogg -ar 16000 voice-clean.wav")
-```
-
-### "Image analysis failed"
-
-**Cause:** Image corrupted or format issue.
-
-**Debug:**
-```bash
-# Verify image
-bash(command="file /tmp/photo.jpg")
-bash(command="identify /tmp/photo.jpg")
+send_document(document_path="/tmp/small.pdf", caption="...")
 ```
 
 ## Tips
 
-- **Add captions**: Provides context for media
-- **Use descriptive filenames**: Easier to identify
-- **Check file sizes**: Large files may fail
-- **Compress when needed**: Faster upload/sending
-- **Verify paths**: Ensure files exist before sending
-- **Handle formats**: Convert unsupported formats
-
-## Workflow Examples
-
-### Customer Support with Photo
-```bash
-# Customer sends photo of damaged product
-
-# 1. Analyze image
-describe_image(image_path="/tmp/damage.jpg")
-# Output: "Shows a cracked screen on a smartphone..."
-
-# 2. Create support ticket
-send_message("I can see the screen damage. I'll process a replacement for you.")
-
-# 3. Generate return label
-bash(command="python scripts/generate_label.py --order 12345 --output /tmp/label.pdf")
-
-# 4. Send label
-send_document(
-  document_path="/tmp/label.pdf",
-  caption="Return shipping label - Order #12345",
-  filename="return-label.pdf"
-)
-```
-
-### Report Generation Workflow
-```bash
-# 1. Gather data
-bash(command="python scripts/analyze_sales.py > /tmp/report.md")
-
-# 2. Convert to PDF
-bash(command="pandoc /tmp/report.md -o /tmp/sales-report.pdf")
-
-# 3. Generate summary chart
-bash(command="python scripts/chart.py --output /tmp/chart.png")
-
-# 4. Send both
-send_image(image_path="/tmp/chart.png", caption="Resumo de vendas")
-send_document(
-  document_path="/tmp/sales-report.pdf",
-  caption="Relatório completo",
-  filename="sales-report.pdf"
-)
-```
+- **Sempre use send_* tools**: Criar arquivo não é enviar
+- **Adicione caption**: Dá contexto ao arquivo
+- **Use filename claro**: Facilita identificação
+- **Verifique tamanho**: Arquivos grandes podem falhar
+- **Comprima se necessário**: Envio mais rápido
 
 ## Common Mistakes
 
-| Mistake | Correct Approach |
-|---------|-----------------|
-| No caption | Always add descriptive caption |
-| Sending huge files | Compress before sending |
-| Wrong path | Verify with `ls` first |
-| Unsupported format | Convert to supported format |
-| Missing filename param | Set clear filename for documents |
+| Erro | Correção |
+|------|----------|
+| Apenas criar arquivo, não enviar | Usar `send_document`/`send_image` |
+| Sem caption | Adicionar descrição no caption |
+| Caminho errado | Verificar com `ls` antes |
+| Formato não suportado | Converter para formato aceito |
+| Arquivo muito grande | Comprimir antes de enviar |

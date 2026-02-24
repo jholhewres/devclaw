@@ -8,6 +8,30 @@ trigger: automatic
 
 Schedule **jobs** (agendamentos) to execute commands at specific times or intervals.
 
+## ⚠️ REGRAS CRÍTICAS
+
+| Regra | Motivo |
+|-------|--------|
+| **NUNCA** crie agendamento sem solicitação explícita | Não antecipe necessidades do usuário |
+| **SEMPRE** confirme detalhes antes de agendar | Evita agendamentos incorretos |
+| **NUNCA** adicione "follow-up" ou itens extras | Apenas o que foi pedido |
+| **UMA** ação por vez | Não agrupe múltiplos agendamentos |
+
+### ❌ Errado
+```
+Usuário: "Tenho reunião às 15:30"
+Agente: Cria lembrete para 15:20 automaticamente ❌
+```
+
+### ✓ Correto
+```
+Usuário: "Tenho reunião às 15:30"
+Agente: "Entendido. Quer que eu crie um lembrete?" ✓
+
+Usuário: "Sim, 10 minutos antes"
+Agente: Cria agendamento conforme solicitado ✓
+```
+
 ## Terminologia
 
 | Termo | Significado |
@@ -18,11 +42,11 @@ Schedule **jobs** (agendamentos) to execute commands at specific times or interv
 
 ## Tools
 
-| Tool | Action |
-|------|--------|
-| `cron_add` | Criar um novo job agendado |
-| `cron_list` | Listar todos os jobs |
-| `cron_remove` | Remover um job pelo ID |
+| Tool | Action | Só Use Quando |
+|------|--------|---------------|
+| `cron_add` | Criar um novo job | Usuário EXPLICITAMENTE pede |
+| `cron_list` | Listar todos os jobs | Usuário pede ou precisa verificar |
+| `cron_remove` | Remover um job | Usuário EXPLICITAMENTE pede |
 
 ## Tipos de Agendamento
 
@@ -132,6 +156,8 @@ cron_list()
 
 ## Remover Job
 
+**⚠️ Só remova quando o usuário pedir explicitamente**
+
 ```bash
 cron_remove(id="health-check")
 # Output: Job 'health-check' removed
@@ -156,40 +182,66 @@ cron_remove(id="health-check")
 | `every` | Intervalo | `5m`, `30m`, `1h`, `1d` |
 | `cron` | Expressão cron | `0 9 * * *`, `*/10 * * * *` |
 
-## Workflow Completo
+## Workflow Correto
 
-### Lembrete Simples
+### Usuário pede lembrete
 ```bash
 # Usuário: "Me lembra de ligar pro cliente em 20 minutos"
+
+# 1. Criar EXATAMENTE o que foi pedido
 cron_add(
   id="lembrete-ligacao",
   type="at",
   schedule="20m",
-  command="Ligar para o cliente sobre a proposta"
+  command="Ligar para o cliente"
 )
+# Output: Job 'lembrete-ligacao' scheduled: 20m (at)
+
+# 2. Confirmar (NÃO adicionar extras)
+send_message("Lembrete criado! Vou te avisar em 20 minutos.")
 ```
 
-### Verificação Periódica
+### Usuário menciona evento (sem pedir lembrete)
 ```bash
-# Verificar sistema a cada 10 minutos
-cron_add(
-  id="monitor-api",
-  type="every",
-  schedule="10m",
-  command="Verificar se a API está respondendo e reportar se houver erro"
-)
+# Usuário: "Tenho reunião às 15:30"
+
+# NÃO criar automaticamente! Apenas acknowedge
+send_message("Entendido, reunião às 15:30.")
+
+# Se quiser oferecer:
+send_message("Quer que eu crie um lembrete?")
 ```
 
-### Relatório Diário
+### Usuário pede verificação
 ```bash
-# Todo dia às 8:00
-cron_add(
-  id="morning-briefing",
-  type="cron",
-  schedule="0 8 * * *",
-  command="Gerar resumo das tarefas do dia e enviar"
-)
+# Usuário: "Quais agendamentos tenho?"
+
+cron_list()
+# Mostra lista...
 ```
+
+## Troubleshooting
+
+### "Job já existe"
+
+**Causa:** ID duplicado.
+
+**Solução:**
+```bash
+# Liste primeiro para verificar
+cron_list()
+
+# Use ID diferente ou remova o existente (só se usuário pedir)
+```
+
+### "Schedule inválido"
+
+**Causa:** Formato errado para o type.
+
+**Solução:**
+- `at`: duração (`30m`) ou horário (`14:30`)
+- `every`: intervalo (`5m`, `1h`)
+- `cron`: expressão cron (`0 9 * * *`)
 
 ## Importante
 
@@ -204,6 +256,8 @@ cron_add(
 
 | Erro | Correção |
 |------|----------|
+| Criar agendamento sem pedir | Só crie quando explicitamente solicitado |
+| Adicionar "follow-up" não pedido | Apenas o que o usuário pediu |
 | Usar `cron` para lembrete único | Use `type="at"` |
 | Esquecer de especificar `type` | Padrão é `cron`, pode não ser o desejado |
 | Schedule inválido para o type | Cada type aceita formato diferente |
