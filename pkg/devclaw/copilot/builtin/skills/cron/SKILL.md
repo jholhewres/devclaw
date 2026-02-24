@@ -4,261 +4,261 @@ description: "Schedule jobs to run at specific times or intervals"
 trigger: automatic
 ---
 
-# Cron / Agendamentos
+# Cron / Scheduler
 
-Schedule **jobs** (agendamentos) to execute commands at specific times or intervals.
+Schedule **jobs** to execute commands at specific times or intervals.
 
-## ⚠️ REGRAS CRÍTICAS
+## ⚠️ CRITICAL RULES
 
-| Regra | Motivo |
+| Rule | Reason |
 |-------|--------|
-| **NUNCA** crie agendamento sem solicitação explícita | Não antecipe necessidades do usuário |
-| **SEMPRE** confirme detalhes antes de agendar | Evita agendamentos incorretos |
-| **NUNCA** adicione "follow-up" ou itens extras | Apenas o que foi pedido |
-| **UMA** ação por vez | Não agrupe múltiplos agendamentos |
+| **NEVER** create schedule without explicit request | Don't anticipate user needs |
+| **ALWAYS** confirm details before scheduling | Avoid incorrect schedules |
+| **NEVER** add "follow-up" or extra items | Only what was requested |
+| **ONE** action at a time | Don't batch multiple schedules |
 
-### ❌ Errado
+### ❌ Wrong
 ```
-Usuário: "Tenho reunião às 15:30"
-Agente: Cria lembrete para 15:20 automaticamente ❌
-```
-
-### ✓ Correto
-```
-Usuário: "Tenho reunião às 15:30"
-Agente: "Entendido. Quer que eu crie um lembrete?" ✓
-
-Usuário: "Sim, 10 minutos antes"
-Agente: Cria agendamento conforme solicitado ✓
+User: "I have a meeting at 15:30"
+Agent: Creates reminder for 15:20 automatically ❌
 ```
 
-## Terminologia
+### ✓ Correct
+```
+User: "I have a meeting at 15:30"
+Agent: "Got it. Would you like me to create a reminder?" ✓
 
-| Termo | Significado |
-|-------|-------------|
-| **Job** | Um agendamento (tarefa agendada) |
+User: "Yes, 10 minutes before"
+Agent: Creates schedule as requested ✓
+```
+
+## Terminology
+
+| Term | Meaning |
+|-------|---------|
+| **Job** | A scheduled task |
 | **Tools** | `cron_add`, `cron_list`, `cron_remove` |
-| **Types** | `at` (única vez), `every` (intervalo), `cron` (expressão cron) |
+| **Types** | `at` (one-time), `every` (interval), `cron` (cron expression) |
 
 ## Tools
 
-| Tool | Action | Só Use Quando |
+| Tool | Action | Only Use When |
 |------|--------|---------------|
-| `cron_add` | Criar um novo job | Usuário EXPLICITAMENTE pede |
-| `cron_list` | Listar todos os jobs | Usuário pede ou precisa verificar |
-| `cron_remove` | Remover um job | Usuário EXPLICITAMENTE pede |
+| `cron_add` | Create a new job | User EXPLICITLY asks |
+| `cron_list` | List all jobs | User asks or needs to verify |
+| `cron_remove` | Remove a job | User EXPLICITLY asks |
 
-## Tipos de Agendamento
+## Schedule Types
 
-### Type: `at` (Única Vez)
-Executa uma única vez e remove automaticamente. Use para lembretes e tarefas adiadas.
+### Type: `at` (One-Time)
+Executes once and auto-removes. Use for reminders and delayed tasks.
 
 ```bash
 cron_add(
-  id="lembrete-reuniao",
+  id="meeting-reminder",
   type="at",
-  schedule="30m",           # Em 30 minutos
-  command="Lembrar: reunião em 5 minutos"
+  schedule="30m",           # In 30 minutes
+  command="Reminder: meeting in 5 minutes"
 )
 
 cron_add(
-  id="callback-cliente",
+  id="callback-client",
   type="at",
-  schedule="14:30",         # Hoje às 14:30
-  command="Ligar para cliente sobre proposta"
+  schedule="14:30",         # Today at 14:30
+  command="Call client about proposal"
 )
 
 cron_add(
-  id="review-sexta",
+  id="review-friday",
   type="at",
-  schedule="2026-02-28 09:00",  # Data específica
-  command="Revisar relatório semanal"
+  schedule="2026-02-28 09:00",  # Specific date
+  command="Review weekly report"
 )
 ```
 
-### Type: `every` (Intervalo Recorrente)
-Executa repetidamente em intervalos fixos.
+### Type: `every` (Recurring Interval)
+Executes repeatedly at fixed intervals.
 
 ```bash
 cron_add(
   id="health-check",
   type="every",
-  schedule="5m",            # A cada 5 minutos
-  command="Verificar status do servidor"
+  schedule="5m",            # Every 5 minutes
+  command="Check server status"
 )
 
 cron_add(
   id="sync-data",
   type="every",
-  schedule="1h",            # A cada hora
-  command="Sincronizar dados com API externa"
+  schedule="1h",            # Every hour
+  command="Sync data with external API"
 )
 ```
 
-### Type: `cron` (Expressão Cron)
-Executa baseado em expressão cron padrão.
+### Type: `cron` (Cron Expression)
+Executes based on standard cron expression.
 
 ```bash
 cron_add(
   id="daily-report",
   type="cron",
-  schedule="0 9 * * *",     # Todo dia às 9:00
-  command="Gerar relatório diário"
+  schedule="0 9 * * *",     # Every day at 9:00
+  command="Generate daily report"
 )
 
 cron_add(
   id="weekly-backup",
   type="cron",
-  schedule="0 2 * * 0",     # Domingo às 2:00
-  command="Executar backup semanal"
+  schedule="0 2 * * 0",     # Sunday at 2:00
+  command="Execute weekly backup"
 )
 
 cron_add(
   id="monthly-invoice",
   type="cron",
-  schedule="0 9 1 * *",     # Dia 1 de cada mês às 9:00
-  command="Enviar faturas mensais"
+  schedule="0 9 1 * *",     # 1st of each month at 9:00
+  command="Send monthly invoices"
 )
 ```
 
-## Expressões Cron
+## Cron Expressions
 
 ```
-┌───────────── minuto (0-59)
-│ ┌───────────── hora (0-23)
-│ │ ┌───────────── dia do mês (1-31)
-│ │ │ ┌───────────── mês (1-12)
-│ │ │ │ ┌───────────── dia da semana (0-6, 0=domingo)
+┌───────────── minute (0-59)
+│ ┌───────────── hour (0-23)
+│ │ ┌───────────── day of month (1-31)
+│ │ │ ┌───────────── month (1-12)
+│ │ │ │ ┌───────────── day of week (0-6, 0=Sunday)
 │ │ │ │ │
 * * * * *
 ```
 
-| Expressão | Significado |
+| Expression | Meaning |
 |-----------|-------------|
-| `*/5 * * * *` | A cada 5 minutos |
-| `0 * * * *` | Toda hora |
-| `0 9 * * *` | Todo dia às 9:00 |
-| `0 9 * * 1-5` | Dias úteis às 9:00 |
-| `0 9,17 * * *` | Duas vezes ao dia (9h e 17h) |
-| `0 2 * * 0` | Domingos às 2:00 |
-| `0 9 1 * *` | Dia 1 de cada mês |
+| `*/5 * * * *` | Every 5 minutes |
+| `0 * * * *` | Every hour |
+| `0 9 * * *` | Every day at 9:00 |
+| `0 9 * * 1-5` | Weekdays at 9:00 |
+| `0 9,17 * * *` | Twice daily (9am and 5pm) |
+| `0 2 * * 0` | Sundays at 2:00 |
+| `0 9 1 * *` | 1st of each month |
 
-## Listar Jobs
+## List Jobs
 
 ```bash
 cron_list()
 # Output:
 # Scheduled jobs (3):
-# 1. [at] lembrete-reuniao: 30m → "Lembrar: reunião..."
-# 2. [every] health-check: 5m → "Verificar status..."
-# 3. [cron] daily-report: 0 9 * * * → "Gerar relatório..."
+# 1. [at] meeting-reminder: 30m → "Reminder: meeting..."
+# 2. [every] health-check: 5m → "Check server status..."
+# 3. [cron] daily-report: 0 9 * * * → "Generate daily report..."
 ```
 
-## Remover Job
+## Remove Job
 
-**⚠️ Só remova quando o usuário pedir explicitamente**
+**⚠️ Only remove when user explicitly asks**
 
 ```bash
 cron_remove(id="health-check")
 # Output: Job 'health-check' removed
 ```
 
-## Parâmetros do `cron_add`
+## Parameters for `cron_add`
 
-| Parâmetro | Obrigatório | Descrição |
+| Parameter | Required | Description |
 |-----------|-------------|-----------|
-| `id` | Sim | Identificador único do job |
-| `type` | Não | `at`, `every`, ou `cron` (padrão: `cron`) |
-| `schedule` | Sim | Horário/intervalo (formato depende do type) |
-| `command` | Sim | Comando/prompt a executar |
-| `channel` | Não | Canal de resposta (ex: `whatsapp`) |
-| `chat_id` | Não | ID do chat/grupo para resposta |
+| `id` | Yes | Unique identifier for the job |
+| `type` | No | `at`, `every`, or `cron` (default: `cron`) |
+| `schedule` | Yes | Time/interval (format depends on type) |
+| `command` | Yes | Command/prompt to execute |
+| `channel` | No | Response channel (e.g. `whatsapp`) |
+| `chat_id` | No | Chat/group ID for response |
 
-## Formatos de Schedule por Type
+## Schedule Formats by Type
 
-| Type | Formato | Exemplos |
+| Type | Format | Examples |
 |------|---------|----------|
-| `at` | Duração relativa ou horário absoluto | `5m`, `1h`, `14:30`, `2026-03-01 09:00` |
-| `every` | Intervalo | `5m`, `30m`, `1h`, `1d` |
-| `cron` | Expressão cron | `0 9 * * *`, `*/10 * * * *` |
+| `at` | Relative duration or absolute time | `5m`, `1h`, `14:30`, `2026-03-01 09:00` |
+| `every` | Interval | `5m`, `30m`, `1h`, `1d` |
+| `cron` | Cron expression | `0 9 * * *`, `*/10 * * * *` |
 
-## Workflow Correto
+## Correct Workflow
 
-### Usuário pede lembrete
+### User asks for reminder
 ```bash
-# Usuário: "Me lembra de ligar pro cliente em 20 minutos"
+# User: "Remind me to call the client in 20 minutes"
 
-# 1. Criar EXATAMENTE o que foi pedido
+# 1. Create EXACTLY what was requested
 cron_add(
-  id="lembrete-ligacao",
+  id="call-reminder",
   type="at",
   schedule="20m",
-  command="Ligar para o cliente"
+  command="Call the client"
 )
-# Output: Job 'lembrete-ligacao' scheduled: 20m (at)
+# Output: Job 'call-reminder' scheduled: 20m (at)
 
-# 2. Confirmar (NÃO adicionar extras)
-send_message("Lembrete criado! Vou te avisar em 20 minutos.")
+# 2. Confirm (DO NOT add extras)
+send_message("Reminder created! I'll notify you in 20 minutes.")
 ```
 
-### Usuário menciona evento (sem pedir lembrete)
+### User mentions event (without asking for reminder)
 ```bash
-# Usuário: "Tenho reunião às 15:30"
+# User: "I have a meeting at 15:30"
 
-# NÃO criar automaticamente! Apenas acknowedge
-send_message("Entendido, reunião às 15:30.")
+# DO NOT create automatically! Just acknowledge
+send_message("Got it, meeting at 15:30.")
 
-# Se quiser oferecer:
-send_message("Quer que eu crie um lembrete?")
+# Optionally offer:
+send_message("Would you like me to create a reminder?")
 ```
 
-### Usuário pede verificação
+### User asks to verify
 ```bash
-# Usuário: "Quais agendamentos tenho?"
+# User: "What schedules do I have?"
 
 cron_list()
-# Mostra lista...
+# Show list...
 ```
 
 ## Troubleshooting
 
-### "Job já existe"
+### "Job already exists"
 
-**Causa:** ID duplicado.
+**Cause:** Duplicate ID.
 
-**Solução:**
+**Solution:**
 ```bash
-# Liste primeiro para verificar
+# List first to verify
 cron_list()
 
-# Use ID diferente ou remova o existente (só se usuário pedir)
+# Use different ID or remove existing (only if user asks)
 ```
 
-### "Schedule inválido"
+### "Invalid schedule"
 
-**Causa:** Formato errado para o type.
+**Cause:** Wrong format for type.
 
-**Solução:**
-- `at`: duração (`30m`) ou horário (`14:30`)
-- `every`: intervalo (`5m`, `1h`)
-- `cron`: expressão cron (`0 9 * * *`)
+**Solution:**
+- `at`: duration (`30m`) or time (`14:30`)
+- `every`: interval (`5m`, `1h`)
+- `cron`: cron expression (`0 9 * * *`)
 
-## Importante
+## Important Notes
 
-| Nota | Motivo |
+| Note | Reason |
 |------|--------|
-| Jobs persistem após restart | Salvos em configuração |
-| `at` remove automaticamente | Executa uma vez e some |
-| Use IDs descritivos | Facilita gerenciar depois |
-| `channel`/`chat_id` são opcionais | Usam contexto atual por padrão |
+| Jobs persist after restart | Saved in configuration |
+| `at` removes automatically | Executes once and gone |
+| Use descriptive IDs | Easier to manage later |
+| `channel`/`chat_id` are optional | Use current context by default |
 
-## Erros Comuns
+## Common Mistakes
 
-| Erro | Correção |
-|------|----------|
-| Criar agendamento sem pedir | Só crie quando explicitamente solicitado |
-| Adicionar "follow-up" não pedido | Apenas o que o usuário pediu |
-| Usar `cron` para lembrete único | Use `type="at"` |
-| Esquecer de especificar `type` | Padrão é `cron`, pode não ser o desejado |
-| Schedule inválido para o type | Cada type aceita formato diferente |
-| ID duplicado | Sobrescreve job existente |
+| Mistake | Correction |
+|---------|-----------|
+| Creating schedule without request | Only create when explicitly requested |
+| Adding unsolicited "follow-up" | Only what the user asked for |
+| Using `cron` for one-time reminder | Use `type="at"` |
+| Forgetting to specify `type` | Default is `cron`, may not be desired |
+| Invalid schedule for type | Each type accepts different format |
+| Duplicate ID | Overwrites existing job |

@@ -8,26 +8,26 @@ trigger: automatic
 
 Multi-agent system for spawning isolated workers and coordinating across sessions.
 
-## ⚠️ REGRAS CRÍTICAS
+## ⚠️ CRITICAL RULES
 
-| Regra | Motivo |
+| Rule | Reason |
 |-------|--------|
-| Use `spawn_subagent` para tarefas complexas/paralelas | Não sobrecarregue contexto principal |
-| **NÃO** use `cron_add` quando pedir subagente | São ferramentas diferentes |
-| Aguarde resultado com `wait_subagent` | Se precisa do resultado |
-| Use labels descritivos | Facilita identificação |
+| Use `spawn_subagent` for complex/parallel tasks | Don't overload main context |
+| **DO NOT** use `cron_add` when asked for subagent | Different tools |
+| Wait for result with `wait_subagent` | If you need the result |
+| Use descriptive labels | Easier identification |
 
-### ❌ Errado
+### ❌ Wrong
 ```
-Usuário: "cria um subagente para criar uma skill"
-Agente: Usa cron_add ❌
-Agente: Cria agendamento ❌
+User: "create a subagent to create a skill"
+Agent: Uses cron_add ❌
+Agent: Creates schedule ❌
 ```
 
-### ✓ Correto
+### ✓ Correct
 ```
-Usuário: "cria um subagente para criar uma skill"
-Agente: spawn_subagent(task="Criar skill...", label="skill-creator") ✓
+User: "create a subagent to create a skill"
+Agent: spawn_subagent(task="Create skill...", label="skill-creator") ✓
 ```
 
 ## Architecture
@@ -54,9 +54,9 @@ Agente: spawn_subagent(task="Criar skill...", label="skill-creator") ✓
 ┌─────────────────┐                 ┌─────────────────┐
 │  Subagent Run   │                 │ Existing Session│
 │  (isolated)     │                 │ (another agent) │
-│  - Nova sessão  │                 │ - Chat separado │
-│  - Contexto limitado             │ - Mensagem entre │
-│  - Reporta de volta              │   agentes        │
+│  - New session  │                 │ - Separate chat │
+│  - Limited ctx  │                 │ - Cross-agent   │
+│  - Reports back │                 │   messaging     │
 └─────────────────┘                 └─────────────────┘
 ```
 
@@ -64,36 +64,36 @@ Agente: spawn_subagent(task="Criar skill...", label="skill-creator") ✓
 
 | Mode | Tools | Purpose |
 |------|-------|---------|
-| **Spawning** | `spawn_subagent`, `list_subagents`, `wait_subagent`, `stop_subagent` | Criar novos agentes isolados |
-| **Communication** | `sessions_list`, `sessions_send`, `sessions_export`, `sessions_delete` | Comunicar com agentes existentes |
+| **Spawning** | `spawn_subagent`, `list_subagents`, `wait_subagent`, `stop_subagent` | Create new isolated agents |
+| **Communication** | `sessions_list`, `sessions_send`, `sessions_export`, `sessions_delete` | Talk to existing agents |
 
 ---
 
 ## Mode 1: Spawning Subagents
 
-### Quando Usar
+### When to Use
 
-| Cenário | Use spawn_subagent |
+| Scenario | Use spawn_subagent |
 |---------|-------------------|
-| Tarefa longa de pesquisa | ✓ |
-| Múltiplas tarefas paralelas | ✓ |
-| Criar skills/plugins | ✓ |
-| Análise complexa | ✓ |
-| Processamento em background | ✓ |
+| Long research task | ✓ |
+| Multiple parallel tasks | ✓ |
+| Create skills/plugins | ✓ |
+| Complex analysis | ✓ |
+| Background processing | ✓ |
 
-### Quando NÃO Usar
+### When NOT to Use
 
-| Cenário | Alternativa |
+| Scenario | Alternative |
 |---------|-------------|
-| Agendar tarefa para horário específico | `cron_add` |
-| Lembrete | `cron_add` com type="at" |
-| Comunicação com agente existente | `sessions_send` |
+| Schedule task for specific time | `cron_add` |
+| Reminder | `cron_add` with type="at" |
+| Communicate with existing agent | `sessions_send` |
 
 ### Spawn a Subagent
 
 ```bash
 spawn_subagent(
-  task="Criar uma skill para a API do ViaCEP. Quando o usuário informar um CEP, buscar e retornar as informações de endereço.",
+  task="Create a skill for ViaCEP API. When user provides a CEP, fetch and return address information.",
   label="viacep-skill-creator"
 )
 # Output: Subagent spawned with ID: sub_abc123
@@ -129,14 +129,14 @@ stop_subagent(subagent_id="sub_abc123")
 
 #### Fire and Forget
 ```bash
-# Spawn e continue trabalhando
+# Spawn and continue working
 spawn_subagent(
   task="Generate weekly report and save to reports/ folder",
   label="reporter"
 )
 
-# Continue com outras tarefas...
-# Verifique depois com list_subagents()
+# Continue with other tasks...
+# Check later with list_subagents()
 ```
 
 #### Blocking Wait
@@ -147,22 +147,22 @@ spawn_subagent(
   label="log-analyzer"
 )
 
-# Espere resultado (bloqueia até completar)
+# Wait for result (blocks until complete)
 result = wait_subagent(subagent_id="sub_abc123", timeout=600)
-# Use o resultado...
+# Use the result...
 ```
 
 #### Parallel Tasks
 ```bash
-# Spawn múltiplos subagentes
+# Spawn multiple subagents
 spawn_subagent(task="Research topic A", label="research-a")
 spawn_subagent(task="Research topic B", label="research-b")
 spawn_subagent(task="Research topic C", label="research-c")
 
-# Verifique status
+# Check status
 list_subagents()
 
-# Espere cada um
+# Wait for each
 result_a = wait_subagent(subagent_id="sub_001")
 result_b = wait_subagent(subagent_id="sub_002")
 result_c = wait_subagent(subagent_id="sub_003")
@@ -209,29 +209,29 @@ sessions_export(session_id="abc123")
 
 ## Complete Workflow Examples
 
-### Criar Skill via Subagent
+### Create Skill via Subagent
 ```bash
-# Usuário: "cria um subagente para criar uma skill do https://viacep.com.br/"
+# User: "create a subagent to create a skill for https://viacep.com.br/"
 
-# 1. Spawn subagent (NÃO cron_add!)
+# 1. Spawn subagent (NOT cron_add!)
 spawn_subagent(
-  task="Criar skill para ViaCEP API (https://viacep.com.br/).
-        A skill deve:
-        1. Aceitar CEP do usuário
-        2. Buscar informações na API
-        3. Retornar endereço formatado
-        Incluir script para fazer a requisição.",
+  task="Create skill for ViaCEP API (https://viacep.com.br/).
+        The skill should:
+        1. Accept CEP from user
+        2. Fetch information from API
+        3. Return formatted address
+        Include script to make the request.",
   label="viacep-skill"
 )
 
-# 2. Verificar status
+# 2. Check status
 list_subagents()
 
-# 3. Aguardar resultado
+# 3. Wait for result
 result = wait_subagent(subagent_id="sub_abc", timeout=300)
 
-# 4. Informar usuário
-send_message("Skill ViaCEP criada! " + result)
+# 4. Inform user
+send_message("ViaCEP skill created! " + result)
 ```
 
 ### Background Research
@@ -271,12 +271,12 @@ sessions_send(
 
 ## Subagent Isolation
 
-| Aspecto | Comportamento |
-|---------|---------------|
-| Context | Bootstrap limitado (AGENTS.md + TOOLS.md) |
-| Session | Separada do spawner |
-| Result | Anunciado de volta ao chat do requester |
-| Lifetime | Até completar ou ser parado |
+| Aspect | Behavior |
+|--------|----------|
+| Context | Limited bootstrap (AGENTS.md + TOOLS.md only) |
+| Session | Separate from spawner |
+| Result | Announced back to requester chat |
+| Lifetime | Until completed or stopped |
 
 ---
 
@@ -284,50 +284,50 @@ sessions_send(
 
 ### "Subagent timeout"
 
-**Causa:** Tarefa demorando mais que timeout.
+**Cause:** Task taking longer than timeout.
 
-**Solução:**
+**Solution:**
 ```bash
-# Aumente timeout
-wait_subagent(subagent_id="sub_abc", timeout=600)  # 10 minutos
+# Increase timeout
+wait_subagent(subagent_id="sub_abc", timeout=600)  # 10 minutes
 
-# Ou verifique status sem esperar
+# Or check status without waiting
 list_subagents()
 ```
 
-### Usou ferramenta errada
+### Used wrong tool
 
-**Causa:** Confusão entre spawn e cron.
+**Cause:** Confusion between spawn and cron.
 
-**Correção:**
-- Subagent = execução imediata em paralelo
-- Cron = agendar para horário específico
+**Correction:**
+- Subagent = immediate parallel execution
+- Cron = schedule for specific time
 
 ### "Session not found"
 
-**Causa:** Sessão não existe ou ID errado.
+**Cause:** Session doesn't exist or wrong ID.
 
-**Solução:**
+**Solution:**
 ```bash
-sessions_list()  # Liste todas primeiro
+sessions_list()  # List all first
 ```
 
 ---
 
 ## Tips
 
-- **Labels descritivos**: "viacep-skill" não "agent1"
-- **Timeouts razoáveis**: Não espere infinitamente
-- **Verifique status antes de esperar**: Evite bloquear se já completou
-- **Pare subagentes travados**: Libere recursos
-- **Fire and forget para não-urgente**: Não espere se não precisa
+- **Descriptive labels**: "viacep-skill" not "agent1"
+- **Reasonable timeouts**: Don't wait forever
+- **Check status before waiting**: Avoid blocking if already done
+- **Stop stuck subagents**: Free resources
+- **Fire and forget for non-urgent**: Don't wait if not needed
 
 ## Common Mistakes
 
-| Erro | Correção |
-|------|----------|
-| Usar `cron_add` quando pedir subagent | Use `spawn_subagent` |
-| Não verificar list_subagents | Verifique status |
-| Esperar sem timeout | Sempre defina timeout |
-| Task vaga no spawn | Seja específico sobre o esperado |
-| Não parar agentes travados | Limpe com `stop_subagent` |
+| Mistake | Correction |
+|---------|-----------|
+| Using `cron_add` when asked for subagent | Use `spawn_subagent` |
+| Not checking list_subagents | Verify status |
+| Waiting without timeout | Always set timeout |
+| Vague task in spawn | Be specific about expected output |
+| Not stopping stuck agents | Clean up with `stop_subagent` |

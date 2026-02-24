@@ -196,69 +196,34 @@ glob_files(path="/home/user/unknown-project", pattern="**/main.go")
 read_file(path="/home/user/unknown-project/cmd/main.go")
 ```
 
-### Search and Replace Across Files
-```bash
-# 1. Find occurrences
-search_files(path="/home/user/project", pattern="oldFunction")
-
-# 2. Edit each file (repeat for each)
-edit_file(
-  path="/home/user/project/src/file1.go",
-  old_string="oldFunction",
-  new_string="newFunction"
-)
-```
-
 ## Troubleshooting
 
 ### "file not found" error
 
 **Cause:** Path doesn't exist or is incorrect.
-
 **Debug:**
 ```bash
 # Check parent directory
 list_files(path="/home/user/project")
-
-# Use absolute paths when unsure
-read_file(path="/home/user/project/file.txt")
 ```
 
 ### "old_string not found" error
-
 **Cause:** The text to replace doesn't match exactly.
-
 **Debug:**
 ```bash
 # Read file to see exact content (including whitespace)
 read_file(path="/home/user/project/file.go")
-
-# Copy exact text from output, preserving indentation
 ```
 
 ### "content truncated" warning
-
 **Cause:** File exceeds 100KB limit.
-
 **Solution:**
 ```bash
 # Use offset and limit to read in chunks
 read_file(path="/large/file.log", offset=1, limit=1000)
 ```
 
-### Permission denied
-
-**Cause:** File or directory not readable.
-
-**Debug:**
-```bash
-# Check permissions in list_files output
-list_files(path="/home/user/project")
-# Look at the mode column (e.g., 644, 755)
-```
-
 ## Tips
-
 - **Always read before edit**: Ensures exact match for `old_string`
 - **Use absolute paths**: Avoids confusion about working directory
 - **Glob before search**: Narrow down files to search
@@ -275,4 +240,3 @@ list_files(path="/home/user/project")
 | Forgetting to escape quotes | Use proper escaping or different quotes |
 | Relative path confusion | Use absolute paths when unsure |
 | Not checking if file exists | Use `list_files` first |
-| `offset=0` | Line numbers start at 1, use `offset=1` |
