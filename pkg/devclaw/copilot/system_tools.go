@@ -1394,16 +1394,26 @@ func registerCronTools(executor *ToolExecutor, sched *scheduler.Scheduler) {
 func registerVaultTools(executor *ToolExecutor, vault *Vault) {
 	// vault_save — store a secret in the encrypted vault.
 	executor.Register(
-		MakeToolDefinition("vault_save", "Store a secret (API key, token, password) in the encrypted vault. Secrets are encrypted with AES-256-GCM and persist across restarts. Use this whenever the user provides a credential or API key.", map[string]any{
+		MakeToolDefinition("vault_save", `Store a secret in the encrypted vault (like a secure .env file).
+
+Use this for ANY sensitive data: API keys, tokens, passwords, database URLs.
+The key can be ANY name (e.g., 'OPENAI_API_KEY', 'DATABASE_URL', 'GITHUB_TOKEN').
+
+Examples:
+- vault_save("OPENAI_API_KEY", "sk-xxx")
+- vault_save("DATABASE_URL", "postgres://user:pass@host:5432/db")
+- vault_save("GITHUB_TOKEN", "ghp_xxx")
+
+The vault uses AES-256-GCM encryption. Secrets are automatically injected as environment variables at startup.`, map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"name": map[string]any{
 					"type":        "string",
-					"description": "Secret name/key (e.g. 'weather_api_key', 'github_token')",
+					"description": "Secret name/key - any descriptive name (e.g. 'OPENAI_API_KEY', 'DATABASE_URL', 'GITHUB_TOKEN')",
 				},
 				"value": map[string]any{
 					"type":        "string",
-					"description": "The secret value to store",
+					"description": "The secret value to store securely",
 				},
 			},
 			"required": []string{"name", "value"},
@@ -1423,7 +1433,10 @@ func registerVaultTools(executor *ToolExecutor, vault *Vault) {
 
 	// vault_get — retrieve a secret from the encrypted vault.
 	executor.Register(
-		MakeToolDefinition("vault_get", "Retrieve a secret from the encrypted vault by name.", map[string]any{
+		MakeToolDefinition("vault_get", `Retrieve a secret from the encrypted vault.
+
+Returns the secret value if found, or empty if the key doesn't exist.
+Use vault_list first if you're unsure what keys are available.`, map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"name": map[string]any{
@@ -1451,7 +1464,10 @@ func registerVaultTools(executor *ToolExecutor, vault *Vault) {
 
 	// vault_list — list all secret names in the vault (without values).
 	executor.Register(
-		MakeToolDefinition("vault_list", "List all secret names stored in the encrypted vault. Returns only names, not values.", map[string]any{
+		MakeToolDefinition("vault_list", `List all secret keys stored in the encrypted vault.
+
+Returns only the key names (e.g., 'OPENAI_API_KEY', 'DATABASE_URL'), never the values.
+Use this to discover what secrets are available before using vault_get.`, map[string]any{
 			"type":                 "object",
 			"properties":           map[string]any{},
 			"additionalProperties": false,

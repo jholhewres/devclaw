@@ -536,6 +536,7 @@ func (p *PromptComposer) buildBootstrapLayer() string {
 		Path    string
 		Section string
 	}{
+		{"DEVCLAW.md", "DEVCLAW.md"}, // Platform identity - loaded first
 		{"SOUL.md", "SOUL.md"},
 		{"AGENTS.md", "AGENTS.md"},
 		{"IDENTITY.md", "IDENTITY.md"},
@@ -544,14 +545,14 @@ func (p *PromptComposer) buildBootstrapLayer() string {
 		{"MEMORY.md", "MEMORY.md"},
 	}
 
-	// Subagent filter: only load AGENTS.md + TOOLS.md.
+	// Subagent filter: load DEVCLAW.md + AGENTS.md + TOOLS.md.
 	var bootstrapFiles []struct {
 		Path    string
 		Section string
 	}
 	if p.isSubagent {
 		for _, bf := range allBootstrapFiles {
-			if bf.Path == "AGENTS.md" || bf.Path == "TOOLS.md" {
+			if bf.Path == "DEVCLAW.md" || bf.Path == "AGENTS.md" || bf.Path == "TOOLS.md" {
 				bootstrapFiles = append(bootstrapFiles, bf)
 			}
 		}
