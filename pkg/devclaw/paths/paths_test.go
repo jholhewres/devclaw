@@ -60,6 +60,69 @@ func TestResolveMediaPath(t *testing.T) {
 	}
 }
 
+func TestResolveMediaPathTraversalProtection(t *testing.T) {
+	os.Setenv(StateDirEnv, "/tmp/test-devclaw")
+	defer os.Unsetenv(StateDirEnv)
+
+	tests := []struct {
+		name      string
+		channel   string
+		sessionID string
+		want      string
+	}{
+		{
+			name:      "path traversal with ../",
+			channel:   "whatsapp",
+			sessionID: "../etc/passwd",
+			want:      "/tmp/test-devclaw/data/media/whatsapp/__etc_passwd",
+		},
+		{
+			name:      "path traversal with ..",
+			channel:   "../../../etc",
+			sessionID: "session-123",
+			want:      "/tmp/test-devclaw/data/media/______etc/session-123",
+		},
+		{
+			name:      "backslash path separator",
+			channel:   "whatsapp",
+			sessionID: "..\\..\\windows",
+			want:      "/tmp/test-devclaw/data/media/whatsapp/____windows",
+		},
+		{
+			name:      "mixed path traversal",
+			channel:   "a/../b",
+			sessionID: "c/../../d",
+			want:      "/tmp/test-devclaw/data/media/a___b/c_____d",
+		},
+		{
+			name:      "normal paths unchanged",
+			channel:   "whatsapp",
+			sessionID: "session-123",
+			want:      "/tmp/test-devclaw/data/media/whatsapp/session-123",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveMediaPath(tt.channel, tt.sessionID)
+			if got != tt.want {
+				t.Errorf("ResolveMediaPath(%q, %q) = %q, want %q",
+					tt.channel, tt.sessionID, got, tt.want)
+			}
+
+			// Additional safety check: result should always be under media dir
+			mediaDir := ResolveMediaDir()
+			relPath, err := filepath.Rel(mediaDir, got)
+			if err != nil {
+				t.Errorf("Failed to get relative path: %v", err)
+			}
+			if relPath == ".." || len(relPath) >= 3 && relPath[:3] == "../" {
+				t.Errorf("Path escapes media directory: %s", got)
+			}
+		})
+	}
+}
+
 func TestResolveConfigPath(t *testing.T) {
 	t.Run("respects environment variable", func(t *testing.T) {
 		customPath := "/tmp/custom-config.yaml"

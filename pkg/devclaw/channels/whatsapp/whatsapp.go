@@ -391,7 +391,12 @@ func (w *WhatsApp) Disconnect() error {
 	if w.client != nil {
 		w.client.Disconnect()
 	}
-	close(w.messages)
+
+	// Mark channel as closed before actually closing to prevent
+	// race condition with emitMessage trying to send to closed channel.
+	if w.messagesClosed.CompareAndSwap(false, true) {
+		close(w.messages)
+	}
 
 	w.logger.Info("whatsapp: disconnected")
 
@@ -769,6 +774,7 @@ func (w *WhatsApp) loginWithQR(ctx context.Context) error {
 
 // RequestNewQR disconnects and reconnects to generate a fresh QR code.
 // This is used when the web UI needs a new QR after timeout.
+// A default timeout of 2 minutes is applied if the context has no deadline.
 func (w *WhatsApp) RequestNewQR(ctx context.Context) error {
 	if w.connected.Load() {
 		return fmt.Errorf("already connected")
@@ -789,7 +795,15 @@ func (w *WhatsApp) RequestNewQR(ctx context.Context) error {
 
 	// Re-login with QR in a goroutine (non-blocking for the web handler).
 	go func() {
-		if err := w.loginWithQR(ctx); err != nil {
+		// Apply default timeout if context has no deadline.
+		qrCtx := ctx
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			var cancel context.CancelFunc
+			qrCtx, cancel = context.WithTimeout(ctx, 2*time.Minute)
+			defer cancel()
+		}
+
+		if err := w.loginWithQR(qrCtx); err != nil {
 			w.logger.Error("whatsapp: QR re-login failed", "error", err)
 		}
 	}()
@@ -799,6 +813,11 @@ func (w *WhatsApp) RequestNewQR(ctx context.Context) error {
 
 // emitMessage sends a message to the incoming messages channel.
 func (w *WhatsApp) emitMessage(msg *channels.IncomingMessage) {
+	// Check if channel is already closed to prevent panic.
+	if w.messagesClosed.Load() {
+		return
+	}
+
 	select {
 	case w.messages <- msg:
 		w.lastMsg.Store(time.Now())

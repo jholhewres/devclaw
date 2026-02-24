@@ -6,6 +6,7 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // AppName is the application name used for the state directory.
@@ -135,8 +136,21 @@ func ResolveDatabasePath(filename string) string {
 }
 
 // ResolveMediaPath returns the media path for a specific channel and session.
+// Input is sanitized to prevent path traversal attacks.
 func ResolveMediaPath(channel, sessionID string) string {
+	// Sanitize inputs to prevent path traversal
+	channel = sanitizePathComponent(channel)
+	sessionID = sanitizePathComponent(sessionID)
 	return filepath.Join(ResolveMediaDir(), channel, sessionID)
+}
+
+// sanitizePathComponent removes path traversal sequences from a path component.
+func sanitizePathComponent(s string) string {
+	// Remove any path separators and parent directory references
+	s = strings.ReplaceAll(s, "/", "_")
+	s = strings.ReplaceAll(s, "\\", "_")
+	s = strings.ReplaceAll(s, "..", "_")
+	return s
 }
 
 // EnsureStateDirs creates the state directory structure if it doesn't exist.

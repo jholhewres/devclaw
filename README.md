@@ -8,7 +8,7 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/jholhewres/devclaw/ci.yml?branch=master&style=for-the-badge&label=build)](https://github.com/jholhewres/devclaw/actions/workflows/ci.yml)
 
 <p align="center">
-  <img src="web/public/assets/devclaw-horizontal.png" alt="DevClaw" width="400">
+  <img src="web/public/assets/devclaw-horizontal.png" alt="DevClaw" width="430">
 </p>
 
 Open-source AI agent for tech teams — devs, DevOps, QA, PMs, designers, and everyone in between. Single Go binary with CLI, WebUI, MCP server, and messaging channels. Full system access, persistent memory, encrypted vault, and 70+ built-in tools.
@@ -476,10 +476,6 @@ See [install/DEPLOYMENT.md](install/DEPLOYMENT.md) for detailed setup instructio
 | Skills Catalog | [docs/skills-catalog.md](docs/skills-catalog.md) |
 
 ---
-
-<p align="center">
-  <img src="web/public/assets/mascote-devclaw.png" alt="DevClaw Mascot" width="200">
-</p>
 
 ## Author
 
