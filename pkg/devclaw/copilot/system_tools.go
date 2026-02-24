@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
@@ -30,7 +29,9 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 	registerWebSearchTool(executor, webSearchCfg)
 	registerWebFetchTool(executor, ssrfGuard)
 	registerFileTools(executor, dataDir)
+	RegisterApplyPatchTool(executor)
 	registerBashTool(executor)
+	registerCapabilitiesTool(executor) // Agent self-discovery tool
 
 	if sandboxRunner != nil {
 		registerExecTool(executor, sandboxRunner)
@@ -466,10 +467,9 @@ func registerBashTool(executor *ToolExecutor) {
 			cmd := exec.CommandContext(cmdCtx, "bash", "-l", "-c", wrappedCmd)
 			// Create a new process group so we can kill all child processes
 			// (nohup, background &, etc.) when the timeout fires.
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			setSysProcAttr(cmd)
 			cmd.Cancel = func() error {
-				// Kill the entire process group (negative PID).
-				return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				return killProcGroup(cmd)
 			}
 			cmd.Env = os.Environ() // Inherit full user environment.
 
@@ -575,9 +575,9 @@ func registerBashTool(executor *ToolExecutor) {
 			sshArgs = append(sshArgs, host, command)
 
 			cmd := exec.CommandContext(cmdCtx, "ssh", sshArgs...)
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			setSysProcAttr(cmd)
 			cmd.Cancel = func() error {
-				return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				return killProcGroup(cmd)
 			}
 			cmd.Env = os.Environ() // Inherit SSH agent, keys, etc.
 
@@ -645,9 +645,9 @@ func registerBashTool(executor *ToolExecutor) {
 			scpArgs = append(scpArgs, source, dest)
 
 			cmd := exec.CommandContext(cmdCtx, "scp", scpArgs...)
-			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			setSysProcAttr(cmd)
 			cmd.Cancel = func() error {
-				return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				return killProcGroup(cmd)
 			}
 			cmd.Env = os.Environ()
 
@@ -694,7 +694,7 @@ func registerBashTool(executor *ToolExecutor) {
 // persistentShellState tracks state between bash tool calls.
 type persistentShellState struct {
 	cwd string            // Current working directory.
-	env map[string]string  // Extra environment variables.
+	env map[string]string // Extra environment variables.
 }
 
 // ---------- File Tools (full filesystem access) ----------
@@ -1394,16 +1394,26 @@ func registerCronTools(executor *ToolExecutor, sched *scheduler.Scheduler) {
 func registerVaultTools(executor *ToolExecutor, vault *Vault) {
 	// vault_save — store a secret in the encrypted vault.
 	executor.Register(
-		MakeToolDefinition("vault_save", "Store a secret (API key, token, password) in the encrypted vault. Secrets are encrypted with AES-256-GCM and persist across restarts. Use this whenever the user provides a credential or API key.", map[string]any{
+		MakeToolDefinition("vault_save", `Store a secret in the encrypted vault (like a secure .env file).
+
+Use this for ANY sensitive data: API keys, tokens, passwords, database URLs.
+The key can be ANY name (e.g., 'OPENAI_API_KEY', 'DATABASE_URL', 'GITHUB_TOKEN').
+
+Examples:
+- vault_save("OPENAI_API_KEY", "sk-xxx")
+- vault_save("DATABASE_URL", "postgres://user:pass@host:5432/db")
+- vault_save("GITHUB_TOKEN", "ghp_xxx")
+
+The vault uses AES-256-GCM encryption. Secrets are automatically injected as environment variables at startup.`, map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"name": map[string]any{
 					"type":        "string",
-					"description": "Secret name/key (e.g. 'weather_api_key', 'github_token')",
+					"description": "Secret name/key - any descriptive name (e.g. 'OPENAI_API_KEY', 'DATABASE_URL', 'GITHUB_TOKEN')",
 				},
 				"value": map[string]any{
 					"type":        "string",
-					"description": "The secret value to store",
+					"description": "The secret value to store securely",
 				},
 			},
 			"required": []string{"name", "value"},
@@ -1423,7 +1433,10 @@ func registerVaultTools(executor *ToolExecutor, vault *Vault) {
 
 	// vault_get — retrieve a secret from the encrypted vault.
 	executor.Register(
-		MakeToolDefinition("vault_get", "Retrieve a secret from the encrypted vault by name.", map[string]any{
+		MakeToolDefinition("vault_get", `Retrieve a secret from the encrypted vault.
+
+Returns the secret value if found, or empty if the key doesn't exist.
+Use vault_list first if you're unsure what keys are available.`, map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"name": map[string]any{
@@ -1451,7 +1464,10 @@ func registerVaultTools(executor *ToolExecutor, vault *Vault) {
 
 	// vault_list — list all secret names in the vault (without values).
 	executor.Register(
-		MakeToolDefinition("vault_list", "List all secret names stored in the encrypted vault. Returns only names, not values.", map[string]any{
+		MakeToolDefinition("vault_list", `List all secret keys stored in the encrypted vault.
+
+Returns only the key names (e.g., 'OPENAI_API_KEY', 'DATABASE_URL'), never the values.
+Use this to discover what secrets are available before using vault_get.`, map[string]any{
 			"type":                 "object",
 			"properties":           map[string]any{},
 			"additionalProperties": false,
@@ -1663,6 +1679,101 @@ func RegisterSessionTools(executor *ToolExecutor, wm *WorkspaceManager) {
 			)
 
 			return fmt.Sprintf("Message delivered to session %s (channel: %s).", sessionID, session.Channel), nil
+		},
+	)
+}
+
+// ---------- Capabilities Discovery Tool ----------
+
+// registerCapabilitiesTool registers the list_capabilities tool for agent self-discovery.
+// This tool allows the agent to discover what tools and skills it has available,
+// addressing the "agent doesn't know its capabilities" problem.
+func registerCapabilitiesTool(executor *ToolExecutor) {
+	executor.Register(
+		MakeToolDefinition("list_capabilities",
+			"List all available tools and skills with their descriptions. Use this to discover what you can do. "+
+				"Filter options: 'tools' (only tools), 'skills' (only skills), 'all' (both). "+
+				"This helps you understand your capabilities before attempting tasks.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"filter": map[string]any{
+						"type":        "string",
+						"enum":        []string{"tools", "skills", "all"},
+						"default":     "all",
+						"description": "What to list: 'tools' (only tools), 'skills' (only skills), 'all' (both)",
+					},
+					"category": map[string]any{
+						"type":        "string",
+						"description": "Filter tools by category (e.g. 'Filesystem', 'Web', 'Memory'). Empty = all categories.",
+					},
+				},
+			},
+		),
+		func(_ context.Context, args map[string]any) (any, error) {
+			filter, _ := args["filter"].(string)
+			if filter == "" {
+				filter = "all"
+			}
+			category, _ := args["category"].(string)
+
+			var sb strings.Builder
+			sb.WriteString("# Available Capabilities\n\n")
+
+			// List tools
+			if filter == "tools" || filter == "all" {
+				sb.WriteString("## Tools\n\n")
+				tools := executor.Tools()
+
+				// Categorize tools
+				categories := CategorizeTools(tools)
+
+				// Sort categories
+				var cats []string
+				for cat := range categories {
+					cats = append(cats, cat)
+				}
+				for i := 0; i < len(cats); i++ {
+					for j := i + 1; j < len(cats); j++ {
+						if cats[j] < cats[i] {
+							cats[i], cats[j] = cats[j], cats[i]
+						}
+					}
+				}
+
+				for _, cat := range cats {
+					// Filter by category if specified
+					if category != "" && cat != category {
+						continue
+					}
+					sb.WriteString(fmt.Sprintf("### %s\n", cat))
+					for _, tool := range categories[cat] {
+						desc := tool.Function.Description
+						// Truncate long descriptions
+						if len(desc) > 80 {
+							desc = desc[:77] + "..."
+						}
+						desc = strings.ReplaceAll(desc, "\n", " ")
+						sb.WriteString(fmt.Sprintf("- **%s**: %s\n", tool.Function.Name, desc))
+					}
+					sb.WriteString("\n")
+				}
+			}
+
+			// Note: skills listing is handled separately via skillRegistry
+			// which is not directly accessible here. The agent can use
+			// list_skills tool from the skills system.
+
+			if filter == "skills" || filter == "all" {
+				sb.WriteString("## Skills\n\n")
+				sb.WriteString("Use `list_skills` tool to see available skills.\n")
+				sb.WriteString("Use `search_skills <query>` to find skills by keyword.\n\n")
+			}
+
+			sb.WriteString(fmt.Sprintf("\n**Total tools available**: %d\n", len(executor.Tools())))
+			sb.WriteString("\n*Tip: Use specific tool names directly. If unsure about a tool's parameters, try it - the error message will show the expected format.*\n")
+
+			return sb.String(), nil
 		},
 	)
 }

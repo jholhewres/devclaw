@@ -20,6 +20,7 @@ import (
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot"
 	"github.com/jholhewres/devclaw/pkg/devclaw/gateway"
 	"github.com/jholhewres/devclaw/pkg/devclaw/media"
+	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
 	"github.com/jholhewres/devclaw/pkg/devclaw/plugins"
 	"github.com/jholhewres/devclaw/pkg/devclaw/webui"
 	"github.com/spf13/cobra"
@@ -45,6 +46,11 @@ Examples:
 }
 
 func runServe(cmd *cobra.Command, _ []string) error {
+	// ── Ensure state directories exist ──
+	if err := paths.EnsureStateDirs(); err != nil {
+		return fmt.Errorf("failed to create state directories: %w", err)
+	}
+
 	// ── Load config ──
 	cfg, configPath, err := resolveConfig(cmd)
 	if err != nil {
@@ -578,6 +584,16 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 				cfg.API.BaseURL = v
 			}
 			if v, ok := updates["api_key"].(string); ok && v != "" {
+				// Store in vault if available and unlocked (preferred for security)
+				if vault := assistant.Vault(); vault != nil && vault.IsUnlocked() {
+					providerKey := copilot.GetProviderKeyName(cfg.API.Provider)
+					if err := vault.Set(providerKey, v); err != nil {
+						return fmt.Errorf("failed to store API key in vault: %w", err)
+					}
+					// Inject into current process environment for immediate use
+					os.Setenv(providerKey, v)
+				}
+				// Set in config for immediate use (will be sanitized on save)
 				cfg.API.APIKey = v
 			}
 			// Update API params (provider-specific settings like context1m, tool_stream).

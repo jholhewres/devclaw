@@ -27,18 +27,19 @@ import (
 type PromptLayer int
 
 const (
-	LayerCore          PromptLayer = 0  // Base identity and tooling.
-	LayerSafety        PromptLayer = 5  // Safety rules.
-	LayerIdentity      PromptLayer = 10 // Custom instructions.
-	LayerThinking      PromptLayer = 12 // Extended thinking level hint (from /think).
-	LayerBootstrap     PromptLayer = 15 // SOUL.md, AGENTS.md, etc.
-	LayerBuiltinSkills PromptLayer = 18 // Built-in tool guides (memory, teams, etc.)
-	LayerBusiness      PromptLayer = 20 // User/workspace context.
-	LayerSkills       PromptLayer = 40 // Active skill instructions.
-	LayerMemory       PromptLayer = 50 // Long-term memory facts.
-	LayerTemporal     PromptLayer = 60 // Date/time context.
-	LayerConversation PromptLayer = 70 // Recent history summary.
-	LayerRuntime      PromptLayer = 80 // Runtime info (final line).
+	LayerCore           PromptLayer = 0  // Base identity and tooling.
+	LayerSafety         PromptLayer = 5  // Safety rules.
+	LayerIdentity       PromptLayer = 10 // Custom instructions.
+	LayerThinking       PromptLayer = 12 // Extended thinking level hint (from /think).
+	LayerBootstrap      PromptLayer = 15 // SOUL.md, AGENTS.md, etc.
+	LayerBuiltinSkills  PromptLayer = 18 // Built-in tool guides (memory, teams, etc.)
+	LayerBusiness       PromptLayer = 20 // User/workspace context.
+	LayerProjectContext PromptLayer = 25 // Auto-discovered project context.
+	LayerSkills         PromptLayer = 40 // Active skill instructions.
+	LayerMemory         PromptLayer = 50 // Long-term memory facts.
+	LayerTemporal       PromptLayer = 60 // Date/time context.
+	LayerConversation   PromptLayer = 70 // Recent history summary.
+	LayerRuntime        PromptLayer = 80 // Runtime info (final line).
 )
 
 // layerEntry represents a single prompt layer entry.
@@ -75,7 +76,9 @@ type PromptComposer struct {
 	memoryStore   *memory.FileStore
 	sqliteMemory  *memory.SQLiteStore
 	skillGetter   func(name string) (interface{ SystemPrompt() string }, bool)
+	skillLister   func() []SkillInfo // Returns all available skills with name, description, tools
 	builtinSkills *BuiltinSkills
+	toolExecutor  *ToolExecutor // For dynamic tool list generation
 	isSubagent    bool // When true, only AGENTS.md + TOOLS.md are loaded.
 
 	// bootstrapCache caches bootstrap file contents to avoid re-reading from disk
@@ -87,6 +90,13 @@ type PromptComposer struct {
 	// prompt composition on I/O-heavy operations. Key: "sessionID:layerType".
 	layerCacheMu sync.RWMutex
 	layerCache   map[string]*promptLayerCache
+}
+
+// SkillInfo holds basic skill information for the Skill Discovery XML.
+type SkillInfo struct {
+	Name        string
+	Description string
+	Tools       []string
 }
 
 // NewPromptComposer creates a new prompt composer.
@@ -118,9 +128,19 @@ func (p *PromptComposer) SetSkillGetter(getter func(name string) (interface{ Sys
 	p.skillGetter = getter
 }
 
+// SetSkillLister sets the function used to list all available skills.
+func (p *PromptComposer) SetSkillLister(lister func() []SkillInfo) {
+	p.skillLister = lister
+}
+
 // SetBuiltinSkills sets the built-in skills for the prompt composer.
 func (p *PromptComposer) SetBuiltinSkills(skills *BuiltinSkills) {
 	p.builtinSkills = skills
+}
+
+// SetToolExecutor sets the tool executor for dynamic tool list generation.
+func (p *PromptComposer) SetToolExecutor(executor *ToolExecutor) {
+	p.toolExecutor = executor
 }
 
 // Compose builds the complete system prompt for a session and user input.
@@ -150,6 +170,9 @@ func (p *PromptComposer) Compose(session *Session, input string) string {
 			layer:   LayerBusiness,
 			content: "## Workspace Context\n\n" + cfg.BusinessContext,
 		})
+	}
+	if projectContext := p.buildProjectContextLayer(); projectContext != "" {
+		layers = append(layers, layerEntry{layer: LayerProjectContext, content: projectContext})
 	}
 
 	// ── Heavy layers (I/O, search) ──
@@ -248,15 +271,92 @@ func (p *PromptComposer) refreshLayerCache(session *Session, input string) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		result := p.buildMemoryLayer(session, input)
-		p.setCachedLayer(session.ID, "memory", result)
+		if memoryPrompt := p.buildMemoryLayer(session, input); memoryPrompt != "" {
+			p.setCachedLayer(session.ID, "memory", memoryPrompt)
+		}
 	}()
 	go func() {
 		defer wg.Done()
-		result := p.buildSkillsLayer(session)
-		p.setCachedLayer(session.ID, "skills", result)
+		if skills := p.buildSkillsLayer(session); skills != "" {
+			p.setCachedLayer(session.ID, "skills", skills)
+		}
 	}()
 	wg.Wait()
+}
+
+// buildProjectContextLayer scans the workspace for common project files
+// to provide automated codebase context to the LLM.
+func (p *PromptComposer) buildProjectContextLayer() string {
+	if p.isSubagent {
+		return ""
+	}
+
+	workspaceDir := p.config.Heartbeat.WorkspaceDir
+	if workspaceDir == "" {
+		workspaceDir = "."
+	}
+	searchDirs := []string{workspaceDir}
+
+	targetFiles := []string{
+		"package.json",
+		"go.mod",
+		"Cargo.toml",
+		"pyproject.toml",
+		"requirements.txt",
+		"docker-compose.yml",
+		"Makefile",
+		"README.md",
+	}
+
+	var foundFiles []struct {
+		name    string
+		content string
+	}
+
+	for _, filename := range targetFiles {
+		text := p.loadBootstrapFileCached(filename, searchDirs)
+		if text == "" {
+			continue
+		}
+
+		// Truncate to avoid context explosion
+		maxLen := 2000
+		if filename == "package.json" || filename == "go.mod" {
+			maxLen = 4000 // Allow more for dependency files
+		}
+
+		if len(text) > maxLen {
+			text = text[:maxLen] + "\n... [truncated for project context size]"
+		}
+
+		foundFiles = append(foundFiles, struct {
+			name    string
+			content string
+		}{filename, text})
+	}
+
+	if len(foundFiles) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("## Project Context (Auto-discovered)\n\n")
+	b.WriteString("The following files were automatically discovered in the workspace to provide context about the project structure, dependencies, and environment:\n\n")
+
+	for _, f := range foundFiles {
+		// Use Markdown code blocks for syntax highlighting if possible
+		ext := strings.TrimPrefix(filepath.Ext(f.name), ".")
+		if ext == "json" || ext == "toml" || ext == "yaml" || ext == "yml" || ext == "txt" {
+			b.WriteString(fmt.Sprintf("### %s\n```%s\n%s\n```\n\n", f.name, ext, f.content))
+		} else if f.name == "go.mod" || f.name == "Makefile" {
+			b.WriteString(fmt.Sprintf("### %s\n```\n%s\n```\n\n", f.name, f.content))
+		} else { // README.md or others
+			// We don't wrap markdown in markdown code blocks to avoid rendering issues
+			b.WriteString(fmt.Sprintf("### %s\n\n%s\n\n", f.name, f.content))
+		}
+	}
+
+	return b.String()
 }
 
 // ---------- Layer Builders ----------
@@ -269,32 +369,50 @@ func (p *PromptComposer) buildCoreLayer() string {
 
 	b.WriteString(fmt.Sprintf("You are %s, a personal assistant running inside DevClaw.\n\n", p.config.Name))
 
-	// ## Tooling - matches structure exactly
+	// ## Tooling - DYNAMIC if toolExecutor available, fallback to hardcoded
 	b.WriteString("## Tooling\n\n")
 	b.WriteString("Tool availability (filtered by policy):\n")
-	b.WriteString("- read: Read file contents\n")
-	b.WriteString("- write: Create or overwrite files\n")
-	b.WriteString("- edit: Make precise edits to files\n")
-	b.WriteString("- grep: Search file contents for patterns\n")
-	b.WriteString("- glob: Find files by glob pattern\n")
-	b.WriteString("- bash: Run shell commands\n")
-	b.WriteString("- web_search: Search the web\n")
-	b.WriteString("- web_fetch: Fetch and extract content from URLs\n")
-	b.WriteString("- memory: Long-term memory (save, search, list, index)\n")
-	b.WriteString("- cron_add/cron_remove: Schedule jobs and reminders\n")
-	b.WriteString("- message: Send messages and channel actions\n")
-	b.WriteString("- vault_save/vault_get/vault_list: Encrypted secret storage\n")
+
+	// Generate tool list dynamically if toolExecutor is available
+	if p.toolExecutor != nil {
+		tools := p.toolExecutor.Tools()
+		b.WriteString(FormatToolsForPrompt(tools, 60))
+	} else {
+		// Fallback to hardcoded list (backward compatibility)
+		b.WriteString("- read: Read file contents\n")
+		b.WriteString("- write: Create or overwrite files\n")
+		b.WriteString("- edit: Make precise edits to files\n")
+		b.WriteString("- grep: Search file contents for patterns\n")
+		b.WriteString("- glob: Find files by glob pattern\n")
+		b.WriteString("- bash: Run shell commands\n")
+		b.WriteString("- web_search: Search the web\n")
+		b.WriteString("- web_fetch: Fetch and extract content from URLs\n")
+		b.WriteString("- memory: Long-term memory (save, search, list, index)\n")
+		b.WriteString("- cron_add/cron_remove: Schedule jobs and reminders\n")
+		b.WriteString("- message: Send messages and channel actions\n")
+		b.WriteString("- vault_save/vault_get/vault_list: Encrypted secret storage\n")
+	}
 	b.WriteString("\nTool names are case-sensitive. Call tools exactly as listed.\n")
+	b.WriteString("Use `list_capabilities` to see all available tools organized by category.\n")
 	b.WriteString("TOOLS.md does not control tool availability; it is user guidance for how to use external tools.\n")
 	b.WriteString("If a task is more complex or takes longer, spawn a sub-agent using `spawn_subagent`. Completion is push-based: it will auto-announce when done.\n")
 	b.WriteString("Do NOT poll in a loop. Check status on-demand only (for intervention, debugging, or when explicitly asked).\n\n")
+
+	// ## Memory Recall - NEW: explicit hint to search memory before answering
+	b.WriteString("## Memory Recall\n\n")
+	b.WriteString("Before answering questions about prior work, decisions, dates, people, preferences, or todos:\n")
+	b.WriteString("1. First search memory: memory(action='search', query='your search terms')\n")
+	b.WriteString("2. Then use the results to inform your response\n")
+	b.WriteString("This helps you recall relevant context from previous conversations.\n\n")
 
 	// ## Tool Call Style - matches exactly
 	b.WriteString("## Tool Call Style\n\n")
 	b.WriteString("Default: do not narrate routine, low-risk tool calls (just call the tool).\n")
 	b.WriteString("Narrate only when it helps: multi-step work, complex/challenging problems, sensitive actions (e.g., deletions), or when the user explicitly asks.\n")
 	b.WriteString("Keep narration brief and value-dense; avoid repeating obvious steps.\n")
-	b.WriteString("Use plain human language for narration unless in a technical context.\n\n")
+	b.WriteString("Use plain human language for narration unless in a technical context.\n")
+	b.WriteString("When you need to reason extensively before acting, you MUST place your internal monologue inside `<think>...</think>` tags.\n")
+	b.WriteString("Any user-facing text or tool calls MUST be placed AFTER the `</think>` tag. Never put tool calls inside the think block.\n\n")
 
 	// ## Safety - matches exactly (comes right after Tool Call Style)
 	b.WriteString("## Safety\n\n")
@@ -418,6 +536,7 @@ func (p *PromptComposer) buildBootstrapLayer() string {
 		Path    string
 		Section string
 	}{
+		{"DEVCLAW.md", "DEVCLAW.md"}, // Platform identity - loaded first
 		{"SOUL.md", "SOUL.md"},
 		{"AGENTS.md", "AGENTS.md"},
 		{"IDENTITY.md", "IDENTITY.md"},
@@ -426,14 +545,14 @@ func (p *PromptComposer) buildBootstrapLayer() string {
 		{"MEMORY.md", "MEMORY.md"},
 	}
 
-	// Subagent filter: only load AGENTS.md + TOOLS.md.
+	// Subagent filter: load DEVCLAW.md + AGENTS.md + TOOLS.md.
 	var bootstrapFiles []struct {
 		Path    string
 		Section string
 	}
 	if p.isSubagent {
 		for _, bf := range allBootstrapFiles {
-			if bf.Path == "AGENTS.md" || bf.Path == "TOOLS.md" {
+			if bf.Path == "DEVCLAW.md" || bf.Path == "AGENTS.md" || bf.Path == "TOOLS.md" {
 				bootstrapFiles = append(bootstrapFiles, bf)
 			}
 		}

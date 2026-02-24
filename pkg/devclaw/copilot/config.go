@@ -3,6 +3,7 @@
 package copilot
 
 import (
+	"path/filepath"
 	"strings"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/discord"
@@ -12,6 +13,7 @@ import (
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/security"
 	"github.com/jholhewres/devclaw/pkg/devclaw/database"
+	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
 	"github.com/jholhewres/devclaw/pkg/devclaw/plugins"
 	"github.com/jholhewres/devclaw/pkg/devclaw/sandbox"
 	"github.com/jholhewres/devclaw/pkg/devclaw/webui"
@@ -248,11 +250,12 @@ type NativeMediaEnrichmentConfig struct {
 // (VisionEnabled, TranscriptionEnabled) are also enabled. Documents always work
 // as they don't depend on external APIs.
 func DefaultNativeMediaConfig() NativeMediaConfig {
+	mediaDir := paths.ResolveMediaDir()
 	return NativeMediaConfig{
 		Enabled: true,
 		Store: NativeMediaStoreConfig{
-			BaseDir:     "./data/media",
-			TempDir:     "./data/media/temp",
+			BaseDir:     mediaDir,
+			TempDir:     filepath.Join(mediaDir, "temp"),
 			MaxFileSize: 50 * 1024 * 1024, // 50MB
 		},
 		Service: NativeMediaServiceConfig{
@@ -720,7 +723,7 @@ func DefaultConfig() *Config {
 		},
 		Memory: MemoryConfig{
 			Type:                "sqlite",
-			Path:                "./data/memory.db",
+			Path:                paths.ResolveDatabasePath("memory.db"),
 			MaxMessages:         100,
 			CompressionStrategy: "summarize",
 			Embedding:           memory.DefaultEmbeddingConfig(),
@@ -762,7 +765,7 @@ func DefaultConfig() *Config {
 			Tools:    4000,
 		},
 		Plugins: plugins.Config{
-			Dir: "./plugins",
+			Dir: paths.ResolvePluginsDir(),
 		},
 		Sandbox: sandbox.DefaultConfig(),
 		Skills: SkillsConfig{
@@ -770,7 +773,7 @@ func DefaultConfig() *Config {
 		},
 		Scheduler: SchedulerConfig{
 			Enabled: true,
-			Storage: "./data/scheduler.db",
+			Storage: paths.ResolveDatabasePath("scheduler.db"),
 		},
 		Heartbeat:  DefaultHeartbeatConfig(),
 		Subagents:  DefaultSubagentConfig(),
@@ -784,7 +787,7 @@ func DefaultConfig() *Config {
 			Format: "json",
 		},
 		Database: DatabaseConfig{
-			Path: "./data/devclaw.db",
+			Path: paths.ResolveDatabasePath("devclaw.db"),
 			Hub:  database.DefaultHubConfig(),
 		},
 		Gateway: GatewayConfig{
