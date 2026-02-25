@@ -267,6 +267,33 @@ export interface ToolProfileInfo {
   builtin: boolean
 }
 
+/* ── OAuth Types ── */
+
+export interface OAuthProvider {
+  id: string
+  label: string
+  flow_type: 'pkce' | 'device_code'
+  experimental?: boolean
+}
+
+export interface OAuthStatus {
+  provider: string
+  status: 'valid' | 'expiring_soon' | 'expired' | 'unknown'
+  email?: string
+  expires_in?: number
+  has_token: boolean
+}
+
+export interface OAuthStartResponse {
+  flow_type: 'pkce' | 'device_code'
+  auth_url?: string
+  provider: string
+  user_code?: string
+  verify_url?: string
+  expires_in?: number
+  experimental?: boolean
+}
+
 /* ── API Methods ── */
 
 export const api = {
@@ -466,5 +493,21 @@ export const api = {
       delete: (name: string) =>
         request<void>(`/settings/tool-profiles/${name}`, { method: 'DELETE' }),
     },
+  },
+
+  /* OAuth */
+  oauth: {
+    providers: () => request<OAuthProvider[]>('/oauth/providers'),
+    status: () => request<Record<string, OAuthStatus>>('/oauth/status'),
+    start: (provider: string) =>
+      request<OAuthStartResponse>(`/oauth/start/${provider}`, { method: 'POST' }),
+    callback: (provider: string, code: string, state: string) =>
+      request<{ status: string }>(`/oauth/callback/${provider}?code=${code}&state=${state}`),
+    refresh: (provider: string) =>
+      request<{ status: string }>(`/oauth/refresh/${provider}`, { method: 'POST' }),
+    logout: (provider: string) =>
+      request<void>(`/oauth/logout/${provider}`, { method: 'DELETE' }),
+    poll: (provider: string) =>
+      request<{ status: string; message?: string }>(`/oauth/poll/${provider}`, { method: 'POST' }),
   },
 }

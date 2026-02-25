@@ -1,174 +1,170 @@
-import React, { useState, useEffect } from 'react';
-import { api } from '../lib/api';
-
-interface OAuthProvider {
-  id: string;
-  label: string;
-  flow_type: 'pkce' | 'device_code';
-  experimental?: boolean;
-}
-
-interface OAuthStatus {
-  provider: string;
-  status: 'valid' | 'expiring_soon' | 'expired' | 'unknown';
-  email?: string;
-  expires_in?: number;
-  has_token: boolean;
-}
-
-interface OAuthStartResponse {
-  flow_type: 'pkce' | 'device_code';
-  auth_url?: string;
-  provider: string;
-  user_code?: string;
-  verify_url?: string;
-  expires_in?: number;
-  experimental?: boolean;
-}
+import { useState, useEffect, useCallback } from 'react'
+import { api, type OAuthProvider, type OAuthStatus, type OAuthStartResponse } from '../lib/api'
 
 export function OAuthSettings() {
-  const [providers, setProviders] = useState<OAuthProvider[]>([]);
-  const [statuses, setStatuses] = useState<Record<string, OAuthStatus>>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [activeFlow, setActiveFlow] = useState<OAuthStartResponse | null>(null);
-  const [pollingProvider, setPollingProvider] = useState<string | null>(null);
+  const [providers, setProviders] = useState<OAuthProvider[]>([])
+  const [statuses, setStatuses] = useState<Record<string, OAuthStatus>>({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [activeFlow, setActiveFlow] = useState<OAuthStartResponse | null>(null)
+  const [pollingProvider, setPollingProvider] = useState<string | null>(null)
+
+  const loadProviders = useCallback(async () => {
+    try {
+      const data = await api.oauth.providers()
+      setProviders(data)
+    } catch (err) {
+      console.error('Failed to load providers:', err)
+    }
+  }, [])
+
+  const loadStatus = useCallback(async () => {
+    try {
+      setLoading(true)
+      const data = await api.oauth.status()
+      setStatuses(data)
+      setError(null)
+    } catch (err) {
+      setError('Failed to load OAuth status')
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    loadProviders();
-    loadStatus();
-  }, []);
+    loadProviders()
+    loadStatus()
+  }, [loadProviders, loadStatus])
 
+  // Handle PKCE flow popup
   useEffect(() => {
     if (activeFlow?.flow_type === 'pkce' && activeFlow.auth_url) {
-      // Open OAuth URL in popup
       const popup = window.open(
         activeFlow.auth_url,
         'oauth',
         'width=600,height=800,scrollbars=yes'
-      );
+      )
 
-      // Listen for OAuth success message
       const handleMessage = (event: MessageEvent) => {
         if (event.data?.type === 'oauth-success') {
-          setActiveFlow(null);
-          loadStatus();
+          setActiveFlow(null)
+          loadStatus()
         }
-      };
+      }
 
-      window.addEventListener('message', handleMessage);
+      window.addEventListener('message', handleMessage)
 
-      // Poll for popup closure
       const pollClosed = setInterval(() => {
         if (popup?.closed) {
-          clearInterval(pollClosed);
-          window.removeEventListener('message', handleMessage);
-          setActiveFlow(null);
-          loadStatus();
+          clearInterval(pollClosed)
+          window.removeEventListener('message', handleMessage)
+          setActiveFlow(null)
+          loadStatus()
         }
-      }, 500);
+      }, 500)
 
       return () => {
-        clearInterval(pollClosed);
-        window.removeEventListener('message', handleMessage);
-      };
+        clearInterval(pollClosed)
+        window.removeEventListener('message', handleMessage)
+      }
     }
-  }, [activeFlow]);
+  }, [activeFlow, loadStatus])
 
-  const loadProviders = async () => {
-    try {
-      const data = await api.get<OAuthProvider[]>('/api/oauth/providers');
-      setProviders(data);
-    } catch (err) {
-      console.error('Failed to load providers:', err);
-    }
-  };
+  // Handle device code polling
+  useEffect(() => {
+    if (!pollingProvider) return
 
-  const loadStatus = async () => {
-    try {
-      setLoading(true);
-      const data = await api.get<Record<string, OAuthStatus>>('/api/oauth/status');
-      setStatuses(data);
-      setError(null);
-    } catch (err) {
-      setError('Failed to load OAuth status');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const pollInterval = setInterval(async () => {
+      try {
+        const result = await api.oauth.poll(pollingProvider)
+        if (result.status === 'completed') {
+          setPollingProvider(null)
+          setActiveFlow(null)
+          loadStatus()
+        } else if (result.status === 'error') {
+          setError(result.message || 'Authentication failed')
+          setPollingProvider(null)
+          setActiveFlow(null)
+        }
+      } catch (err) {
+        console.error('Poll error:', err)
+      }
+    }, 5000)
+
+    return () => clearInterval(pollInterval)
+  }, [pollingProvider, loadStatus])
 
   const startLogin = async (providerId: string) => {
     try {
-      setError(null);
-      const data = await api.post<OAuthStartResponse>(`/api/oauth/start/${providerId}`);
-      setActiveFlow(data);
+      setError(null)
+      const data = await api.oauth.start(providerId)
+      setActiveFlow(data)
 
       if (data.experimental) {
         alert(
-          '⚠️ EXPERIMENTAL FEATURE\n\n' +
+          'EXPERIMENTAL FEATURE\n\n' +
           'This OAuth provider uses unofficial endpoints and may stop working at any time.\n\n' +
           'Use at your own risk.'
-        );
+        )
       }
 
       if (data.flow_type === 'device_code') {
-        // For device code flow, we need to poll for completion
-        setPollingProvider(providerId);
+        setPollingProvider(providerId)
       }
     } catch (err) {
-      setError(`Failed to start OAuth login for ${providerId}`);
-      console.error(err);
+      setError(`Failed to start OAuth login for ${providerId}`)
+      console.error(err)
     }
-  };
+  }
 
   const logout = async (providerId: string) => {
-    if (!confirm(`Logout from ${providerId}?`)) return;
+    if (!confirm(`Logout from ${providerId}?`)) return
 
     try {
-      await api.delete(`/api/oauth/logout/${providerId}`);
-      loadStatus();
+      await api.oauth.logout(providerId)
+      loadStatus()
     } catch (err) {
-      setError(`Failed to logout from ${providerId}`);
-      console.error(err);
+      setError(`Failed to logout from ${providerId}`)
+      console.error(err)
     }
-  };
+  }
 
   const refresh = async (providerId: string) => {
     try {
-      await api.post(`/api/oauth/refresh/${providerId}`, {});
-      loadStatus();
+      await api.oauth.refresh(providerId)
+      loadStatus()
     } catch (err) {
-      setError(`Failed to refresh token for ${providerId}`);
-      console.error(err);
+      setError(`Failed to refresh token for ${providerId}`)
+      console.error(err)
     }
-  };
+  }
 
   const formatExpiresIn = (seconds?: number): string => {
-    if (!seconds) return '';
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
+    if (!seconds) return ''
+    const hours = Math.floor(seconds / 3600)
+    const minutes = Math.floor((seconds % 3600) / 60)
     if (hours > 0) {
-      return `${hours}h ${minutes}m`;
+      return `${hours}h ${minutes}m`
     }
-    return `${minutes}m`;
-  };
+    return `${minutes}m`
+  }
 
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'valid':
-        return <span className="px-2 py-1 text-xs rounded bg-green-100 text-green-800">Valid</span>;
+        return <span className="px-2 py-1 text-xs rounded bg-green-100 text-green-800">Valid</span>
       case 'expiring_soon':
-        return <span className="px-2 py-1 text-xs rounded bg-yellow-100 text-yellow-800">Expiring Soon</span>;
+        return <span className="px-2 py-1 text-xs rounded bg-yellow-100 text-yellow-800">Expiring Soon</span>
       case 'expired':
-        return <span className="px-2 py-1 text-xs rounded bg-red-100 text-red-800">Expired</span>;
+        return <span className="px-2 py-1 text-xs rounded bg-red-100 text-red-800">Expired</span>
       default:
-        return <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800">Unknown</span>;
+        return <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800">Unknown</span>
     }
-  };
+  }
 
   if (loading) {
-    return <div className="p-4">Loading OAuth settings...</div>;
+    return <div className="p-4">Loading OAuth settings...</div>
   }
 
   return (
@@ -207,7 +203,10 @@ export function OAuthSettings() {
             <p className="font-mono text-lg font-bold">{activeFlow.user_code}</p>
           </div>
           <button
-            onClick={() => setActiveFlow(null)}
+            onClick={() => {
+              setActiveFlow(null)
+              setPollingProvider(null)
+            }}
             className="mt-3 px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
           >
             Cancel
@@ -218,8 +217,8 @@ export function OAuthSettings() {
       {/* Providers List */}
       <div className="space-y-3">
         {providers.map((provider) => {
-          const status = statuses[provider.id];
-          const isActive = activeFlow?.provider === provider.id;
+          const status = statuses[provider.id]
+          const isActive = activeFlow?.provider === provider.id
 
           return (
             <div
@@ -238,9 +237,9 @@ export function OAuthSettings() {
                 {status && (
                   <div className="flex items-center gap-2 mt-1 text-sm text-gray-500">
                     {getStatusBadge(status.status)}
-                    {status.email && <span>• {status.email}</span>}
+                    {status.email && <span>- {status.email}</span>}
                     {status.expires_in && status.expires_in > 0 && (
-                      <span>• Expires in {formatExpiresIn(status.expires_in)}</span>
+                      <span>- Expires in {formatExpiresIn(status.expires_in)}</span>
                     )}
                   </div>
                 )}
@@ -273,13 +272,13 @@ export function OAuthSettings() {
                 )}
               </div>
             </div>
-          );
+          )
         })}
       </div>
 
       {/* Warning for experimental providers */}
       <div className="p-4 bg-yellow-50 border border-yellow-200 rounded">
-        <h4 className="font-medium text-yellow-800">⚠️ Experimental Providers</h4>
+        <h4 className="font-medium text-yellow-800">Experimental Providers</h4>
         <p className="text-sm text-yellow-700 mt-1">
           ChatGPT OAuth uses unofficial endpoints and may stop working at any time.
           OpenAI may block this approach like Anthropic did with Claude.
@@ -287,7 +286,7 @@ export function OAuthSettings() {
         </p>
       </div>
     </div>
-  );
+  )
 }
 
-export default OAuthSettings;
+export default OAuthSettings
