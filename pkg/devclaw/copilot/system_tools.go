@@ -61,7 +61,7 @@ func sanitizeOutput(output string) string {
 // RegisterSystemTools registers all built-in system tools in the executor.
 // These are core tools available regardless of which skills are loaded.
 // If ssrfGuard is non-nil, web_fetch will validate URLs against SSRF rules.
-func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, memStore *memory.FileStore, sqliteStore *memory.SQLiteStore, memCfg MemoryConfig, sched *scheduler.Scheduler, dataDir string, ssrfGuard *security.SSRFGuard, vault *Vault, webSearchCfg WebSearchConfig) {
+func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, memStore *memory.FileStore, sqliteStore *memory.SQLiteStore, memCfg MemoryConfig, sched *scheduler.Scheduler, dataDir string, ssrfGuard *security.SSRFGuard, vault *Vault, webSearchCfg WebSearchConfig, skillDB *SkillDB) {
 	registerWebSearchTool(executor, webSearchCfg)
 	registerWebFetchTool(executor, ssrfGuard)
 	registerFileTools(executor, dataDir)
@@ -82,7 +82,7 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 	}
 
 	if sched != nil {
-		registerCronTools(executor, sched)
+		registerCronTools(executor, sched, skillDB)
 	}
 
 	if vault != nil && vault.IsUnlocked() {
@@ -1286,7 +1286,7 @@ func (c *osExecCmd) CombinedOutput() ([]byte, error) {
 
 // ---------- Cron / Scheduler Tools ----------
 
-func registerCronTools(executor *ToolExecutor, sched *scheduler.Scheduler) {
+func registerCronTools(executor *ToolExecutor, sched *scheduler.Scheduler, skillDB *SkillDB) {
 	// cron_add
 	executor.Register(
 		MakeToolDefinition("cron_add", "Schedule a task. Use type='at' for ONE-TIME tasks (reminders, delayed messages). Use type='every' or 'cron' ONLY for RECURRING tasks.", map[string]any{
@@ -1363,6 +1363,14 @@ func registerCronTools(executor *ToolExecutor, sched *scheduler.Scheduler) {
 				return nil, err
 			}
 
+			// Save reminder to tracking table (for search/history)
+			if skillDB != nil {
+				if err := skillDB.SaveReminder(id, jobType, schedule, command, channel, chatID); err != nil {
+					// Log error but don't fail - the job was already scheduled
+					// This is a best-effort tracking mechanism
+				}
+			}
+
 			return fmt.Sprintf("Job '%s' scheduled: %s (%s) → %s:%s", id, schedule, jobType, channel, chatID), nil
 		},
 	)
@@ -1429,9 +1437,76 @@ func registerCronTools(executor *ToolExecutor, sched *scheduler.Scheduler) {
 			if err := sched.Remove(id); err != nil {
 				return nil, err
 			}
+
+			// Mark reminder as removed in tracking table (for search/history)
+			if skillDB != nil {
+				if err := skillDB.MarkReminderRemoved(id); err != nil {
+					// Log error but don't fail - the job was already removed
+				}
+			}
+
 			return fmt.Sprintf("Job '%s' removed.", id), nil
 		},
 	)
+
+	// reminder_search - search for reminders (including removed ones)
+	if skillDB != nil {
+		executor.Register(
+			MakeToolDefinition("reminder_search", "Search for reminders by keyword. Use this when user asks about past or current reminders. Returns reminders from the tracking database (includes removed ones for history).", map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type":        "string",
+						"description": "Search query (searches in command and job_id). Leave empty to list all.",
+					},
+					"include_removed": map[string]any{
+						"type":        "boolean",
+						"description": "Include removed reminders in results (default: false)",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Maximum results (default: 20, max: 100)",
+					},
+				},
+			}),
+			func(_ context.Context, args map[string]any) (any, error) {
+				query, _ := args["query"].(string)
+				includeRemoved, _ := args["include_removed"].(bool)
+				limit := 20
+				if l, ok := args["limit"].(float64); ok {
+					limit = int(l)
+				}
+
+				reminders, err := skillDB.SearchReminders(query, includeRemoved, limit)
+				if err != nil {
+					return nil, fmt.Errorf("search reminders: %w", err)
+				}
+
+				if len(reminders) == 0 {
+					if query != "" {
+						return fmt.Sprintf("No reminders found matching '%s'.", query), nil
+					}
+					return "No reminders found.", nil
+				}
+
+				var sb strings.Builder
+				sb.WriteString(fmt.Sprintf("Reminders found (%d):\n\n", len(reminders)))
+				for _, r := range reminders {
+					status := r.Status
+					if status == "removed" {
+						status = "removed ✓"
+					}
+					sb.WriteString(fmt.Sprintf("- **%s** [%s] type=%s\n  Schedule: %s\n  Command: %s\n  Created: %s\n",
+						r.JobID, status, r.JobType, r.Schedule, r.Command, r.CreatedAt))
+					if r.RemovedAt != "" {
+						sb.WriteString(fmt.Sprintf("  Removed: %s\n", r.RemovedAt))
+					}
+					sb.WriteString("\n")
+				}
+				return sb.String(), nil
+			},
+		)
+	}
 }
 
 // ---------- Vault Tools ----------

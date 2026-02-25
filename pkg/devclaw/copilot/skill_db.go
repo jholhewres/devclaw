@@ -836,3 +836,233 @@ func (s *SkillDB) DescribeTable(skillName, tableName string) (*TableInfo, error)
 func generateID() string {
 	return uuid.New().String()[:8]
 }
+
+// ---------- Reminder Tracking ----------
+
+// remindersSchema is the DDL for the reminders tracking table.
+const remindersSchema = `
+CREATE TABLE IF NOT EXISTS _reminders (
+    id          TEXT PRIMARY KEY,
+    job_id      TEXT NOT NULL,
+    job_type    TEXT NOT NULL,
+    schedule    TEXT NOT NULL,
+    command     TEXT NOT NULL,
+    channel     TEXT,
+    chat_id     TEXT,
+    status      TEXT NOT NULL DEFAULT 'active',
+    removed_at  TEXT,
+    created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_reminders_job_id ON _reminders(job_id);
+CREATE INDEX IF NOT EXISTS idx_reminders_status ON _reminders(status);
+`
+
+// InitRemindersTable creates the reminders tracking table if it doesn't exist.
+func (s *SkillDB) InitRemindersTable() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(remindersSchema)
+	if err != nil {
+		return fmt.Errorf("create reminders table: %w", err)
+	}
+
+	return nil
+}
+
+// ReminderInfo contains information about a reminder.
+type ReminderInfo struct {
+	ID        string `json:"id"`
+	JobID     string `json:"job_id"`
+	JobType   string `json:"job_type"`
+	Schedule  string `json:"schedule"`
+	Command   string `json:"command"`
+	Channel   string `json:"channel,omitempty"`
+	ChatID    string `json:"chat_id,omitempty"`
+	Status    string `json:"status"` // active, removed, fired
+	RemovedAt string `json:"removed_at,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
+// SaveReminder saves a reminder to the tracking table.
+// If a reminder with the same job_id exists and is active, it updates it.
+// If it exists but was removed, it creates a new entry.
+func (s *SkillDB) SaveReminder(jobID, jobType, schedule, command, channel, chatID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// Check if there's an active reminder with this job_id
+	var count int
+	err := s.db.QueryRow(
+		"SELECT COUNT(*) FROM _reminders WHERE job_id = ? AND status = 'active'",
+		jobID,
+	).Scan(&count)
+	if err != nil {
+		return fmt.Errorf("check existing reminder: %w", err)
+	}
+
+	if count > 0 {
+		// Update existing active reminder
+		_, err = s.db.Exec(`
+			UPDATE _reminders
+			SET job_type = ?, schedule = ?, command = ?, channel = ?, chat_id = ?, created_at = ?
+			WHERE job_id = ? AND status = 'active'`,
+			jobType, schedule, command, channel, chatID, now, jobID,
+		)
+		if err != nil {
+			return fmt.Errorf("update reminder: %w", err)
+		}
+		return nil
+	}
+
+	// Create new reminder
+	id := generateID()
+	_, err = s.db.Exec(`
+		INSERT INTO _reminders (id, job_id, job_type, schedule, command, channel, chat_id, status, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+		id, jobID, jobType, schedule, command, channel, chatID, now,
+	)
+	if err != nil {
+		return fmt.Errorf("insert reminder: %w", err)
+	}
+
+	return nil
+}
+
+// MarkReminderRemoved marks a reminder as removed (soft delete).
+func (s *SkillDB) MarkReminderRemoved(jobID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	result, err := s.db.Exec(`
+		UPDATE _reminders
+		SET status = 'removed', removed_at = ?
+		WHERE job_id = ? AND status = 'active'`,
+		now, jobID,
+	)
+	if err != nil {
+		return fmt.Errorf("mark reminder removed: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		// No active reminder found - this is OK, might have been removed already
+		// or never existed in tracking table
+	}
+
+	return nil
+}
+
+// SearchReminders searches for reminders matching the query.
+// If query is empty, returns all reminders.
+// If includeRemoved is false, only returns active reminders.
+func (s *SkillDB) SearchReminders(query string, includeRemoved bool, limit int) ([]ReminderInfo, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+
+	var whereClauses []string
+	var args []any
+
+	if !includeRemoved {
+		whereClauses = append(whereClauses, "status = ?")
+		args = append(args, "active")
+	}
+
+	if query != "" {
+		whereClauses = append(whereClauses, "(command LIKE ? OR job_id LIKE ?)")
+		likeQuery := "%" + query + "%"
+		args = append(args, likeQuery, likeQuery)
+	}
+
+	whereClause := ""
+	if len(whereClauses) > 0 {
+		whereClause = "WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
+	querySQL := fmt.Sprintf(`
+		SELECT id, job_id, job_type, schedule, command, channel, chat_id, status, removed_at, created_at
+		FROM _reminders
+		%s
+		ORDER BY created_at DESC
+		LIMIT ?
+	`, whereClause)
+
+	args = append(args, limit)
+
+	rows, err := s.db.Query(querySQL, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search reminders: %w", err)
+	}
+	defer rows.Close()
+
+	var reminders []ReminderInfo
+	for rows.Next() {
+		var r ReminderInfo
+		var channel, chatID, removedAt sql.NullString
+		err := rows.Scan(&r.ID, &r.JobID, &r.JobType, &r.Schedule, &r.Command, &channel, &chatID, &r.Status, &removedAt, &r.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("scan reminder: %w", err)
+		}
+		if channel.Valid {
+			r.Channel = channel.String
+		}
+		if chatID.Valid {
+			r.ChatID = chatID.String
+		}
+		if removedAt.Valid {
+			r.RemovedAt = removedAt.String
+		}
+		reminders = append(reminders, r)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows error: %w", err)
+	}
+
+	return reminders, nil
+}
+
+// GetReminderByJobID gets a reminder by its job ID.
+func (s *SkillDB) GetReminderByJobID(jobID string) (*ReminderInfo, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var r ReminderInfo
+	var channel, chatID, removedAt sql.NullString
+	err := s.db.QueryRow(`
+		SELECT id, job_id, job_type, schedule, command, channel, chat_id, status, removed_at, created_at
+		FROM _reminders
+		WHERE job_id = ?
+		ORDER BY created_at DESC
+		LIMIT 1`,
+		jobID,
+	).Scan(&r.ID, &r.JobID, &r.JobType, &r.Schedule, &r.Command, &channel, &chatID, &r.Status, &removedAt, &r.CreatedAt)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get reminder: %w", err)
+	}
+
+	if channel.Valid {
+		r.Channel = channel.String
+	}
+	if chatID.Valid {
+		r.ChatID = chatID.String
+	}
+	if removedAt.Valid {
+		r.RemovedAt = removedAt.String
+	}
+
+	return &r, nil
+}

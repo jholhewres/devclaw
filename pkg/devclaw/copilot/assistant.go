@@ -2118,15 +2118,24 @@ func (a *Assistant) registerSystemTools() {
 	// Use the parent dir of the memory path as the data directory.
 	dataDir = filepath.Dir(dataDir)
 
-	ssrfGuard := security.NewSSRFGuard(a.config.Security.SSRF, a.logger)
-	RegisterSystemTools(a.toolExecutor, sandboxRunner, a.memoryStore, a.sqliteMemory, a.config.Memory, a.scheduler, dataDir, ssrfGuard, a.vault, a.config.WebSearch)
-
 	// Initialize skill database for skills to store structured data.
+	// Must be done before RegisterSystemTools so cron tools can track reminders.
 	skillDB, err := OpenSkillDatabase(dataDir)
 	if err != nil {
 		a.logger.Warn("skill database not available", "error", err)
 	} else {
 		a.skillDB = skillDB
+		// Initialize reminders tracking table
+		if err := a.skillDB.InitRemindersTable(); err != nil {
+			a.logger.Warn("failed to initialize reminders table", "error", err)
+		}
+	}
+
+	ssrfGuard := security.NewSSRFGuard(a.config.Security.SSRF, a.logger)
+	RegisterSystemTools(a.toolExecutor, sandboxRunner, a.memoryStore, a.sqliteMemory, a.config.Memory, a.scheduler, dataDir, ssrfGuard, a.vault, a.config.WebSearch, a.skillDB)
+
+	// Register skill database tools if available.
+	if a.skillDB != nil {
 		RegisterSkillDBTools(a.toolExecutor, a.skillDB)
 	}
 

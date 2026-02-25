@@ -251,6 +251,24 @@ cron_list()
 | `at` removes automatically | Executes once and gone |
 | Use descriptive IDs | Easier to manage later |
 | `channel`/`chat_id` are optional | Use current context by default |
+| Reminders are tracked | Even removed reminders can be searched |
+
+## Searching for Reminders
+
+Use `reminder_search` to find past or current reminders:
+
+```bash
+# Search for a specific reminder
+reminder_search(query="reunião")
+
+# List all reminders (including removed)
+reminder_search(include_removed=true)
+
+# List only active reminders
+reminder_search()
+```
+
+This is useful when user asks "what reminders did I have?" or "remove the reminder about X".
 
 ## Common Mistakes
 
@@ -262,3 +280,4 @@ cron_list()
 | Forgetting to specify `type` | Default is `cron`, may not be desired |
 | Invalid schedule for type | Each type accepts different format |
 | Duplicate ID | Overwrites existing job |
+| Can't find a reminder | Use `reminder_search` to search history |
