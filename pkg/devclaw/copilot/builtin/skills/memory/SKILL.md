@@ -33,7 +33,7 @@ Long-term memory for remembering information across conversations and sessions.
         ▼                  ▼
 ┌───────────────────────────────────────────────────────┐
 │                   MEMORY STORAGE                       │
-│  ~/.devclaw/memory/MEMORY.md                         │
+│  ./data/memory/MEMORY.md                          │
 │  + Semantic Search Index                              │
 └───────────────────────────────────────────────────────┘
 ```
