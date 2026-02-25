@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -534,6 +535,13 @@ func (w *WhatsApp) Send(ctx context.Context, to string, msg *channels.OutgoingMe
 		return channels.ErrChannelDisconnected
 	}
 
+	// Suppress reasoning/thinking messages to prevent leaking internal thoughts.
+	// This handles both explicit IsReasoning flag and content starting with "Reasoning:".
+	if msg.IsReasoning || isReasoningContent(msg.Content) {
+		w.logger.Debug("whatsapp: suppressing reasoning message", "content_preview", truncateString(msg.Content, 50))
+		return nil // Successfully suppressed, not an error
+	}
+
 	jid, err := parseJID(to)
 	if err != nil {
 		return fmt.Errorf("invalid JID %q: %w", to, err)
@@ -548,6 +556,28 @@ func (w *WhatsApp) Send(ctx context.Context, to string, msg *channels.OutgoingMe
 	}
 
 	return nil
+}
+
+// isReasoningContent checks if content appears to be reasoning/thinking output
+// that should be suppressed from end-user delivery.
+func isReasoningContent(content string) bool {
+	if content == "" {
+		return false
+	}
+	// Check for common reasoning prefixes
+	trimmed := strings.TrimSpace(content)
+	return strings.HasPrefix(trimmed, "Reasoning:") ||
+		strings.HasPrefix(trimmed, "Thinking:") ||
+		strings.HasPrefix(trimmed, "<thinking>") ||
+		strings.HasPrefix(trimmed, "<reasoning>")
+}
+
+// truncateString truncates a string to maxLen characters.
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // Receive returns the incoming messages channel.

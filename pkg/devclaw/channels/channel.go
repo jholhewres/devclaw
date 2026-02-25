@@ -146,6 +146,10 @@ type OutgoingMessage struct {
 	// Attachments contains media attachments to send with the message.
 	Attachments []*MediaAttachment
 
+	// IsReasoning indicates this message contains internal reasoning/thinking
+	// that should not be sent to end users on certain channels.
+	IsReasoning bool
+
 	// Metadata contains additional channel-specific data.
 	Metadata map[string]any
 }
