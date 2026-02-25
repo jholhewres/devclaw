@@ -1095,6 +1095,7 @@ func (a *AgentRun) pruneOldToolResults(messages []chatMessage, currentTurn int) 
 //  1. First attempt: truncate oversized tool results (>4K chars).
 //  2. Second attempt: compact messages (keep last N) + truncate tool results harder.
 //  3. Third attempt: aggressive compaction (keep fewer messages).
+//  4. Final attempt: emergency compression (keep only system + last user message).
 func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []chatMessage, tools []ToolDefinition) (*LLMResponse, error) {
 	toolResultTruncated := false
 
@@ -1142,8 +1143,12 @@ func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []ch
 		a.logger.Info("performing managed compaction due to overflow")
 		if attempt == 0 { // First compaction attempt after initial truncation
 			messages = a.managedCompaction(ctx, messages)
-		} else { // Subsequent attempts, use aggressive compaction
+		} else if attempt < a.maxCompactionAttempts-1 { // Subsequent attempts, use aggressive compaction
 			messages = a.aggressiveCompaction(ctx, messages)
+		} else {
+			// Final attempt: emergency compression
+			a.logger.Warn("using emergency compression as last resort")
+			messages = a.emergencyCompression(messages)
 		}
 	}
 
@@ -1265,6 +1270,64 @@ func (a *AgentRun) aggressiveCompaction(ctx context.Context, messages []chatMess
 		})
 	}
 	compacted = append(compacted, body[len(body)-keepRecent:]...)
+
+	return compacted
+}
+
+// emergencyCompression is the last resort when all other compaction methods fail.
+// It keeps only the system prompt and the most recent user message, discarding
+// everything in between. This is inspired by PicoClaw's approach.
+//
+// This function should only be called when:
+// 1. Managed compaction failed
+// 2. Aggressive compaction failed
+// 3. Context still overflows
+func (a *AgentRun) emergencyCompression(messages []chatMessage) []chatMessage {
+	var header []chatMessage
+	var lastUserMsg *chatMessage
+	var lastAssistantMsg *chatMessage
+
+	// Find system messages and the last user message
+	for i := len(messages) - 1; i >= 0; i-- {
+		m := messages[i]
+		if m.Role == "system" {
+			header = append([]chatMessage{m}, header...)
+		} else if lastUserMsg == nil && m.Role == "user" {
+			lastUserMsg = &messages[i]
+		} else if lastAssistantMsg == nil && m.Role == "assistant" && lastUserMsg != nil {
+			lastAssistantMsg = &messages[i]
+		}
+	}
+
+	// If no user message found, just return the header
+	if lastUserMsg == nil {
+		a.logger.Warn("emergency compression: no user message found")
+		return header
+	}
+
+	var compacted []chatMessage
+	compacted = append(compacted, header...)
+
+	// Add compression notice
+	compacted = append(compacted, chatMessage{
+		Role: "system",
+		Content: "[System: Emergency context compression applied. " +
+			"Previous conversation history was discarded to prevent context overflow. " +
+			"The user's last message is preserved below. Please continue assisting.]",
+	})
+
+	// Add the last assistant message if available (provides context)
+	if lastAssistantMsg != nil {
+		compacted = append(compacted, *lastAssistantMsg)
+	}
+
+	// Add the last user message
+	compacted = append(compacted, *lastUserMsg)
+
+	a.logger.Warn("emergency compression applied",
+		"original_len", len(messages),
+		"compacted_len", len(compacted),
+	)
 
 	return compacted
 }

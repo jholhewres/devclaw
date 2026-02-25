@@ -159,8 +159,203 @@ type registeredTool struct {
 type ToolResult struct {
 	ToolCallID string
 	Name       string
-	Content    string
+	Content    string // Main content (used for LLM context when ForLLM is empty)
 	Error      error
+
+	// Extended fields for dual output (PicoClaw-inspired)
+	ForLLM   string // Technical content for LLM reasoning (if empty, Content is used)
+	ForUser  string // Friendly message to show user immediately
+	IsAsync  bool   // Tool is running in background, result comes later
+	IsSilent bool   // Don't notify user about this result
+}
+
+// DualToolResult creates a ToolResult with separate content for LLM and user.
+// This is the recommended way to return results that have both technical details
+// and user-friendly messages.
+func DualToolResult(forLLM, forUser string) *ToolResult {
+	return &ToolResult{
+		Content: forLLM, // Content is always set for backwards compatibility
+		ForLLM:  forLLM,
+		ForUser: forUser,
+	}
+}
+
+// SilentResult creates a ToolResult that doesn't notify the user.
+// Useful for background operations or when the result should only be
+// used for LLM reasoning.
+func SilentResult(content string) *ToolResult {
+	return &ToolResult{
+		Content:  content,
+		ForLLM:   content,
+		IsSilent: true,
+	}
+}
+
+// AsyncResult creates a ToolResult indicating the tool is running in background.
+// The actual result will be delivered via callback or follow-up message.
+func AsyncResult(message string) *ToolResult {
+	return &ToolResult{
+		Content:  message,
+		ForLLM:   message,
+		ForUser:  message,
+		IsAsync:  true,
+	}
+}
+
+// ErrorResult creates a ToolResult from an error.
+func ErrorResult(err error) *ToolResult {
+	errMsg := err.Error()
+	return &ToolResult{
+		Content:  errMsg,
+		ForLLM:   errMsg,
+		ForUser:  "An error occurred. Please try again.",
+		Error:    err,
+	}
+}
+
+// GetForLLM returns the content to use for LLM context.
+// Returns ForLLM if set, otherwise Content.
+func (r *ToolResult) GetForLLM() string {
+	if r.ForLLM != "" {
+		return r.ForLLM
+	}
+	return r.Content
+}
+
+// GetForUser returns the content to show the user.
+// Returns ForUser if set, otherwise GetForLLM().
+func (r *ToolResult) GetForUser() string {
+	if r.ForUser != "" {
+		return r.ForUser
+	}
+	return r.GetForLLM()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contextual Tool Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ContextualTool is an interface for tools that need delivery context.
+// Tools can implement this interface to receive channel/chatID context.
+// The executor checks for this interface and calls SetDeliveryTarget before
+// executing the tool handler.
+//
+// Note: In DevClaw, handlers are functions (not objects), so this interface
+// is typically implemented by a wrapper struct. For simple cases, tools can
+// use GetDeliveryTarget(ctx) directly to extract context from the context.Context.
+//
+// Example with wrapper:
+//
+//	type contextualHandler struct {
+//		fn      ToolHandlerFunc
+//		channel string
+//		chatID  string
+//	}
+//
+//	func (h *contextualHandler) SetDeliveryTarget(channel, chatID string) {
+//		h.channel = channel
+//		h.chatID = chatID
+//	}
+//
+//	func (h *contextualHandler) Call(ctx context.Context, args map[string]any) (any, error) {
+//		// Use h.channel and h.chatID
+//		return h.fn(ctx, args)
+//	}
+type ContextualTool interface {
+	SetDeliveryTarget(channel, chatID string)
+}
+
+// GetDeliveryTarget is a convenience function that extracts the delivery target
+// from the context. Tools should use this to get channel/chatID context.
+//
+// Example:
+//
+//	func myToolHandler(ctx context.Context, args map[string]any) (any, error) {
+//		channel, chatID := GetDeliveryTarget(ctx)
+//		if channel == "" {
+//			return nil, fmt.Errorf("no channel context")
+//		}
+//		// Use channel and chatID...
+//	}
+func GetDeliveryTarget(ctx context.Context) (channel, chatID string) {
+	dt := DeliveryTargetFromContext(ctx)
+	return dt.Channel, dt.ChatID
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Async Tool Support
+// ─────────────────────────────────────────────────────────────────────────────
+
+// AsyncCompleteCallback is called when an async tool completes execution.
+// The result contains the final output that should be delivered.
+type AsyncCompleteCallback func(result *ToolResult)
+
+// AsyncToolConfig holds configuration for async tool execution.
+type AsyncToolConfig struct {
+	// Label is a human-readable description of the async task.
+	Label string
+
+	// OnComplete is called when the async task finishes.
+	OnComplete AsyncCompleteCallback
+
+	// Timeout is the maximum duration for the async task.
+	// Default is 5 minutes if not set.
+	Timeout time.Duration
+}
+
+// RunAsync executes a function in the background and calls the callback when done.
+// This is a helper for tools that need to run long operations asynchronously.
+//
+// The function returns immediately with an AsyncResult. The actual work happens
+// in a background goroutine, and the callback is invoked when complete.
+//
+// The context is propagated to the async function, so cancellation of the parent
+// context will also cancel the async operation.
+//
+// Example:
+//
+//	func myAsyncTool(ctx context.Context, args map[string]any) (any, error) {
+//		config := AsyncToolConfig{
+//			Label: "processing files",
+//			OnComplete: func(result *ToolResult) {
+//				// Handle completion - e.g., send to user
+//			},
+//		}
+//
+//		RunAsync(ctx, config, func(ctx context.Context) *ToolResult {
+//			// Long-running operation
+//			return &ToolResult{Content: "done"}
+//		})
+//
+//		return AsyncResult("Started processing files..."), nil
+//	}
+func RunAsync(ctx context.Context, config AsyncToolConfig, fn func(ctx context.Context) *ToolResult) {
+	timeout := config.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+
+	go func() {
+		// Derive from original context to respect cancellation
+		asyncCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+
+		result := fn(asyncCtx)
+
+		if config.OnComplete != nil {
+			// Use background context if original was cancelled
+			callbackCtx := context.Background()
+			select {
+			case <-ctx.Done():
+				// Original context cancelled, use background for callback
+			default:
+				callbackCtx = ctx
+			}
+			_ = callbackCtx // Callback doesn't need context currently
+
+			config.OnComplete(result)
+		}
+	}()
 }
 
 // sequentialTools are tools that must not run in parallel (shared state).
