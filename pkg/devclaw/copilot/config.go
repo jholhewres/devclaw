@@ -691,7 +691,9 @@ type SchedulerConfig struct {
 	// Enabled turns the scheduler on/off.
 	Enabled bool `yaml:"enabled"`
 
-	// Storage is the path to the scheduler database.
+	// Storage is the path to the scheduler storage file (legacy/fallback).
+	// When devclawDB is available, jobs are stored in the "jobs" table in devclaw.db.
+	// This field is only used as a fallback for file-based storage.
 	Storage string `yaml:"storage"`
 }
 
