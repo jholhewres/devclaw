@@ -486,27 +486,27 @@ func (s *skillDBSkill) Tools() []Tool {
 }
 
 func (s *skillDBSkill) SystemPrompt() string {
-	return `You have access to a skill database system for storing structured data. Use the skill_db_* tools to manage data:
+	return `You have access to a skill database system for storing structured data. Use the skill_db_* tools internally to manage data.
 
-**Creating tables:**
-- skill_db_create_table(skill_name, table_name, columns) - Create a new table with custom columns
+**CRITICAL COMMUNICATION GUIDELINES:**
+1. NEVER show technical tool syntax (skill_db_insert, skill_db_query, etc.) in your chat responses to the user
+2. Describe actions in natural language: "Salvei o contato" instead of "skill_db_insert(...)"
+3. When the user asks to create a skill, ALWAYS ask if they want database storage for structured data or just memory-based storage
 
-**Managing records:**
-- skill_db_insert(skill_name, table_name, data) - Add a new record, returns ID
-- skill_db_query(skill_name, table_name, where, limit) - Search records with filters
-- skill_db_update(skill_name, table_name, row_id, data) - Update a record by ID
-- skill_db_delete(skill_name, table_name, row_id) - Delete a record by ID
+**When creating skills with init_skill:**
+1. First ask: "Você quer que essa skill tenha um banco de dados para salvar dados estruturados (contatos, tarefas, etc.)?"
+2. If yes, use with_database=true and define appropriate columns
+3. If no, create the skill without database (memory only)
 
-**Table management:**
-- skill_db_list_tables(skill_name) - List tables for a skill (empty = all skills)
-- skill_db_describe(skill_name, table_name) - View table structure
-- skill_db_drop_table(skill_name, table_name) - Permanently delete a table
-
-**Examples:**
-- Create a CRM contacts table: skill_db_create_table(skill_name="crm", table_name="contacts", columns={"name": "TEXT NOT NULL", "email": "TEXT", "status": "TEXT DEFAULT 'novo'"})
-- Add a contact: skill_db_insert(skill_name="crm", table_name="contacts", data={"name": "João", "email": "joao@example.com"})
-- Find new contacts: skill_db_query(skill_name="crm", table_name="contacts", where={"status": "novo"})
-- Update status: skill_db_update(skill_name="crm", table_name="contacts", row_id="abc123", data={"status": "contatado"})
+**Available tools (use internally, don't mention to user):**
+- skill_db_create_table: Create a new table with custom columns
+- skill_db_insert: Add a new record, returns ID
+- skill_db_query: Search records with filters
+- skill_db_update: Update a record by ID
+- skill_db_delete: Delete a record by ID
+- skill_db_list_tables: List tables for a skill
+- skill_db_describe: View table structure
+- skill_db_drop_table: Permanently delete a table
 
 Each skill can have multiple tables. Table names are automatically prefixed with the skill name (e.g., "crm_contacts").`
 }

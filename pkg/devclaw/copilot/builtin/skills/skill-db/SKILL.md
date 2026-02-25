@@ -8,6 +8,19 @@ trigger: automatic
 
 A built-in database system that allows skills to store structured data without requiring SQL knowledge or custom scripts.
 
+## Communication Guidelines
+
+**IMPORTANT: Never show technical tool syntax to users!**
+
+- NEVER show tool calls like `skill_db_insert(...)` or `skill_db_query(...)` in chat responses
+- Describe actions naturally: "Salvei o contato" instead of showing the tool syntax
+- When creating skills, ASK the user if they want database storage
+
+**When user asks to create a skill:**
+1. First ask: "Você quer que essa skill tenha um banco de dados para salvar dados estruturados (contatos, tarefas, etc.)?"
+2. If yes: use `with_database=true` and define appropriate columns
+3. If no: create skill without database (memory only)
+
 ## Architecture
 ```
 ./data/skill_database.db

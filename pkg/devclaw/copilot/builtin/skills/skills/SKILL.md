@@ -8,6 +8,15 @@ trigger: automatic
 
 Create, install, and manage skills that extend agent capabilities.
 
+## Communication Guidelines
+
+**When creating skills for users:**
+1. NEVER show technical tool syntax in chat responses
+2. ALWAYS ask: "Você quer que essa skill tenha um banco de dados para salvar dados estruturados (contatos, tarefas, etc.)?"
+3. Explain the options:
+   - **Com banco de dados**: dados persistentes, consultas estruturadas, ideal para CRM, tarefas, contatos
+   - **Sem banco de dados**: usa memória/vault, ideal para integrações de API, automações
+
 ## Architecture
 ```
 ┌─────────────────────────────────────────────────────────────┐
