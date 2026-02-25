@@ -1,88 +1,112 @@
 ---
 name: memory
-description: "Manage long-term memory to remember facts, preferences, and context"
+description: "store and retrieve long-term memories (facts, preferences, context)"
 trigger: automatic
 ---
 
 # Memory
 
-Long-term memory allows you to remember information across conversations and sessions.
+Long-term memory for remembering information across conversations and sessions.
 
-## When to Use
+## ⚠️ CRITICAL RULES
 
-| Action | When |
-|--------|------|
-| `save` | Learn something new about the user |
-| `search` | Find relevant past information before responding |
-| `list` | Review recent memories |
-| `index` | Rebuild search index after manual edits |
+| Rule | Reason |
+|------|--------|
+| **NEVER** store secrets in memory | Use **vault** for API keys, passwords |
+| **NEVER** store database URLs with credentials | Use **vault** |
+| Only store **non-sensitive** information | Facts, preferences, context |
 
-## Tool: `memory`
-
-```bash
-memory(action="...", ...)
+## Architecture
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Agent Context                          │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        │                  │                  │
+        ▼                  ▼                  ▼
+┌───────────────┐  ┌───────────────┐  ┌───────────────┐
+│ memory(save)  │  │memory(search) │  │ memory(list)  │
+│ (store fact)  │  │ (find related)│  │ (browse all)  │
+└───────┬───────┘  └───────┬───────┘  └───────────────┘
+        │                  │
+        ▼                  ▼
+┌───────────────────────────────────────────────────────┐
+│                   MEMORY STORAGE                       │
+│  ./data/memory/MEMORY.md                          │
+│  + Semantic Search Index                              │
+└───────────────────────────────────────────────────────┘
 ```
 
-### Actions
+## Categories
+| Category | Use For | Example |
+|----------|---------|---------|
+| `fact` | Objective information | "User works at Acme Corp" |
+| `preference` | User preferences | "Prefers dark mode" |
+| `event` | Important events | "Started new project on Jan 15" |
+| `summary` | Conversation summaries | "Discussed migration plan" |
 
-#### Save a Memory
+## When to Use
+| Action | Trigger |
+|--------|---------|
+| `save` | User shares personal info, preferences, important context |
+| `search` | Before answering questions that might relate to past context |
 
+## When NOT to Use Memory
+| Data Type | Use Instead |
+|-----------|-------------|
+| API keys, tokens, passwords | **vault_save** |
+| Database URLs with credentials | **vault_save** |
+| Private keys, secrets | **vault_save** |
+
+**Rule:** If exposure could cause harm → vault, not memory.
+
+## Saving Memories
 ```bash
 memory(
   action="save",
-  content="User prefers dark mode in all applications",
+  content="User prefers 2-space indentation for all code",
   category="preference"
 )
 ```
 
-**Categories:**
-- `fact` - Objective information (default)
-- `preference` - User preferences and tastes
-- `event` - Important events or milestones
-- `summary` - Summaries of conversations or work
-
-#### Search Memories
-
+## Searching Memories
 ```bash
 memory(
   action="search",
   query="user preferences about theme",
-  limit=10
+  limit=5
 )
 ```
 
-Uses **semantic search** (vector + keyword hybrid) when available.
-
-#### List Recent Memories
-
+## Listing Memories
 ```bash
 memory(action="list", limit=20)
 ```
 
-#### Rebuild Search Index
+## Common Patterns
 
+### Learning and Using Preferences
 ```bash
-memory(action="index")
+# User: "I always use tabs, not spaces"
+memory(action="save", content="User prefers tabs over spaces", category="preference")
+
+# Later: User: "Format this file"
+memory(action="search", query="indentation preference")
+# Apply preference found
 ```
 
-## Best Practices
+## Memory vs Vault
+| Store in Memory | Store in Vault |
+|-----------------|----------------|
+| User preferences | API keys |
+| Project details | Passwords |
+| Team structure | Secret URLs |
+| Past decisions | Credentials |
 
-1. **Save proactively** - When you learn something important, save it immediately
-2. **Search first** - Before answering questions, search for relevant context
-3. **Be specific** - Use clear, descriptive content for better recall
-4. **Use categories** - Helps organize and filter memories
-5. **Don't duplicate** - Check if information already exists before saving
-
-## Workflow Example
-
-```
-User: "What's my favorite editor?"
-
-1. Search: memory(action="search", query="favorite editor")
-2. If found → Answer with the memory
-3. If not found → Ask user, then save the answer
-```
-
-## Storage
-
-Memories are stored in `MEMORY.md` files and indexed for semantic search. The index enables finding conceptually similar content even without exact keyword matches.
+## Common Mistakes
+| Mistake | Correct Approach |
+|---------|-----------------|
+| Storing API keys in memory | Use vault for secrets |
+| Vague content | Be specific |
+| Not searching before answering | Search for relevant context |

@@ -384,7 +384,10 @@ func (inst *Installer) installLocalFile(filePath string) (*InstallResult, error)
 // ---------- Helpers ----------
 
 // extractClawHubSlug extracts the slug from a ClawHub URL.
-// e.g. "https://clawhub.ai/steipete/trello" -> "steipete/trello"
+// ClawHub URLs are like "https://clawhub.ai/owner/skill" but the API
+// uses simple slugs like "skill". We extract just the skill name.
+// e.g. "https://clawhub.ai/steipete/slack" -> "slack"
+// e.g. "https://clawhub.ai/slack" -> "slack"
 func extractClawHubSlug(u string) string {
 	for _, prefix := range []string{"https://clawhub.ai/", "https://clawhub.com/"} {
 		if strings.HasPrefix(u, prefix) {
@@ -393,6 +396,12 @@ func extractClawHubSlug(u string) string {
 			// Remove any query params or fragments.
 			if idx := strings.IndexAny(slug, "?#"); idx >= 0 {
 				slug = slug[:idx]
+			}
+			// ClawHub API uses simple slugs (last part only)
+			// "steipete/slack" -> "slack"
+			parts := strings.Split(slug, "/")
+			if len(parts) >= 1 {
+				return parts[len(parts)-1]
 			}
 			return slug
 		}
@@ -424,7 +433,9 @@ func extractGitHubRepo(u string) string {
 }
 
 // skillNameFromSlug extracts the skill name from a ClawHub slug.
+// ClawHub uses simple slugs like "slack" or "my-skill".
 func skillNameFromSlug(slug string) string {
+	// Handle both "slack" and "owner/slug" formats
 	parts := strings.Split(slug, "/")
 	if len(parts) >= 2 {
 		return parts[len(parts)-1]

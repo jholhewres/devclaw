@@ -40,6 +40,9 @@ type LLMClient struct {
 	httpClient *http.Client
 	logger     *slog.Logger
 
+	// OAuth support (optional)
+	oauthTokenManager OAuthTokenManager
+
 	// Rate-limit cooldown tracking for auto-recovery.
 	// When the primary model hits a rate limit, we record when the cooldown
 	// expires and which fallback model we're using. Once the cooldown nears
@@ -49,6 +52,11 @@ type LLMClient struct {
 	cooldownModel    string        // the model that was rate-limited
 	lastProbeAt      time.Time     // avoid probe storms
 	probeMinInterval time.Duration // min time between probe attempts
+}
+
+// OAuthTokenManager is the interface for OAuth token management.
+type OAuthTokenManager interface {
+	GetValidToken(provider string) (interface{}, error)
 }
 
 // NewLLMClient creates a new LLM client from config.
@@ -99,6 +107,16 @@ func NewLLMClient(cfg *Config, logger *slog.Logger) *LLMClient {
 // detectProvider infers the provider from the base URL.
 func detectProvider(baseURL string) string {
 	switch {
+	// OAuth providers (check first)
+	case strings.Contains(baseURL, "chatgpt.com/backend-api"):
+		return "chatgpt-oauth"
+	case strings.Contains(baseURL, "cloudcode-pa.googleapis.com"):
+		return "gemini-oauth"
+	case strings.Contains(baseURL, "qwen.ai"):
+		return "qwen-oauth"
+	case strings.Contains(baseURL, "minimax.io"), strings.Contains(baseURL, "minimaxi.com"):
+		return "minimax-oauth"
+	// Standard providers
 	case strings.Contains(baseURL, "z.ai/api/coding"):
 		return "zai-coding"
 	case strings.Contains(baseURL, "z.ai/api/paas"):
@@ -141,8 +159,24 @@ func detectProvider(baseURL string) string {
 }
 
 // resolveAPIKey returns the API key to use for this client.
-// Priority: 1) explicitly set key, 2) provider-specific env var, 3) generic API_KEY.
+// Priority: 1) OAuth token (if OAuth provider), 2) explicitly set key,
+// 3) provider-specific env var, 4) generic API_KEY.
 func (c *LLMClient) resolveAPIKey() string {
+	// Priority 0: OAuth token (if using OAuth provider)
+	if c.oauthTokenManager != nil && strings.HasSuffix(c.provider, "-oauth") {
+		baseProvider := strings.TrimSuffix(c.provider, "-oauth")
+		if cred, err := c.oauthTokenManager.GetValidToken(baseProvider); err == nil {
+			// The credential should have an AccessToken field
+			if token, ok := cred.(interface{ GetAccessToken() string }); ok {
+				return token.GetAccessToken()
+			}
+			c.logger.Warn("OAuth credential does not implement GetAccessToken", "provider", baseProvider)
+		} else {
+			c.logger.Warn("OAuth token not available, falling back to API key",
+				"provider", baseProvider, "error", err)
+		}
+	}
+
 	// Priority 1: Key explicitly set in config (backwards compat)
 	if c.apiKey != "" {
 		return c.apiKey
@@ -160,6 +194,21 @@ func (c *LLMClient) resolveAPIKey() string {
 	}
 
 	return c.apiKey // returns empty string if nothing found
+}
+
+// SetOAuthTokenManager sets the OAuth token manager for this client.
+func (c *LLMClient) SetOAuthTokenManager(tm OAuthTokenManager) {
+	c.oauthTokenManager = tm
+}
+
+// IsOAuthProvider returns true if this client is configured for OAuth.
+func (c *LLMClient) IsOAuthProvider() bool {
+	return strings.HasSuffix(c.provider, "-oauth")
+}
+
+// OAuthBaseProvider returns the base provider name for OAuth providers.
+func (c *LLMClient) OAuthBaseProvider() string {
+	return strings.TrimSuffix(c.provider, "-oauth")
 }
 
 // normalizeGeminiModelID converts short Gemini model aliases to their full API names.

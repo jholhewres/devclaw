@@ -211,23 +211,23 @@ func newSkillSearchCmd() *cobra.Command {
 				return fmt.Errorf("ClawHub search failed: %w", err)
 			}
 
-			if len(result.Skills) == 0 {
+			if len(result.Results) == 0 {
 				fmt.Println("No skills found.")
 				return nil
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintf(w, "SLUG\tDESCRIPTION\tSTARS\tDOWNLOADS\n")
-			fmt.Fprintf(w, "────\t───────────\t─────\t─────────\n")
-			for _, s := range result.Skills {
-				desc := s.Description
-				if len(desc) > 50 {
-					desc = desc[:47] + "..."
+			fmt.Fprintf(w, "SLUG\tNAME\tSUMMARY\tSCORE\n")
+			fmt.Fprintf(w, "────\t────\t───────\t─────\n")
+			for _, s := range result.Results {
+				summary := s.Summary
+				if len(summary) > 50 {
+					summary = summary[:47] + "..."
 				}
-				fmt.Fprintf(w, "%s\t%s\t%d\t%d\n", s.Slug, desc, s.Stars, s.Downloads)
+				fmt.Fprintf(w, "%s\t%s\t%s\t%.2f\n", s.Slug, s.DisplayName, summary, s.Score)
 			}
 			w.Flush()
-			fmt.Printf("\n%d result(s). Install with: copilot skill install <slug>\n", len(result.Skills))
+			fmt.Printf("\n%d result(s). Install with: devclaw skill install <slug>\n", len(result.Results))
 			return nil
 		},
 	}

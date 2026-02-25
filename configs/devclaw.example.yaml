@@ -135,9 +135,9 @@ skills:
   installed: [github, gog, summarize]
 
 # ── Scheduler ──────────────────────────────────────────────
+# Jobs are stored in the "jobs" table in devclaw.db (SQLite).
 scheduler:
   enabled: true
-  storage: "./data/scheduler.db"
 
 # ── Logging ────────────────────────────────────────────────
 logging:
