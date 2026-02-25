@@ -297,6 +297,9 @@ type Server struct {
 
 	// mediaAPI provides media upload/download operations (optional).
 	mediaAPI MediaAPI
+
+	// oauthHandlers provides OAuth endpoints (optional).
+	oauthHandlers *OAuthHandlers
 }
 
 // New creates a new web UI server.
@@ -330,6 +333,16 @@ func (s *Server) OnVaultInit(fn func(password string, secrets map[string]string)
 // SetMediaAPI sets the media API for file upload/download operations.
 func (s *Server) SetMediaAPI(api MediaAPI) {
 	s.mediaAPI = api
+}
+
+// SetOAuthHandlers sets the OAuth handlers for OAuth endpoints.
+func (s *Server) SetOAuthHandlers(handlers *OAuthHandlers) {
+	s.oauthHandlers = handlers
+}
+
+// GetOAuthHandlers returns the OAuth handlers (may be nil).
+func (s *Server) GetOAuthHandlers() *OAuthHandlers {
+	return s.oauthHandlers
 }
 
 // Start begins serving the web UI.
@@ -377,6 +390,11 @@ func (s *Server) Start(ctx context.Context) error {
 	if s.mediaAPI != nil {
 		mux.HandleFunc("/api/media", s.authMiddleware(s.requireAssistant(s.handleAPIMedia)))
 		mux.HandleFunc("/api/media/", s.authMiddleware(s.requireAssistant(s.handleAPIMediaByID)))
+	}
+
+	// OAuth routes (if OAuth handlers are configured)
+	if s.oauthHandlers != nil {
+		s.oauthHandlers.RegisterRoutes(mux, s.authMiddleware)
 	}
 
 	// ── SPA (React) fallback ──
