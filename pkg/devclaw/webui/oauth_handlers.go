@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -437,9 +435,5 @@ func openBrowser(url string) error {
 
 // GetDataDir returns the default data directory.
 func GetDataDir() (string, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(homeDir, ".devclaw"), nil
+	return "./data", nil
 }
