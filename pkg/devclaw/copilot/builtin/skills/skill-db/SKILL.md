@@ -1,63 +1,69 @@
 ---
 name: skill-db
-description: "Database system for skills to store and retrieve structured data like contacts, tasks, notes, CRM, etc."
+description: "Database for skills to store structured data (contacts, tasks, notes, CRM)"
 trigger: automatic
 ---
 
 # Skill Database
 
-A built-in database system that allows skills to store structured data (contacts, tasks, notes, CRM, etc.) without requiring SQL knowledge or custom scripts.
+Store and retrieve structured data without SQL knowledge.
 
- Skills can create their own tables using `skill_db(action="create_table")`.
+## CRITICAL: Communication Rules
 
-**IMPORTANT: Communication Guidelines**
+- **NEVER** show tool syntax in chat (e.g., `skill_db(...)`)
+- Describe actions naturally: "Salvei o contato" not "skill_db(action=insert...)"
+- Respond in the same language as the user
 
-- NEVER show technical tool syntax in chat responses
-- Describe actions naturally: "Saved the contact" instead of "skill_db_insert(...)`
-- NEVER show tool syntax like `skill_db_insert(skill_name="crm", table_name="contacts", data={...})`
-- NEVER show tool calls in chat responses
+## The ONE Tool
 
-**When creating skills with database:**
-1. ALWAYS ASK: "Você quer que essa skill tenha um banco de dados para salvar it?"
-2. ALWAYS use `skill_db_query` to list data - it's the most intuitive and direct!
-- Use `skill_db_query` for natural language
+```
+skill_db(action, skill_name, table_name, ...)
+```
 
-**Example Usage:**
+### Actions
+
+| Action | What it does | When to use |
+|--------|--------------|-------------|
+| `query` | **LIST records** | User asks to "list", "show", "what are" |
+| `insert` | Add new record | User wants to save/store something |
+| `update` | Modify record | User wants to change existing data |
+| `delete` | Remove record | User wants to remove something |
+| `list_tables` | Show table metadata | Checking what tables exist |
+| `describe` | Show table columns | Understanding table structure |
+| `create_table` | Create new table | Setting up a new skill |
+| `drop_table` | Delete table permanently | Removing a skill's data |
+
+## Common Patterns
+
+### List ideas (MOST COMMON - use this!)
 ```
 skill_db(action="query", skill_name="oss_ideas", table_name="ideas")
 ```
+Returns: `{"count": 1, "records": [...]}`
 
-**Common Patterns:**
+### Add an idea
 ```
-skill_db(action="create_table", skill_name="oss_ideas", table_name="ideas", columns={
-    "title": "TEXT NOT NULL",
-    "description": "TEXT",
-    "project": "TEXT",
-    "status": "TEXT DEFAULT 'nova'",
-    "priority": "INTEGER DEFAULT 3,
-    "tags": "TEXT",
+skill_db(action="insert", skill_name="oss_ideas", table_name="ideas", data={
+    "title": "My idea",
+    "description": "Details here"
 })
-
 ```
 
-**Tips:**
-- Use `skill_db` for all skill operations
-- Keep skills focused
-- Use `with_database=true` for skills that need to store data
-- Query with filters to avoid loading all data
-- Always use underscores in skill_name (convert hyphens to underscores: `oss_ideas` not `oss-ideas`)
+### Filter by status
+```
+skill_db(action="query", skill_name="oss_ideas", table_name="ideas", where={"status": "nova"})
+```
 
+## Important Notes
 
-**Related Skills**
-- **skills** - Create, install, and manage skills
-- **skill-db** - Database system for storing structured data in skills
+1. **skill_name uses underscores**: `oss_ideas` not `oss-ideas`
+2. **Use query for listing**: NOT `list_tables` or `describe`
+3. **One tool, one action**: The `action` parameter determines behavior
 
-**Common mistakes**
+## Architecture
 
-| Mistake | Correct Approach |
-|---------|------------------|
-| Hardcoding API keys | Use vault_get in scripts |
-| Vague description | Be specific about capabilities |
-| Not testing | Always test_skill after creation |
-| Creating duplicate skills | Delete duplicate tables (DROP_table) | Use skill_db(action="drop_table") instead
-
+```
+./data/skill_database.db
+├── _skill_tables_registry    # Table metadata
+└── {skill}_{table}           # Actual data tables
+```

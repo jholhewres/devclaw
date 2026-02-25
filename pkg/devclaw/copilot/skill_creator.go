@@ -165,26 +165,38 @@ func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry
 
 This skill has a database table for storing structured data.
 
-**IMPORTANT: Always use skill_name="%s" (with underscores, not hyphens) for all database operations.**
+**IMPORTANT:**
+- Always use skill_name="%s" (underscores, not hyphens)
+- Use action="query" to LIST data (when user asks to "list", "show", "what are")
+- NEVER show tool syntax in chat - respond naturally
 
-### Tools
-- **skill_db_query**: LIST data (use this to show records to user)
-- **skill_db_insert**: Add new records
-- **skill_db_update**: Update existing records
-- **skill_db_delete**: Remove records
+### The skill_db Tool
 
-### Examples
 ` + "```" + `
-# List all records (use this when user asks to "list" or "show" data)
-skill_db_query(skill_name="%s", table_name="%s")
+# LIST records (use this when user asks to "list" or "show")
+skill_db(action="query", skill_name="%s", table_name="%s")
 
-# Add a record
-skill_db_insert(skill_name="%s", table_name="%s", data={"name": "Example"})
+# ADD a record
+skill_db(action="insert", skill_name="%s", table_name="%s", data={"title": "Example"})
 
-# Filter records
-skill_db_query(skill_name="%s", table_name="%s", where={"status": "active"})
+# FILTER records
+skill_db(action="query", skill_name="%s", table_name="%s", where={"status": "active"})
+
+# UPDATE a record
+skill_db(action="update", skill_name="%s", table_name="%s", row_id="ID", data={"status": "done"})
+
+# DELETE a record
+skill_db(action="delete", skill_name="%s", table_name="%s", row_id="ID")
 ` + "```" + `
-`, dbSkillName, dbSkillName, databaseTable, dbSkillName, databaseTable, dbSkillName, databaseTable)
+
+### Quick Reference
+| User asks... | Use action=... |
+|--------------|----------------|
+| "list my X" / "show X" | query |
+| "save/add/create X" | insert |
+| "update/change X" | update |
+| "delete/remove X" | delete |
+`, dbSkillName, dbSkillName, databaseTable, dbSkillName, databaseTable, dbSkillName, databaseTable, dbSkillName, databaseTable, dbSkillName, databaseTable)
 
 				instructions += dbInstructions
 			}

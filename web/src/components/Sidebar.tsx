@@ -28,6 +28,7 @@ import {
   Database,
   UsersRound,
   Cable,
+  Link2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -85,6 +86,7 @@ const menuItems: MenuItem[] = [
     sectionKey: 'sidebarSections.settings',
     submenu: [
       { nameKey: 'sidebar.apiConfig', icon: Key, route: '/api-config' },
+      { nameKey: 'sidebar.oauth', icon: Link2, route: '/oauth' },
       { nameKey: 'sidebar.access', icon: Users, route: '/access' },
       { nameKey: 'sidebar.budget', icon: DollarSign, route: '/budget' },
       { nameKey: 'sidebar.memory', icon: Brain, route: '/memory' },
