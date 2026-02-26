@@ -285,6 +285,7 @@ func (bm *BrowserManager) Start(ctx context.Context) error {
 }
 
 // enableCDPDomains enables the required CDP domains for browser automation.
+// MUST be called with bm.mu already held.
 func (bm *BrowserManager) enableCDPDomains(ctx context.Context) error {
 	domains := []string{
 		"Page.enable",
@@ -295,13 +296,56 @@ func (bm *BrowserManager) enableCDPDomains(ctx context.Context) error {
 	}
 
 	for _, domain := range domains {
-		_, err := bm.sendCDP(domain, nil)
+		_, err := bm.sendCDPInternal(domain, nil)
 		if err != nil {
 			bm.logger.Debug("CDP domain enable result", "domain", domain, "error", err)
 		}
 	}
 
 	return nil
+}
+
+// sendCDPInternal sends a CDP command WITHOUT acquiring the lock.
+// MUST be called with bm.mu already held.
+func (bm *BrowserManager) sendCDPInternal(method string, params map[string]any) (json.RawMessage, error) {
+	conn, err := bm.connect()
+	if err != nil {
+		return nil, err
+	}
+
+	bm.msgID++
+	msg := map[string]any{
+		"id":     bm.msgID,
+		"method": method,
+	}
+	if params != nil {
+		msg["params"] = params
+	}
+
+	if err := conn.WriteJSON(msg); err != nil {
+		return nil, fmt.Errorf("CDP write error: %w", err)
+	}
+
+	// Read response
+	for {
+		var resp struct {
+			ID     int             `json:"id"`
+			Result json.RawMessage `json:"result"`
+			Error  *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := conn.ReadJSON(&resp); err != nil {
+			return nil, fmt.Errorf("CDP read error: %w", err)
+		}
+		if resp.ID == bm.msgID {
+			if resp.Error != nil {
+				return nil, fmt.Errorf("CDP error: %s", resp.Error.Message)
+			}
+			return resp.Result, nil
+		}
+		// Ignore events or other responses
+	}
 }
 
 // waitForCDP polls the CDP /json/version endpoint until it responds.
