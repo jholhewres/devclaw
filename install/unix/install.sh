@@ -340,22 +340,67 @@ install_deps_linux() {
     ui_info "Installing Chrome/Chromium (required for browser automation)..."
     if [[ "$DRY_RUN" != "1" ]]; then
       if [[ "$pkg_manager" == "apt" ]]; then
-        # Try Chromium first (lighter, no external repo needed)
-        if [[ "$(id -u)" == "0" ]]; then
-          apt-get install -y chromium-browser 2>/dev/null || {
-            # Fallback to Google Chrome
-            ui_info "Chromium not available, installing Google Chrome..."
-            wget -q -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-            apt-get install -y /tmp/google-chrome.deb || apt-get install -y -f /tmp/google-chrome.deb
-            rm -f /tmp/google-chrome.deb
-          }
+        # Install Google Chrome directly (most reliable on servers)
+        ui_info "Installing Google Chrome..."
+        local chrome_installed=0
+
+        # Detect if we need t64 suffix (Ubuntu 22.04+) or not (Debian, older Ubuntu)
+        # Ubuntu 22.04+ uses t64 suffix for some packages
+        local t64_suffix=""
+        if [[ -f /etc/os-release ]]; then
+          . /etc/os-release
+          if [[ "$ID" == "ubuntu" ]]; then
+            # Check Ubuntu version
+            local ubuntu_version
+            ubuntu_version=$(echo "$VERSION_ID" | cut -d. -f1 2>/dev/null || echo "0")
+            if [[ "$ubuntu_version" -ge 22 ]]; then
+              t64_suffix="t64"
+            fi
+          fi
+        fi
+
+        # Build package list based on distro
+        local chrome_deps="wget ca-certificates fonts-liberation"
+        if [[ -n "$t64_suffix" ]]; then
+          # Ubuntu 22.04+
+          chrome_deps="$chrome_deps libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libcups2t64 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0t64 libnspr4 libnss3 libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxrandr2 xdg-utils"
         else
-          sudo apt-get install -y chromium-browser 2>/dev/null || {
-            ui_info "Chromium not available, installing Google Chrome..."
-            wget -q -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-            sudo apt-get install -y /tmp/google-chrome.deb || sudo apt-get install -y -f /tmp/google-chrome.deb
-            rm -f /tmp/google-chrome.deb
-          }
+          # Debian and older Ubuntu
+          chrome_deps="$chrome_deps libasound2 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 libnspr4 libnss3 libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 libxrandr2 xdg-utils"
+        fi
+
+        if [[ "$(id -u)" == "0" ]]; then
+          # Install dependencies
+          apt-get install -y $chrome_deps 2>/dev/null || true
+
+          wget -q -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          apt-get install -y /tmp/google-chrome.deb 2>/dev/null || apt-get install -y -f /tmp/google-chrome.deb 2>/dev/null
+          rm -f /tmp/google-chrome.deb
+
+          # Verify installation
+          if command -v google-chrome-stable &>/dev/null; then
+            chrome_installed=1
+            ui_success "Google Chrome installed successfully"
+          fi
+        else
+          # Install dependencies
+          sudo apt-get install -y $chrome_deps 2>/dev/null || true
+
+          wget -q -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y /tmp/google-chrome.deb 2>/dev/null || sudo apt-get install -y -f /tmp/google-chrome.deb 2>/dev/null
+          rm -f /tmp/google-chrome.deb
+
+          # Verify installation
+          if command -v google-chrome-stable &>/dev/null; then
+            chrome_installed=1
+            ui_success "Google Chrome installed successfully"
+          fi
+        fi
+
+        if [[ "$chrome_installed" != "1" ]]; then
+          ui_warn "Could not install Chrome automatically"
+          ui_info "Try manually: wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && sudo apt install ./google-chrome-stable_current_amd64.deb"
+          ui_warn "Browser automation features will not work without Chrome/Chromium"
         fi
       else
         # RHEL-based systems

@@ -232,6 +232,14 @@ func (bm *BrowserManager) Start(ctx context.Context) error {
 		"--disable-default-apps",
 		"--disable-dev-shm-usage",
 		"--no-sandbox",
+		"--disable-gpu",
+		"--disable-software-rasterizer",
+		"--disable-dbus",
+		"--disable-crash-reporter",
+		"--disable-in-process-stack-traces",
+		"--disable-logging",
+		"--log-level=3",
+		"--silent-debugger-extension-api",
 		fmt.Sprintf("--window-size=%d,%d", bm.cfg.ViewportWidth, bm.cfg.ViewportHeight),
 	}
 	if bm.cfg.Headless {
