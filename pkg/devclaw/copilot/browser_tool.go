@@ -209,11 +209,11 @@ func (bm *BrowserManager) Start(ctx context.Context) error {
 
 	// Check if already started and still alive
 	if bm.started {
-		if bm.isAlive() {
+		if bm.isAlive() && bm.conn != nil {
 			return nil
 		}
-		// Chrome died, clean up and restart
-		bm.logger.Warn("chrome process died, restarting")
+		// Chrome died or connection lost, clean up and restart
+		bm.logger.Warn("chrome process died or connection lost, restarting")
 		bm.cleanup()
 	}
 
@@ -255,23 +255,39 @@ func (bm *BrowserManager) Start(ctx context.Context) error {
 	args = append(args, "about:blank")
 
 	bm.cmd = exec.CommandContext(ctx, chromePath, args...)
+	// Create a new process group to ensure Chrome and its children can be killed together
+	bm.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
 	if err := bm.cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start Chrome: %w", err)
 	}
 
 	bm.logger.Info("chrome started", "pid", bm.cmd.Process.Pid, "port", port)
 
-	// Wait for CDP to be ready.
-	wsURL, err := bm.waitForCDP(port, 10*time.Second)
+	// Wait for CDP to be ready (increased timeout for slower servers)
+	wsURL, err := bm.waitForCDP(port, 30*time.Second)
 	if err != nil {
-		bm.cmd.Process.Kill()
+		bm.logger.Error("CDP not ready, killing Chrome", "error", err)
+		bm.killProcessGroup()
 		return fmt.Errorf("CDP not ready: %w", err)
 	}
 
+	bm.logger.Info("CDP ready", "wsURL", wsURL)
 	bm.wsURL = wsURL
+
+	// Establish WebSocket connection NOW and keep it for reuse
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		bm.logger.Error("failed to connect to CDP WebSocket", "error", err)
+		bm.killProcessGroup()
+		return fmt.Errorf("CDP WebSocket connection failed: %w", err)
+	}
+	bm.conn = conn
+	bm.logger.Info("CDP WebSocket connected")
+
 	bm.started = true
 
-	// Enable required CDP domains
+	// Enable required CDP domains using the established connection
 	if err := bm.enableCDPDomains(ctx); err != nil {
 		bm.logger.Warn("failed to enable some CDP domains", "error", err)
 		// Don't fail - some domains might not be available
@@ -294,7 +310,9 @@ func (bm *BrowserManager) enableCDPDomains(ctx context.Context) error {
 	for _, domain := range domains {
 		_, err := bm.sendCDPInternal(domain, nil)
 		if err != nil {
-			bm.logger.Debug("CDP domain enable result", "domain", domain, "error", err)
+			bm.logger.Warn("CDP domain enable failed", "domain", domain, "error", err)
+		} else {
+			bm.logger.Info("CDP domain enabled", "domain", domain)
 		}
 	}
 
@@ -302,11 +320,10 @@ func (bm *BrowserManager) enableCDPDomains(ctx context.Context) error {
 }
 
 // sendCDPInternal sends a CDP command WITHOUT acquiring the lock.
-// MUST be called with bm.mu already held.
+// MUST be called with bm.mu already held and bm.conn already established.
 func (bm *BrowserManager) sendCDPInternal(method string, params map[string]any) (json.RawMessage, error) {
-	conn, err := bm.connect()
-	if err != nil {
-		return nil, err
+	if bm.conn == nil {
+		return nil, fmt.Errorf("CDP connection not established")
 	}
 
 	bm.msgID++
@@ -318,11 +335,14 @@ func (bm *BrowserManager) sendCDPInternal(method string, params map[string]any) 
 		msg["params"] = params
 	}
 
-	if err := conn.WriteJSON(msg); err != nil {
+	if err := bm.conn.WriteJSON(msg); err != nil {
 		return nil, fmt.Errorf("CDP write error: %w", err)
 	}
 
-	// Read response
+	// Read response with timeout
+	deadline := time.Now().Add(time.Duration(bm.cfg.TimeoutSeconds) * time.Second)
+	bm.conn.SetReadDeadline(deadline)
+
 	for {
 		var resp struct {
 			ID     int             `json:"id"`
@@ -331,7 +351,7 @@ func (bm *BrowserManager) sendCDPInternal(method string, params map[string]any) 
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		if err := conn.ReadJSON(&resp); err != nil {
+		if err := bm.conn.ReadJSON(&resp); err != nil {
 			return nil, fmt.Errorf("CDP read error: %w", err)
 		}
 		if resp.ID == bm.msgID {
@@ -602,12 +622,25 @@ func (bm *BrowserManager) cleanup() {
 		bm.conn.Close()
 		bm.conn = nil
 	}
-	if bm.cmd != nil && bm.cmd.Process != nil {
-		bm.cmd.Process.Kill()
-		bm.cmd.Wait()
-		bm.cmd = nil
-	}
+	bm.killProcessGroup()
 	bm.started = false
+}
+
+// killProcessGroup kills Chrome and all its child processes.
+func (bm *BrowserManager) killProcessGroup() {
+	if bm.cmd == nil || bm.cmd.Process == nil {
+		return
+	}
+	// Kill the entire process group (Chrome + children)
+	pgid, err := syscall.Getpgid(bm.cmd.Process.Pid)
+	if err == nil {
+		syscall.Kill(-pgid, syscall.SIGKILL)
+	} else {
+		// Fallback to killing just the process
+		bm.cmd.Process.Kill()
+	}
+	bm.cmd.Wait()
+	bm.cmd = nil
 }
 
 // isAlive checks if Chrome process is still running.
