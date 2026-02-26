@@ -122,12 +122,14 @@ type BrowserManager struct {
 	logger    *slog.Logger
 	ssrfGuard *security.SSRFGuard
 
-	mu      sync.Mutex
-	cmd     *exec.Cmd
-	wsURL   string
-	conn    *websocket.Conn
-	msgID   int
-	started bool
+	mu         sync.Mutex
+	cmd        *exec.Cmd
+	browserURL string           // Browser WebSocket URL
+	browserConn *websocket.Conn // Connection to browser (for target management)
+	pageConn   *websocket.Conn  // Connection to current page (for page commands)
+	pageTarget *CDPTarget       // Current page target
+	msgID      int
+	started    bool
 
 	// Role references per targetId (for element resolution)
 	roleRefsMu sync.RWMutex
@@ -136,6 +138,16 @@ type BrowserManager struct {
 	// Page state tracking
 	pageStateMu sync.RWMutex
 	pageState   map[string]*PageState // targetId -> state
+}
+
+// CDPTarget represents a CDP target (page, worker, etc.)
+type CDPTarget struct {
+	TargetID         string `json:"targetId"`
+	Type             string `json:"type"`
+	Title            string `json:"title"`
+	URL              string `json:"url"`
+	Attached         bool   `json:"attached"`
+	WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
 }
 
 // WithSSRFGuard attaches an SSRF guard to the browser manager.
@@ -209,7 +221,7 @@ func (bm *BrowserManager) Start(ctx context.Context) error {
 
 	// Check if already started and still alive
 	if bm.started {
-		if bm.isAlive() && bm.conn != nil {
+		if bm.isAlive() && bm.pageConn != nil {
 			return nil
 		}
 		// Chrome died or connection lost, clean up and restart
@@ -273,57 +285,198 @@ func (bm *BrowserManager) Start(ctx context.Context) error {
 	}
 
 	bm.logger.Info("CDP ready", "wsURL", wsURL)
-	bm.wsURL = wsURL
+	bm.browserURL = wsURL
 
-	// Establish WebSocket connection NOW and keep it for reuse
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	// Connect to Browser WebSocket (for target management)
+	browserConn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
-		bm.logger.Error("failed to connect to CDP WebSocket", "error", err)
+		bm.logger.Error("failed to connect to Browser WebSocket", "error", err)
 		bm.killProcessGroup()
-		return fmt.Errorf("CDP WebSocket connection failed: %w", err)
+		return fmt.Errorf("Browser WebSocket connection failed: %w", err)
 	}
-	bm.conn = conn
-	bm.logger.Info("CDP WebSocket connected")
+	bm.browserConn = browserConn
+	bm.logger.Info("Browser WebSocket connected")
+
+	// Get or create a page target
+	if err := bm.ensurePageTarget(); err != nil {
+		bm.logger.Error("failed to create page target", "error", err)
+		bm.killProcessGroup()
+		return fmt.Errorf("failed to create page target: %w", err)
+	}
 
 	bm.started = true
-
-	// Enable required CDP domains using the established connection
-	if err := bm.enableCDPDomains(ctx); err != nil {
-		bm.logger.Warn("failed to enable some CDP domains", "error", err)
-		// Don't fail - some domains might not be available
-	}
-
 	return nil
 }
 
-// enableCDPDomains enables the required CDP domains for browser automation.
+// ensurePageTarget creates or attaches to a page target and connects to it.
 // MUST be called with bm.mu already held.
-func (bm *BrowserManager) enableCDPDomains(ctx context.Context) error {
-	domains := []string{
-		"Page.enable",
-		"Target.enable",
-		"DOM.enable",
-		"Network.enable",
-		"Runtime.enable",
+func (bm *BrowserManager) ensurePageTarget() error {
+	// Use HTTP /json/list to get targets with WebSocket URLs (more reliable than CDP)
+	port := 0
+	if bm.cmd != nil && bm.cmd.Process != nil {
+		// Parse port from browserURL
+		parts := strings.Split(bm.browserURL, ":")
+		if len(parts) >= 3 {
+			fmt.Sscanf(parts[2], "%d/", &port)
+		}
 	}
-
-	for _, domain := range domains {
-		_, err := bm.sendCDPInternal(domain, nil)
-		if err != nil {
-			bm.logger.Warn("CDP domain enable failed", "domain", domain, "error", err)
-		} else {
-			bm.logger.Info("CDP domain enabled", "domain", domain)
+	if port == 0 {
+		// Fallback: extract from URL
+		for i, c := range bm.browserURL {
+			if c == ':' && i > 0 {
+				var p int
+				if _, err := fmt.Sscanf(bm.browserURL[i+1:], "%d", &p); err == nil && p > 0 {
+					port = p
+					break
+				}
+			}
 		}
 	}
 
+	// Get targets via HTTP /json/list
+	targets, err := bm.getTargetsHTTP(port)
+	if err != nil {
+		bm.logger.Warn("failed to get targets via HTTP, falling back to CDP", "error", err)
+		targets, err = bm.getTargets()
+		if err != nil {
+			return fmt.Errorf("failed to get targets: %w", err)
+		}
+	}
+
+	// Find an existing page target
+	var pageTarget *CDPTarget
+	for i := range targets {
+		if targets[i].Type == "page" && targets[i].WebSocketDebuggerURL != "" {
+			pageTarget = &targets[i]
+			break
+		}
+	}
+
+	// Create a new page if none exists
+	if pageTarget == nil {
+		bm.logger.Info("creating new page target")
+		targetID, err := bm.createTarget("about:blank")
+		if err != nil {
+			return fmt.Errorf("failed to create target: %w", err)
+		}
+		// Get the new target info via HTTP
+		time.Sleep(100 * time.Millisecond) // Wait for target to be ready
+		targets, err = bm.getTargetsHTTP(port)
+		if err != nil {
+			return fmt.Errorf("failed to get targets after creation: %w", err)
+		}
+		for i := range targets {
+			if targets[i].TargetID == targetID && targets[i].WebSocketDebuggerURL != "" {
+				pageTarget = &targets[i]
+				break
+			}
+		}
+	}
+
+	if pageTarget == nil {
+		return fmt.Errorf("no page target available")
+	}
+
+	bm.pageTarget = pageTarget
+	bm.logger.Info("using page target", "targetId", pageTarget.TargetID, "url", pageTarget.URL, "wsURL", pageTarget.WebSocketDebuggerURL)
+
+	// Connect to the page's WebSocket
+	pageConn, _, err := websocket.DefaultDialer.Dial(pageTarget.WebSocketDebuggerURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to connect to Page WebSocket: %w", err)
+	}
+	bm.pageConn = pageConn
+	bm.logger.Info("Page WebSocket connected")
+
+	// Enable CDP domains on the page connection
+	if err := bm.enablePageDomains(); err != nil {
+		bm.logger.Warn("failed to enable some CDP domains", "error", err)
+	}
+
 	return nil
 }
 
-// sendCDPInternal sends a CDP command WITHOUT acquiring the lock.
-// MUST be called with bm.mu already held and bm.conn already established.
-func (bm *BrowserManager) sendCDPInternal(method string, params map[string]any) (json.RawMessage, error) {
-	if bm.conn == nil {
-		return nil, fmt.Errorf("CDP connection not established")
+// getTargetsHTTP gets targets via HTTP /json/list endpoint (more reliable)
+func (bm *BrowserManager) getTargetsHTTP(port int) ([]CDPTarget, error) {
+	url := fmt.Sprintf("http://127.0.0.1:%d/json/list", port)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var targets []CDPTarget
+	if err := json.NewDecoder(resp.Body).Decode(&targets); err != nil {
+		return nil, fmt.Errorf("failed to parse targets: %w", err)
+	}
+	return targets, nil
+}
+
+// getTargets returns all current targets.
+func (bm *BrowserManager) getTargets() ([]CDPTarget, error) {
+	result, err := bm.sendBrowserCDP("Target.getTargets", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		TargetInfos []CDPTarget `json:"targetInfos"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse targets: %w", err)
+	}
+	return resp.TargetInfos, nil
+}
+
+// createTarget creates a new page target.
+func (bm *BrowserManager) createTarget(url string) (string, error) {
+	result, err := bm.sendBrowserCDP("Target.createTarget", map[string]any{
+		"url": url,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	var resp struct {
+		TargetID string `json:"targetId"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return "", fmt.Errorf("failed to parse createTarget response: %w", err)
+	}
+	return resp.TargetID, nil
+}
+
+// attachToTarget attaches to a target and returns its WebSocket URL.
+func (bm *BrowserManager) attachToTarget(targetID string) (string, error) {
+	result, err := bm.sendBrowserCDP("Target.attachToTarget", map[string]any{
+		"targetId":    targetID,
+		"flatten":     true,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	var resp struct {
+		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+	}
+	if err := json.Unmarshal(result, &resp); err != nil {
+		return "", fmt.Errorf("failed to parse attachToTarget response: %w", err)
+	}
+	return resp.WebSocketDebuggerURL, nil
+}
+
+// sendBrowserCDP sends a CDP command to the browser connection.
+func (bm *BrowserManager) sendBrowserCDP(method string, params map[string]any) (json.RawMessage, error) {
+	if bm.browserConn == nil {
+		return nil, fmt.Errorf("browser connection not established")
 	}
 
 	bm.msgID++
@@ -335,13 +488,13 @@ func (bm *BrowserManager) sendCDPInternal(method string, params map[string]any) 
 		msg["params"] = params
 	}
 
-	if err := bm.conn.WriteJSON(msg); err != nil {
+	if err := bm.browserConn.WriteJSON(msg); err != nil {
 		return nil, fmt.Errorf("CDP write error: %w", err)
 	}
 
 	// Read response with timeout
 	deadline := time.Now().Add(time.Duration(bm.cfg.TimeoutSeconds) * time.Second)
-	bm.conn.SetReadDeadline(deadline)
+	bm.browserConn.SetReadDeadline(deadline)
 
 	for {
 		var resp struct {
@@ -351,7 +504,7 @@ func (bm *BrowserManager) sendCDPInternal(method string, params map[string]any) 
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		if err := bm.conn.ReadJSON(&resp); err != nil {
+		if err := bm.browserConn.ReadJSON(&resp); err != nil {
 			return nil, fmt.Errorf("CDP read error: %w", err)
 		}
 		if resp.ID == bm.msgID {
@@ -362,6 +515,124 @@ func (bm *BrowserManager) sendCDPInternal(method string, params map[string]any) 
 		}
 		// Ignore events or other responses
 	}
+}
+
+// enablePageDomains enables CDP domains on the page connection.
+func (bm *BrowserManager) enablePageDomains() error {
+	domains := []string{
+		"Page.enable",
+		"DOM.enable",
+		"Network.enable",
+		"Runtime.enable",
+	}
+
+	for _, domain := range domains {
+		_, err := bm.sendPageCDP(domain, nil)
+		if err != nil {
+			bm.logger.Warn("CDP domain enable failed", "domain", domain, "error", err)
+		} else {
+			bm.logger.Info("CDP domain enabled", "domain", domain)
+		}
+	}
+
+	return nil
+}
+
+// sendPageCDP sends a CDP command to the page connection.
+func (bm *BrowserManager) sendPageCDP(method string, params map[string]any) (json.RawMessage, error) {
+	if bm.pageConn == nil {
+		return nil, fmt.Errorf("page connection not established")
+	}
+
+	bm.msgID++
+	msg := map[string]any{
+		"id":     bm.msgID,
+		"method": method,
+	}
+	if params != nil {
+		msg["params"] = params
+	}
+
+	if err := bm.pageConn.WriteJSON(msg); err != nil {
+		return nil, fmt.Errorf("CDP write error: %w", err)
+	}
+
+	// Read response with timeout
+	deadline := time.Now().Add(time.Duration(bm.cfg.TimeoutSeconds) * time.Second)
+	bm.pageConn.SetReadDeadline(deadline)
+
+	for {
+		var resp struct {
+			ID     int             `json:"id"`
+			Result json.RawMessage `json:"result"`
+			Error  *struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := bm.pageConn.ReadJSON(&resp); err != nil {
+			return nil, fmt.Errorf("CDP read error: %w", err)
+		}
+		if resp.ID == bm.msgID {
+			if resp.Error != nil {
+				return nil, fmt.Errorf("CDP error: %s", resp.Error.Message)
+			}
+			return resp.Result, nil
+		}
+		// Ignore events or other responses
+	}
+}
+
+// sendCDP sends a CDP command to the page connection (alias for sendPageCDP).
+// This is the main method used by browser tools.
+// Automatically reconnects if the connection is lost.
+func (bm *BrowserManager) sendCDP(method string, params map[string]any) (json.RawMessage, error) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	// Try to send the command
+	result, err := bm.sendPageCDP(method, params)
+	if err == nil {
+		return result, nil
+	}
+
+	// Check if it's a connection error
+	if isConnectionError(err) {
+		bm.logger.Warn("connection lost, attempting reconnect", "error", err)
+
+		// Clean up and reconnect
+		if bm.pageConn != nil {
+			bm.pageConn.Close()
+			bm.pageConn = nil
+		}
+
+		// Reconnect to page target
+		if err := bm.ensurePageTarget(); err != nil {
+			return nil, fmt.Errorf("reconnect failed: %w", err)
+		}
+
+		// Retry the command
+		return bm.sendPageCDP(method, params)
+	}
+
+	return nil, err
+}
+
+// isConnectionError checks if an error is a connection-related error
+func isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "broken pipe") ||
+		strings.Contains(errStr, "connection reset") ||
+		strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "closed") ||
+		strings.Contains(errStr, "EOF")
+}
+
+// sendBrowserCDPLocked sends a CDP command to the browser connection without acquiring lock.
+func (bm *BrowserManager) sendBrowserCDPLocked(method string, params map[string]any) (json.RawMessage, error) {
+	return bm.sendBrowserCDP(method, params)
 }
 
 // waitForCDP polls the CDP /json/version endpoint until it responds.
@@ -395,74 +666,6 @@ func (bm *BrowserManager) waitForCDP(port int, timeout time.Duration) (string, e
 		time.Sleep(200 * time.Millisecond)
 	}
 	return "", fmt.Errorf("timeout waiting for CDP on port %d", port)
-}
-
-// connect establishes or reuses the WebSocket connection to CDP.
-func (bm *BrowserManager) connect() (*websocket.Conn, error) {
-	if bm.conn != nil {
-		return bm.conn, nil
-	}
-
-	conn, _, err := websocket.DefaultDialer.Dial(bm.wsURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("CDP WebSocket dial failed: %w", err)
-	}
-	bm.conn = conn
-	return conn, nil
-}
-
-// sendCDP sends a CDP command and waits for the response.
-func (bm *BrowserManager) sendCDP(method string, params map[string]any) (json.RawMessage, error) {
-	bm.mu.Lock()
-	defer bm.mu.Unlock()
-
-	conn, err := bm.connect()
-	if err != nil {
-		return nil, err
-	}
-
-	bm.msgID++
-	msg := map[string]any{
-		"id":     bm.msgID,
-		"method": method,
-	}
-	if params != nil {
-		msg["params"] = params
-	}
-
-	if err := conn.WriteJSON(msg); err != nil {
-		conn.Close()
-		bm.conn = nil
-		return nil, fmt.Errorf("CDP write error: %w", err)
-	}
-
-	// Read until we get our response.
-	targetID := bm.msgID
-	deadline := time.Now().Add(time.Duration(bm.cfg.TimeoutSeconds) * time.Second)
-	conn.SetReadDeadline(deadline)
-
-	for {
-		_, data, err := conn.ReadMessage()
-		if err != nil {
-			conn.Close()
-			bm.conn = nil
-			return nil, fmt.Errorf("CDP read error: %w", err)
-		}
-
-		var resp struct {
-			ID     int             `json:"id"`
-			Result json.RawMessage `json:"result"`
-			Error  *struct {
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if json.Unmarshal(data, &resp) == nil && resp.ID == targetID {
-			if resp.Error != nil {
-				return nil, fmt.Errorf("CDP error: %s", resp.Error.Message)
-			}
-			return resp.Result, nil
-		}
-	}
 }
 
 // Navigate opens a URL in the browser.
@@ -618,10 +821,15 @@ func (bm *BrowserManager) Stop() {
 
 // cleanup closes connections and kills Chrome process.
 func (bm *BrowserManager) cleanup() {
-	if bm.conn != nil {
-		bm.conn.Close()
-		bm.conn = nil
+	if bm.pageConn != nil {
+		bm.pageConn.Close()
+		bm.pageConn = nil
 	}
+	if bm.browserConn != nil {
+		bm.browserConn.Close()
+		bm.browserConn = nil
+	}
+	bm.pageTarget = nil
 	bm.killProcessGroup()
 	bm.started = false
 }
