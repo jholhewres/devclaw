@@ -13,6 +13,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,10 +24,44 @@ import (
 	"github.com/jholhewres/devclaw/pkg/devclaw/scheduler"
 )
 
+// sanitizeOutput removes sensitive information from command output.
+// This prevents API tokens, passwords, and other secrets from being exposed to users/LLMs.
+func sanitizeOutput(output string) string {
+	// Sanitize common API token patterns.
+	// Jira/Atlassian tokens (ATATT3...)
+	output = regexp.MustCompile(`ATATT3[A-Za-z0-9+/=]{20,}`).ReplaceAllString(output, "[SANITIZED_TOKEN]")
+	// Generic API keys/tokens (long alphanumeric strings after common prefixes).
+	tokenPatterns := []string{
+		`api[_-]?key[=:=]\s*[A-Za-z0-9_-]{20,}`,
+		`token[=:=]\s*[A-Za-z0-9_-]{20,}`,
+		`secret[=:=]\s*[A-Za-z0-9_-]{20,}`,
+		`password[=:=]\s*\S{8,}`,
+		`bearer\s+[A-Za-z0-9_-]{20,}`,
+	}
+	for _, pattern := range tokenPatterns {
+		re := regexp.MustCompile(`(?i)` + pattern)
+		output = re.ReplaceAllString(output, "$1 [SANITIZED]")
+	}
+
+	// Sanitize URLs with credentials (user:pass@host).
+	urlCredPattern := regexp.MustCompile(`(https?://)([^:@\s]+):([^@\s]+)@`)
+	output = urlCredPattern.ReplaceAllString(output, "$1[REDACTED]:[REDACTED]@")
+
+	// Sanitize long hex strings that look like secrets (32+ hex chars).
+	hexPattern := regexp.MustCompile(`\b[0-9a-fA-F]{32,}\b`)
+	output = hexPattern.ReplaceAllString(output, "[SANITIZED_HEX]")
+
+	// Sanitize private key patterns.
+	privateKeyPattern := regexp.MustCompile(`-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`)
+	output = privateKeyPattern.ReplaceAllString(output, "[SANITIZED_PRIVATE_KEY]")
+
+	return output
+}
+
 // RegisterSystemTools registers all built-in system tools in the executor.
 // These are core tools available regardless of which skills are loaded.
 // If ssrfGuard is non-nil, web_fetch will validate URLs against SSRF rules.
-func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, memStore *memory.FileStore, sqliteStore *memory.SQLiteStore, memCfg MemoryConfig, sched *scheduler.Scheduler, dataDir string, ssrfGuard *security.SSRFGuard, vault *Vault, webSearchCfg WebSearchConfig) {
+func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, memStore *memory.FileStore, sqliteStore *memory.SQLiteStore, memCfg MemoryConfig, sched *scheduler.Scheduler, dataDir string, ssrfGuard *security.SSRFGuard, vault *Vault, webSearchCfg WebSearchConfig, skillDB *SkillDB) {
 	registerWebSearchTool(executor, webSearchCfg)
 	registerWebFetchTool(executor, ssrfGuard)
 	registerFileTools(executor, dataDir)
@@ -46,7 +82,7 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 	}
 
 	if sched != nil {
-		registerCronTools(executor, sched)
+		registerCronTools(executor, sched, skillDB)
 	}
 
 	if vault != nil && vault.IsUnlocked() {
@@ -410,7 +446,7 @@ func registerBashTool(executor *ToolExecutor) {
 
 	// bash — full access command execution inheriting the user's environment.
 	executor.Register(
-		MakeToolDefinition("bash", "Execute a bash command with full system access. Inherits the user's complete environment (PATH, SSH keys, etc). Supports cd (persistent between calls), git, ssh, docker, package managers, builds, system administration, or any shell operation. The command runs directly on the host machine as the current user.", map[string]any{
+		MakeToolDefinition("bash", "Execute a shell command with full system access. Use for git, docker, npm, system administration, or any shell operation. Working directory persists between calls.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"command": map[string]any{
@@ -494,6 +530,9 @@ func registerBashTool(executor *ToolExecutor) {
 			}
 
 			output = strings.TrimRight(output, "\n ")
+
+			// Sanitize sensitive information from output.
+			output = sanitizeOutput(output)
 
 			// Truncate very long output.
 			if len(output) > 50000 {
@@ -584,6 +623,9 @@ func registerBashTool(executor *ToolExecutor) {
 			out, err := cmd.CombinedOutput()
 			output := strings.TrimRight(string(out), "\n ")
 
+			// Sanitize sensitive information from output.
+			output = sanitizeOutput(output)
+
 			if len(output) > 50000 {
 				output = output[:50000] + "\n... [truncated]"
 			}
@@ -653,6 +695,9 @@ func registerBashTool(executor *ToolExecutor) {
 
 			out, err := cmd.CombinedOutput()
 			output := strings.TrimRight(string(out), "\n ")
+
+			// Sanitize sensitive information from output.
+			output = sanitizeOutput(output)
 
 			if err != nil {
 				return fmt.Sprintf("SCP error: %v\n%s", err, output), nil
@@ -1241,7 +1286,7 @@ func (c *osExecCmd) CombinedOutput() ([]byte, error) {
 
 // ---------- Cron / Scheduler Tools ----------
 
-func registerCronTools(executor *ToolExecutor, sched *scheduler.Scheduler) {
+func registerCronTools(executor *ToolExecutor, sched *scheduler.Scheduler, skillDB *SkillDB) {
 	// cron_add
 	executor.Register(
 		MakeToolDefinition("cron_add", "Schedule a task. Use type='at' for ONE-TIME tasks (reminders, delayed messages). Use type='every' or 'cron' ONLY for RECURRING tasks.", map[string]any{
@@ -1318,6 +1363,14 @@ func registerCronTools(executor *ToolExecutor, sched *scheduler.Scheduler) {
 				return nil, err
 			}
 
+			// Save reminder to tracking table (for search/history)
+			if skillDB != nil {
+				if err := skillDB.SaveReminder(id, jobType, schedule, command, channel, chatID); err != nil {
+					// Log error but don't fail - the job was already scheduled
+					// This is a best-effort tracking mechanism
+				}
+			}
+
 			return fmt.Sprintf("Job '%s' scheduled: %s (%s) → %s:%s", id, schedule, jobType, channel, chatID), nil
 		},
 	)
@@ -1384,9 +1437,76 @@ func registerCronTools(executor *ToolExecutor, sched *scheduler.Scheduler) {
 			if err := sched.Remove(id); err != nil {
 				return nil, err
 			}
+
+			// Mark reminder as removed in tracking table (for search/history)
+			if skillDB != nil {
+				if err := skillDB.MarkReminderRemoved(id); err != nil {
+					// Log error but don't fail - the job was already removed
+				}
+			}
+
 			return fmt.Sprintf("Job '%s' removed.", id), nil
 		},
 	)
+
+	// reminder_search - search for reminders (including removed ones)
+	if skillDB != nil {
+		executor.Register(
+			MakeToolDefinition("reminder_search", "Search for reminders by keyword. Use this when user asks about past or current reminders. Returns reminders from the tracking database (includes removed ones for history).", map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type":        "string",
+						"description": "Search query (searches in command and job_id). Leave empty to list all.",
+					},
+					"include_removed": map[string]any{
+						"type":        "boolean",
+						"description": "Include removed reminders in results (default: false)",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Maximum results (default: 20, max: 100)",
+					},
+				},
+			}),
+			func(_ context.Context, args map[string]any) (any, error) {
+				query, _ := args["query"].(string)
+				includeRemoved, _ := args["include_removed"].(bool)
+				limit := 20
+				if l, ok := args["limit"].(float64); ok {
+					limit = int(l)
+				}
+
+				reminders, err := skillDB.SearchReminders(query, includeRemoved, limit)
+				if err != nil {
+					return nil, fmt.Errorf("search reminders: %w", err)
+				}
+
+				if len(reminders) == 0 {
+					if query != "" {
+						return fmt.Sprintf("No reminders found matching '%s'.", query), nil
+					}
+					return "No reminders found.", nil
+				}
+
+				var sb strings.Builder
+				sb.WriteString(fmt.Sprintf("Reminders found (%d):\n\n", len(reminders)))
+				for _, r := range reminders {
+					status := r.Status
+					if status == "removed" {
+						status = "removed ✓"
+					}
+					sb.WriteString(fmt.Sprintf("- **%s** [%s] type=%s\n  Schedule: %s\n  Command: %s\n  Created: %s\n",
+						r.JobID, status, r.JobType, r.Schedule, r.Command, r.CreatedAt))
+					if r.RemovedAt != "" {
+						sb.WriteString(fmt.Sprintf("  Removed: %s\n", r.RemovedAt))
+					}
+					sb.WriteString("\n")
+				}
+				return sb.String(), nil
+			},
+		)
+	}
 }
 
 // ---------- Vault Tools ----------
@@ -1394,17 +1514,7 @@ func registerCronTools(executor *ToolExecutor, sched *scheduler.Scheduler) {
 func registerVaultTools(executor *ToolExecutor, vault *Vault) {
 	// vault_save — store a secret in the encrypted vault.
 	executor.Register(
-		MakeToolDefinition("vault_save", `Store a secret in the encrypted vault (like a secure .env file).
-
-Use this for ANY sensitive data: API keys, tokens, passwords, database URLs.
-The key can be ANY name (e.g., 'OPENAI_API_KEY', 'DATABASE_URL', 'GITHUB_TOKEN').
-
-Examples:
-- vault_save("OPENAI_API_KEY", "sk-xxx")
-- vault_save("DATABASE_URL", "postgres://user:pass@host:5432/db")
-- vault_save("GITHUB_TOKEN", "ghp_xxx")
-
-The vault uses AES-256-GCM encryption. Secrets are automatically injected as environment variables at startup.`, map[string]any{
+		MakeToolDefinition("vault_save", "Store a secret securely (API keys, tokens, passwords). AES-256-GCM encrypted. IMPORTANT: Automatically overwrites - NO need to delete before saving.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"name": map[string]any{
@@ -1433,10 +1543,7 @@ The vault uses AES-256-GCM encryption. Secrets are automatically injected as env
 
 	// vault_get — retrieve a secret from the encrypted vault.
 	executor.Register(
-		MakeToolDefinition("vault_get", `Retrieve a secret from the encrypted vault.
-
-Returns the secret value if found, or empty if the key doesn't exist.
-Use vault_list first if you're unsure what keys are available.`, map[string]any{
+		MakeToolDefinition("vault_get", "Retrieve a stored secret by name. Returns empty if not found. Use vault_list to see available keys.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"name": map[string]any{
@@ -1464,10 +1571,7 @@ Use vault_list first if you're unsure what keys are available.`, map[string]any{
 
 	// vault_list — list all secret names in the vault (without values).
 	executor.Register(
-		MakeToolDefinition("vault_list", `List all secret keys stored in the encrypted vault.
-
-Returns only the key names (e.g., 'OPENAI_API_KEY', 'DATABASE_URL'), never the values.
-Use this to discover what secrets are available before using vault_get.`, map[string]any{
+		MakeToolDefinition("vault_list", "List all secret names in the vault. Shows names only, never values.", map[string]any{
 			"type":                 "object",
 			"properties":           map[string]any{},
 			"additionalProperties": false,
@@ -1488,7 +1592,7 @@ Use this to discover what secrets are available before using vault_get.`, map[st
 
 	// vault_delete — remove a secret from the vault.
 	executor.Register(
-		MakeToolDefinition("vault_delete", "Remove a secret from the encrypted vault by name.", map[string]any{
+		MakeToolDefinition("vault_delete", "Permanently remove a secret. Use ONLY when user explicitly asks to delete. NEVER delete before vault_save (it overwrites automatically).", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"name": map[string]any{
@@ -1710,7 +1814,7 @@ func registerCapabilitiesTool(executor *ToolExecutor) {
 				},
 			},
 		),
-		func(_ context.Context, args map[string]any) (any, error) {
+			func(_ context.Context, args map[string]any) (any, error) {
 			filter, _ := args["filter"].(string)
 			if filter == "" {
 				filter = "all"
@@ -1718,60 +1822,38 @@ func registerCapabilitiesTool(executor *ToolExecutor) {
 			category, _ := args["category"].(string)
 
 			var sb strings.Builder
-			sb.WriteString("# Available Capabilities\n\n")
+			sb.WriteString("# Available Tools\n\n")
 
-			// List tools
+			// List tools by category (names only, no descriptions)
 			if filter == "tools" || filter == "all" {
-				sb.WriteString("## Tools\n\n")
-				tools := executor.Tools()
-
-				// Categorize tools
-				categories := CategorizeTools(tools)
+				categories := CategorizeTools(executor.Tools())
 
 				// Sort categories
-				var cats []string
+				cats := make([]string, 0, len(categories))
 				for cat := range categories {
 					cats = append(cats, cat)
 				}
-				for i := 0; i < len(cats); i++ {
-					for j := i + 1; j < len(cats); j++ {
-						if cats[j] < cats[i] {
-							cats[i], cats[j] = cats[j], cats[i]
-						}
-					}
-				}
+				sort.Strings(cats)
 
 				for _, cat := range cats {
-					// Filter by category if specified
 					if category != "" && cat != category {
 						continue
 					}
-					sb.WriteString(fmt.Sprintf("### %s\n", cat))
+					// Get tool names for this category
+					names := make([]string, 1, len(categories[cat]))
 					for _, tool := range categories[cat] {
-						desc := tool.Function.Description
-						// Truncate long descriptions
-						if len(desc) > 80 {
-							desc = desc[:77] + "..."
-						}
-						desc = strings.ReplaceAll(desc, "\n", " ")
-						sb.WriteString(fmt.Sprintf("- **%s**: %s\n", tool.Function.Name, desc))
+						names = append(names, tool.Function.Name)
 					}
-					sb.WriteString("\n")
+					sb.WriteString(fmt.Sprintf("**%s**: %s\n\n", cat, strings.Join(names, ", ")))
 				}
 			}
 
-			// Note: skills listing is handled separately via skillRegistry
-			// which is not directly accessible here. The agent can use
-			// list_skills tool from the skills system.
-
 			if filter == "skills" || filter == "all" {
-				sb.WriteString("## Skills\n\n")
-				sb.WriteString("Use `list_skills` tool to see available skills.\n")
-				sb.WriteString("Use `search_skills <query>` to find skills by keyword.\n\n")
+				sb.WriteString("**Skills**: Use list_skills to discover available skills.\n\n")
 			}
 
-			sb.WriteString(fmt.Sprintf("\n**Total tools available**: %d\n", len(executor.Tools())))
-			sb.WriteString("\n*Tip: Use specific tool names directly. If unsure about a tool's parameters, try it - the error message will show the expected format.*\n")
+			sb.WriteString(fmt.Sprintf("Total: %d tools\n", len(executor.Tools())))
+			sb.WriteString("Use tools directly. Errors show expected parameters if unsure.\n")
 
 			return sb.String(), nil
 		},

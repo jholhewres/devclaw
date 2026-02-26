@@ -63,6 +63,7 @@ func (l *BuiltinLoader) Load(_ context.Context) ([]Skill, error) {
 		"web-fetch":       newWebFetchSkill,
 		"datetime":        newDatetimeSkill,
 		"image-gen":       newImageGenSkill,
+		"skill-db":        newSkillDBSkill,
 		"claude-code":     func() Skill { return NewClaudeCodeSkill(l.projProv, l.apiKey, l.baseURL, l.model) },
 		"project-manager": func() Skill { return NewProjectManagerSkill(l.projProv) },
 	}
@@ -457,6 +458,75 @@ func (s *datetimeSkill) Execute(_ context.Context, input string) (string, error)
 }
 
 func (s *datetimeSkill) Shutdown() error { return nil }
+
+// ============================================================
+// Skill Database Skill
+// ============================================================
+
+type skillDBSkill struct{}
+
+func newSkillDBSkill() Skill { return &skillDBSkill{} }
+
+func (s *skillDBSkill) Metadata() Metadata {
+	return Metadata{
+		Name:        "skill-db",
+		Version:     "1.0.0",
+		Author:      "devclaw",
+		Description: "Provides database tools for skills to store and retrieve structured data like contacts, tasks, and notes",
+		Category:    "utility",
+		Tags:        []string{"database", "storage", "crud", "sqlite", "persist", "data"},
+	}
+}
+
+func (s *skillDBSkill) Tools() []Tool {
+	// This skill doesn't provide its own tools - the tools are registered
+	// separately via RegisterSkillDBTools in the assistant initialization.
+	// This skill exists primarily for its system prompt and triggers.
+	return nil
+}
+
+func (s *skillDBSkill) SystemPrompt() string {
+	return `You have access to a skill database system for storing structured data. Use the skill_db_* tools internally to manage data.
+
+**CRITICAL COMMUNICATION GUIDELINES:**
+1. NEVER show technical tool syntax (skill_db_insert, skill_db_query, etc.) in your chat responses to the user
+2. Describe actions in natural language: "Salvei o contato" instead of "skill_db_insert(...)"
+3. When the user asks to create a skill, ALWAYS ask if they want database storage for structured data or just memory-based storage
+
+**When creating skills with init_skill:**
+1. First ask: "Você quer que essa skill tenha um banco de dados para salvar dados estruturados (contatos, tarefas, etc.)?"
+2. If yes, use with_database=true and define appropriate columns
+3. If no, create the skill without database (memory only)
+
+**Available tools (use internally, don't mention to user):**
+- skill_db_create_table: Create a new table with custom columns
+- skill_db_insert: Add a new record, returns ID
+- skill_db_query: Search records with filters
+- skill_db_update: Update a record by ID
+- skill_db_delete: Delete a record by ID
+- skill_db_list_tables: List tables for a skill
+- skill_db_describe: View table structure
+- skill_db_drop_table: Permanently delete a table
+
+Each skill can have multiple tables. Table names are automatically prefixed with the skill name (e.g., "crm_contacts").`
+}
+
+func (s *skillDBSkill) Triggers() []string {
+	return []string{
+		"database", "banco de dados", "salvar dados", "tabela",
+		"storage", "persistir", "armazenar", "guardar",
+		"contatos", "contacts", "crm", "leads",
+		"tarefas", "tasks", "notas", "notes",
+	}
+}
+
+func (s *skillDBSkill) Init(_ context.Context, _ map[string]any) error { return nil }
+
+func (s *skillDBSkill) Execute(_ context.Context, input string) (string, error) {
+	return "", fmt.Errorf("skill-db is a tool-based skill. Use skill_db_* tools directly.")
+}
+
+func (s *skillDBSkill) Shutdown() error { return nil }
 
 // ============================================================
 // Image Generation Skill (DALL-E 3 / gpt-image-1)

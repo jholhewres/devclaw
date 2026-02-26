@@ -54,6 +54,9 @@ type Assistant struct {
 	// skillRegistry manages available skills.
 	skillRegistry *skills.Registry
 
+	// skillDB provides database storage for skills to persist structured data.
+	skillDB *SkillDB
+
 	// scheduler manages scheduled tasks.
 	scheduler *scheduler.Scheduler
 
@@ -408,6 +411,12 @@ func (a *Assistant) Start(ctx context.Context) error {
 			"backend", hubConfig.Backend, "error", hubErr)
 	} else {
 		a.dbHub = dbHub
+
+		// Run database migrations (creates all tables if needed)
+		if err := dbHub.Migrate(context.Background(), "primary", 0); err != nil {
+			a.logger.Error("failed to run database migrations", "error", err)
+		}
+
 		// Get the underlying DB connection for backward compatibility
 		if dbHub.DB() != nil {
 			a.devclawDB = dbHub.DB()
@@ -792,6 +801,13 @@ func (a *Assistant) Stop() {
 	if a.sqliteMemory != nil {
 		if err := a.sqliteMemory.Close(); err != nil {
 			a.logger.Warn("error closing SQLite memory", "error", err)
+		}
+	}
+
+	// Close skill database.
+	if a.skillDB != nil {
+		if err := a.skillDB.Close(); err != nil {
+			a.logger.Warn("error closing skill database", "error", err)
 		}
 	}
 
@@ -2108,15 +2124,33 @@ func (a *Assistant) registerSystemTools() {
 	// Use the parent dir of the memory path as the data directory.
 	dataDir = filepath.Dir(dataDir)
 
+	// Initialize skill database for skills to store structured data.
+	// Must be done before RegisterSystemTools so cron tools can track reminders.
+	skillDB, err := OpenSkillDatabase(dataDir)
+	if err != nil {
+		a.logger.Warn("skill database not available", "error", err)
+	} else {
+		a.skillDB = skillDB
+		// Initialize reminders tracking table
+		if err := a.skillDB.InitRemindersTable(); err != nil {
+			a.logger.Warn("failed to initialize reminders table", "error", err)
+		}
+	}
+
 	ssrfGuard := security.NewSSRFGuard(a.config.Security.SSRF, a.logger)
-	RegisterSystemTools(a.toolExecutor, sandboxRunner, a.memoryStore, a.sqliteMemory, a.config.Memory, a.scheduler, dataDir, ssrfGuard, a.vault, a.config.WebSearch)
+	RegisterSystemTools(a.toolExecutor, sandboxRunner, a.memoryStore, a.sqliteMemory, a.config.Memory, a.scheduler, dataDir, ssrfGuard, a.vault, a.config.WebSearch, a.skillDB)
+
+	// Register skill database tools if available.
+	if a.skillDB != nil {
+		RegisterSkillDBTools(a.toolExecutor, a.skillDB)
+	}
 
 	// Register skill creator tools (including install_skill, search_skills, remove_skill).
 	skillsDir := "./skills"
 	if len(a.config.Skills.ClawdHubDirs) > 0 {
 		skillsDir = a.config.Skills.ClawdHubDirs[0]
 	}
-	RegisterSkillCreatorTools(a.toolExecutor, a.skillRegistry, skillsDir, a.logger)
+	RegisterSkillCreatorTools(a.toolExecutor, a.skillRegistry, skillsDir, a.skillDB, a.logger)
 
 	// Register subagent tools (spawn, list, wait, stop).
 	RegisterSubagentTools(a.toolExecutor, a.subagentMgr, a.llmClient, a.promptComposer, a.logger)

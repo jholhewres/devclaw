@@ -25,15 +25,65 @@ Open-source AI agent for tech teams — devs, DevOps, QA, PMs, designers, and ev
 
 **Linux/macOS:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/install.sh | bash -s -- --url https://github.com/jholhewres/devclaw/releases/latest/download
+```
+
+**What the installer does:**
+- Downloads and installs the binary to `/opt/devclaw` (Linux) or `/usr/local/opt/devclaw` (macOS)
+- Installs dependencies (Node.js, PM2) if missing
+- Sets up PM2 process manager with auto-restart
+- Starts DevClaw in "First Run Setup" mode
+- Creates global `devclaw` command
+
+**After installation:**
+```bash
+# Check service status
+pm2 status
+
+# View logs
+pm2 logs devclaw
+
+# Access setup wizard (configure API key)
+open http://localhost:8090/setup
+```
+
+**Install options:**
+```bash
+# Install specific version
+curl -fsSL ... | bash -s -- --url https://... --version v1.2.3
+
+# Non-interactive mode (skip confirmations)
+curl -fsSL ... | bash -s -- --url https://... --no-prompt
+
+# Custom port
+curl -fsSL ... | bash -s -- --url https://... --port 3000
+
+# Dry run (see what would happen)
+curl -fsSL ... | bash -s -- --url https://... --dry-run
+```
+
+**Install from local directory (for testing/development):**
+```bash
+# Build release package first
+make release-package
+
+# Install from local dist/
+sudo ./install/unix/install.sh --local ./dist --version v1.0.0
+```
+
+**Uninstall:**
+```bash
+# Download and run uninstaller
+curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/uninstall.sh | sudo bash
+
+# Or if you have the repo cloned:
+sudo ./install/unix/uninstall.sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
 iwr -useb https://raw.githubusercontent.com/jholhewres/devclaw/master/install/windows/install.ps1 | iex
 ```
-
-The installer downloads the pre-built binary from GitHub Releases. If unavailable, it falls back to `go install` or building from source.
 
 ### Docker
 
@@ -437,30 +487,67 @@ See [docs/security.md](docs/security.md) for details.
 
 ## Deployment
 
-DevClaw can be deployed in several ways depending on your environment:
+### Install Script (Recommended for Production)
 
-| Method | Best For |
-|--------|----------|
-| **Docker Compose** | Development, quick start |
-| **systemd** | Production Linux servers |
-| **PM2** | Node.js stacks, development |
-| **Ansible** | Multi-server deployment |
-
-**Quick start with Docker:**
+The install script handles the complete setup:
 
 ```bash
-docker compose up -d
-docker compose logs -f devclaw
+curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/install.sh | \
+  bash -s -- --url https://github.com/jholhewres/devclaw/releases/latest/download
 ```
 
-**Quick start with systemd:**
+**What happens:**
+1. Binary installed to `/opt/devclaw`
+2. PM2 configured with auto-restart
+3. Service starts automatically in "First Run Setup" mode
+4. Access `http://localhost:8090/setup` to configure API key
 
+**PM2 management:**
 ```bash
-sudo systemctl enable --now devclaw
-sudo journalctl -u devclaw -f
+pm2 status              # Check status
+pm2 logs devclaw        # View logs
+pm2 restart devclaw     # Restart service
+pm2 stop devclaw        # Stop service
+
+# Enable auto-start on boot:
+pm2 startup             # Follow the printed command
 ```
 
-See [install/DEPLOYMENT.md](install/DEPLOYMENT.md) for detailed setup instructions for each method.
+### Other Methods
+
+| Method | Best For | Quick Start |
+|--------|----------|-------------|
+| **Docker Compose** | Development, isolated envs | `docker compose up -d` |
+| **systemd** | Traditional Linux servers | `sudo systemctl enable --now devclaw` |
+| **Ansible** | Multi-server deployment | See `install/ansible/` |
+
+See [install/DEPLOYMENT.md](install/DEPLOYMENT.md) for detailed instructions.
+
+### Uninstall
+
+**Via uninstall script:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/uninstall.sh | sudo bash
+
+# Or skip confirmation:
+curl -fsSL ... | sudo bash -s -- --yes
+```
+
+**What is removed:**
+- DevClaw binary and all data in `/opt/devclaw`
+- PM2 process configuration
+- Global `devclaw` command
+
+**Manual uninstall (if script unavailable):**
+```bash
+# Stop and remove PM2 process
+pm2 delete devclaw
+pm2 save
+
+# Remove files
+sudo rm -rf /opt/devclaw
+sudo rm -f /usr/local/bin/devclaw
+```
 
 ---
 

@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -112,11 +113,28 @@ func (s *ScriptSkill) Tools() []Tool {
 }
 
 // SystemPrompt returns the SKILL.md body with {baseDir} resolved.
+// For prompt-only skills (no scripts), adds a notice about available tools.
 func (s *ScriptSkill) SystemPrompt() string {
 	body := s.def.Body
 
 	// Replace {baseDir} with the actual skill directory.
 	body = strings.ReplaceAll(body, "{baseDir}", s.def.Dir)
+
+	// Check if this is a prompt-only skill (no executable scripts)
+	if len(s.scripts) == 0 {
+		// Add notice about how to use this skill
+		notice := `
+
+---
+**Skill Notice:** This skill provides instructions only and has no executable scripts.
+
+- If the skill references specific tools, use the ` + "`bash`" + ` tool to run CLI commands
+- If the skill mentions external CLIs (e.g., gog, gh, aws), ensure they are installed: ` + "`which <cli-name>`" + `
+- If no CLI is mentioned and no tools are available, inform the user that this skill requires additional setup
+`
+
+		body += notice
+	}
 
 	return body
 }
@@ -167,6 +185,107 @@ func (s *ScriptSkill) Execute(ctx context.Context, input string) (string, error)
 // Shutdown releases resources.
 func (s *ScriptSkill) Shutdown() error {
 	return nil
+}
+
+// ---------- SkillSetupChecker Interface ----------
+
+// RequiredConfig returns the configuration requirements for this skill.
+func (s *ScriptSkill) RequiredConfig() []ConfigRequirement {
+	if s.def == nil {
+		return nil
+	}
+	return s.def.ConfigRequirements
+}
+
+// CheckSetup verifies if all required configuration is present.
+func (s *ScriptSkill) CheckSetup(vault VaultReader) SetupStatus {
+	reqs := s.RequiredConfig()
+
+	// Check for required binaries first
+	var missingBins []string
+	if s.def.OpenClaw != nil {
+		for _, bin := range s.def.OpenClaw.Requires.Bins {
+			if _, err := exec.LookPath(bin); err != nil {
+				missingBins = append(missingBins, bin)
+			}
+		}
+	}
+
+	// Check for prompt-only skills without required tools
+	isPromptOnly := len(s.scripts) == 0
+
+	// Build status
+	var missing []ConfigRequirement
+	var optionalMissing []ConfigRequirement
+
+	for _, req := range reqs {
+		// Check vault first
+		hasInVault := vault != nil && vault.Has(req.Key)
+
+		// Also check environment variable as fallback
+		hasInEnv := req.EnvVar != "" && os.Getenv(req.EnvVar) != ""
+
+		if !hasInVault && !hasInEnv {
+			if req.Required {
+				missing = append(missing, req)
+			} else {
+				optionalMissing = append(optionalMissing, req)
+			}
+		}
+	}
+
+	// If there are missing binaries, add them as setup requirements
+	if len(missingBins) > 0 {
+		return SetupStatus{
+			IsComplete: false,
+			MissingRequirements: missing,
+			Message: fmt.Sprintf("Skill '%s' requires external tools that are not installed:\n\nMissing binaries: %s\n\nInstall them before using this skill.",
+				s.meta.Name, strings.Join(missingBins, ", ")),
+		}
+	}
+
+	// If prompt-only with no config requirements, it's complete but note it
+	if isPromptOnly && len(reqs) == 0 && len(missingBins) == 0 {
+		return SetupStatus{
+			IsComplete: true,
+			Message:    fmt.Sprintf("Skill '%s' is a prompt-only skill (instructions provided, no executable scripts)", s.meta.Name),
+		}
+	}
+
+	if len(missing) == 0 {
+		msg := fmt.Sprintf("Skill '%s' is properly configured", s.meta.Name)
+		if len(optionalMissing) > 0 {
+			msg += fmt.Sprintf(" (%d optional settings not configured)", len(optionalMissing))
+		}
+		return SetupStatus{
+			IsComplete:         true,
+			OptionalMissing:    optionalMissing,
+			Message:            msg,
+		}
+	}
+
+	// Build helpful message
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Skill '%s' needs configuration:\n", s.meta.Name))
+	for i, req := range missing {
+		sb.WriteString(fmt.Sprintf("\n%d. **%s**\n", i+1, req.Name))
+		if req.Description != "" {
+			sb.WriteString(fmt.Sprintf("   %s\n", req.Description))
+		}
+		if req.Example != "" {
+			sb.WriteString(fmt.Sprintf("   Example: `%s`\n", req.Example))
+		}
+		if req.EnvVar != "" {
+			sb.WriteString(fmt.Sprintf("   Or set env: `%s`\n", req.EnvVar))
+		}
+	}
+
+	return SetupStatus{
+		IsComplete:         false,
+		MissingRequirements: missing,
+		OptionalMissing:    optionalMissing,
+		Message:            sb.String(),
+	}
 }
 
 // ---------- Script Execution ----------

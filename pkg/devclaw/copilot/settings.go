@@ -37,7 +37,6 @@ func findSettingsFile() string {
 	candidates := []string{
 		"configs/settings.yaml",
 		"settings.yaml",
-		".devclaw/settings.yaml",
 	}
 	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {

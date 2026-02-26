@@ -40,6 +40,7 @@ Examples:
 		newHowCmd(),
 		newShellHookCmd(),
 		newMCPCmd(),
+		NewOAuthCommand(),
 	)
 
 	// Flags globais.

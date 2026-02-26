@@ -37,6 +37,9 @@ type ctxKeyCallerJID struct{}
 // ctxKeyToolProfile is the context key for passing the active tool profile.
 type ctxKeyToolProfile struct{}
 
+// ctxKeyVaultReader is the context key for passing the vault reader.
+type ctxKeyVaultReader struct{}
+
 // DeliveryTarget holds the channel and chatID for message delivery.
 type DeliveryTarget struct {
 	Channel string
@@ -93,6 +96,20 @@ func ContextWithToolProfile(ctx context.Context, profile *ToolProfile) context.C
 // Returns nil if no profile is set.
 func ToolProfileFromContext(ctx context.Context) *ToolProfile {
 	if v, ok := ctx.Value(ctxKeyToolProfile{}).(*ToolProfile); ok {
+		return v
+	}
+	return nil
+}
+
+// ContextWithVaultReader returns a new context carrying a vault reader.
+func ContextWithVaultReader(ctx context.Context, vr skills.VaultReader) context.Context {
+	return context.WithValue(ctx, ctxKeyVaultReader{}, vr)
+}
+
+// VaultReaderFromContext extracts the vault reader from context.
+// Returns nil if not set.
+func VaultReaderFromContext(ctx context.Context) skills.VaultReader {
+	if v, ok := ctx.Value(ctxKeyVaultReader{}).(skills.VaultReader); ok {
 		return v
 	}
 	return nil
@@ -159,8 +176,203 @@ type registeredTool struct {
 type ToolResult struct {
 	ToolCallID string
 	Name       string
-	Content    string
+	Content    string // Main content (used for LLM context when ForLLM is empty)
 	Error      error
+
+	// Extended fields for dual output (PicoClaw-inspired)
+	ForLLM   string // Technical content for LLM reasoning (if empty, Content is used)
+	ForUser  string // Friendly message to show user immediately
+	IsAsync  bool   // Tool is running in background, result comes later
+	IsSilent bool   // Don't notify user about this result
+}
+
+// DualToolResult creates a ToolResult with separate content for LLM and user.
+// This is the recommended way to return results that have both technical details
+// and user-friendly messages.
+func DualToolResult(forLLM, forUser string) *ToolResult {
+	return &ToolResult{
+		Content: forLLM, // Content is always set for backwards compatibility
+		ForLLM:  forLLM,
+		ForUser: forUser,
+	}
+}
+
+// SilentResult creates a ToolResult that doesn't notify the user.
+// Useful for background operations or when the result should only be
+// used for LLM reasoning.
+func SilentResult(content string) *ToolResult {
+	return &ToolResult{
+		Content:  content,
+		ForLLM:   content,
+		IsSilent: true,
+	}
+}
+
+// AsyncResult creates a ToolResult indicating the tool is running in background.
+// The actual result will be delivered via callback or follow-up message.
+func AsyncResult(message string) *ToolResult {
+	return &ToolResult{
+		Content:  message,
+		ForLLM:   message,
+		ForUser:  message,
+		IsAsync:  true,
+	}
+}
+
+// ErrorResult creates a ToolResult from an error.
+func ErrorResult(err error) *ToolResult {
+	errMsg := err.Error()
+	return &ToolResult{
+		Content:  errMsg,
+		ForLLM:   errMsg,
+		ForUser:  "An error occurred. Please try again.",
+		Error:    err,
+	}
+}
+
+// GetForLLM returns the content to use for LLM context.
+// Returns ForLLM if set, otherwise Content.
+func (r *ToolResult) GetForLLM() string {
+	if r.ForLLM != "" {
+		return r.ForLLM
+	}
+	return r.Content
+}
+
+// GetForUser returns the content to show the user.
+// Returns ForUser if set, otherwise GetForLLM().
+func (r *ToolResult) GetForUser() string {
+	if r.ForUser != "" {
+		return r.ForUser
+	}
+	return r.GetForLLM()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contextual Tool Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ContextualTool is an interface for tools that need delivery context.
+// Tools can implement this interface to receive channel/chatID context.
+// The executor checks for this interface and calls SetDeliveryTarget before
+// executing the tool handler.
+//
+// Note: In DevClaw, handlers are functions (not objects), so this interface
+// is typically implemented by a wrapper struct. For simple cases, tools can
+// use GetDeliveryTarget(ctx) directly to extract context from the context.Context.
+//
+// Example with wrapper:
+//
+//	type contextualHandler struct {
+//		fn      ToolHandlerFunc
+//		channel string
+//		chatID  string
+//	}
+//
+//	func (h *contextualHandler) SetDeliveryTarget(channel, chatID string) {
+//		h.channel = channel
+//		h.chatID = chatID
+//	}
+//
+//	func (h *contextualHandler) Call(ctx context.Context, args map[string]any) (any, error) {
+//		// Use h.channel and h.chatID
+//		return h.fn(ctx, args)
+//	}
+type ContextualTool interface {
+	SetDeliveryTarget(channel, chatID string)
+}
+
+// GetDeliveryTarget is a convenience function that extracts the delivery target
+// from the context. Tools should use this to get channel/chatID context.
+//
+// Example:
+//
+//	func myToolHandler(ctx context.Context, args map[string]any) (any, error) {
+//		channel, chatID := GetDeliveryTarget(ctx)
+//		if channel == "" {
+//			return nil, fmt.Errorf("no channel context")
+//		}
+//		// Use channel and chatID...
+//	}
+func GetDeliveryTarget(ctx context.Context) (channel, chatID string) {
+	dt := DeliveryTargetFromContext(ctx)
+	return dt.Channel, dt.ChatID
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Async Tool Support
+// ─────────────────────────────────────────────────────────────────────────────
+
+// AsyncCompleteCallback is called when an async tool completes execution.
+// The result contains the final output that should be delivered.
+type AsyncCompleteCallback func(result *ToolResult)
+
+// AsyncToolConfig holds configuration for async tool execution.
+type AsyncToolConfig struct {
+	// Label is a human-readable description of the async task.
+	Label string
+
+	// OnComplete is called when the async task finishes.
+	OnComplete AsyncCompleteCallback
+
+	// Timeout is the maximum duration for the async task.
+	// Default is 5 minutes if not set.
+	Timeout time.Duration
+}
+
+// RunAsync executes a function in the background and calls the callback when done.
+// This is a helper for tools that need to run long operations asynchronously.
+//
+// The function returns immediately with an AsyncResult. The actual work happens
+// in a background goroutine, and the callback is invoked when complete.
+//
+// The context is propagated to the async function, so cancellation of the parent
+// context will also cancel the async operation.
+//
+// Example:
+//
+//	func myAsyncTool(ctx context.Context, args map[string]any) (any, error) {
+//		config := AsyncToolConfig{
+//			Label: "processing files",
+//			OnComplete: func(result *ToolResult) {
+//				// Handle completion - e.g., send to user
+//			},
+//		}
+//
+//		RunAsync(ctx, config, func(ctx context.Context) *ToolResult {
+//			// Long-running operation
+//			return &ToolResult{Content: "done"}
+//		})
+//
+//		return AsyncResult("Started processing files..."), nil
+//	}
+func RunAsync(ctx context.Context, config AsyncToolConfig, fn func(ctx context.Context) *ToolResult) {
+	timeout := config.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+
+	go func() {
+		// Derive from original context to respect cancellation
+		asyncCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+
+		result := fn(asyncCtx)
+
+		if config.OnComplete != nil {
+			// Use background context if original was cancelled
+			callbackCtx := context.Background()
+			select {
+			case <-ctx.Done():
+				// Original context cancelled, use background for callback
+			default:
+				callbackCtx = ctx
+			}
+			_ = callbackCtx // Callback doesn't need context currently
+
+			config.OnComplete(result)
+		}
+	}()
 }
 
 // sequentialTools are tools that must not run in parallel (shared state).
@@ -193,6 +405,9 @@ type ToolExecutor struct {
 	logger      *slog.Logger
 	guard       *ToolGuard
 	mu          sync.RWMutex
+
+	// vault is the optional vault reader for checking skill setup
+	vault skills.VaultReader
 
 	// toolDefsCache caches the slice of ToolDefinitions so we don't rebuild
 	// it on every Tools() call. Invalidated when a new tool is registered.
@@ -368,6 +583,13 @@ func (e *ToolExecutor) Register(def ToolDefinition, handler ToolHandlerFunc) {
 	e.logger.Debug("tool registered", "name", name)
 }
 
+// SetVault sets the vault reader for skill setup checking.
+func (e *ToolExecutor) SetVault(vault skills.VaultReader) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.vault = vault
+}
+
 // RegisterSkillTools registers all tools exposed by a skill.
 // Tool names are prefixed with the skill name to avoid collisions.
 // Names are sanitized to match OpenAI's pattern: ^[a-zA-Z0-9_-]+$
@@ -383,6 +605,94 @@ func (e *ToolExecutor) RegisterSkillTools(skill skills.Skill) {
 
 		e.Register(def, handler)
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Skill Setup Checking
+// ─────────────────────────────────────────────────────────────────────────────
+
+// VaultReaderAdapter adapts a Vault to implement skills.VaultReader.
+type VaultReaderAdapter struct {
+	getKey func(key string) (string, error)
+	hasKey func(key string) bool
+}
+
+// NewVaultReaderAdapter creates a VaultReader from getter functions.
+func NewVaultReaderAdapter(getKey func(key string) (string, error), hasKey func(key string) bool) *VaultReaderAdapter {
+	return &VaultReaderAdapter{getKey: getKey, hasKey: hasKey}
+}
+
+// Get returns the value for a key.
+func (v *VaultReaderAdapter) Get(key string) (string, error) {
+	if v.getKey == nil {
+		return "", fmt.Errorf("vault not configured")
+	}
+	return v.getKey(key)
+}
+
+// Has returns true if the key exists.
+func (v *VaultReaderAdapter) Has(key string) bool {
+	if v.hasKey == nil {
+		return false
+	}
+	return v.hasKey(key)
+}
+
+// CheckSkillSetup checks if a skill is properly configured.
+// Returns setup status and nil if check was performed, or error if skill doesn't support setup checking.
+func CheckSkillSetup(skill skills.Skill, vault skills.VaultReader) (*skills.SetupStatus, error) {
+	checker, ok := skill.(skills.SkillSetupChecker)
+	if !ok {
+		return nil, fmt.Errorf("skill does not support setup checking")
+	}
+	status := checker.CheckSetup(vault)
+	return &status, nil
+}
+
+// SkillNeedsSetup returns true if a skill requires configuration that is missing.
+func SkillNeedsSetup(skill skills.Skill, vault skills.VaultReader) bool {
+	status, err := CheckSkillSetup(skill, vault)
+	if err != nil {
+		return false // Skill doesn't need setup
+	}
+	return !status.IsComplete
+}
+
+// FormatSetupPrompt creates a user-friendly prompt for missing configuration.
+func FormatSetupPrompt(skillName string, status *skills.SetupStatus) string {
+	if status == nil || status.IsComplete {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("⚠️ Skill **%s** needs configuration before use.\n\n", skillName))
+
+	// Build details from MissingRequirements if available
+	if len(status.MissingRequirements) > 0 {
+		sb.WriteString("Required credentials:\n\n")
+		for i, req := range status.MissingRequirements {
+			sb.WriteString(fmt.Sprintf("%d. **%s**\n", i+1, req.Name))
+			sb.WriteString(fmt.Sprintf("   - Vault key: `%s`\n", req.Key))
+			if req.Description != "" {
+				sb.WriteString(fmt.Sprintf("   - %s\n", req.Description))
+			}
+			if req.Example != "" {
+				sb.WriteString(fmt.Sprintf("   - Example: `%s`\n", req.Example))
+			}
+			if req.EnvVar != "" {
+				sb.WriteString(fmt.Sprintf("   - Or set env var: `%s`\n", req.EnvVar))
+			}
+			sb.WriteString("\n")
+		}
+	} else if status.Message != "" {
+		sb.WriteString(status.Message)
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("To configure, provide the values and I'll save them to the vault with the correct keys.\n")
+	sb.WriteString("Example: 'My API key is abc123 and my token is xyz789'\n")
+
+	return sb.String()
 }
 
 // sanitizeToolName ensures a tool name matches OpenAI's required pattern
@@ -676,6 +986,14 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 	if ps := ProgressSenderFromContext(ctx); ps != nil {
 		execCtx = ContextWithProgressSender(execCtx, ps)
 	}
+
+	// Propagate VaultReader to the tool context for skill setup checking.
+	if e.vault != nil {
+		execCtx = ContextWithVaultReader(execCtx, e.vault)
+	} else if vr := VaultReaderFromContext(ctx); vr != nil {
+		execCtx = ContextWithVaultReader(execCtx, vr)
+	}
+
 	defer cancel()
 
 	// ── Before-tool hooks ──
@@ -858,13 +1176,44 @@ func MakeToolDefinition(name, description string, params map[string]any) ToolDef
 
 // makeSkillToolHandler creates a ToolHandlerFunc that delegates to a skill's tool handler.
 func makeSkillToolHandler(skill skills.Skill, tool skills.Tool) ToolHandlerFunc {
+	// Check if skill needs setup validation
+	checker, needsSetupCheck := skill.(skills.SkillSetupChecker)
+	meta := skill.Metadata()
+
 	if tool.Handler != nil {
-		// Skill tool has an explicit handler — use it directly.
-		return ToolHandlerFunc(tool.Handler)
+		// Skill tool has an explicit handler — wrap with setup check.
+		return func(ctx context.Context, args map[string]any) (any, error) {
+			// Check setup before executing
+			if needsSetupCheck {
+				vault := VaultReaderFromContext(ctx)
+				status := checker.CheckSetup(vault)
+				if !status.IsComplete {
+					// Return setup instructions as a dual result
+					return DualToolResult(
+						fmt.Sprintf("[SETUP_REQUIRED] Skill '%s' needs configuration: %s", meta.Name, status.Message),
+						FormatSetupPrompt(meta.Name, &status),
+					), nil
+				}
+			}
+			return tool.Handler(ctx, args)
+		}
 	}
 
 	// Fallback: call the skill's Execute method with the input arg.
 	return func(ctx context.Context, args map[string]any) (any, error) {
+		// Check setup before executing
+		if needsSetupCheck {
+			vault := VaultReaderFromContext(ctx)
+			status := checker.CheckSetup(vault)
+			if !status.IsComplete {
+				// Return setup instructions as a dual result
+				return DualToolResult(
+					fmt.Sprintf("[SETUP_REQUIRED] Skill '%s' needs configuration: %s", meta.Name, status.Message),
+					FormatSetupPrompt(meta.Name, &status),
+				), nil
+			}
+		}
+
 		input, _ := args["input"].(string)
 		if input == "" {
 			// Try to serialize all args as the input.

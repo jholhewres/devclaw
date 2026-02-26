@@ -67,6 +67,12 @@ func (a *Assistant) HandleCommand(msg *channels.IncomingMessage) CommandResult {
 		return CommandResult{Handled: false}
 	}
 
+	// Check for abort triggers (multilingual stop phrases).
+	// This allows users to stop runs with natural language like "stop", "pare", "arrête", etc.
+	if IsAbortRequestText(content) {
+		return CommandResult{Response: a.stopCommand(msg), Handled: true}
+	}
+
 	// Parse command and args.
 	parts := strings.Fields(content)
 	cmd := strings.ToLower(parts[0])

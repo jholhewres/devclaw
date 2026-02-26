@@ -24,6 +24,7 @@ import { Memory } from '@/pages/Memory'
 import { DatabasePage } from '@/pages/Database'
 import { Groups } from '@/pages/Groups'
 import { Mcp } from '@/pages/Mcp'
+import { OAuth } from '@/pages/OAuth'
 
 /** Estado global de autenticação obtido de /api/auth/status */
 interface AuthState {
@@ -145,6 +146,7 @@ export function App() {
           <Route path="/channels/whatsapp" element={<WhatsAppConnect />} />
           <Route path="/config" element={<Config />} />
           <Route path="/api-config" element={<ApiConfig />} />
+          <Route path="/oauth" element={<OAuth />} />
           <Route path="/access" element={<Access />} />
           <Route path="/budget" element={<Budget />} />
           <Route path="/memory" element={<Memory />} />
