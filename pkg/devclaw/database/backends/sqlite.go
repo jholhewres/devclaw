@@ -584,5 +584,90 @@ CREATE TABLE IF NOT EXISTS team_activities (
 );
 CREATE INDEX IF NOT EXISTS idx_activities_team ON team_activities(team_id);
 CREATE INDEX IF NOT EXISTS idx_activities_created ON team_activities(created_at);
+
+-- Team documents (deliverables linked to tasks)
+CREATE TABLE IF NOT EXISTS team_documents (
+    id          TEXT PRIMARY KEY,
+    team_id     TEXT NOT NULL,
+    task_id     TEXT DEFAULT '',
+    title       TEXT NOT NULL,
+    doc_type    TEXT DEFAULT 'deliverable',
+    content     TEXT NOT NULL,
+    format      TEXT DEFAULT 'markdown',
+    file_path   TEXT DEFAULT '',
+    version     INTEGER DEFAULT 1,
+    author      TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    FOREIGN KEY (team_id) REFERENCES teams(id)
+);
+CREATE INDEX IF NOT EXISTS idx_documents_team ON team_documents(team_id);
+CREATE INDEX IF NOT EXISTS idx_documents_task ON team_documents(task_id);
+CREATE INDEX IF NOT EXISTS idx_documents_type ON team_documents(doc_type);
+
+-- Thread subscriptions (agents subscribed to task threads)
+CREATE TABLE IF NOT EXISTS team_thread_subscriptions (
+    id            TEXT PRIMARY KEY,
+    team_id       TEXT NOT NULL,
+    thread_id     TEXT NOT NULL,
+    agent_id      TEXT NOT NULL,
+    subscribed_at TEXT NOT NULL,
+    reason        TEXT DEFAULT 'auto',
+    UNIQUE(team_id, thread_id, agent_id)
+);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_thread ON team_thread_subscriptions(thread_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_agent ON team_thread_subscriptions(agent_id);
+
+-- Agent working state (WORKING.md pattern)
+CREATE TABLE IF NOT EXISTS agent_working_state (
+    agent_id        TEXT PRIMARY KEY,
+    team_id         TEXT NOT NULL,
+    current_task_id TEXT DEFAULT '',
+    status          TEXT DEFAULT 'idle',
+    next_steps      TEXT DEFAULT '',
+    context         TEXT DEFAULT '',
+    updated_at      TEXT NOT NULL
+);
+
+-- Notification rules (routing configuration)
+CREATE TABLE IF NOT EXISTS notification_rules (
+    id           TEXT PRIMARY KEY,
+    team_id      TEXT DEFAULT '',
+    name         TEXT NOT NULL,
+    enabled      INTEGER DEFAULT 1,
+    events       TEXT NOT NULL,
+    conditions   TEXT DEFAULT '{}',
+    destinations TEXT NOT NULL,
+    template     TEXT DEFAULT '',
+    priority     INTEGER DEFAULT 0,
+    rate_limit   INTEGER DEFAULT 0,
+    quiet_hours  TEXT DEFAULT '',
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notif_rules_team ON notification_rules(team_id);
+CREATE INDEX IF NOT EXISTS idx_notif_rules_enabled ON notification_rules(enabled);
+
+-- Notification history
+CREATE TABLE IF NOT EXISTS team_notifications (
+    id         TEXT PRIMARY KEY,
+    team_id    TEXT NOT NULL,
+    type       TEXT NOT NULL,
+    agent_id   TEXT NOT NULL,
+    agent_name TEXT NOT NULL,
+    task_id    TEXT DEFAULT '',
+    task_title TEXT DEFAULT '',
+    action     TEXT NOT NULL,
+    result     TEXT NOT NULL,
+    message    TEXT NOT NULL,
+    details    TEXT DEFAULT '{}',
+    priority   INTEGER DEFAULT 3,
+    timestamp  TEXT NOT NULL,
+    read       INTEGER DEFAULT 0,
+    read_at    TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_team ON team_notifications(team_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_timestamp ON team_notifications(timestamp);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON team_notifications(read);
 `
 }
