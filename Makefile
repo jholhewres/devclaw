@@ -1,9 +1,10 @@
-.PHONY: build build-linux run build-run serve setup chat test test-v lint clean install init help web-install web-build web-dev
+.PHONY: build build-linux run build-run serve setup chat test test-v lint clean install init help web-install web-build web-dev release release-metadata release-package
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 CONFIG  ?= $(wildcard config.yaml)
 VERBOSE ?=
+DIST_DIR := dist
 
 # Build flags for serve
 SERVE_FLAGS :=
@@ -110,6 +111,34 @@ docker-up:
 docker-down:
 	docker compose down
 
+## release: Build binary for current platform (includes frontend)
+release: web-build
+	@echo "=== Building release binary ==="
+	@mkdir -p $(DIST_DIR)
+	CGO_ENABLED=1 go build -tags 'sqlite_fts5' $(LDFLAGS) -o $(DIST_DIR)/devclaw ./cmd/devclaw
+	@chmod +x $(DIST_DIR)/devclaw
+
+## release-linux: Cross-compile for Linux AMD64 (includes frontend)
+release-linux: web-build
+	@echo "=== Building Linux AMD64 release binary ==="
+	@mkdir -p $(DIST_DIR)
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags 'sqlite_fts5' $(LDFLAGS) -o $(DIST_DIR)/devclaw ./cmd/devclaw
+
+## release-metadata: Generate metadata.json for release
+release-metadata:
+	@mkdir -p $(DIST_DIR)
+	@echo '{"version": "$(VERSION)", "binary": "devclaw", "platform": "unix", "updated": "$(shell date -u +%Y-%m-%dT%H:%M:%SZ)"}' > $(DIST_DIR)/metadata.json
+
+## release-package: Create distributable .zip package (Linux AMD64)
+release-package: release-linux release-metadata
+	@echo "=== Creating release package ==="
+	@cp install/unix/ecosystem.config.js $(DIST_DIR)/
+	@cd $(DIST_DIR) && zip -r devclaw-$(VERSION)-linux-amd64.zip devclaw ecosystem.config.js metadata.json
+	@rm -f $(DIST_DIR)/devclaw $(DIST_DIR)/ecosystem.config.js $(DIST_DIR)/metadata.json
+	@echo ""
+	@echo "Package created: $(DIST_DIR)/devclaw-$(VERSION)-linux-amd64.zip"
+	@echo "Contents: devclaw, ecosystem.config.js, metadata.json"
+
 ## help: Show available commands
 help:
 	@echo "Usage:"
@@ -127,6 +156,10 @@ help:
 	@echo "  make web-install       # Install npm dependencies"
 	@echo "  make web-build         # Build React frontend"
 	@echo "  make web-dev           # Start Vite dev server"
+	@echo ""
+	@echo "Release:"
+	@echo "  make release           # Build binary for distribution"
+	@echo "  make release-package   # Create .zip package"
 	@echo ""
 	@echo "All commands:"
 	@sed -n 's/^## //p' $(MAKEFILE_LIST) | sort
