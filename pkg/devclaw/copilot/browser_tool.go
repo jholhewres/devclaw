@@ -22,9 +22,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -206,9 +208,18 @@ func (bm *BrowserManager) Start(ctx context.Context) error {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
+	// Check if already started and still alive
 	if bm.started {
-		return nil
+		if bm.isAlive() {
+			return nil
+		}
+		// Chrome died, clean up and restart
+		bm.logger.Warn("chrome process died, restarting")
+		bm.cleanup()
 	}
+
+	// Kill any existing Chrome processes that might be zombied
+	bm.killZombieChrome()
 
 	chromePath := bm.findChrome()
 	if chromePath == "" {
@@ -263,6 +274,33 @@ func (bm *BrowserManager) Start(ctx context.Context) error {
 
 	bm.wsURL = wsURL
 	bm.started = true
+
+	// Enable required CDP domains
+	if err := bm.enableCDPDomains(ctx); err != nil {
+		bm.logger.Warn("failed to enable some CDP domains", "error", err)
+		// Don't fail - some domains might not be available
+	}
+
+	return nil
+}
+
+// enableCDPDomains enables the required CDP domains for browser automation.
+func (bm *BrowserManager) enableCDPDomains(ctx context.Context) error {
+	domains := []string{
+		"Page.enable",
+		"Target.enable",
+		"DOM.enable",
+		"Network.enable",
+		"Runtime.enable",
+	}
+
+	for _, domain := range domains {
+		_, err := bm.sendCDP(domain, nil)
+		if err != nil {
+			bm.logger.Debug("CDP domain enable result", "domain", domain, "error", err)
+		}
+	}
+
 	return nil
 }
 
@@ -514,7 +552,12 @@ func (bm *BrowserManager) FillInput(ctx context.Context, selector, value string)
 func (bm *BrowserManager) Stop() {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
+	bm.cleanup()
+	bm.logger.Info("chrome stopped")
+}
 
+// cleanup closes connections and kills Chrome process.
+func (bm *BrowserManager) cleanup() {
 	if bm.conn != nil {
 		bm.conn.Close()
 		bm.conn = nil
@@ -522,9 +565,27 @@ func (bm *BrowserManager) Stop() {
 	if bm.cmd != nil && bm.cmd.Process != nil {
 		bm.cmd.Process.Kill()
 		bm.cmd.Wait()
-		bm.logger.Info("chrome stopped")
+		bm.cmd = nil
 	}
 	bm.started = false
+}
+
+// isAlive checks if Chrome process is still running.
+func (bm *BrowserManager) isAlive() bool {
+	if bm.cmd == nil || bm.cmd.Process == nil {
+		return false
+	}
+	// Send signal 0 to check if process exists
+	err := bm.cmd.Process.Signal(syscall.Signal(0))
+	return err == nil
+}
+
+// killZombieChrome kills any Chrome processes that might be leftover.
+func (bm *BrowserManager) killZombieChrome() {
+	// Kill any Chrome processes on the same user
+	exec.Command("pkill", "-9", "-u", os.Getenv("USER"), "chrome").Run()
+	exec.Command("pkill", "-9", "-u", os.Getenv("USER"), "chromium").Run()
+	time.Sleep(500 * time.Millisecond)
 }
 
 // ─── Tool Registration ───
