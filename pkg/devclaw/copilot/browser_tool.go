@@ -229,83 +229,7 @@ func (bm *BrowserManager) Start(ctx context.Context) error {
 		bm.cleanup()
 	}
 
-	chromePath := bm.findChrome()
-	if chromePath == "" {
-		return fmt.Errorf("chrome/chromium not found; install Chrome or set browser.chrome_path in config")
-	}
-
-	port, err := allocatePort()
-	if err != nil {
-		return fmt.Errorf("failed to allocate CDP port: %w", err)
-	}
-
-	args := []string{
-		fmt.Sprintf("--remote-debugging-port=%d", port),
-		"--no-first-run",
-		"--no-default-browser-check",
-		"--disable-extensions",
-		"--disable-popup-blocking",
-		"--disable-translate",
-		"--disable-background-networking",
-		"--disable-sync",
-		"--disable-default-apps",
-		"--disable-dev-shm-usage",
-		"--no-sandbox",
-		"--disable-gpu",
-		"--disable-software-rasterizer",
-		"--disable-dbus",
-		"--disable-crash-reporter",
-		"--disable-in-process-stack-traces",
-		"--disable-logging",
-		"--log-level=3",
-		"--silent-debugger-extension-api",
-		fmt.Sprintf("--window-size=%d,%d", bm.cfg.ViewportWidth, bm.cfg.ViewportHeight),
-	}
-	if bm.cfg.Headless {
-		args = append(args, "--headless=new")
-	}
-	args = append(args, "about:blank")
-
-	bm.cmd = exec.CommandContext(ctx, chromePath, args...)
-	// Create a new process group to ensure Chrome and its children can be killed together
-	bm.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-	if err := bm.cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start Chrome: %w", err)
-	}
-
-	bm.logger.Info("chrome started", "pid", bm.cmd.Process.Pid, "port", port)
-
-	// Wait for CDP to be ready (increased timeout for slower servers)
-	wsURL, err := bm.waitForCDP(port, 30*time.Second)
-	if err != nil {
-		bm.logger.Error("CDP not ready, killing Chrome", "error", err)
-		bm.killProcessGroup()
-		return fmt.Errorf("CDP not ready: %w", err)
-	}
-
-	bm.logger.Info("CDP ready", "wsURL", wsURL)
-	bm.browserURL = wsURL
-
-	// Connect to Browser WebSocket (for target management)
-	browserConn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		bm.logger.Error("failed to connect to Browser WebSocket", "error", err)
-		bm.killProcessGroup()
-		return fmt.Errorf("Browser WebSocket connection failed: %w", err)
-	}
-	bm.browserConn = browserConn
-	bm.logger.Info("Browser WebSocket connected")
-
-	// Get or create a page target
-	if err := bm.ensurePageTarget(); err != nil {
-		bm.logger.Error("failed to create page target", "error", err)
-		bm.killProcessGroup()
-		return fmt.Errorf("failed to create page target: %w", err)
-	}
-
-	bm.started = true
-	return nil
+	return bm.startChrome(ctx)
 }
 
 // ensurePageTarget creates or attaches to a page target and connects to it.
@@ -584,7 +508,7 @@ func (bm *BrowserManager) sendPageCDP(method string, params map[string]any) (jso
 
 // sendCDP sends a CDP command to the page connection (alias for sendPageCDP).
 // This is the main method used by browser tools.
-// Automatically reconnects if the connection is lost.
+// Automatically reconnects or restarts Chrome if the connection is lost.
 func (bm *BrowserManager) sendCDP(method string, params map[string]any) (json.RawMessage, error) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
@@ -599,15 +523,28 @@ func (bm *BrowserManager) sendCDP(method string, params map[string]any) (json.Ra
 	if isConnectionError(err) {
 		bm.logger.Warn("connection lost, attempting reconnect", "error", err)
 
-		// Clean up and reconnect
-		if bm.pageConn != nil {
-			bm.pageConn.Close()
-			bm.pageConn = nil
-		}
-
-		// Reconnect to page target
-		if err := bm.ensurePageTarget(); err != nil {
-			return nil, fmt.Errorf("reconnect failed: %w", err)
+		// Check if Chrome is still alive
+		if !bm.isAlive() {
+			bm.logger.Warn("Chrome process died, full restart required")
+			bm.cleanup()
+			// Restart Chrome completely
+			if err := bm.startChrome(context.Background()); err != nil {
+				return nil, fmt.Errorf("Chrome restart failed: %w", err)
+			}
+		} else {
+			// Chrome is alive, just reconnect to page
+			if bm.pageConn != nil {
+				bm.pageConn.Close()
+				bm.pageConn = nil
+			}
+			if err := bm.ensurePageTarget(); err != nil {
+				// If reconnect fails, try full restart
+				bm.logger.Warn("page reconnect failed, trying full restart", "error", err)
+				bm.cleanup()
+				if err := bm.startChrome(context.Background()); err != nil {
+					return nil, fmt.Errorf("Chrome restart failed: %w", err)
+				}
+			}
 		}
 
 		// Retry the command
@@ -615,6 +552,84 @@ func (bm *BrowserManager) sendCDP(method string, params map[string]any) (json.Ra
 	}
 
 	return nil, err
+}
+
+// startChrome starts the Chrome process without acquiring the lock.
+// MUST be called with bm.mu already held.
+func (bm *BrowserManager) startChrome(ctx context.Context) error {
+	chromePath := bm.findChrome()
+	if chromePath == "" {
+		return fmt.Errorf("chrome/chromium not found; install Chrome or set browser.chrome_path in config")
+	}
+
+	port, err := allocatePort()
+	if err != nil {
+		return fmt.Errorf("failed to allocate CDP port: %w", err)
+	}
+
+	args := []string{
+		fmt.Sprintf("--remote-debugging-port=%d", port),
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--disable-extensions",
+		"--disable-popup-blocking",
+		"--disable-translate",
+		"--disable-background-networking",
+		"--disable-sync",
+		"--disable-default-apps",
+		"--disable-dev-shm-usage",
+		"--no-sandbox",
+		"--disable-gpu",
+		"--disable-software-rasterizer",
+		"--disable-dbus",
+		"--disable-crash-reporter",
+		"--disable-in-process-stack-traces",
+		"--disable-logging",
+		"--log-level=3",
+		"--silent-debugger-extension-api",
+		fmt.Sprintf("--window-size=%d,%d", bm.cfg.ViewportWidth, bm.cfg.ViewportHeight),
+	}
+	if bm.cfg.Headless {
+		args = append(args, "--headless=new")
+	}
+	args = append(args, "about:blank")
+
+	bm.cmd = exec.CommandContext(ctx, chromePath, args...)
+	bm.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	if err := bm.cmd.Start(); err != nil {
+		return fmt.Errorf("failed to start Chrome: %w", err)
+	}
+
+	bm.logger.Info("chrome started", "pid", bm.cmd.Process.Pid, "port", port)
+
+	// Wait for CDP to be ready
+	wsURL, err := bm.waitForCDP(port, 30*time.Second)
+	if err != nil {
+		bm.killProcessGroup()
+		return fmt.Errorf("CDP not ready: %w", err)
+	}
+
+	bm.logger.Info("CDP ready", "wsURL", wsURL)
+	bm.browserURL = wsURL
+
+	// Connect to Browser WebSocket
+	browserConn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		bm.killProcessGroup()
+		return fmt.Errorf("Browser WebSocket connection failed: %w", err)
+	}
+	bm.browserConn = browserConn
+	bm.logger.Info("Browser WebSocket connected")
+
+	// Connect to page target
+	if err := bm.ensurePageTarget(); err != nil {
+		bm.killProcessGroup()
+		return fmt.Errorf("failed to create page target: %w", err)
+	}
+
+	bm.started = true
+	return nil
 }
 
 // isConnectionError checks if an error is a connection-related error
