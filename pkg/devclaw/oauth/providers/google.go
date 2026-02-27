@@ -230,12 +230,13 @@ func GetFullGoogleScopes() []string {
 // GoogleProvider implements OAuth for Google APIs (Gmail, Calendar, Drive).
 type GoogleProvider struct {
 	BaseProvider
-	clientID     string
-	clientSecret string
-	redirectPort int
-	scopes       []string
-	httpClient   *http.Client
-	logger       *slog.Logger
+	clientID        string
+	clientSecret    string
+	redirectPort    int
+	redirectBaseURL string // Base URL for redirect (e.g., "http://example.com:8090")
+	scopes          []string
+	httpClient      *http.Client
+	logger          *slog.Logger
 }
 
 // GoogleOption configures the Google provider.
@@ -259,6 +260,13 @@ func WithGoogleClientSecret(secret string) GoogleOption {
 func WithGoogleRedirectPort(port int) GoogleOption {
 	return func(p *GoogleProvider) {
 		p.redirectPort = port
+	}
+}
+
+// WithGoogleRedirectBaseURL sets the base URL for redirect (e.g., "http://example.com:8090").
+func WithGoogleRedirectBaseURL(baseURL string) GoogleOption {
+	return func(p *GoogleProvider) {
+		p.redirectBaseURL = baseURL
 	}
 }
 
@@ -375,6 +383,9 @@ func (p *GoogleProvider) AuthURL(state, challenge string) string {
 
 // redirectURI returns the OAuth redirect URI.
 func (p *GoogleProvider) redirectURI() string {
+	if p.redirectBaseURL != "" {
+		return fmt.Sprintf("%s/oauth/callback", strings.TrimSuffix(p.redirectBaseURL, "/"))
+	}
 	return fmt.Sprintf("http://localhost:%d/oauth/callback", p.redirectPort)
 }
 

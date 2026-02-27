@@ -30,6 +30,7 @@ type oauthFlow struct {
 	state     string
 	pkce      *oauth.PKCEPair
 	provider  string
+	baseURL   string // Base URL for redirect (e.g., "http://example.com:8090")
 	expiresAt time.Time
 	result    chan oauthFlowResult
 }
@@ -209,11 +210,15 @@ func (h *OAuthHandlers) startPKCEFlow(ctx context.Context, w http.ResponseWriter
 	// Generate state
 	state := generateState()
 
+	// Get base URL from request for callback
+	baseURL := getBaseURLFromRequest(r)
+
 	// Store flow for callback
 	flow := &oauthFlow{
 		state:     state,
 		pkce:      pkce,
 		provider:  provider,
+		baseURL:   baseURL,
 		expiresAt: time.Now().Add(10 * time.Minute),
 		result:    make(chan oauthFlowResult, 1),
 	}
@@ -282,6 +287,9 @@ func (h *OAuthHandlers) startGoogleWorkspacePKCEFlow(ctx context.Context, w http
 		return
 	}
 
+	// Get base URL from request
+	baseURL := getBaseURLFromRequest(r)
+
 	// Create provider based on service
 	var p PKCEProvider
 	switch provider {
@@ -289,16 +297,19 @@ func (h *OAuthHandlers) startGoogleWorkspacePKCEFlow(ctx context.Context, w http
 		p = providers.NewGmailProvider(
 			providers.WithGoogleClientID(clientID),
 			providers.WithGoogleClientSecret(clientSecret),
+			providers.WithGoogleRedirectBaseURL(baseURL),
 		)
 	case "google-calendar":
 		p = providers.NewCalendarProvider(
 			providers.WithGoogleClientID(clientID),
 			providers.WithGoogleClientSecret(clientSecret),
+			providers.WithGoogleRedirectBaseURL(baseURL),
 		)
 	case "google-drive":
 		p = providers.NewDriveProvider(
 			providers.WithGoogleClientID(clientID),
 			providers.WithGoogleClientSecret(clientSecret),
+			providers.WithGoogleRedirectBaseURL(baseURL),
 		)
 	default:
 		// Generic Google provider with full scopes
@@ -307,10 +318,30 @@ func (h *OAuthHandlers) startGoogleWorkspacePKCEFlow(ctx context.Context, w http
 			providers.WithGoogleClientSecret(clientSecret),
 			providers.WithGoogleService(getServiceFromProvider(provider)),
 			providers.WithGoogleName(provider),
+			providers.WithGoogleRedirectBaseURL(baseURL),
 		)
 	}
 
 	h.startPKCEFlow(ctx, w, r, provider, p)
+}
+
+// getBaseURLFromRequest extracts the base URL from the request.
+func getBaseURLFromRequest(r *http.Request) string {
+	// Check for X-Forwarded-* headers (proxy/load balancer)
+	scheme := "http"
+	host := r.Host
+
+	if r.URL.Scheme != "" {
+		scheme = r.URL.Scheme
+	}
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	}
+	if h := r.Header.Get("X-Forwarded-Host"); h != "" {
+		host = h
+	}
+
+	return fmt.Sprintf("%s://%s", scheme, host)
 }
 
 // getServiceFromProvider extracts service name from provider string
@@ -609,7 +640,7 @@ func (h *OAuthHandlers) renderGoogleSetupPage(w http.ResponseWriter, clientID, c
 
 			<div class="buttons">
 				<button type="submit" class="btn-primary">Save Credentials</button>
-				<a href="/settings/oauth" class="btn-secondary" style="text-decoration:none; padding: 10px 20px; display: inline-block;">Cancel</a>
+				<a href="/oauth" class="btn-secondary" style="text-decoration:none; padding: 10px 20px; display: inline-block;">Cancel</a>
 			</div>
 		</form>
 
@@ -657,7 +688,7 @@ func (h *OAuthHandlers) renderGoogleSetupSuccess(w http.ResponseWriter, clientID
 		fmt.Fprint(w, "...")
 	}
 	fmt.Fprint(w, `</p>
-		<a href="/settings/oauth" class="btn">Go to OAuth Settings</a>
+		<a href="/oauth" class="btn">Go to OAuth Settings</a>
 	</div>
 </body>
 </html>`)
@@ -716,18 +747,21 @@ func (h *OAuthHandlers) handleOAuthCallback(w http.ResponseWriter, r *http.Reque
 		p := providers.NewGmailProvider(
 			providers.WithGoogleClientID(getGoogleClientID()),
 			providers.WithGoogleClientSecret(getGoogleClientSecret()),
+			providers.WithGoogleRedirectBaseURL(flow.baseURL),
 		)
 		cred, err = p.ExchangeCode(ctx, code, flow.pkce.Verifier)
 	case "google-calendar":
 		p := providers.NewCalendarProvider(
 			providers.WithGoogleClientID(getGoogleClientID()),
 			providers.WithGoogleClientSecret(getGoogleClientSecret()),
+			providers.WithGoogleRedirectBaseURL(flow.baseURL),
 		)
 		cred, err = p.ExchangeCode(ctx, code, flow.pkce.Verifier)
 	case "google-drive":
 		p := providers.NewDriveProvider(
 			providers.WithGoogleClientID(getGoogleClientID()),
 			providers.WithGoogleClientSecret(getGoogleClientSecret()),
+			providers.WithGoogleRedirectBaseURL(flow.baseURL),
 		)
 		cred, err = p.ExchangeCode(ctx, code, flow.pkce.Verifier)
 	case "google", "google-sheets", "google-docs", "google-slides",
@@ -737,6 +771,7 @@ func (h *OAuthHandlers) handleOAuthCallback(w http.ResponseWriter, r *http.Reque
 			providers.WithGoogleClientSecret(getGoogleClientSecret()),
 			providers.WithGoogleService(getServiceFromProvider(flow.provider)),
 			providers.WithGoogleName(flow.provider),
+			providers.WithGoogleRedirectBaseURL(flow.baseURL),
 		)
 		cred, err = p.ExchangeCode(ctx, code, flow.pkce.Verifier)
 	default:
