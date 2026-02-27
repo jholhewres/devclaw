@@ -129,6 +129,7 @@ type BrowserManager struct {
 	pageTarget  *CDPTarget      // Current page target
 	msgID       int
 	started     bool
+	currentURL  string // Last navigated URL (to restore after restart)
 
 	// Role references per targetId (for element resolution)
 	roleRefsMu sync.RWMutex
@@ -627,6 +628,17 @@ func (bm *BrowserManager) startChrome(ctx context.Context) error {
 		return fmt.Errorf("failed to create page target: %w", err)
 	}
 
+	// Restore previous URL if we're restarting
+	if bm.currentURL != "" && bm.currentURL != "about:blank" {
+		bm.logger.Info("restoring previous URL", "url", bm.currentURL)
+		_, err := bm.sendPageCDP("Page.navigate", map[string]any{"url": bm.currentURL})
+		if err != nil {
+			bm.logger.Warn("failed to restore URL", "error", err)
+		} else {
+			time.Sleep(500 * time.Millisecond) // Wait for page load
+		}
+	}
+
 	bm.started = true
 	return nil
 }
@@ -696,6 +708,10 @@ func (bm *BrowserManager) Navigate(ctx context.Context, url string) error {
 	if err != nil {
 		return err
 	}
+	// Save URL for restoration after restart
+	bm.mu.Lock()
+	bm.currentURL = url
+	bm.mu.Unlock()
 	// Wait for load.
 	time.Sleep(500 * time.Millisecond)
 	return nil
