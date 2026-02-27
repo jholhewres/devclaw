@@ -16,7 +16,6 @@ package copilot
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -122,14 +121,14 @@ type BrowserManager struct {
 	logger    *slog.Logger
 	ssrfGuard *security.SSRFGuard
 
-	mu         sync.Mutex
-	cmd        *exec.Cmd
-	browserURL string           // Browser WebSocket URL
+	mu          sync.Mutex
+	cmd         *exec.Cmd
+	browserURL  string          // Browser WebSocket URL
 	browserConn *websocket.Conn // Connection to browser (for target management)
-	pageConn   *websocket.Conn  // Connection to current page (for page commands)
-	pageTarget *CDPTarget       // Current page target
-	msgID      int
-	started    bool
+	pageConn    *websocket.Conn // Connection to current page (for page commands)
+	pageTarget  *CDPTarget      // Current page target
+	msgID       int
+	started     bool
 
 	// Role references per targetId (for element resolution)
 	roleRefsMu sync.RWMutex
@@ -142,11 +141,11 @@ type BrowserManager struct {
 
 // CDPTarget represents a CDP target (page, worker, etc.)
 type CDPTarget struct {
-	TargetID         string `json:"targetId"`
-	Type             string `json:"type"`
-	Title            string `json:"title"`
-	URL              string `json:"url"`
-	Attached         bool   `json:"attached"`
+	TargetID             string `json:"targetId"`
+	Type                 string `json:"type"`
+	Title                string `json:"title"`
+	URL                  string `json:"url"`
+	Attached             bool   `json:"attached"`
 	WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
 }
 
@@ -381,8 +380,8 @@ func (bm *BrowserManager) createTarget(url string) (string, error) {
 // attachToTarget attaches to a target and returns its WebSocket URL.
 func (bm *BrowserManager) attachToTarget(targetID string) (string, error) {
 	result, err := bm.sendBrowserCDP("Target.attachToTarget", map[string]any{
-		"targetId":    targetID,
-		"flatten":     true,
+		"targetId": targetID,
+		"flatten":  true,
 	})
 	if err != nil {
 		return "", err
