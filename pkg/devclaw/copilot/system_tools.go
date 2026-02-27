@@ -88,6 +88,10 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 	if vault != nil && vault.IsUnlocked() {
 		registerVaultTools(executor, vault)
 	}
+
+	// Register Google API tool for accessing Gmail, Calendar, Drive, etc.
+	// This tool requires OAuth profiles to be configured via auth_profile_add.
+	registerGoogleAPITool(executor)
 }
 
 // ---------- External Content Security ----------

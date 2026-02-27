@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
 )
 
 // StreamEvent is a typed SSE event sent to the frontend.
@@ -115,6 +117,9 @@ type AssistantAPI interface {
 	CreateToolProfile(profile ToolProfileDef) error
 	UpdateToolProfile(profile ToolProfileDef) error
 	DeleteToolProfile(name string) error
+
+	// Auth Profiles for OAuth/API key management
+	GetProfileManager() profiles.ProfileManager
 }
 
 // SessionInfo contains session metadata for the UI.
@@ -385,6 +390,11 @@ func (s *Server) Start(ctx context.Context) error {
 	// Settings / Tool Profiles
 	mux.HandleFunc("/api/settings/tool-profiles", s.authMiddleware(s.requireAssistant(s.handleAPISettingsToolProfiles)))
 	mux.HandleFunc("/api/settings/tool-profiles/", s.authMiddleware(s.requireAssistant(s.handleAPISettingsToolProfileByName)))
+
+	// Auth Profiles (OAuth/API keys)
+	mux.HandleFunc("/api/auth/providers", s.authMiddleware(s.requireAssistant(s.handleAPIProviders)))
+	mux.HandleFunc("/api/profiles", s.authMiddleware(s.requireAssistant(s.handleAPIProfiles)))
+	mux.HandleFunc("/api/profiles/", s.authMiddleware(s.handleAPIProfileDetail))
 
 	// Media routes (if media service is configured)
 	if s.mediaAPI != nil {

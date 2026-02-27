@@ -157,6 +157,10 @@ func (h *OAuthHandlers) handleOAuthStart(w http.ResponseWriter, r *http.Request)
 		}
 		h.startDeviceCodeFlow(ctx, w, r, provider,
 			providers.NewMiniMaxProvider(providers.WithMiniMaxRegion(region)))
+	case "google", "google-gmail", "google-calendar", "google-drive", "google-sheets",
+		"google-docs", "google-slides", "google-contacts", "google-tasks", "google-people":
+		// Google Workspace services require gogcli setup
+		h.startGoogleWorkspaceFlow(ctx, w, r, provider)
 	default:
 		writeOAuthError(w, http.StatusBadRequest, "unknown provider: "+provider)
 	}
@@ -237,6 +241,46 @@ func (h *OAuthHandlers) startDeviceCodeFlow(ctx context.Context, w http.Response
 		UserCode:  deviceResp.UserCode,
 		VerifyURL: deviceResp.VerificationURI,
 		ExpiresIn: deviceResp.ExpiresIn,
+	}
+
+	writeOAuthJSON(w, http.StatusOK, resp)
+}
+
+// startGoogleWorkspaceFlow provides instructions for Google Workspace OAuth setup.
+// Google Workspace services (Gmail, Calendar, Drive, etc.) require gogcli for OAuth.
+func (h *OAuthHandlers) startGoogleWorkspaceFlow(ctx context.Context, w http.ResponseWriter, r *http.Request, provider string) {
+	// Map provider to service name for gogcli
+	serviceMap := map[string]string{
+		"google":          "gmail,calendar,drive",
+		"google-gmail":    "gmail",
+		"google-calendar": "calendar",
+		"google-drive":    "drive",
+		"google-sheets":   "sheets",
+		"google-docs":     "docs",
+		"google-slides":   "slides",
+		"google-contacts": "contacts",
+		"google-tasks":    "tasks",
+		"google-people":   "people",
+	}
+
+	services := serviceMap[provider]
+	if services == "" {
+		services = "gmail,calendar,drive"
+	}
+
+	// Return instructions for gogcli setup
+	resp := map[string]any{
+		"flow_type":   "manual",
+		"provider":    provider,
+		"instructions": "Google Workspace services require gogcli for OAuth setup.",
+		"setup_steps": []string{
+			"1. Install gogcli: go install github.com/steipete/gogcli@latest",
+			"2. Configure OAuth credentials: gog auth credentials <credentials.json>",
+			"3. Authorize your account: gog auth add you@gmail.com --services " + services,
+			"4. The credentials will be automatically available in DevClaw",
+		},
+		"docs_url":    "https://zread.ai/steipete/gogcli/4-authentication-and-account-management",
+		"alternative": "You can also configure OAuth manually via auth_profile_add tool with your refresh token.",
 	}
 
 	writeOAuthJSON(w, http.StatusOK, resp)

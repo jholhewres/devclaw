@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/discord"
 	slackchan "github.com/jholhewres/devclaw/pkg/devclaw/channels/slack"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/telegram"
@@ -166,6 +167,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if cfg.WebUI.Enabled {
 		adapter = buildWebUIAdapter(assistant, cfg, wa, configPath)
 		webServer = webui.New(cfg.WebUI, adapter, logger)
+
+		// Initialize OAuth handlers for OAuth providers (gemini, chatgpt, qwen, minimax, google-*)
+		oauthHandlers, err := webui.NewOAuthHandlers(paths.ResolveDataDir(), logger)
+		if err != nil {
+			logger.Warn("failed to initialize OAuth handlers", "error", err)
+		} else {
+			webServer.SetOAuthHandlers(oauthHandlers)
+		}
+
 		if err := webServer.Start(ctx); err != nil {
 			logger.Error("failed to start web UI", "error", err)
 		} else {
@@ -805,6 +815,9 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 				return reg.Enable(name)
 			}
 			return reg.Disable(name)
+		},
+		GetProfileManagerFn: func() profiles.ProfileManager {
+			return assistant.ProfileManager()
 		},
 		SendChatMessageFn: func(sessionID, content string) (string, error) {
 			session := assistant.SessionStore().GetOrCreate("webui", sessionID)

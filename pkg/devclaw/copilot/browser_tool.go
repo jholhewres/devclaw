@@ -894,7 +894,9 @@ func (bm *BrowserManager) isAlive() bool {
 // ─── Tool Registration ───
 
 // RegisterBrowserTools registers browser automation tools in the executor.
-func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, logger *slog.Logger) {
+// If llmClient is provided and vision is enabled, browser_screenshot will
+// automatically describe the image using vision instead of returning raw base64.
+func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, llmClient *LLMClient, mediaCfg MediaConfig, logger *slog.Logger) {
 	if browserMgr == nil {
 		return
 	}
@@ -930,9 +932,15 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, lo
 	)
 
 	// browser_screenshot
+	// If vision is enabled, automatically describe the screenshot instead of returning raw base64.
+	// This prevents massive base64 strings from polluting the LLM context.
+	screenshotDesc := "Take a screenshot of the current browser page and describe what you see."
+	if llmClient == nil || !mediaCfg.VisionEnabled {
+		screenshotDesc = "Take a screenshot of the current browser page. Returns base64-encoded PNG image data. Use describe_image to analyze it."
+	}
+
 	executor.Register(
-		MakeToolDefinition("browser_screenshot",
-			"Take a screenshot of the current browser page. Returns the base64-encoded PNG image data that can be used with describe_image for vision analysis.",
+		MakeToolDefinition("browser_screenshot", screenshotDesc,
 			map[string]any{
 				"type":                 "object",
 				"properties":           map[string]any{},
@@ -944,7 +952,25 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, lo
 			if err != nil {
 				return nil, err
 			}
-			// Return the actual base64 data so it can be used with describe_image
+
+			// If vision is available, automatically describe the screenshot
+			// instead of returning raw base64 to the LLM context.
+			if llmClient != nil && mediaCfg.VisionEnabled {
+				prompt := "Describe what you see in this browser screenshot. Include: 1) The main content and layout, 2) Any visible text, buttons, or interactive elements, 3) The current state of the page (logged in, error messages, forms, etc.). Be concise but thorough."
+				detail := mediaCfg.VisionDetail
+				if detail == "" {
+					detail = "auto"
+				}
+				desc, err := llmClient.CompleteWithVision(ctx, "", data, "image/png", prompt, detail, mediaCfg.VisionModel)
+				if err != nil {
+					logger.Warn("vision analysis failed, returning raw base64", "error", err)
+					// Fall back to returning the base64
+					return data, nil
+				}
+				return desc, nil
+			}
+
+			// No vision available - return raw base64
 			return data, nil
 		},
 	)

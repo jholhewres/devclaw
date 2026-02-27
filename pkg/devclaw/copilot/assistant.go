@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels"
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/security"
@@ -113,6 +114,9 @@ type Assistant struct {
 
 	// vault provides encrypted secret storage (nil if unavailable/locked).
 	vault *Vault
+
+	// profileMgr manages authentication profiles for OAuth/API keys.
+	profileMgr profiles.ProfileManager
 
 	// projectMgr manages registered development projects.
 	projectMgr *ProjectManager
@@ -326,6 +330,26 @@ func (a *Assistant) Start(ctx context.Context) error {
 	// This runs once at startup with zero runtime cost.
 	if a.vault != nil && a.vault.IsUnlocked() {
 		a.InjectVaultEnvVars()
+	}
+
+	// 0pre-a. Initialize auth profile manager for OAuth/API key management.
+	// This enables the google_api tool and other OAuth-based integrations.
+	if a.vault != nil && a.vault.IsUnlocked() {
+		profileStore, err := profiles.NewStore(profiles.StoreConfig{
+			Vault:        a.vault,
+			Logger:       a.logger.With("component", "auth-profiles"),
+			CachePath:    filepath.Join(filepath.Dir(a.config.Memory.Path), "auth_profiles_cache.json"),
+		})
+		if err != nil {
+			a.logger.Warn("auth profile manager not available", "error", err)
+		} else {
+			a.profileMgr = profileStore
+			a.logger.Info("auth profile manager initialized",
+				"profiles", len(profileStore.List()),
+			)
+		}
+	} else {
+		a.logger.Info("vault locked or unavailable, auth profile manager disabled")
 	}
 
 	// 0pre-b. Auto-resolve media transcription provider from main API config.
@@ -557,6 +581,11 @@ func (a *Assistant) Start(ctx context.Context) error {
 		)
 		a.teamMgr.SetNotificationDispatcher(notifDisp)
 		a.logger.Info("team manager initialized with spawn callback and notification dispatcher")
+	}
+
+	// 1d-b. Configure profile manager for OAuth/API key tools (google_api, etc.)
+	if a.profileMgr != nil {
+		a.toolExecutor.SetProfileManager(a.profileMgr)
 	}
 
 	// 1e. Register system tools (needs scheduler to be created first).
@@ -877,6 +906,12 @@ func (a *Assistant) SetVault(v *Vault) {
 // Vault returns the vault instance (may be nil if unavailable).
 func (a *Assistant) Vault() *Vault {
 	return a.vault
+}
+
+// ProfileManager returns the auth profile manager for OAuth/API key access.
+// Returns nil if the vault is locked or profiles are not configured.
+func (a *Assistant) ProfileManager() profiles.ProfileManager {
+	return a.profileMgr
 }
 
 // InjectVaultEnvVars loads all vault secrets as environment variables.
@@ -2191,7 +2226,8 @@ func (a *Assistant) registerSystemTools() {
 	if a.config.Browser.Enabled {
 		a.browserMgr = NewBrowserManager(a.config.Browser, a.logger)
 		a.browserMgr.WithSSRFGuard(ssrfGuard)
-		RegisterBrowserTools(a.toolExecutor, a.browserMgr, a.logger)
+		mediaCfg := a.config.Media.Effective()
+		RegisterBrowserTools(a.toolExecutor, a.browserMgr, a.llmClient, mediaCfg, a.logger)
 	}
 
 	// Register daemon manager for background process control.

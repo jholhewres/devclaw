@@ -107,6 +107,7 @@ func (w *WhatsApp) handleEvent(rawEvt interface{}) {
 func (w *WhatsApp) handleConnected(_ *events.Connected) {
 	previous := w.getState()
 	w.setState(StateConnected)
+	w.connected.Store(true) // Ensure connected flag is set (needed for auto-reconnect)
 	w.errorCount.Store(0)
 	w.reconnectAttempts.Store(0)
 
