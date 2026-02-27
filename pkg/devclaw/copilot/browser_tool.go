@@ -917,7 +917,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, lo
 	// browser_screenshot
 	executor.Register(
 		MakeToolDefinition("browser_screenshot",
-			"Take a screenshot of the current browser page. Returns base64-encoded PNG.",
+			"Take a screenshot of the current browser page. Returns the base64-encoded PNG image data that can be used with describe_image for vision analysis.",
 			map[string]any{
 				"type":                 "object",
 				"properties":           map[string]any{},
@@ -929,10 +929,8 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, lo
 			if err != nil {
 				return nil, err
 			}
-			// Return truncated info + base64 ref.
-			sizeKB := len(data) * 3 / 4 / 1024
-			_ = base64.StdEncoding // Ensure import is used.
-			return fmt.Sprintf("Screenshot captured (%d KB). Base64 data available for vision analysis.", sizeKB), nil
+			// Return the actual base64 data so it can be used with describe_image
+			return data, nil
 		},
 	)
 

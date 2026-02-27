@@ -32,12 +32,12 @@ func RegisterMediaTools(executor *ToolExecutor, llmClient *LLMClient, cfg *Confi
 
 func registerDescribeImageTool(executor *ToolExecutor, llm *LLMClient, media MediaConfig, logger *slog.Logger) {
 	executor.Register(
-		MakeToolDefinition("describe_image", "Describe or analyze an image. Takes a base64-encoded image and returns a description. Use when the user shares an image or when you need to understand visual content.", map[string]any{
+		MakeToolDefinition("describe_image", "Describe or analyze an image. IMPORTANT: The image_base64 parameter must contain the ACTUAL base64 data from a previous screenshot or image capture - do NOT use placeholders like 'BASE64_DATA_FROM_SCREENSHOT'. To analyze a browser screenshot, first call browser_screenshot to capture it, then use the base64 data returned in that result.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"image_base64": map[string]any{
 					"type":        "string",
-					"description": "Base64-encoded image data (without data URL prefix)",
+					"description": "The actual base64-encoded image data string. Must be real base64 data from a screenshot or image capture, NOT a placeholder or description.",
 				},
 				"prompt": map[string]any{
 					"type":        "string",
