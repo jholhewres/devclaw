@@ -171,7 +171,7 @@ func (bm *BrowserManager) GetAccessibilityTree(ctx context.Context) (*AXNode, er
 	var axResult struct {
 		Nodes []struct {
 			NodeID        string         `json:"nodeId"`
-			Role          string         `json:"role"`
+			Role          AXRole         `json:"role"`
 			Name          string         `json:"name,omitempty"`
 			Value         string         `json:"value,omitempty"`
 			Description   string         `json:"description,omitempty"`
@@ -192,7 +192,7 @@ func (bm *BrowserManager) GetAccessibilityTree(ctx context.Context) (*AXNode, er
 // buildAXTree converts the flat CDP node list into a tree structure.
 func (bm *BrowserManager) buildAXTree(nodes []struct {
 	NodeID      string         `json:"nodeId"`
-	Role        string         `json:"role"`
+	Role        AXRole         `json:"role"`
 	Name        string         `json:"name,omitempty"`
 	Value       string         `json:"value,omitempty"`
 	Description string         `json:"description,omitempty"`
@@ -205,7 +205,7 @@ func (bm *BrowserManager) buildAXTree(nodes []struct {
 	for _, n := range nodes {
 		nodeMap[n.NodeID] = &AXNode{
 			NodeID:      n.NodeID,
-			Role:        AXRole{Value: n.Role},
+			Role:        n.Role,
 			Name:        n.Name,
 			Value:       n.Value,
 			Description: n.Description,
