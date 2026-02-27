@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+
+	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
 )
 
 // WhatsAppQREvent mirrors whatsapp.QREvent without importing the channel package.
@@ -96,6 +98,9 @@ type AssistantAdapter struct {
 	CreateToolProfileFn  func(profile ToolProfileDef) error
 	UpdateToolProfileFn  func(name string, profile ToolProfileDef) error
 	DeleteToolProfileFn  func(name string) error
+
+	// Auth Profiles
+	GetProfileManagerFn func() profiles.ProfileManager
 }
 
 // ToolProfileInfo contains profile info for API responses.
@@ -472,4 +477,12 @@ func (m *MediaAdapter) Delete(mediaID string) error {
 		return m.DeleteFn(mediaID)
 	}
 	return errors.New("media delete not available")
+}
+
+// GetProfileManager returns the auth profile manager for OAuth/API key management.
+func (a *AssistantAdapter) GetProfileManager() profiles.ProfileManager {
+	if a.GetProfileManagerFn != nil {
+		return a.GetProfileManagerFn()
+	}
+	return nil
 }

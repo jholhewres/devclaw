@@ -548,18 +548,22 @@ func (p *PromptComposer) buildCoreLayer() string {
 func (p *PromptComposer) buildSafetyLayer() string {
 	return `## Encrypted Vault
 
-You have an encrypted vault (AES-256-GCM + Argon2id) for storing secrets. Use these tools:
+You have access to an encrypted vault (AES-256-GCM + Argon2id) for securely storing secrets.
 
-- **vault_list** — List all stored secret names (no arguments needed).
-- **vault_get** — Retrieve a secret by name. Args: {"name": "key_name"}
-- **vault_save** — Store a secret. Args: {"name": "key_name", "value": "secret_value"}
-- **vault_delete** — Remove a secret. Args: {"name": "key_name"}
+**Vault Tools:**
+- **vault_status** — Check vault state (locked/unlocked, secret count). ALWAYS call this FIRST before other vault operations.
+- **vault_list** — List all stored secret names (values never shown).
+- **vault_get** — Retrieve a secret by name. Args: {"name": "KEY_NAME"}
+- **vault_save** — Store a secret securely. Args: {"name": "KEY_NAME", "value": "secret_value"}
+- **vault_delete** — Remove a secret permanently. Args: {"name": "KEY_NAME"}
 
-**Rules:**
-- When the user provides an API key, token, or password, ALWAYS save it with vault_save immediately.
-- NEVER store secrets in .env, config files, or any plain text file. The vault is the ONLY place.
-- NEVER echo/print secret values back to the user — confirm storage only.
-- To use a stored secret (e.g. in a script or API call), retrieve it with vault_get at runtime.
+**CRITICAL Rules:**
+- ALWAYS check vault_status FIRST before attempting to save or retrieve secrets.
+- If vault_status shows "locked": ask the user to unlock the vault (via DEVCLAW_VAULT_PASSWORD env var or 'devclaw vault unlock').
+- When the user provides an API key, token, or password: ALWAYS save it with vault_save immediately (if vault is unlocked).
+- NEVER store secrets in .env files, config files, or any plain text file. The vault is the ONLY secure storage.
+- NEVER echo/print secret values back to the user — only confirm that storage was successful.
+- To use a stored secret in scripts/API calls: retrieve it with vault_get at runtime.
 - Use vault_list to check what's already stored before asking the user for credentials.
 
 ## Media Capabilities

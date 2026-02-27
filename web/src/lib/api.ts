@@ -272,7 +272,7 @@ export interface ToolProfileInfo {
 export interface OAuthProvider {
   id: string
   label: string
-  flow_type: 'pkce' | 'device_code'
+  flow_type: 'pkce' | 'device_code' | 'manual'
   experimental?: boolean
 }
 
@@ -285,7 +285,7 @@ export interface OAuthStatus {
 }
 
 export interface OAuthStartResponse {
-  flow_type: 'pkce' | 'device_code'
+  flow_type: 'pkce' | 'device_code' | 'manual'
   auth_url?: string
   provider: string
   user_code?: string
@@ -510,4 +510,64 @@ export const api = {
     poll: (provider: string) =>
       request<{ status: string; message?: string }>(`/oauth/poll/${provider}`, { method: 'POST' }),
   },
+
+  /* Auth Profiles */
+  authProfiles: {
+    providers: () => request<{ providers: AuthProviderInfo[]; count: number }>('/auth/providers'),
+    list: () => request<{ profiles: AuthProfileInfo[]; count: number }>('/profiles'),
+    get: (id: string) => request<AuthProfileInfo>(`/profiles/${id}`),
+    create: (data: CreateAuthProfileRequest) =>
+      request<{ id: string; success: boolean; message: string }>('/profiles', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    update: (id: string, data: Partial<AuthProfileInfo>) =>
+      request<{ id: string; success: boolean }>(`/profiles/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+    delete: (id: string) =>
+      request<{ id: string; success: boolean }>(`/profiles/${id}`, { method: 'DELETE' }),
+    test: (id: string) =>
+      request<{ id: string; valid: boolean; expired: boolean; error?: string }>(`/profiles/${id}/test`, {
+        method: 'POST',
+      }),
+  },
+}
+
+/* ── Auth Profile Types ── */
+
+export interface AuthProviderInfo {
+  name: string
+  label: string
+  description: string
+  modes: string[]
+  website?: string
+  env_key?: string
+  parent_provider?: string
+}
+
+export interface AuthProfileInfo {
+  id: string
+  provider: string
+  name: string
+  mode: 'api_key' | 'oauth' | 'token'
+  enabled: boolean
+  priority: number
+  valid: boolean
+  expired: boolean
+  email?: string
+  last_error?: string
+  created_at: string
+  updated_at: string
+  last_used_at?: string
+}
+
+export interface CreateAuthProfileRequest {
+  provider: string
+  name: string
+  mode: 'api_key' | 'oauth' | 'token'
+  api_key?: string
+  token?: string
+  priority?: number
 }

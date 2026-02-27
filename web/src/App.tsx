@@ -25,6 +25,7 @@ import { DatabasePage } from '@/pages/Database'
 import { Groups } from '@/pages/Groups'
 import { Mcp } from '@/pages/Mcp'
 import { OAuth } from '@/pages/OAuth'
+import { AuthProfiles } from '@/pages/AuthProfiles'
 
 /** Estado global de autenticação obtido de /api/auth/status */
 interface AuthState {
@@ -158,6 +159,7 @@ export function App() {
           <Route path="/webhooks" element={<Webhooks />} />
           <Route path="/hooks" element={<Hooks />} />
           <Route path="/security" element={<Security />} />
+          <Route path="/auth-profiles" element={<AuthProfiles />} />
           <Route path="/jobs" element={<Jobs />} />
         </Route>
       </Routes>

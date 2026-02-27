@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
 	"github.com/jholhewres/devclaw/pkg/devclaw/skills"
 )
 
@@ -409,6 +410,9 @@ type ToolExecutor struct {
 	// vault is the optional vault reader for checking skill setup
 	vault skills.VaultReader
 
+	// profileMgr manages auth profiles for OAuth/API key access
+	profileMgr profiles.ProfileManager
+
 	// toolDefsCache caches the slice of ToolDefinitions so we don't rebuild
 	// it on every Tools() call. Invalidated when a new tool is registered.
 	toolDefsCache []ToolDefinition
@@ -490,6 +494,20 @@ func (e *ToolExecutor) SetGuard(guard *ToolGuard) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.guard = guard
+}
+
+// SetProfileManager configures the auth profile manager for OAuth/API key access.
+func (e *ToolExecutor) SetProfileManager(pm profiles.ProfileManager) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.profileMgr = pm
+}
+
+// ProfileManager returns the configured auth profile manager (may be nil).
+func (e *ToolExecutor) ProfileManager() profiles.ProfileManager {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.profileMgr
 }
 
 // RegisterHook adds a before/after tool execution hook.

@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/discord"
 	slackchan "github.com/jholhewres/devclaw/pkg/devclaw/channels/slack"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/telegram"
@@ -165,6 +167,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if cfg.WebUI.Enabled {
 		adapter = buildWebUIAdapter(assistant, cfg, wa, configPath)
 		webServer = webui.New(cfg.WebUI, adapter, logger)
+
+		// Initialize OAuth handlers for OAuth providers (gemini, chatgpt, qwen, minimax, google-*)
+		oauthHandlers, err := webui.NewOAuthHandlers(paths.ResolveDataDir(), logger)
+		if err != nil {
+			logger.Warn("failed to initialize OAuth handlers", "error", err)
+		} else {
+			webServer.SetOAuthHandlers(oauthHandlers)
+		}
+
 		if err := webServer.Start(ctx); err != nil {
 			logger.Error("failed to start web UI", "error", err)
 		} else {
@@ -285,6 +296,12 @@ func resolveConfig(cmd *cobra.Command) (*copilot.Config, string, error) {
 func runWebSetupMode() error {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
+	// Get server IP for display
+	serverIP := "localhost"
+	if ip := getServerIP(); ip != "" {
+		serverIP = ip
+	}
+
 	fmt.Println()
 	fmt.Println("  ╭──────────────────────────────────────────────╮")
 	fmt.Println("  │  🐾 DevClaw — First Run Setup                 │")
@@ -292,7 +309,7 @@ func runWebSetupMode() error {
 	fmt.Println("  │  No config.yaml found.                       │")
 	fmt.Println("  │  Starting web setup wizard...                │")
 	fmt.Println("  │                                              │")
-	fmt.Println("  │  Open:  http://localhost:8090/setup           │")
+	fmt.Printf("  │  Open:  http://%s:8090/setup           │\n", serverIP)
 	fmt.Println("  ╰──────────────────────────────────────────────╯")
 	fmt.Println()
 
@@ -369,6 +386,22 @@ func reloadProcess() error {
 	}
 
 	return nil
+}
+
+// getServerIP returns the first non-loopback IP address of the server.
+func getServerIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String()
+			}
+		}
+	}
+	return ""
 }
 
 // shouldEnable checks if a channel should be enabled.
@@ -782,6 +815,9 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 				return reg.Enable(name)
 			}
 			return reg.Disable(name)
+		},
+		GetProfileManagerFn: func() profiles.ProfileManager {
+			return assistant.ProfileManager()
 		},
 		SendChatMessageFn: func(sessionID, content string) (string, error) {
 			session := assistant.SessionStore().GetOrCreate("webui", sessionID)
