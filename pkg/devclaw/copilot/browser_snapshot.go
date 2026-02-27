@@ -14,10 +14,53 @@ import (
 	"strings"
 )
 
+// AXRole is a custom type that can unmarshal from either a string or an object.
+// Chrome CDP sometimes returns role as {"type": "role", "value": "button"}
+// and sometimes as just "button".
+type AXRole struct {
+	Value string
+}
+
+// UnmarshalJSON implements json.Unmarshaler for AXRole.
+func (r *AXRole) UnmarshalJSON(data []byte) error {
+	// Try string first
+	var str string
+	if err := json.Unmarshal(data, &str); err == nil {
+		r.Value = str
+		return nil
+	}
+
+	// Try object with "value" field
+	var obj struct {
+		Type  string `json:"type"`
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(data, &obj); err == nil {
+		r.Value = obj.Value
+		return nil
+	}
+
+	// Try object with just value
+	var simpleObj map[string]any
+	if err := json.Unmarshal(data, &simpleObj); err == nil {
+		if v, ok := simpleObj["value"].(string); ok {
+			r.Value = v
+			return nil
+		}
+	}
+
+	return fmt.Errorf("cannot unmarshal AXRole from: %s", string(data))
+}
+
+// String returns the role value as string.
+func (r AXRole) String() string {
+	return r.Value
+}
+
 // AXNode represents a node in the accessibility tree from CDP.
 type AXNode struct {
 	NodeID      string         `json:"nodeId"`
-	Role        string         `json:"role"`
+	Role        AXRole         `json:"role"`
 	Name        string         `json:"name,omitempty"`
 	Value       string         `json:"value,omitempty"`
 	Description string         `json:"description,omitempty"`
@@ -162,7 +205,7 @@ func (bm *BrowserManager) buildAXTree(nodes []struct {
 	for _, n := range nodes {
 		nodeMap[n.NodeID] = &AXNode{
 			NodeID:      n.NodeID,
-			Role:        n.Role,
+			Role:        AXRole{Value: n.Role},
 			Name:        n.Name,
 			Value:       n.Value,
 			Description: n.Description,
@@ -230,13 +273,13 @@ func (bm *BrowserManager) renderSnapshot(builder *strings.Builder, node *AXNode,
 	}
 
 	// Skip structural elements in compact mode
-	if opts.Compact && StructuralRoles[node.Role] && node.Name == "" && len(node.Children) == 0 {
+	if opts.Compact && StructuralRoles[node.Role.Value] && node.Name == "" && len(node.Children) == 0 {
 		return
 	}
 
 	// Check if interactive-only filter applies
-	isInteractive := InteractiveRoles[node.Role]
-	if opts.InteractiveOnly && !isInteractive && !ContentRoles[node.Role] {
+	isInteractive := InteractiveRoles[node.Role.Value]
+	if opts.InteractiveOnly && !isInteractive && !ContentRoles[node.Role.Value] {
 		// Still process children for interactive elements
 		for _, child := range node.Children {
 			bm.renderSnapshot(builder, child, refs, opts, depth, stats)
@@ -258,9 +301,9 @@ func (bm *BrowserManager) renderSnapshot(builder *strings.Builder, node *AXNode,
 
 	var line string
 	if name != "" {
-		line = fmt.Sprintf("%s- %s%s: %s\n", indent, node.Role, ref, name)
+		line = fmt.Sprintf("%s- %s%s: %s\n", indent, node.Role.Value, ref, name)
 	} else {
-		line = fmt.Sprintf("%s- %s%s\n", indent, node.Role, ref)
+		line = fmt.Sprintf("%s- %s%s\n", indent, node.Role.Value, ref)
 	}
 
 	builder.WriteString(line)
@@ -292,13 +335,13 @@ func buildRoleRefs(root *AXNode, interactiveOnly bool) map[string]Ref {
 		}
 
 		// Only generate refs for interactive elements
-		if InteractiveRoles[node.Role] {
+		if InteractiveRoles[node.Role.Value] {
 			counter++
 			refID := fmt.Sprintf("e%d", counter)
 			node.Ref = refID
 
 			// Handle duplicates
-			key := node.Role + ":" + node.Name
+			key := node.Role.Value + ":" + node.Name
 			nth := 0
 			if seen[key] > 0 {
 				nth = seen[key] + 1
@@ -306,7 +349,7 @@ func buildRoleRefs(root *AXNode, interactiveOnly bool) map[string]Ref {
 			seen[key]++
 
 			refs[refID] = Ref{
-				Role: node.Role,
+				Role: node.Role.Value,
 				Name: node.Name,
 				Nth:  nth,
 			}
