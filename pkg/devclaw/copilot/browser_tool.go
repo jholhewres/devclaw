@@ -1140,7 +1140,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, lo
 	// browser_act - Unified browser actions
 	executor.Register(
 		MakeToolDefinition("browser_act",
-			"Perform a browser action. Use after browser_snapshot to get element refs (e1, e2, ...). Kinds: click, type, press, hover, drag, select, fill, resize, wait, evaluate.",
+			"Perform a browser action. Use after browser_snapshot to get element refs (e1, e2, ...). Kinds: click, type, press, hover, drag, select, fill, resize, wait, evaluate. TIP: After submitting forms, use wait (1-2 seconds) then browser_snapshot to check for success or error messages before retrying.",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1196,7 +1196,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, lo
 					},
 					"time_ms": map[string]any{
 						"type":        "integer",
-						"description": "Time to wait in ms (for wait action).",
+						"description": "Time to wait in ms (for wait action). Use 1000-3000ms after form submissions.",
 					},
 					"fn": map[string]any{
 						"type":        "string",
