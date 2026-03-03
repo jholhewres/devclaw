@@ -54,7 +54,7 @@ export function ChatInput({
   const canSend = value.trim().length > 0 && !disabled && !isStreaming
 
   return (
-    <div className="bg-[#111827] rounded-xl border border-white/10 transition-all focus-within:border-white/20">
+    <div className="bg-[#14172b] rounded-xl border border-[rgba(99,102,241,0.12)] transition-all focus-within:border-[rgba(99,102,241,0.24)]">
       {/* Textarea */}
       <textarea
         ref={textareaRef}
@@ -65,7 +65,7 @@ export function ChatInput({
         disabled={disabled}
         rows={rows}
         autoFocus={autoFocus}
-        className="w-full px-4 pt-3 pb-1.5 text-[15px] text-[#f8fafc] placeholder:text-[#475569] bg-transparent resize-none border-none outline-none focus:ring-0 disabled:opacity-50"
+        className="w-full px-4 pt-3 pb-1.5 text-[15px] text-[#f1f5f9] placeholder:text-[#475569] bg-transparent resize-none border-none outline-none focus:ring-0 disabled:opacity-50"
         style={{ boxShadow: 'none' }}
       />
 
@@ -81,7 +81,7 @@ export function ChatInput({
           {isStreaming ? (
             <button
               onClick={() => onAbort?.()}
-              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg bg-[#ef4444] text-white transition-all hover:bg-[#dc2626]"
+              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg bg-[#f43f5e] text-white transition-all hover:bg-[#e11d48]"
               aria-label="Parar geração"
             >
               <Square className="h-3.5 w-3.5" fill="currentColor" />
@@ -93,7 +93,7 @@ export function ChatInput({
               className={cn(
                 'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg transition-all',
                 canSend
-                  ? 'bg-[#3b82f6] text-white hover:bg-[#2563eb]'
+                  ? 'bg-[#6366f1] text-white hover:bg-[#818cf8]'
                   : 'bg-white/10 text-white/30 cursor-not-allowed',
               )}
               aria-label="Enviar mensagem"

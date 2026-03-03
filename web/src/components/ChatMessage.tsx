@@ -117,15 +117,15 @@ export const ChatMessage = memo(function ChatMessage({
           <div
             className="rounded-2xl rounded-tr-md px-4 py-3"
             style={{
-              background: '#1e293b',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
+              background: '#1c1f3a',
+              border: '1px solid rgba(99, 102, 241, 0.12)',
             }}
           >
-            <p className="whitespace-pre-wrap text-[15px] leading-[1.625] text-[#f8fafc]">{content}</p>
+            <p className="whitespace-pre-wrap text-[15px] leading-[1.625] text-[#f1f5f9]">{content}</p>
           </div>
         </div>
         <div
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#3b82f6]"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-brand"
         >
           <User className="h-4 w-4 text-white" />
         </div>
@@ -143,10 +143,10 @@ export const ChatMessage = memo(function ChatMessage({
       <div
         className={cn(
           'flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-300',
-          isStreaming && 'ring-2 ring-[#3b82f6]/30 ring-offset-2 ring-offset-[#0c1222]',
+          isStreaming && 'ring-2 ring-[#6366f1]/30 ring-offset-2 ring-offset-[#0b0d17]',
         )}
         style={{
-          background: isStreaming ? '#3b82f6' : '#1e293b',
+          background: isStreaming ? '#6366f1' : '#1c1f3a',
         }}
       >
         <Bot className={cn('h-4 w-4 transition-colors', isStreaming ? 'text-white' : 'text-[#64748b]')} />
@@ -157,7 +157,7 @@ export const ChatMessage = memo(function ChatMessage({
         ) : (
           <div
             className={cn(
-              'copilot-markdown text-[15px] leading-[1.7] text-[#f8fafc]',
+              'copilot-markdown text-[15px] leading-[1.7] text-[#f1f5f9]',
               isStreaming && 'stream-shimmer',
             )}
           >
@@ -167,7 +167,7 @@ export const ChatMessage = memo(function ChatMessage({
             {isStreaming && (
               <span
                 className="ml-0.5 inline-block h-[18px] w-[2px] rounded-full align-text-bottom animate-pulse"
-                style={{ background: '#3b82f6' }}
+                style={{ background: '#6366f1' }}
               />
             )}
           </div>
@@ -181,7 +181,7 @@ function TypingDots() {
   const { t } = useTranslation()
   return (
     <div className="flex items-center gap-2 py-2">
-      <div className="copilot-thinking-dots text-[#3b82f6]">
+      <div className="copilot-thinking-dots text-[#6366f1]">
         <span />
         <span />
         <span />
@@ -202,22 +202,22 @@ function ToolMessage({ toolName, toolInput, content }: { toolName?: string; tool
       <div
         className="rounded-lg"
         style={{
-          background: 'rgba(255, 255, 255, 0.03)',
-          borderLeft: '2px solid #3b82f6',
+          background: 'rgba(99, 102, 241, 0.05)',
+          borderLeft: '2px solid #6366f1',
         }}
       >
         <button
           onClick={() => setExpanded(!expanded)}
-          className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-white/5"
+          className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-[rgba(99,102,241,0.08)]"
         >
-          <Icon className="h-3.5 w-3.5 shrink-0 text-[#3b82f6]" />
-          <span className="min-w-0 flex-1 font-medium text-[#f8fafc]">{summary}</span>
+          <Icon className="h-3.5 w-3.5 shrink-0 text-[#818cf8]" />
+          <span className="min-w-0 flex-1 font-medium text-[#f1f5f9]">{summary}</span>
           {expanded ? <ChevronDown className="h-3 w-3 shrink-0 text-[#64748b]" /> : <ChevronRight className="h-3 w-3 shrink-0 text-[#64748b]" />}
         </button>
         {expanded && (
-          <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
+          <div style={{ borderTop: '1px solid rgba(99, 102, 241, 0.08)' }}>
             {toolInput && (
-              <div className="px-3 py-2" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <div className="px-3 py-2" style={{ borderBottom: '1px solid rgba(99, 102, 241, 0.08)' }}>
                 <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-[#475569]">Input</p>
                 <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px] text-[#94a3b8]">{toolInput}</pre>
               </div>
@@ -241,7 +241,7 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
     return (
       <code
         className="rounded-md px-1.5 py-0.5 text-[13px]"
-        style={{ background: '#1e293b', color: '#f8fafc' }}
+        style={{ background: '#1c1f3a', color: '#f1f5f9' }}
         {...props}
       >
         {children}
@@ -268,24 +268,24 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
         <div
           className="flex items-center justify-between rounded-t-xl px-3 py-2"
           style={{
-            background: '#1e293b',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            background: '#1c1f3a',
+            borderBottom: '1px solid rgba(99, 102, 241, 0.08)',
           }}
         >
           <span className="text-[10px] font-medium uppercase tracking-wider text-[#475569]">{lang}</span>
-          <button onClick={handleCopy} aria-label="Copiar código" className="cursor-pointer text-[#64748b] transition-colors hover:text-[#f8fafc]">
-            {copied ? <Check className="h-3 w-3 text-[#22c55e]" /> : <Copy className="h-3 w-3" />}
+          <button onClick={handleCopy} aria-label="Copiar código" className="cursor-pointer text-[#64748b] transition-colors hover:text-[#f1f5f9]">
+            {copied ? <Check className="h-3 w-3 text-[#10b981]" /> : <Copy className="h-3 w-3" />}
           </button>
         </div>
       )}
       <pre
         className={cn(
-          'overflow-x-auto p-3 text-[13px] leading-relaxed text-[#f8fafc]',
+          'overflow-x-auto p-3 text-[13px] leading-relaxed text-[#f1f5f9]',
           lang ? 'rounded-b-xl' : 'rounded-xl',
         )}
         style={{
-          background: '#1e293b',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
+          background: '#1c1f3a',
+          border: '1px solid rgba(99, 102, 241, 0.08)',
         }}
       >
         <code className={className} {...props}>{children}</code>
@@ -294,9 +294,9 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
         <button
           onClick={handleCopy}
           aria-label="Copiar código"
-          className="absolute right-2 top-2 cursor-pointer rounded-lg p-1.5 text-[#64748b] opacity-0 transition-all hover:bg-white/10 hover:text-[#f8fafc] group-hover:opacity-100"
+          className="absolute right-2 top-2 cursor-pointer rounded-lg p-1.5 text-[#64748b] opacity-0 transition-all hover:bg-[rgba(99,102,241,0.1)] hover:text-[#f1f5f9] group-hover:opacity-100"
         >
-          {copied ? <Check className="h-3 w-3 text-[#22c55e]" /> : <Copy className="h-3 w-3" />}
+          {copied ? <Check className="h-3 w-3 text-[#10b981]" /> : <Copy className="h-3 w-3" />}
         </button>
       )}
     </div>

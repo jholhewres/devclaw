@@ -135,11 +135,12 @@ export function Chat() {
         <div className="flex-1 flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto">
             {!showChatView ? (
-              <div className="flex flex-col h-full items-center justify-center px-6">
-                <div className="w-full max-w-2xl space-y-6">
+              <div className="flex flex-col h-full items-center justify-center px-6 relative">
+                <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse at center, rgba(99,102,241,0.08) 0%, transparent 70%)' }} />
+                <div className="w-full max-w-2xl space-y-6 relative z-10">
                   {/* Branding */}
                   <div className="text-center space-y-3">
-                    <h1 className="text-3xl md:text-[40px] font-bold text-[#f8fafc] tracking-tight leading-tight">
+                    <h1 className="text-3xl md:text-[40px] font-bold gradient-text tracking-tight leading-tight">
                       {t('chatPage.howCanHelp')}
                     </h1>
                     <p className="text-sm text-[#64748b] max-w-md mx-auto">
@@ -160,7 +161,7 @@ export function Chat() {
                     <div className="mt-4">
                       <button
                         onClick={() => setShowSidebar(!showSidebar)}
-                        className="flex items-center gap-2 text-sm text-[#64748b] hover:text-[#f8fafc] transition-colors mx-auto"
+                        className="flex items-center gap-2 text-sm text-[#64748b] hover:text-[#f1f5f9] transition-colors mx-auto"
                       >
                         <Clock className="h-4 w-4" />
                         <span>Conversas recentes</span>
@@ -200,17 +201,17 @@ export function Chat() {
                     <div
                       className="rounded-xl px-4 py-3"
                       style={{
-                        background: 'rgba(239, 68, 68, 0.1)',
-                        border: '1px solid rgba(239, 68, 68, 0.2)',
+                        background: 'rgba(244, 63, 94, 0.1)',
+                        border: '1px solid rgba(244, 63, 94, 0.2)',
                       }}
                     >
-                      <p className="text-sm font-medium text-[#f87171]">{friendlyErrorLocal(error)}</p>
+                      <p className="text-sm font-medium text-[#fb7185]">{friendlyErrorLocal(error)}</p>
                       {error !== friendlyErrorLocal(error) && (
                         <details className="mt-2">
-                          <summary className="cursor-pointer text-xs text-[#f87171]/60 hover:text-[#f87171]/80">
+                          <summary className="cursor-pointer text-xs text-[#fb7185]/60 hover:text-[#fb7185]/80">
                             {t('chatPage.technicalDetails')}
                           </summary>
-                          <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap font-mono text-xs text-[#f87171]/50">
+                          <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap font-mono text-xs text-[#fb7185]/50">
                             {error}
                           </pre>
                         </details>
@@ -233,10 +234,10 @@ export function Chat() {
 
         {/* Recent sessions sidebar */}
         {(showSidebar || showChatView) && recentSessions.length > 0 && (
-          <div className="w-64 border-l border-white/10 bg-[#111827] overflow-y-auto hidden lg:block">
+          <div className="w-64 border-l border-[rgba(99,102,241,0.12)] bg-[#14172b] overflow-y-auto hidden lg:block">
             <div className="p-4">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-[#f8fafc]">Conversas</h3>
+                <h3 className="text-sm font-semibold text-[#f1f5f9]">Conversas</h3>
                 <button
                   onClick={() => {
                     // Reset local state to start a new chat
@@ -245,7 +246,7 @@ export function Chat() {
                     initialMessageSentRef.current = false
                     navigate('/')
                   }}
-                  className="flex items-center gap-1 text-xs text-[#64748b] hover:text-[#3b82f6] transition-colors"
+                  className="flex items-center gap-1 text-xs text-[#64748b] hover:text-[#6366f1] transition-colors"
                 >
                   <Plus className="h-3 w-3" />
                   <span>Nova</span>
@@ -267,8 +268,8 @@ export function Chat() {
                       className={cn(
                         'w-full flex items-start gap-3 px-3 py-2.5 rounded-lg transition-all text-left',
                         isActive
-                          ? 'bg-[#3b82f6]/10 text-[#f8fafc]'
-                          : 'text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc]'
+                          ? 'bg-[#6366f1]/10 text-[#f1f5f9]'
+                          : 'text-[#94a3b8] hover:bg-[rgba(99,102,241,0.08)] hover:text-[#f1f5f9]'
                       )}
                     >
                       <MessageSquare className="h-4 w-4 mt-0.5 shrink-0" />
