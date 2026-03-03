@@ -255,6 +255,9 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request, sessio
 // connection — no second round-trip needed. This eliminates ~200-500ms of
 // latency compared to the two-step send → stream flow.
 func (s *Server) handleChatStreamUnified(w http.ResponseWriter, r *http.Request, sessionID string) {
+	// Limit request body to 1MB to prevent memory exhaustion.
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
 	var body struct {
 		Content string `json:"content"`
 	}

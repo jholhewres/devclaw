@@ -9,9 +9,9 @@ export function SetupLayout() {
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0a0f1a] p-6">
       {/* Background effects */}
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1e293b]/20 via-transparent to-transparent" />
-        <div className="absolute -left-40 -top-40 h-[600px] w-[600px] rounded-full bg-[#3b82f6]/5 blur-[120px]" />
-        <div className="absolute -bottom-40 -right-40 h-[600px] w-[600px] rounded-full bg-[#3b82f6]/3 blur-[120px]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1c1f3a]/20 via-transparent to-transparent" />
+        <div className="absolute -left-40 -top-40 h-[600px] w-[600px] rounded-full bg-[#6366f1]/5 blur-[120px]" />
+        <div className="absolute -bottom-40 -right-40 h-[600px] w-[600px] rounded-full bg-[#6366f1]/3 blur-[120px]" />
         {/* Grid pattern */}
         <div
           className="absolute inset-0 opacity-[0.02]"
@@ -26,11 +26,11 @@ export function SetupLayout() {
         {/* Logo */}
         <div className="mb-6 text-center">
           <div className="inline-flex items-center justify-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[#3b82f6] to-[#2563eb] shadow-lg shadow-blue-500/25">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[#6366f1] to-[#818cf8] shadow-lg shadow-indigo-500/25">
               <Bot className="h-6 w-6 text-white" />
             </div>
           </div>
-          <h1 className="mt-3 text-xl font-bold text-[#f8fafc] tracking-tight">
+          <h1 className="mt-3 text-xl font-bold text-[#f1f5f9] tracking-tight">
             Dev<span className="text-[#64748b]">Claw</span>
           </h1>
           <p className="mt-1 text-sm text-[#64748b]">Configure seu agente de IA</p>

@@ -71,8 +71,8 @@ export function StepIdentity({ data, updateData }: Props) {
                 onClick={() => handleLanguageChange(lang.value)}
                 className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-all ${
                   data.language === lang.value
-                    ? 'border-[#3b82f6]/50 bg-[#3b82f6]/10 text-[#f8fafc]'
-                    : 'border-white/10 bg-[#0c1222] text-[#94a3b8] hover:border-white/20 hover:bg-[#111827]'
+                    ? 'border-[#6366f1]/50 bg-[#6366f1]/10 text-[#f1f5f9]'
+                    : 'border-[rgba(99,102,241,0.12)] bg-[#0b0d17] text-[#94a3b8] hover:border-[rgba(99,102,241,0.24)] hover:bg-[#14172b]'
                 }`}
               >
                 <span className="text-base">{lang.flag}</span>

@@ -33,10 +33,10 @@ function Toggle({ enabled, onChange, label }: { enabled: boolean; onChange: (v: 
       onClick={() => onChange(!enabled)}
       className="flex items-center gap-3 group cursor-pointer"
     >
-      <div className={`relative h-6 w-11 rounded-full transition-colors ${enabled ? 'bg-[#3b82f6]' : 'bg-[#1e293b]'}`}>
+      <div className={`relative h-6 w-11 rounded-full transition-colors ${enabled ? 'bg-[#6366f1]' : 'bg-[#1c1f3a]'}`}>
         <div className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-5' : ''}`} />
       </div>
-      <span className="text-sm text-[#94a3b8] group-hover:text-[#f8fafc] transition-colors">{label}</span>
+      <span className="text-sm text-[#94a3b8] group-hover:text-[#f1f5f9] transition-colors">{label}</span>
     </button>
   )
 }
@@ -57,12 +57,12 @@ function Input({ value, onChange, placeholder, type = 'text' }: {
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="h-11 w-full rounded-xl border border-white/10 bg-[#111827] px-4 pr-10 text-sm text-[#f8fafc] outline-none transition-all placeholder:text-[#475569] hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20"
+          className="h-11 w-full rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 pr-10 text-sm text-[#f1f5f9] outline-none transition-all placeholder:text-[#475569] hover:border-[rgba(99,102,241,0.24)] focus:border-[#6366f1]/50 focus:ring-1 focus:ring-[#6366f1]/20"
         />
         <button
           type="button"
           onClick={() => setShow(!show)}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-[#64748b] hover:text-[#f8fafc] cursor-pointer"
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-[#64748b] hover:text-[#f1f5f9] cursor-pointer"
         >
           {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </button>
@@ -76,7 +76,7 @@ function Input({ value, onChange, placeholder, type = 'text' }: {
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="h-11 w-full rounded-xl border border-white/10 bg-[#111827] px-4 text-sm text-[#f8fafc] outline-none transition-all placeholder:text-[#475569] hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20"
+      className="h-11 w-full rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 text-sm text-[#f1f5f9] outline-none transition-all placeholder:text-[#475569] hover:border-[rgba(99,102,241,0.24)] focus:border-[#6366f1]/50 focus:ring-1 focus:ring-[#6366f1]/20"
     />
   )
 }
@@ -91,7 +91,7 @@ function Select({ value, onChange, options, placeholder }: {
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="h-11 w-full cursor-pointer appearance-none rounded-xl border border-white/10 bg-[#111827] px-4 pr-10 text-sm text-[#f8fafc] outline-none transition-all hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20"
+      className="h-11 w-full cursor-pointer appearance-none rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 pr-10 text-sm text-[#f1f5f9] outline-none transition-all hover:border-[rgba(99,102,241,0.24)] focus:border-[#6366f1]/50 focus:ring-1 focus:ring-[#6366f1]/20"
     >
       {placeholder && <option value="">{placeholder}</option>}
       {options.map((opt) => (
@@ -170,17 +170,17 @@ export function Config() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-        <div className="h-10 w-10 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
+      <div className="flex flex-1 items-center justify-center bg-[#0b0d17]">
+        <div className="h-10 w-10 rounded-full border-4 border-[#1c1f3a] border-t-[#6366f1] animate-spin" />
       </div>
     )
   }
 
   if (loadError || !config) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center bg-[#0c1222]">
-        <p className="text-sm text-[#f87171]">{t('common.error')}</p>
-        <button onClick={() => window.location.reload()} className="mt-3 text-xs text-[#64748b] hover:text-[#f8fafc] transition-colors cursor-pointer">
+      <div className="flex flex-1 flex-col items-center justify-center bg-[#0b0d17]">
+        <p className="text-sm text-[#fb7185]">{t('common.error')}</p>
+        <button onClick={() => window.location.reload()} className="mt-3 text-xs text-[#64748b] hover:text-[#f1f5f9] transition-colors cursor-pointer">
           {t('common.loading')}
         </button>
       </div>
@@ -188,13 +188,13 @@ export function Config() {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-[#0c1222]">
+    <div className="flex flex-1 flex-col overflow-hidden bg-[#0b0d17]">
       <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#475569]">{t('config.subtitle')}</p>
-            <h1 className="mt-1 text-2xl font-bold text-[#f8fafc] tracking-tight">{t('config.title')}</h1>
+            <h1 className="mt-1 text-2xl font-bold text-[#f1f5f9] tracking-tight">{t('config.title')}</h1>
             <p className="mt-2 text-base text-[#64748b]">
               {config.name}
             </p>
@@ -203,7 +203,7 @@ export function Config() {
             {hasChanges && (
               <button
                 onClick={handleReset}
-                className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-[#111827] px-5 py-3 text-sm font-medium text-[#94a3b8] transition-all hover:border-white/20 hover:text-[#f8fafc]"
+                className="flex cursor-pointer items-center gap-2 rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-5 py-3 text-sm font-medium text-[#94a3b8] transition-all hover:border-[rgba(99,102,241,0.24)] hover:text-[#f1f5f9]"
               >
                 <RotateCcw className="h-4 w-4" />
                 Desfazer
@@ -212,7 +212,7 @@ export function Config() {
             <button
               onClick={handleSave}
               disabled={!hasChanges || saving}
-              className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#3b82f6] px-5 py-3 text-sm font-semibold text-white transition-all hover:bg-[#2563eb] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#6366f1] px-5 py-3 text-sm font-semibold text-white transition-all hover:bg-[#818cf8] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Save className="h-4 w-4" />
               {saving ? 'Salvando...' : 'Salvar'}
@@ -223,8 +223,8 @@ export function Config() {
         {message && (
           <div className={`mt-6 rounded-xl px-5 py-4 text-sm border ${
             message.type === 'success'
-              ? 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/20'
-              : 'bg-[#ef4444]/10 text-[#f87171] border-[#ef4444]/20'
+              ? 'bg-[#10b981]/10 text-[#10b981] border-[#10b981]/20'
+              : 'bg-[#f43f5e]/10 text-[#fb7185] border-[#f43f5e]/20'
           }`}>
             {message.text}
           </div>
@@ -233,16 +233,16 @@ export function Config() {
         {/* Provider & Model Section */}
         <section className="mt-10">
           <div className="flex items-center gap-3 mb-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[#111827]">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b]">
               <Cpu className="h-5 w-5 text-[#64748b]" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-[#f8fafc]">Provider & Modelo LLM</h2>
+              <h2 className="text-lg font-semibold text-[#f1f5f9]">Provider & Modelo LLM</h2>
               <p className="text-sm text-[#64748b]">Configuração do modelo de linguagem principal</p>
             </div>
           </div>
 
-          <div className="space-y-5 rounded-2xl border border-white/10 bg-[#111827] p-6">
+          <div className="space-y-5 rounded-2xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] p-6">
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-[#64748b]">
                 Provider
@@ -299,16 +299,16 @@ export function Config() {
         {/* Vision Section */}
         <section className="mt-10">
           <div className="flex items-center gap-3 mb-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[#111827]">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b]">
               <Image className="h-5 w-5 text-[#64748b]" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-[#f8fafc]">Compreensão de Imagens</h2>
+              <h2 className="text-lg font-semibold text-[#f1f5f9]">Compreensão de Imagens</h2>
               <p className="text-sm text-[#64748b]">Entender imagens e vídeos recebidos nos canais</p>
             </div>
           </div>
 
-          <div className="space-y-5 rounded-2xl border border-white/10 bg-[#111827] p-6">
+          <div className="space-y-5 rounded-2xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] p-6">
             <Toggle
               enabled={config.media.vision_enabled}
               onChange={(v) => updateMedia('vision_enabled', v)}
@@ -353,16 +353,16 @@ export function Config() {
         {/* Transcription Section */}
         <section className="mt-8 mb-10">
           <div className="flex items-center gap-3 mb-6">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[#111827]">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b]">
               <Mic className="h-5 w-5 text-[#64748b]" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-[#f8fafc]">Transcrição de Áudio</h2>
+              <h2 className="text-lg font-semibold text-[#f1f5f9]">Transcrição de Áudio</h2>
               <p className="text-sm text-[#64748b]">Converter áudios e notas de voz em texto</p>
             </div>
           </div>
 
-          <div className="space-y-5 rounded-2xl border border-white/10 bg-[#111827] p-6">
+          <div className="space-y-5 rounded-2xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] p-6">
             <Toggle
               enabled={config.media.transcription_enabled}
               onChange={(v) => updateMedia('transcription_enabled', v)}

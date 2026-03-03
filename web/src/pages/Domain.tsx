@@ -98,25 +98,25 @@ export function Domain() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-        <div className="h-10 w-10 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
+      <div className="flex flex-1 items-center justify-center bg-[#0b0d17]">
+        <div className="h-10 w-10 rounded-full border-4 border-[#1c1f3a] border-t-[#6366f1] animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-[#0c1222]">
+    <div className="flex flex-1 flex-col overflow-hidden bg-[#0b0d17]">
       <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#475569]">Rede</p>
-            <h1 className="mt-1 text-2xl font-bold text-[#f8fafc] tracking-tight">Domínio & Acesso</h1>
+            <h1 className="mt-1 text-2xl font-bold text-[#f1f5f9] tracking-tight">Domínio & Acesso</h1>
           </div>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#3b82f6] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-[#2563eb] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#6366f1] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-[#818cf8] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             {saving ? 'Salvando...' : 'Salvar'}
@@ -127,8 +127,8 @@ export function Domain() {
         {message && (
           <div className={`mt-5 flex items-center gap-2.5 rounded-xl px-4 py-3 text-sm border ${
             message.type === 'success'
-              ? 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/20'
-              : 'bg-[#ef4444]/10 text-[#f87171] border-[#ef4444]/20'
+              ? 'bg-[#10b981]/10 text-[#10b981] border-[#10b981]/20'
+              : 'bg-[#f43f5e]/10 text-[#fb7185] border-[#f43f5e]/20'
           }`}>
             {message.type === 'success' ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
             {message.text}
@@ -208,12 +208,12 @@ export function Domain() {
                   {corsOrigins.map((origin) => (
                     <span
                       key={origin}
-                      className="group flex items-center gap-1.5 rounded-lg bg-[#1e293b] px-2.5 py-1.5 text-xs font-mono text-[#f8fafc]"
+                      className="group flex items-center gap-1.5 rounded-lg bg-[#1c1f3a] px-2.5 py-1.5 text-xs font-mono text-[#f1f5f9]"
                     >
                       {origin}
                       <button
                         onClick={() => setCorsOrigins(corsOrigins.filter((o) => o !== origin))}
-                        className="cursor-pointer text-[#64748b] transition-colors hover:text-[#f87171]"
+                        className="cursor-pointer text-[#64748b] transition-colors hover:text-[#fb7185]"
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -267,16 +267,16 @@ export function Domain() {
               </div>
 
               {config?.tailscale_hostname && (
-                <div className="flex items-center gap-3 rounded-xl bg-[#22c55e]/10 px-4 py-3 border border-[#22c55e]/20">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-[#22c55e]" />
+                <div className="flex items-center gap-3 rounded-xl bg-[#10b981]/10 px-4 py-3 border border-[#10b981]/20">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-[#10b981]" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-[#f8fafc] truncate">{config.tailscale_hostname}</p>
+                    <p className="text-sm font-medium text-[#f1f5f9] truncate">{config.tailscale_hostname}</p>
                     {config.tailscale_url && (
                       <a
                         href={config.tailscale_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-xs text-[#64748b] hover:text-[#f8fafc] transition-colors"
+                        className="flex items-center gap-1 text-xs text-[#64748b] hover:text-[#f1f5f9] transition-colors"
                       >
                         {config.tailscale_url}
                         <ArrowUpRight className="h-3 w-3" />
@@ -297,7 +297,7 @@ export function Domain() {
 
 function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`rounded-2xl border border-white/10 bg-[#111827] p-5 ${className}`}>
+    <div className={`rounded-2xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] p-5 ${className}`}>
       {children}
     </div>
   )
@@ -306,10 +306,10 @@ function Card({ children, className = '' }: { children: React.ReactNode; classNa
 function CardHeader({ icon: Icon, title }: { icon: React.FC<{ className?: string }>; title: string }) {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1e293b]">
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1c1f3a]">
         <Icon className="h-4 w-4 text-[#64748b]" />
       </div>
-      <h2 className="text-sm font-semibold text-[#f8fafc]">{title}</h2>
+      <h2 className="text-sm font-semibold text-[#f1f5f9]">{title}</h2>
     </div>
   )
 }
@@ -340,7 +340,7 @@ function Input({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="flex h-10 w-full rounded-lg border border-white/10 bg-[#0c1222] px-3 text-sm text-[#f8fafc] placeholder:text-[#475569] outline-none transition-all hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20"
+      className="flex h-10 w-full rounded-lg border border-[rgba(99,102,241,0.12)] bg-[#0b0d17] px-3 text-sm text-[#f1f5f9] placeholder:text-[#475569] outline-none transition-all hover:border-[rgba(99,102,241,0.24)] focus:border-[#6366f1]/50 focus:ring-1 focus:ring-[#6366f1]/20"
     />
   )
 }
@@ -365,12 +365,12 @@ function PasswordInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="flex h-10 w-full rounded-lg border border-white/10 bg-[#0c1222] px-3 pr-9 text-sm text-[#f8fafc] placeholder:text-[#475569] outline-none transition-all hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20"
+        className="flex h-10 w-full rounded-lg border border-[rgba(99,102,241,0.12)] bg-[#0b0d17] px-3 pr-9 text-sm text-[#f1f5f9] placeholder:text-[#475569] outline-none transition-all hover:border-[rgba(99,102,241,0.24)] focus:border-[#6366f1]/50 focus:ring-1 focus:ring-[#6366f1]/20"
       />
       <button
         type="button"
         onClick={onToggle}
-        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#64748b] hover:text-[#f8fafc] transition-colors"
+        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#64748b] hover:text-[#f1f5f9] transition-colors"
       >
         {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
       </button>
@@ -386,7 +386,7 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
       aria-checked={value}
       onClick={() => onChange(!value)}
       className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
-        value ? 'bg-[#3b82f6]' : 'bg-[#1e293b]'
+        value ? 'bg-[#6366f1]' : 'bg-[#1c1f3a]'
       }`}
     >
       <span
@@ -410,9 +410,9 @@ function ToggleRow({
   onChange: (v: boolean) => void
 }) {
   return (
-    <div className="flex items-center justify-between rounded-xl bg-[#0c1222] px-4 py-3 border border-white/5">
+    <div className="flex items-center justify-between rounded-xl bg-[#0b0d17] px-4 py-3 border border-[rgba(99,102,241,0.06)]">
       <div>
-        <span className="text-sm font-medium text-[#f8fafc]">{label}</span>
+        <span className="text-sm font-medium text-[#f1f5f9]">{label}</span>
         <p className="text-[11px] text-[#64748b]">{description}</p>
       </div>
       <Toggle value={value} onChange={onChange} />
@@ -434,14 +434,14 @@ function Endpoint({
   return (
     <div className={`rounded-xl px-3.5 py-2.5 border transition-colors ${
       active
-        ? 'bg-[#111827] border-white/10'
-        : 'bg-[#111827] border-white/5'
+        ? 'bg-[#14172b] border-[rgba(99,102,241,0.12)]'
+        : 'bg-[#14172b] border-[rgba(99,102,241,0.06)]'
     }`}>
       <div className="flex items-center justify-between">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">{label}</span>
         <div className="flex items-center gap-1">
           {active ? (
-            <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-[#10b981]" />
           ) : (
             <span className="h-1.5 w-1.5 rounded-full bg-[#475569]" />
           )}
@@ -457,7 +457,7 @@ function Endpoint({
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-1 flex items-center gap-1 text-[11px] font-mono text-[#64748b] hover:text-[#f8fafc] transition-colors truncate"
+          className="mt-1 flex items-center gap-1 text-[11px] font-mono text-[#64748b] hover:text-[#f1f5f9] transition-colors truncate"
         >
           {url.replace(/^https?:\/\//, '')}
           <ExternalLink className="h-2.5 w-2.5 shrink-0" />

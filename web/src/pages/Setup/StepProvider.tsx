@@ -70,7 +70,7 @@ export function StepProvider({ data, updateData }: Props) {
         className={`flex cursor-pointer flex-col items-center gap-1 rounded-xl border px-2 py-2.5 text-center transition-all ${
           isSelected
             ? `${categoryStyle.borderColor} ${categoryStyle.bgColor}`
-            : 'border-white/10 bg-[#0c1222] hover:border-white/20 hover:bg-[#111827]'
+            : 'border-[rgba(99,102,241,0.12)] bg-[#0b0d17] hover:border-[rgba(99,102,241,0.24)] hover:bg-[#14172b]'
         }`}
         style={isSelected ? {
           borderColor: `${categoryStyle.accentColor}80`,
@@ -81,7 +81,7 @@ export function StepProvider({ data, updateData }: Props) {
         <div className={isSelected ? categoryStyle.textColor : 'text-[#64748b]'} style={isSelected ? { color: categoryStyle.accentColor } : undefined}>
           {icon}
         </div>
-        <span className={`text-[10px] font-medium ${isSelected ? 'text-[#f8fafc]' : 'text-[#94a3b8]'}`}>
+        <span className={`text-[10px] font-medium ${isSelected ? 'text-[#f1f5f9]' : 'text-[#94a3b8]'}`}>
           {p.label}
         </span>
       </button>
@@ -125,7 +125,7 @@ export function StepProvider({ data, updateData }: Props) {
 
         {/* Provider info with link */}
         {provider && provider.freeUrl && (
-          <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-[#0c1222] px-3 py-2">
+          <div className="flex items-center gap-2 rounded-lg border border-[rgba(99,102,241,0.12)] bg-[#0b0d17] px-3 py-2">
             <div className="flex-1">
               <p className="text-xs text-[#94a3b8]">
                 {provider.freeNote || provider.description}
@@ -135,7 +135,7 @@ export function StepProvider({ data, updateData }: Props) {
               href={provider.freeUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs text-[#3b82f6] hover:text-[#60a5fa] transition-colors"
+              className="flex items-center gap-1 text-xs text-[#6366f1] hover:text-[#a5b4fc] transition-colors"
             >
               {t('setupPage.getApiKey')}
               <ExternalLink className="h-3 w-3" />
@@ -153,11 +153,11 @@ export function StepProvider({ data, updateData }: Props) {
                   onClick={() => updateData({ baseUrl: ep.value })}
                   className={`cursor-pointer rounded-xl border px-3 py-2.5 text-left transition-all ${
                     data.baseUrl === ep.value
-                      ? 'border-[#3b82f6]/50 bg-[#3b82f6]/10'
-                      : 'border-white/10 bg-[#0c1222] hover:border-white/20 hover:bg-[#111827]'
+                      ? 'border-[#6366f1]/50 bg-[#6366f1]/10'
+                      : 'border-[rgba(99,102,241,0.12)] bg-[#0b0d17] hover:border-[rgba(99,102,241,0.24)] hover:bg-[#14172b]'
                   }`}
                 >
-                  <span className={`text-xs font-medium ${data.baseUrl === ep.value ? 'text-[#f8fafc]' : 'text-[#94a3b8]'}`}>
+                  <span className={`text-xs font-medium ${data.baseUrl === ep.value ? 'text-[#f1f5f9]' : 'text-[#94a3b8]'}`}>
                     {ep.label}
                   </span>
                   {ep.value && (
@@ -235,11 +235,11 @@ export function StepProvider({ data, updateData }: Props) {
           {testResult && (
             <div className="flex items-center gap-1.5 text-sm">
               {testResult.success ? (
-                <span className="flex items-center gap-1.5 text-[#22c55e]">
+                <span className="flex items-center gap-1.5 text-[#10b981]">
                   <CheckCircle2 className="h-4 w-4" /> {t('setupPage.connected')}
                 </span>
               ) : (
-                <span className="flex items-center gap-1.5 text-[#f87171]">
+                <span className="flex items-center gap-1.5 text-[#fb7185]">
                   <XCircle className="h-4 w-4" /> {testResult.error}
                 </span>
               )}

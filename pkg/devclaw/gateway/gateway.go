@@ -154,7 +154,18 @@ func (g *Gateway) securityHeadersMiddleware(next http.Handler) http.Handler {
 // validateWebhookURL rejects URLs that target private or loopback addresses
 // to prevent Server-Side Request Forgery (SSRF) via outgoing webhooks.
 func validateWebhookURL(rawURL string) error {
-	parsed, err := url.Parse(rawURL)
+	// Depth-bounded URL decoding: prevent canonicalization attacks by decoding
+	// percent-encoded URLs up to 3 rounds, then validating the final form.
+	decoded := rawURL
+	for i := 0; i < 3; i++ {
+		next, err := url.QueryUnescape(decoded)
+		if err != nil || next == decoded {
+			break
+		}
+		decoded = next
+	}
+
+	parsed, err := url.Parse(decoded)
 	if err != nil {
 		return fmt.Errorf("invalid webhook URL: %w", err)
 	}
@@ -162,16 +173,60 @@ func validateWebhookURL(rawURL string) error {
 		return fmt.Errorf("webhook URL must use http or https scheme")
 	}
 	hostname := strings.ToLower(parsed.Hostname())
+
+	// Block reserved hostnames.
+	for _, blocked := range []string{
+		"localhost", "localhost.localdomain",
+		"metadata.google.internal", "metadata.google",
+		"169.254.169.254", // AWS/GCP metadata endpoint
+	} {
+		if hostname == blocked {
+			return fmt.Errorf("webhook URL targets a reserved hostname: %s", hostname)
+		}
+	}
+
+	// Check if hostname is a direct IP literal.
 	ip := net.ParseIP(hostname)
 	if ip != nil {
-		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
-			return fmt.Errorf("webhook URL targets a private or loopback address: %s", hostname)
+		if err := validateIP(ip, hostname); err != nil {
+			return err
 		}
-	} else {
-		// Block well-known internal hostnames.
-		for _, blocked := range []string{"localhost", "localhost.localdomain", "metadata.google.internal"} {
-			if hostname == blocked {
-				return fmt.Errorf("webhook URL targets a reserved hostname: %s", hostname)
+		return nil
+	}
+
+	// Resolve hostname to IPs and validate each resolved address.
+	// This prevents DNS rebinding at registration time (delivery-time
+	// validation should also be done separately).
+	ips, err := net.LookupHost(hostname)
+	if err != nil {
+		return fmt.Errorf("webhook URL hostname cannot be resolved: %s", hostname)
+	}
+	for _, ipStr := range ips {
+		resolved := net.ParseIP(ipStr)
+		if resolved != nil {
+			if err := validateIP(resolved, ipStr); err != nil {
+				return fmt.Errorf("webhook URL resolves to blocked address (%s → %s): %w", hostname, ipStr, err)
+			}
+		}
+	}
+	return nil
+}
+
+// validateIP checks a single IP against private/reserved ranges.
+func validateIP(ip net.IP, display string) error {
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+		return fmt.Errorf("webhook URL targets a private or loopback address: %s", display)
+	}
+	// Block IPv6 transition addresses that may embed private IPv4.
+	if ip4 := ip.To4(); ip4 == nil && len(ip) == net.IPv6len {
+		// Check for IPv4-mapped IPv6 (::ffff:x.x.x.x)
+		if ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0 &&
+			ip[4] == 0 && ip[5] == 0 && ip[6] == 0 && ip[7] == 0 &&
+			ip[8] == 0 && ip[9] == 0 && ip[10] == 0xff && ip[11] == 0xff {
+			embedded := net.IPv4(ip[12], ip[13], ip[14], ip[15])
+			if embedded.IsLoopback() || embedded.IsPrivate() || embedded.IsLinkLocalUnicast() {
+				return fmt.Errorf("webhook URL targets an embedded private IPv4 address: %s", display)
 			}
 		}
 	}

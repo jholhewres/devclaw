@@ -67,9 +67,9 @@ function Slider({ label, value, onChange, hint }: {
           step="0.1"
           value={value}
           onChange={(e) => onChange(parseFloat(e.target.value))}
-          className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-[#1e293b] accent-[#3b82f6]"
+          className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-[#1c1f3a] accent-[#6366f1]"
         />
-        <span className="text-sm text-[#f8fafc] w-12 text-right">
+        <span className="text-sm text-[#f1f5f9] w-12 text-right">
           {(value * 100).toFixed(0)}%
         </span>
       </div>

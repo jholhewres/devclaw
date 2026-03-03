@@ -48,8 +48,8 @@ export function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-        <div className="h-8 w-8 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
+      <div className="flex flex-1 items-center justify-center bg-[#0b0d17]">
+        <div className="h-8 w-8 rounded-full border-4 border-[#1c1f3a] border-t-[#6366f1] animate-spin" />
       </div>
     )
   }
@@ -71,19 +71,19 @@ export function Dashboard() {
       <div className="flex items-start justify-between">
         <div>
           <p className="text-sm text-[#64748b]">{getGreeting(t)}</p>
-          <h1 className="mt-0.5 text-2xl font-bold text-[#f8fafc] tracking-tight">{t('dashboard.title')}</h1>
+          <h1 className="mt-0.5 text-2xl font-bold text-[#f1f5f9] tracking-tight">{t('dashboard.title')}</h1>
         </div>
         {/* Usage pill */}
-        <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-[#111827] px-4 py-2.5">
+        <div className="flex items-center gap-3 rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 py-2.5">
           <div className="flex items-center gap-1.5">
-            <Activity className="h-3 w-3 text-[#3b82f6]" />
-            <span className="text-xs font-semibold text-[#f8fafc]">{formatTokens(totalTokens)}</span>
+            <Activity className="h-3 w-3 text-[#6366f1]" />
+            <span className="text-xs font-semibold text-[#f1f5f9]">{formatTokens(totalTokens)}</span>
             <span className="text-[10px] text-[#64748b]">{t('dashboard.tokens')}</span>
           </div>
-          <span className="h-4 w-px bg-white/10" />
+          <span className="h-4 w-px bg-[rgba(99,102,241,0.12)]" />
           <div className="flex items-center gap-1">
-            <DollarSign className="h-3 w-3 text-[#3b82f6]" />
-            <span className="text-xs font-semibold text-[#f8fafc]">{usage.total_cost?.toFixed(2) ?? '0.00'}</span>
+            <DollarSign className="h-3 w-3 text-[#6366f1]" />
+            <span className="text-xs font-semibold text-[#f1f5f9]">{usage.total_cost?.toFixed(2) ?? '0.00'}</span>
           </div>
         </div>
       </div>
@@ -135,7 +135,7 @@ export function Dashboard() {
             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">{t('dashboard.channels')}</p>
             <button
               onClick={() => navigate('/channels')}
-              className="flex cursor-pointer items-center gap-1 text-[11px] text-[#64748b] hover:text-[#f8fafc] transition-colors"
+              className="flex cursor-pointer items-center gap-1 text-[11px] text-[#64748b] hover:text-[#f1f5f9] transition-colors"
             >
               {t('common.viewAll')} <ArrowRight className="h-3 w-3" />
             </button>
@@ -145,15 +145,15 @@ export function Dashboard() {
               <button
                 key={ch.name}
                 onClick={() => navigate('/channels')}
-                className="flex w-full cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-[#111827] px-4 py-3.5 text-left transition-all duration-200 hover:border-white/20"
+                className="flex w-full cursor-pointer items-center justify-between rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 py-3.5 text-left transition-all duration-200 hover:border-[rgba(99,102,241,0.24)]"
               >
                 <div className="flex items-center gap-3">
-                  <span className={`h-2 w-2 rounded-full ${ch.connected ? 'bg-[#22c55e]' : 'bg-[#64748b]'}`} />
-                  <span className="text-sm font-medium capitalize text-[#f8fafc]">{ch.name}</span>
+                  <span className={`h-2 w-2 rounded-full ${ch.connected ? 'bg-[#10b981]' : 'bg-[#64748b]'}`} />
+                  <span className="text-sm font-medium capitalize text-[#f1f5f9]">{ch.name}</span>
                 </div>
                 <span
                   className="text-[11px] font-medium"
-                  style={{ color: ch.connected ? '#22c55e' : '#64748b' }}
+                  style={{ color: ch.connected ? '#10b981' : '#64748b' }}
                 >
                   {ch.connected ? t('common.online') : t('common.offline')}
                 </span>
@@ -170,7 +170,7 @@ export function Dashboard() {
             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">{t('dashboard.recentSessions')}</p>
             <button
               onClick={() => navigate('/sessions')}
-              className="flex cursor-pointer items-center gap-1 text-[11px] text-[#64748b] hover:text-[#f8fafc] transition-colors"
+              className="flex cursor-pointer items-center gap-1 text-[11px] text-[#64748b] hover:text-[#f1f5f9] transition-colors"
             >
               {t('common.viewAll')} <ArrowRight className="h-3 w-3" />
             </button>
@@ -180,11 +180,11 @@ export function Dashboard() {
               <button
                 key={s.id}
                 onClick={() => navigate(`/chat/${encodeURIComponent(s.id)}`)}
-                className="flex w-full cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-[#111827] px-4 py-3.5 text-left transition-all duration-200 hover:border-white/20"
+                className="flex w-full cursor-pointer items-center justify-between rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 py-3.5 text-left transition-all duration-200 hover:border-[rgba(99,102,241,0.24)]"
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  <Zap className="h-3.5 w-3.5 shrink-0 text-[#3b82f6]" />
-                  <span className="truncate text-sm text-[#f8fafc]">{s.id}</span>
+                  <Zap className="h-3.5 w-3.5 shrink-0 text-[#6366f1]" />
+                  <span className="truncate text-sm text-[#f1f5f9]">{s.id}</span>
                 </div>
                 <span className="shrink-0 text-[11px] text-[#64748b]">{s.message_count} {t('common.msgs')} · {timeAgo(s.last_message_at)}</span>
               </button>
@@ -211,19 +211,19 @@ function MetricCard({
   status?: 'ok' | 'warn' | 'neutral'
   onClick?: () => void
 }) {
-  const borderColor = status === 'ok' ? 'rgba(34, 197, 94, 0.3)' : status === 'warn' ? 'rgba(245, 158, 11, 0.3)' : 'rgba(255, 255, 255, 0.1)'
+  const borderColor = status === 'ok' ? 'rgba(16, 185, 129, 0.3)' : status === 'warn' ? 'rgba(245, 158, 11, 0.3)' : 'rgba(99, 102, 241, 0.12)'
 
   return (
     <button
       onClick={onClick}
-      className="group cursor-pointer rounded-2xl bg-[#111827] p-5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#1e293b]"
+      className="group cursor-pointer rounded-2xl bg-[#14172b] p-5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#1c1f3a]"
       style={{ border: `1px solid ${borderColor}` }}
     >
       <div className="flex items-center gap-1.5 text-[#64748b]">
         {icon}
         <span className="text-[11px] font-semibold uppercase tracking-wider">{label}</span>
       </div>
-      <p className="mt-1.5 text-2xl font-bold text-[#f8fafc] tracking-tight">{value}</p>
+      <p className="mt-1.5 text-2xl font-bold text-[#f1f5f9] tracking-tight">{value}</p>
     </button>
   )
 }
@@ -238,12 +238,12 @@ function QuickAction({ icon: Icon, label, onClick }: {
   return (
     <button
       onClick={onClick}
-      className="group flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-[#111827] p-4 text-left transition-all duration-200 hover:border-white/20 hover:bg-[#1e293b]"
+      className="group flex cursor-pointer items-center gap-3 rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] p-4 text-left transition-all duration-200 hover:border-[rgba(99,102,241,0.24)] hover:bg-[#1c1f3a]"
     >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#1e293b] text-[#64748b] transition-colors group-hover:bg-[#3b82f6]/10 group-hover:text-[#3b82f6]">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#1c1f3a] text-[#64748b] transition-colors group-hover:bg-[#6366f1]/10 group-hover:text-[#6366f1]">
         <Icon className="h-4 w-4" />
       </div>
-      <span className="text-sm font-medium text-[#94a3b8] transition-colors group-hover:text-[#f8fafc]">{label}</span>
+      <span className="text-sm font-medium text-[#94a3b8] transition-colors group-hover:text-[#f1f5f9]">{label}</span>
     </button>
   )
 }

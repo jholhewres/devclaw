@@ -98,7 +98,7 @@ export function StepSecurity({ data, updateData }: Props) {
                 selected={data.accessMode === mode.value}
                 onClick={() => updateData({ accessMode: mode.value })}
                 icon={mode.icon}
-                iconColor="text-[#3b82f6]"
+                iconColor="text-[#6366f1]"
                 title={mode.label}
                 description={mode.description}
               />

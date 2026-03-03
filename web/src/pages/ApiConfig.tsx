@@ -70,12 +70,12 @@ function PasswordInput({ value, onChange, placeholder }: {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="h-11 w-full rounded-xl border border-white/10 bg-[#111827] px-4 pr-10 text-sm text-[#f8fafc] outline-none transition-all placeholder:text-[#475569] hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20"
+        className="h-11 w-full rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 pr-10 text-sm text-[#f1f5f9] outline-none transition-all placeholder:text-[#475569] hover:border-[rgba(99,102,241,0.24)] focus:border-[#6366f1]/50 focus:ring-1 focus:ring-[#6366f1]/20"
       />
       <button
         type="button"
         onClick={() => setShow(!show)}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#64748b] hover:text-[#f8fafc] cursor-pointer"
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#64748b] hover:text-[#f1f5f9] cursor-pointer"
       >
         {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
       </button>
@@ -349,7 +349,7 @@ export function ApiConfig() {
       >
         {/* Provider info with link */}
         {provider && provider.freeUrl && (
-          <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-[#0c1222] px-3 py-2 mb-4">
+          <div className="flex items-center gap-2 rounded-lg border border-[rgba(99,102,241,0.12)] bg-[#0b0d17] px-3 py-2 mb-4">
             <div className="flex-1">
               <p className="text-xs text-[#94a3b8]">
                 {provider.freeNote || provider.description}
@@ -359,7 +359,7 @@ export function ApiConfig() {
               href={provider.freeUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs text-[#3b82f6] hover:text-[#60a5fa] transition-colors"
+              className="flex items-center gap-1 text-xs text-[#6366f1] hover:text-[#a5b4fc] transition-colors"
             >
               {t('apiConfig.getApiKey')}
               <ExternalLink className="h-3 w-3" />
@@ -403,7 +403,7 @@ export function ApiConfig() {
               />
             </ConfigField>
             {validationErrors.apiKey && (
-              <p className="text-xs text-[#f87171]">{validationErrors.apiKey}</p>
+              <p className="text-xs text-[#fb7185]">{validationErrors.apiKey}</p>
             )}
           </div>
         )}
@@ -430,7 +430,7 @@ export function ApiConfig() {
           )}
         </ConfigField>
         {validationErrors.model && (
-          <p className="text-xs text-[#f87171] -mt-3">{validationErrors.model}</p>
+          <p className="text-xs text-[#fb7185] -mt-3">{validationErrors.model}</p>
         )}
         </div>
 
@@ -445,7 +445,7 @@ export function ApiConfig() {
                   ...prev,
                   params: { ...prev.params, context1m: e.target.checked }
                 } : prev)}
-                className="h-4 w-4 rounded border-white/20 bg-[#111827] text-[#3b82f6] focus:ring-[#3b82f6]/20"
+                className="h-4 w-4 rounded border-[rgba(99,102,241,0.24)] bg-[#14172b] text-[#6366f1] focus:ring-[#6366f1]/20"
               />
               <span className="text-sm text-[#94a3b8]">{t('apiConfig.context1m')}</span>
             </label>
@@ -463,7 +463,7 @@ export function ApiConfig() {
                   ...prev,
                   params: { ...prev.params, tool_stream: e.target.checked }
                 } : prev)}
-                className="h-4 w-4 rounded border-white/20 bg-[#111827] text-[#3b82f6] focus:ring-[#3b82f6]/20"
+                className="h-4 w-4 rounded border-[rgba(99,102,241,0.24)] bg-[#14172b] text-[#6366f1] focus:ring-[#6366f1]/20"
               />
               <span className="text-sm text-[#94a3b8]">{t('apiConfig.toolStream')}</span>
             </label>
@@ -472,12 +472,12 @@ export function ApiConfig() {
         )}
 
         {/* Connection Test */}
-        <div className="pt-4 border-t border-white/5">
+        <div className="pt-4 border-t border-[rgba(99,102,241,0.06)]">
           <div className="flex items-center justify-between">
             <button
               onClick={handleTestConnection}
               disabled={testingConnection || !config.base_url}
-              className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-[#1e293b] px-4 py-2.5 text-sm font-medium text-[#94a3b8] transition-all hover:border-white/20 hover:text-[#f8fafc] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex cursor-pointer items-center gap-2 rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#1c1f3a] px-4 py-2.5 text-sm font-medium text-[#94a3b8] transition-all hover:border-[rgba(99,102,241,0.24)] hover:text-[#f1f5f9] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {testingConnection ? (
                 <>
@@ -496,8 +496,8 @@ export function ApiConfig() {
             {testResult && (
               <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${
                 testResult.success
-                  ? 'bg-[#22c55e]/10 text-[#22c55e]'
-                  : 'bg-[#ef4444]/10 text-[#f87171]'
+                  ? 'bg-[#10b981]/10 text-[#10b981]'
+                  : 'bg-[#f43f5e]/10 text-[#fb7185]'
               }`}>
                 {testResult.success ? (
                   <>
@@ -518,9 +518,9 @@ export function ApiConfig() {
 
           {/* Error Message */}
           {testResult && !testResult.success && testResult.error && (
-            <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#ef4444]/5 border border-[#ef4444]/10 p-3">
-              <AlertTriangle className="h-4 w-4 text-[#f87171] flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-[#f87171]">{testResult.error}</p>
+            <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#f43f5e]/5 border border-[#f43f5e]/10 p-3">
+              <AlertTriangle className="h-4 w-4 text-[#fb7185] flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-[#fb7185]">{testResult.error}</p>
             </div>
           )}
         </div>
@@ -535,11 +535,11 @@ export function ApiConfig() {
         actions={
           <div className="text-right">
             <p className="text-xs text-[#64748b]">{t('apiConfig.currentProvider')}</p>
-            <p className="text-sm font-medium text-[#f8fafc] capitalize">{config.provider}</p>
+            <p className="text-sm font-medium text-[#f1f5f9] capitalize">{config.provider}</p>
           </div>
         }
       >
-        <p className={`text-sm ${config.api_key_configured ? 'text-[#22c55e]' : 'text-[#f59e0b]'}`}>
+        <p className={`text-sm ${config.api_key_configured ? 'text-[#10b981]' : 'text-[#f59e0b]'}`}>
           {config.api_key_configured
             ? t('apiConfig.statusConfigured')
             : t('apiConfig.statusNotConfigured')

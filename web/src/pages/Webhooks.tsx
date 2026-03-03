@@ -17,7 +17,7 @@ import { api } from '@/lib/api'
 import type { WebhookInfo } from '@/lib/api'
 
 const inputClass =
-  'flex h-11 w-full rounded-xl border border-white/10 bg-[#111827] px-4 text-sm text-[#f8fafc] placeholder:text-[#475569] outline-none transition-all hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20'
+  'flex h-11 w-full rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 text-sm text-[#f1f5f9] placeholder:text-[#475569] outline-none transition-all hover:border-[rgba(99,102,241,0.24)] focus:border-[#6366f1]/50 focus:ring-1 focus:ring-[#6366f1]/20'
 
 /**
  * Webhook management page.
@@ -116,14 +116,14 @@ export function Webhooks() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-        <div className="h-10 w-10 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
+      <div className="flex flex-1 items-center justify-center bg-[#0b0d17]">
+        <div className="h-10 w-10 rounded-full border-4 border-[#1c1f3a] border-t-[#6366f1] animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-[#0c1222]">
+    <div className="flex flex-1 flex-col overflow-hidden bg-[#0b0d17]">
       <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
         {/* Header */}
         <div className="flex items-start justify-between">
@@ -131,14 +131,14 @@ export function Webhooks() {
             <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#475569]">
               Integrações
             </p>
-            <h1 className="mt-1 text-2xl font-bold text-[#f8fafc] tracking-tight">Webhooks</h1>
+            <h1 className="mt-1 text-2xl font-bold text-[#f1f5f9] tracking-tight">Webhooks</h1>
             <p className="mt-2 text-base text-[#64748b]">
               Receba notificações quando eventos acontecem no DevClaw
             </p>
           </div>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#3b82f6] px-5 py-3 text-sm font-semibold text-white transition-all hover:bg-[#2563eb]"
+            className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#6366f1] px-5 py-3 text-sm font-semibold text-white transition-all hover:bg-[#818cf8]"
           >
             <Plus className="h-4 w-4" />
             Novo Webhook
@@ -150,8 +150,8 @@ export function Webhooks() {
           <div
             className={`mt-6 rounded-xl px-5 py-4 text-sm border ${
               message.type === 'success'
-                ? 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/20'
-                : 'bg-[#ef4444]/10 text-[#f87171] border-[#ef4444]/20'
+                ? 'bg-[#10b981]/10 text-[#10b981] border-[#10b981]/20'
+                : 'bg-[#f43f5e]/10 text-[#fb7185] border-[#f43f5e]/20'
             }`}
           >
             {message.text}
@@ -160,8 +160,8 @@ export function Webhooks() {
 
         {/* Formulário de criação */}
         {showForm && (
-          <div className="mt-6 rounded-2xl border border-white/10 bg-[#111827] p-6">
-            <h3 className="text-base font-semibold text-[#f8fafc] mb-5">Criar Webhook</h3>
+          <div className="mt-6 rounded-2xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] p-6">
+            <h3 className="text-base font-semibold text-[#f1f5f9] mb-5">Criar Webhook</h3>
 
             <div className="space-y-5">
               {/* URL */}
@@ -191,8 +191,8 @@ export function Webhooks() {
                         onClick={() => toggleEvent(event)}
                         className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
                           isSelected
-                            ? 'bg-[#3b82f6]/20 text-[#3b82f6]'
-                            : 'bg-[#1e293b] text-[#64748b] hover:bg-[#334155] hover:text-[#f8fafc]'
+                            ? 'bg-[#6366f1]/20 text-[#6366f1]'
+                            : 'bg-[#1c1f3a] text-[#64748b] hover:bg-[#242850] hover:text-[#f1f5f9]'
                         }`}
                       >
                         {event}
@@ -216,14 +216,14 @@ export function Webhooks() {
                     setNewUrl('')
                     setSelectedEvents([])
                   }}
-                  className="cursor-pointer rounded-xl px-4 py-2.5 text-sm font-medium text-[#64748b] transition-colors hover:text-[#f8fafc]"
+                  className="cursor-pointer rounded-xl px-4 py-2.5 text-sm font-medium text-[#64748b] transition-colors hover:text-[#f1f5f9]"
                 >
                   Cancelar
                 </button>
                 <button
                   onClick={handleCreate}
                   disabled={creating || !newUrl.trim()}
-                  className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#3b82f6] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-[#2563eb] disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#6366f1] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-[#818cf8] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {creating ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -240,11 +240,11 @@ export function Webhooks() {
         {/* Lista de webhooks */}
         <div className="mt-8">
           <div className="mb-5 flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1e293b]">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1c1f3a]">
               <Webhook className="h-4 w-4 text-[#64748b]" />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-[#f8fafc]">Webhooks registrados</h2>
+              <h2 className="text-base font-semibold text-[#f1f5f9]">Webhooks registrados</h2>
               <p className="text-xs text-[#64748b]">
                 {webhooks.length === 0
                   ? 'Nenhum webhook configurado'
@@ -254,14 +254,14 @@ export function Webhooks() {
           </div>
 
           {webhooks.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-white/10 bg-[#111827] px-8 py-14 text-center">
+            <div className="rounded-2xl border border-dashed border-[rgba(99,102,241,0.12)] bg-[#14172b] px-8 py-14 text-center">
               <Webhook className="mx-auto h-10 w-10 text-[#475569]" />
               <p className="mt-4 text-sm text-[#64748b]">
                 Webhooks permitem que sistemas externos sejam notificados sobre eventos do DevClaw.
               </p>
               <button
                 onClick={() => setShowForm(true)}
-                className="mt-4 cursor-pointer text-sm font-medium text-[#64748b] hover:text-[#f8fafc] transition-colors"
+                className="mt-4 cursor-pointer text-sm font-medium text-[#64748b] hover:text-[#f1f5f9] transition-colors"
               >
                 Criar primeiro webhook
               </button>
@@ -283,7 +283,7 @@ export function Webhooks() {
         </div>
 
         {/* Documentação rápida */}
-        <div className="mt-10 mb-6 rounded-2xl border border-white/10 bg-[#111827] p-6">
+        <div className="mt-10 mb-6 rounded-2xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] p-6">
           <h3 className="text-sm font-semibold text-[#94a3b8] mb-3">Eventos disponíveis</h3>
           <div className="grid grid-cols-2 gap-y-2 gap-x-4">
             {validEvents.map((event) => (
@@ -322,10 +322,10 @@ function WebhookCard({
 
   return (
     <div
-      className={`rounded-2xl border bg-[#111827] p-5 transition-all ${
+      className={`rounded-2xl border bg-[#14172b] p-5 transition-all ${
         webhook.active
-          ? 'border-white/10'
-          : 'border-white/5 opacity-60'
+          ? 'border-[rgba(99,102,241,0.12)]'
+          : 'border-[rgba(99,102,241,0.06)] opacity-60'
       }`}
     >
       {/* Linha superior: status + ações */}
@@ -333,7 +333,7 @@ function WebhookCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1.5">
             {webhook.active ? (
-              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#22c55e]" />
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#10b981]" />
             ) : (
               <XCircle className="h-3.5 w-3.5 shrink-0 text-[#64748b]" />
             )}
@@ -341,7 +341,7 @@ function WebhookCard({
               {webhook.active ? 'Ativo' : 'Inativo'}
             </span>
           </div>
-          <p className="truncate font-mono text-sm text-[#f8fafc]" title={webhook.url}>
+          <p className="truncate font-mono text-sm text-[#f1f5f9]" title={webhook.url}>
             {webhook.url}
           </p>
         </div>
@@ -351,7 +351,7 @@ function WebhookCard({
           <button
             onClick={() => onToggle(webhook.id, !webhook.active)}
             title={webhook.active ? 'Desativar' : 'Ativar'}
-            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[#64748b] transition-colors hover:bg-[#1e293b] hover:text-[#f8fafc]"
+            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[#64748b] transition-colors hover:bg-[#1c1f3a] hover:text-[#f1f5f9]"
           >
             {webhook.active ? (
               <PowerOff className="h-4 w-4" />
@@ -364,10 +364,10 @@ function WebhookCard({
           <button
             onClick={() => onCopyId(webhook.id)}
             title="Copiar ID"
-            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[#64748b] transition-colors hover:bg-[#1e293b] hover:text-[#f8fafc]"
+            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[#64748b] transition-colors hover:bg-[#1c1f3a] hover:text-[#f1f5f9]"
           >
             {copiedId === webhook.id ? (
-              <Check className="h-4 w-4 text-[#22c55e]" />
+              <Check className="h-4 w-4 text-[#10b981]" />
             ) : (
               <Copy className="h-4 w-4" />
             )}
@@ -380,7 +380,7 @@ function WebhookCard({
                 onDelete(webhook.id)
                 setConfirming(false)
               }}
-              className="flex h-8 cursor-pointer items-center gap-1 rounded-lg bg-[#ef4444]/10 px-2 text-xs font-medium text-[#f87171] transition-colors hover:bg-[#ef4444]/20"
+              className="flex h-8 cursor-pointer items-center gap-1 rounded-lg bg-[#f43f5e]/10 px-2 text-xs font-medium text-[#fb7185] transition-colors hover:bg-[#f43f5e]/20"
             >
               Confirmar
             </button>
@@ -391,7 +391,7 @@ function WebhookCard({
                 setTimeout(() => setConfirming(false), 3000)
               }}
               title="Excluir"
-              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[#64748b] transition-colors hover:bg-[#ef4444]/10 hover:text-[#f87171]"
+              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[#64748b] transition-colors hover:bg-[#f43f5e]/10 hover:text-[#fb7185]"
             >
               <Trash2 className="h-4 w-4" />
             </button>
@@ -405,7 +405,7 @@ function WebhookCard({
           webhook.events.map((event) => (
             <span
               key={event}
-              className="rounded-md bg-[#1e293b] px-2 py-0.5 text-[11px] font-mono text-[#94a3b8]"
+              className="rounded-md bg-[#1c1f3a] px-2 py-0.5 text-[11px] font-mono text-[#94a3b8]"
             >
               {event}
             </span>

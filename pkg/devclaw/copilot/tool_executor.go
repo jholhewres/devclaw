@@ -993,17 +993,8 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 		return result
 	}
 
-	// Execute with timeout.
-	timeout := e.timeout
-	// Give bash/ssh/scp longer timeouts (configurable via bash_timeout_seconds).
-	if name == "bash" || name == "ssh" || name == "scp" || name == "exec" {
-		timeout = e.bashTimeout
-	}
-	// Claude Code manages its own internal timeout (default 15min);
-	// give the executor wrapper enough headroom.
-	if name == "claude-code_execute" {
-		timeout = 20 * time.Minute
-	}
+	// Execute with timeout — dynamic per tool type.
+	timeout := toolTimeout(name, e.timeout, e.bashTimeout)
 
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 
@@ -1339,4 +1330,54 @@ func mapKeys(m map[string]any) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// toolTimeout returns a dynamic timeout based on tool type.
+// I/O-bound tools (bash, web_fetch) get longer timeouts; read-only tools
+// (read_file, memory_search) get shorter ones.
+func toolTimeout(name string, defaultTimeout, bashTimeout time.Duration) time.Duration {
+	switch name {
+	// Shell / remote commands — user-configurable bash timeout.
+	case "bash", "ssh", "scp", "exec":
+		return bashTimeout
+
+	// Claude Code manages its own internal timeout (default 15min).
+	case "claude-code_execute":
+		return 20 * time.Minute
+
+	// Web fetch can be slow (DNS, TLS, large pages).
+	case "web_fetch", "web-fetch_fetch_url":
+		return 60 * time.Second
+
+	// Web search is typically fast.
+	case "web_search", "brave-search_execute", "brave-search_run_search":
+		return 30 * time.Second
+
+	// Read-only file operations — should be fast.
+	case "read_file", "list_files", "glob_files", "search_files":
+		return 15 * time.Second
+
+	// Write operations — slightly longer for large files.
+	case "write_file", "edit_file":
+		return 30 * time.Second
+
+	// Memory operations.
+	case "memory":
+		return 15 * time.Second
+
+	// Image generation can be slow.
+	case "image-gen_generate_image":
+		return 120 * time.Second
+
+	// Audio transcription.
+	case "transcribe_audio":
+		return 90 * time.Second
+
+	// Subagent operations can be long-running.
+	case "spawn_subagent", "wait_subagent":
+		return 10 * time.Minute
+
+	default:
+		return defaultTimeout
+	}
 }

@@ -18,8 +18,8 @@ export function Jobs() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-        <div className="h-8 w-8 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
+      <div className="flex flex-1 items-center justify-center bg-[#0b0d17]">
+        <div className="h-8 w-8 rounded-full border-4 border-[#1c1f3a] border-t-[#6366f1] animate-spin" />
       </div>
     )
   }
@@ -32,7 +32,7 @@ export function Jobs() {
       {/* Header */}
       <div>
         <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#475569]">{t('jobs.subtitle')}</p>
-        <h1 className="mt-1 text-2xl font-bold text-[#f8fafc] tracking-tight">{t('jobs.title')}</h1>
+        <h1 className="mt-1 text-2xl font-bold text-[#f1f5f9] tracking-tight">{t('jobs.title')}</h1>
       </div>
 
       {jobs.length === 0 ? (
@@ -63,9 +63,9 @@ export function Jobs() {
 function EmptyJobs() {
   const { t } = useTranslation()
   return (
-    <div className="mt-8 rounded-2xl border border-white/10 bg-[#111827] px-6 py-12">
+    <div className="mt-8 rounded-2xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-6 py-12">
       <div className="flex flex-col items-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#1e293b]">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#1c1f3a]">
           <CalendarClock className="h-6 w-6 text-[#64748b]" />
         </div>
         <h3 className="mt-4 text-sm font-semibold text-[#94a3b8]">{t('jobs.noJobs')}</h3>
@@ -74,7 +74,7 @@ function EmptyJobs() {
         </p>
       </div>
 
-      <div className="mt-6 mx-auto max-w-md rounded-xl bg-[#0c1222] px-4 py-3 border border-white/5">
+      <div className="mt-6 mx-auto max-w-md rounded-xl bg-[#0b0d17] px-4 py-3 border border-[rgba(99,102,241,0.06)]">
         <p className="text-[11px] font-semibold uppercase tracking-wider text-[#475569]">config.yaml</p>
         <pre className="mt-2 overflow-x-auto font-mono text-xs leading-relaxed text-[#94a3b8]">
 {`scheduler:
@@ -91,7 +91,7 @@ function EmptyJobs() {
           <Clock className="h-3 w-3 text-[#64748b]" />
           Cron syntax padrão
         </span>
-        <span className="h-3 w-px bg-white/10" />
+        <span className="h-3 w-px bg-[rgba(99,102,241,0.1)]" />
         <span className="flex items-center gap-1.5">
           <FileCode className="h-3 w-3 text-[#64748b]" />
           Tipos: prompt, command, skill
@@ -107,29 +107,29 @@ function JobCard({ job }: { job: JobInfo }) {
   return (
     <div className={`rounded-xl px-5 py-4 border transition-colors ${
       job.enabled
-        ? 'bg-[#111827] border-white/10'
-        : 'bg-[#111827] border-white/5 opacity-60'
+        ? 'bg-[#14172b] border-[rgba(99,102,241,0.12)]'
+        : 'bg-[#14172b] border-[rgba(99,102,241,0.06)] opacity-60'
     }`}>
       <div className="flex items-start gap-4">
         <div className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-          job.enabled ? 'bg-[#22c55e]/10' : 'bg-[#1e293b]'
+          job.enabled ? 'bg-[#10b981]/10' : 'bg-[#1c1f3a]'
         }`}>
-          {job.enabled ? <Play className="h-4 w-4 text-[#22c55e]" /> : <Pause className="h-4 w-4 text-[#64748b]" />}
+          {job.enabled ? <Play className="h-4 w-4 text-[#10b981]" /> : <Pause className="h-4 w-4 text-[#64748b]" />}
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
-            <h3 className="text-sm font-semibold text-[#f8fafc]">{job.id}</h3>
-            <span className="rounded bg-[#1e293b] px-1.5 py-0.5 font-mono text-[10px] text-[#94a3b8]">
+            <h3 className="text-sm font-semibold text-[#f1f5f9]">{job.id}</h3>
+            <span className="rounded bg-[#1c1f3a] px-1.5 py-0.5 font-mono text-[10px] text-[#94a3b8]">
               {job.schedule}
             </span>
-            <span className="rounded bg-[#1e293b] px-1.5 py-0.5 text-[10px] font-medium text-[#64748b]">
+            <span className="rounded bg-[#1c1f3a] px-1.5 py-0.5 text-[10px] font-medium text-[#64748b]">
               {job.type}
             </span>
           </div>
 
           {job.command && (
-            <pre className="mt-2 overflow-x-auto rounded-lg bg-[#0c1222] px-3 py-2 font-mono text-xs text-[#94a3b8]">
+            <pre className="mt-2 overflow-x-auto rounded-lg bg-[#0b0d17] px-3 py-2 font-mono text-xs text-[#94a3b8]">
               {job.command}
             </pre>
           )}

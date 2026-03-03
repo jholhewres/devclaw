@@ -388,25 +388,46 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 		}
 
 		// ── Proactive context compaction ──
-		// Instead of dropping old messages entirely (which causes amnesia), we
-		// compact the context if it grows too large.
-		if totalTurns > 5 && len(messages) > 15 {
-			a.logger.Debug("checking context size for compaction", "messages_len", len(messages))
-			messages = a.managedCompaction(runCtx, messages)
+		// Smart compaction based on estimated context window usage.
+		// 70% = warning log, 85% = proactive compaction before overflow.
+		if totalTurns > 3 && len(messages) > 10 {
+			tokenEstimate := a.estimateTokens(messages)
+			contextWindow := a.getModelContextWindow()
+			usagePct := float64(tokenEstimate) / float64(contextWindow) * 100
+
+			if usagePct >= 85 {
+				a.logger.Warn("context usage at critical level, compacting proactively",
+					"usage_pct", int(usagePct),
+					"tokens_est", tokenEstimate,
+					"context_window", contextWindow,
+					"messages_len", len(messages),
+				)
+				messages = a.managedCompaction(runCtx, messages)
+			} else if usagePct >= 70 {
+				a.logger.Info("context usage nearing threshold",
+					"usage_pct", int(usagePct),
+					"tokens_est", tokenEstimate,
+					"context_window", contextWindow,
+				)
+				// Prune old tool results to free space without full compaction.
+				messages = a.pruneOldToolResults(messages, totalTurns)
+			}
 		}
 
 		// Inject reflection nudge periodically so the agent is aware of duration.
-		// More aggressive messaging to catch stuck patterns early.
+		// Includes tool count and context usage for better budget awareness.
 		if a.reflectionOn && totalTurns > 1 && totalTurns%reflectionInterval == 0 {
 			elapsed := time.Since(runStart).Seconds()
 			remaining := a.runTimeout.Seconds() - elapsed
+			toolCount := strings.Count(a.lastRunToolSummary, ",") + strings.Count(a.lastRunToolSummary, ";")
+			contextPct := float64(a.estimateTokens(messages)) / float64(a.getModelContextWindow()) * 100
 			messages = append(messages, chatMessage{
 				Role: "user",
 				Content: fmt.Sprintf(
-					"[System: Turn %d checkpoint (%.0fs elapsed, ~%.0fs remaining). "+
+					"[System: Turn %d checkpoint (%.0fs elapsed, ~%.0fs remaining, %d tools used, context %.0f%% full). "+
 						"If you're stuck or repeating the same approach, STOP and investigate the root cause. "+
 						"Don't repeat failed approaches — think before acting.]",
-					totalTurns, elapsed, remaining,
+					totalTurns, elapsed, remaining, toolCount, contextPct,
 				),
 			})
 		}

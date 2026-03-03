@@ -17,7 +17,7 @@ export function EndpointSelector({
   endpoints,
   value,
   onChange,
-  accentColor = '#3b82f6',
+  accentColor = '#6366f1',
   layout = 'grid',
 }: EndpointSelectorProps) {
   if (endpoints.length === 0) return null
@@ -32,14 +32,14 @@ export function EndpointSelector({
             className={`w-full cursor-pointer rounded-xl border px-4 py-3 text-left transition-all ${
               value === ep.value
                 ? `border-[${accentColor}]/50 bg-[${accentColor}]/10`
-                : 'border-white/10 bg-[#0c1222] hover:border-white/20 hover:bg-[#111827]'
+                : 'border-[rgba(99,102,241,0.12)] bg-[#0b0d17] hover:border-[rgba(99,102,241,0.24)] hover:bg-[#14172b]'
             }`}
             style={value === ep.value ? {
               borderColor: `${accentColor}80`,
               backgroundColor: `${accentColor}15`,
             } : undefined}
           >
-            <span className={`text-sm font-medium ${value === ep.value ? 'text-[#f8fafc]' : 'text-[#94a3b8]'}`}>
+            <span className={`text-sm font-medium ${value === ep.value ? 'text-[#f1f5f9]' : 'text-[#94a3b8]'}`}>
               {ep.label}
             </span>
             {ep.value && (
@@ -48,7 +48,7 @@ export function EndpointSelector({
               </p>
             )}
             {ep.extraModels && ep.extraModels.length > 0 && (
-              <p className="mt-1 text-[10px] text-[#22c55e]">
+              <p className="mt-1 text-[10px] text-[#10b981]">
                 +{ep.extraModels.length} extra models
               </p>
             )}
@@ -67,14 +67,14 @@ export function EndpointSelector({
           className={`cursor-pointer rounded-xl border px-3 py-2.5 text-left transition-all ${
             value === ep.value
               ? `border-[${accentColor}]/50 bg-[${accentColor}]/10`
-              : 'border-white/10 bg-[#0c1222] hover:border-white/20 hover:bg-[#111827]'
+              : 'border-[rgba(99,102,241,0.12)] bg-[#0b0d17] hover:border-[rgba(99,102,241,0.24)] hover:bg-[#14172b]'
           }`}
           style={value === ep.value ? {
             borderColor: `${accentColor}80`,
             backgroundColor: `${accentColor}15`,
           } : undefined}
         >
-          <span className={`text-xs font-medium ${value === ep.value ? 'text-[#f8fafc]' : 'text-[#94a3b8]'}`}>
+          <span className={`text-xs font-medium ${value === ep.value ? 'text-[#f1f5f9]' : 'text-[#94a3b8]'}`}>
             {ep.label}
           </span>
           {ep.value && (

@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -525,6 +526,14 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 
 // writeSSE writes a named SSE event to the response writer.
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, eventType string, data any) {
+	// Filter out silent tokens from SSE text events before sending to the client.
+	if eventType == "text" || eventType == "delta" {
+		if s, ok := data.(string); ok {
+			if s == "NO_REPLY" || s == "HEARTBEAT_OK" || strings.TrimSpace(s) == "" {
+				return // Suppress silent tokens — don't send to client.
+			}
+		}
+	}
 	b, _ := json.Marshal(data)
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", eventType, string(b))
 	flusher.Flush()

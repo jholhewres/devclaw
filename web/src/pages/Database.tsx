@@ -93,18 +93,18 @@ function StatusCard({ label, value, subtext, icon: Icon, status }: {
   status?: 'success' | 'error' | 'neutral'
 }) {
   const statusColors = {
-    success: 'text-[#22c55e]',
-    error: 'text-[#f87171]',
-    neutral: 'text-[#f8fafc]',
+    success: 'text-[#10b981]',
+    error: 'text-[#fb7185]',
+    neutral: 'text-[#f1f5f9]',
   }
 
   return (
-    <div className="rounded-xl border border-white/10 bg-[#111827] p-4">
+    <div className="rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] p-4">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs text-[#64748b] uppercase tracking-wide">{label}</span>
-        {Icon && <Icon className={`h-4 w-4 ${status === 'success' ? 'text-[#22c55e]' : status === 'error' ? 'text-[#f87171]' : 'text-[#64748b]'}`} />}
+        {Icon && <Icon className={`h-4 w-4 ${status === 'success' ? 'text-[#10b981]' : status === 'error' ? 'text-[#fb7185]' : 'text-[#64748b]'}`} />}
       </div>
-      <p className={`text-lg font-semibold ${status ? statusColors[status] : 'text-[#f8fafc]'}`}>
+      <p className={`text-lg font-semibold ${status ? statusColors[status] : 'text-[#f1f5f9]'}`}>
         {value}
       </p>
       {subtext && <p className="text-xs text-[#64748b] mt-1">{subtext}</p>}
@@ -205,7 +205,7 @@ export function DatabasePage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => loadData()}
-            className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-[#111827] px-4 py-3 text-sm font-medium text-[#94a3b8] transition-all hover:border-white/20 hover:text-[#f8fafc]"
+            className="flex cursor-pointer items-center gap-2 rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 py-3 text-sm font-medium text-[#94a3b8] transition-all hover:border-[rgba(99,102,241,0.24)] hover:text-[#f1f5f9]"
           >
             <RefreshCw className="h-4 w-4" />
             {t('database.refresh')}
@@ -257,9 +257,9 @@ export function DatabasePage() {
             />
           </div>
           {status.error && (
-            <div className="mt-4 flex items-start gap-2 rounded-lg bg-[#ef4444]/5 border border-[#ef4444]/10 p-3">
-              <AlertTriangle className="h-4 w-4 text-[#f87171] flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-[#f87171]">{status.error}</p>
+            <div className="mt-4 flex items-start gap-2 rounded-lg bg-[#f43f5e]/5 border border-[#f43f5e]/10 p-3">
+              <AlertTriangle className="h-4 w-4 text-[#fb7185] flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-[#fb7185]">{status.error}</p>
             </div>
           )}
         </ConfigSection>

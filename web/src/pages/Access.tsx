@@ -42,9 +42,9 @@ function ColoredTagList({ tags, onRemove, color = 'blue' }: {
   color?: 'blue' | 'green' | 'red' | 'yellow'
 }) {
   const colorClasses = {
-    blue: 'bg-[#3b82f6]/10 text-[#3b82f6] border-[#3b82f6]/20',
-    green: 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/20',
-    red: 'bg-[#ef4444]/10 text-[#f87171] border-[#ef4444]/20',
+    blue: 'bg-[#6366f1]/10 text-[#6366f1] border-[#6366f1]/20',
+    green: 'bg-[#10b981]/10 text-[#10b981] border-[#10b981]/20',
+    red: 'bg-[#f43f5e]/10 text-[#fb7185] border-[#f43f5e]/20',
     yellow: 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/20',
   }
 
@@ -94,11 +94,11 @@ function AddTagInput({ onAdd, placeholder }: {
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAdd())}
         placeholder={placeholder}
-        className="h-10 flex-1 rounded-lg border border-white/10 bg-[#111827] px-3 text-sm text-[#f8fafc] outline-none transition-all placeholder:text-[#475569] hover:border-white/20 focus:border-[#3b82f6]/50"
+        className="h-10 flex-1 rounded-lg border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-3 text-sm text-[#f1f5f9] outline-none transition-all placeholder:text-[#475569] hover:border-[rgba(99,102,241,0.24)] focus:border-[#6366f1]/50"
       />
       <button
         onClick={handleAdd}
-        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#1e293b] border border-white/10 text-sm text-[#94a3b8] hover:text-[#f8fafc] hover:border-white/20 transition-all cursor-pointer"
+        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#1c1f3a] border border-[rgba(99,102,241,0.12)] text-sm text-[#94a3b8] hover:text-[#f1f5f9] hover:border-[rgba(99,102,241,0.24)] transition-all cursor-pointer"
       >
         <UserPlus className="h-4 w-4" />
         Add
@@ -238,7 +238,7 @@ export function Access() {
         icon={UserCheck}
         title={t('access.owners')}
         description={t('access.ownersDesc')}
-        iconColor="#22c55e"
+        iconColor="#10b981"
       >
         <ColoredTagList tags={config.owners} onRemove={(v) => removeFromArray('owners', v)} color="green" />
         <AddTagInput onAdd={(v) => updateArray('owners', v)} placeholder={t('access.addOwnerPlaceholder')} />
@@ -249,7 +249,7 @@ export function Access() {
         icon={Shield}
         title={t('access.admins')}
         description={t('access.adminsDesc')}
-        iconColor="#3b82f6"
+        iconColor="#6366f1"
       >
         <ColoredTagList tags={config.admins} onRemove={(v) => removeFromArray('admins', v)} color="blue" />
         <AddTagInput onAdd={(v) => updateArray('admins', v)} placeholder={t('access.addAdminPlaceholder')} />
@@ -271,7 +271,7 @@ export function Access() {
         icon={UserX}
         title={t('access.blockedUsers')}
         description={t('access.blockedUsersDesc')}
-        iconColor="#f87171"
+        iconColor="#fb7185"
       >
         <ColoredTagList tags={config.blocked_users} onRemove={(v) => removeFromArray('blocked_users', v)} color="red" />
         <AddTagInput onAdd={(v) => updateArray('blocked_users', v)} placeholder={t('access.addBlockedPlaceholder')} />

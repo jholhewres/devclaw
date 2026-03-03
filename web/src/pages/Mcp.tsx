@@ -149,14 +149,14 @@ export function Mcp() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => loadServers()}
-            className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-[#111827] px-4 py-3 text-sm font-medium text-[#94a3b8] transition-all hover:border-white/20 hover:text-[#f8fafc]"
+            className="flex cursor-pointer items-center gap-2 rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 py-3 text-sm font-medium text-[#94a3b8] transition-all hover:border-[rgba(99,102,241,0.24)] hover:text-[#f1f5f9]"
           >
             <RefreshCw className="h-4 w-4" />
             {t('mcp.refresh')}
           </button>
           <button
             onClick={() => setShowAddForm(!showAddForm)}
-            className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#3b82f6] px-5 py-3 text-sm font-semibold text-white transition-all hover:bg-[#2563eb]"
+            className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#6366f1] px-5 py-3 text-sm font-semibold text-white transition-all hover:bg-[#818cf8]"
           >
             <Plus className="h-4 w-4" />
             {t('mcp.addServer')}
@@ -186,14 +186,14 @@ export function Mcp() {
           <div className="flex gap-3 pt-2">
             <button
               onClick={handleAddServer}
-              className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#22c55e] px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-[#16a34a]"
+              className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#10b981] px-4 py-2.5 text-sm font-semibold text-white transition-all hover:bg-[#16a34a]"
             >
               <Plus className="h-4 w-4" />
               {t('mcp.createServer')}
             </button>
             <button
               onClick={() => setShowAddForm(false)}
-              className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-[#111827] px-4 py-2.5 text-sm font-medium text-[#94a3b8] transition-all hover:border-white/20 hover:text-[#f8fafc]"
+              className="flex cursor-pointer items-center gap-2 rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 py-2.5 text-sm font-medium text-[#94a3b8] transition-all hover:border-[rgba(99,102,241,0.24)] hover:text-[#f1f5f9]"
             >
               {t('common.cancel')}
             </button>
@@ -233,7 +233,7 @@ export function Mcp() {
                     {server.status === 'running' ? (
                       <button
                         onClick={() => handleStopServer(server.name)}
-                        className="flex cursor-pointer items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#ef4444]/10 text-[#f87171] text-xs font-medium hover:bg-[#ef4444]/20 transition-all"
+                        className="flex cursor-pointer items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#f43f5e]/10 text-[#fb7185] text-xs font-medium hover:bg-[#f43f5e]/20 transition-all"
                       >
                         <Square className="h-3.5 w-3.5" />
                         {t('mcp.stop')}
@@ -241,7 +241,7 @@ export function Mcp() {
                     ) : (
                       <button
                         onClick={() => handleStartServer(server.name)}
-                        className="flex cursor-pointer items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#22c55e]/10 text-[#22c55e] text-xs font-medium hover:bg-[#22c55e]/20 transition-all"
+                        className="flex cursor-pointer items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#10b981]/10 text-[#10b981] text-xs font-medium hover:bg-[#10b981]/20 transition-all"
                       >
                         <Play className="h-3.5 w-3.5" />
                         {t('mcp.start')}
@@ -249,7 +249,7 @@ export function Mcp() {
                     )}
                     <button
                       onClick={() => handleDeleteServer(server.name)}
-                      className="flex cursor-pointer items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1e293b] text-[#94a3b8] text-xs font-medium hover:text-[#f87171] transition-all"
+                      className="flex cursor-pointer items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1c1f3a] text-[#94a3b8] text-xs font-medium hover:text-[#fb7185] transition-all"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                       {t('common.delete')}
@@ -258,9 +258,9 @@ export function Mcp() {
                 }
               >
                 {server.error && (
-                  <div className="mb-4 flex items-start gap-2 rounded-lg bg-[#ef4444]/5 border border-[#ef4444]/10 p-3 -mt-2">
-                    <AlertTriangle className="h-4 w-4 text-[#f87171] flex-shrink-0 mt-0.5" />
-                    <p className="text-xs text-[#f87171]">{server.error}</p>
+                  <div className="mb-4 flex items-start gap-2 rounded-lg bg-[#f43f5e]/5 border border-[#f43f5e]/10 p-3 -mt-2">
+                    <AlertTriangle className="h-4 w-4 text-[#fb7185] flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-[#fb7185]">{server.error}</p>
                   </div>
                 )}
                 <ConfigToggle

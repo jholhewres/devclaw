@@ -35,17 +35,17 @@ export function Security() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-        <div className="h-8 w-8 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
+      <div className="flex flex-1 items-center justify-center bg-[#0b0d17]">
+        <div className="h-8 w-8 rounded-full border-4 border-[#1c1f3a] border-t-[#6366f1] animate-spin" />
       </div>
     )
   }
 
   if (loadError) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center bg-[#0c1222]">
-        <p className="text-sm text-[#f87171]">{t('common.error')}</p>
-        <button onClick={() => window.location.reload()} className="mt-3 text-xs text-[#64748b] hover:text-[#f8fafc] transition-colors cursor-pointer">
+      <div className="flex flex-1 flex-col items-center justify-center bg-[#0b0d17]">
+        <p className="text-sm text-[#fb7185]">{t('common.error')}</p>
+        <button onClick={() => window.location.reload()} className="mt-3 text-xs text-[#64748b] hover:text-[#f1f5f9] transition-colors cursor-pointer">
           {t('common.loading')}
         </button>
       </div>
@@ -61,7 +61,7 @@ export function Security() {
       {/* Header */}
       <div>
           <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#475569]">{t('security.subtitle')}</p>
-          <h1 className="mt-1 text-2xl font-bold text-[#f8fafc] tracking-tight">{t('security.title')}</h1>
+          <h1 className="mt-1 text-2xl font-bold text-[#f1f5f9] tracking-tight">{t('security.title')}</h1>
         </div>
 
         {/* Quick status */}
@@ -89,12 +89,12 @@ export function Security() {
 function StatusPill({ label, ok, text }: { label: string; ok: boolean; text: string }) {
   return (
     <div className={`rounded-xl px-3.5 py-2.5 border ${
-      ok ? 'bg-[#111827] border-white/10' : 'bg-[#111827] border-white/5'
+      ok ? 'bg-[#14172b] border-[rgba(99,102,241,0.12)]' : 'bg-[#14172b] border-[rgba(99,102,241,0.06)]'
     }`}>
       <span className="text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">{label}</span>
       <div className="mt-0.5 flex items-center gap-1.5">
-        <span className={`h-1.5 w-1.5 rounded-full ${ok ? 'bg-[#22c55e]' : 'bg-[#475569]'}`} />
-        <span className={`text-xs font-medium ${ok ? 'text-[#f8fafc]' : 'text-[#64748b]'}`}>{text}</span>
+        <span className={`h-1.5 w-1.5 rounded-full ${ok ? 'bg-[#10b981]' : 'bg-[#475569]'}`} />
+        <span className={`text-xs font-medium ${ok ? 'text-[#f1f5f9]' : 'text-[#64748b]'}`}>{text}</span>
       </div>
     </div>
   )
@@ -130,23 +130,23 @@ function Accordion({
   }
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#111827]">
+    <section className="overflow-hidden rounded-2xl border border-[rgba(99,102,241,0.12)] bg-[#14172b]">
       <button
         onClick={toggle}
         aria-expanded={open}
-        className="flex w-full cursor-pointer items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-white/5"
+        className="flex w-full cursor-pointer items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-[rgba(99,102,241,0.08)]"
       >
         <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${iconColor}`}>
           {icon}
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-[#f8fafc]">{title}</h3>
+          <h3 className="text-sm font-semibold text-[#f1f5f9]">{title}</h3>
           <p className="text-[11px] text-[#64748b]">{subtitle}</p>
         </div>
         {badge}
         <ChevronDown className={`h-4 w-4 shrink-0 text-[#64748b] transition-transform ${open ? '' : '-rotate-90'}`} />
       </button>
-      {open && <div className="border-t border-white/10 px-5 py-5">{children}</div>}
+      {open && <div className="border-t border-[rgba(99,102,241,0.12)] px-5 py-5">{children}</div>}
     </section>
   )
 }
@@ -169,10 +169,10 @@ function VaultSection({ exists, unlocked }: { exists: boolean; unlocked: boolean
   const statusBadge = (
     <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
       !exists
-        ? 'bg-[#1e293b] text-[#64748b]'
+        ? 'bg-[#1c1f3a] text-[#64748b]'
         : unlocked
-        ? 'bg-[#22c55e]/20 text-[#22c55e]'
-        : 'bg-[#1e293b] text-[#f59e0b]'
+        ? 'bg-[#10b981]/20 text-[#10b981]'
+        : 'bg-[#1c1f3a] text-[#f59e0b]'
     }`}>
       {!exists ? 'Não configurado' : unlocked ? 'Protegido' : 'Inacessível'}
     </span>
@@ -214,10 +214,10 @@ function VaultSection({ exists, unlocked }: { exists: boolean; unlocked: boolean
               {vault.keys.map((key) => (
                 <div
                   key={key}
-                  className="flex items-center gap-3 rounded-xl bg-[#0c1222] px-4 py-3 border border-white/5"
+                  className="flex items-center gap-3 rounded-xl bg-[#0b0d17] px-4 py-3 border border-[rgba(99,102,241,0.06)]"
                 >
                   <Key className="h-3.5 w-3.5 shrink-0 text-[#a78bfa]" />
-                  <span className="min-w-0 flex-1 truncate font-mono text-sm text-[#f8fafc]">{key}</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-sm text-[#f1f5f9]">{key}</span>
                   <span className="text-xs tracking-widest text-[#475569]">••••••••</span>
                 </div>
               ))}
@@ -278,8 +278,8 @@ function ToolGuardSection({ enabled }: { enabled: boolean }) {
   const statusBadge = (
     <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
       enabled
-        ? 'bg-[#22c55e]/20 text-[#22c55e]'
-        : 'bg-[#1e293b] text-[#64748b]'
+        ? 'bg-[#10b981]/20 text-[#10b981]'
+        : 'bg-[#1c1f3a] text-[#64748b]'
     }`}>
       {enabled ? 'Ativo' : 'Desativado'}
     </span>
@@ -288,7 +288,7 @@ function ToolGuardSection({ enabled }: { enabled: boolean }) {
   return (
     <Accordion
       icon={<Shield className="h-4 w-4 text-[#f59e0b]" />}
-      iconColor="bg-[#1e293b]"
+      iconColor="bg-[#1c1f3a]"
       title="Tool Guard"
       subtitle="Controle de permissões de ferramentas"
       badge={statusBadge}
@@ -365,7 +365,7 @@ function ToolGuardSection({ enabled }: { enabled: boolean }) {
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">Paths protegidos</p>
               <div className="flex flex-wrap gap-1.5">
                 {guard.protected_paths.map((p) => (
-                  <span key={p} className="rounded-lg bg-[#1e293b] px-2.5 py-1 font-mono text-xs text-[#94a3b8]">{p}</span>
+                  <span key={p} className="rounded-lg bg-[#1c1f3a] px-2.5 py-1 font-mono text-xs text-[#94a3b8]">{p}</span>
                 ))}
               </div>
             </div>
@@ -392,7 +392,7 @@ function APIKeysSection({ gatewayConfigured, webuiConfigured }: { gatewayConfigu
       </div>
       <div className="mt-4 flex items-center gap-2 text-[11px] text-[#475569]">
         <span>Altere os tokens em</span>
-        <Link to="/domain" className="inline-flex items-center gap-1 text-[#64748b] hover:text-[#f8fafc] transition-colors">
+        <Link to="/domain" className="inline-flex items-center gap-1 text-[#64748b] hover:text-[#f1f5f9] transition-colors">
           Domínio & Acesso
           <ExternalLink className="h-2.5 w-2.5" />
         </Link>
@@ -403,13 +403,13 @@ function APIKeysSection({ gatewayConfigured, webuiConfigured }: { gatewayConfigu
 
 function AuthRow({ label, hint, configured, warn }: { label: string; hint: string; configured: boolean; warn?: boolean }) {
   return (
-    <div className="flex items-center justify-between rounded-xl bg-[#0c1222] px-4 py-3 border border-white/5">
+    <div className="flex items-center justify-between rounded-xl bg-[#0b0d17] px-4 py-3 border border-[rgba(99,102,241,0.06)]">
       <div>
-        <p className="text-sm font-medium text-[#f8fafc]">{label}</p>
+        <p className="text-sm font-medium text-[#f1f5f9]">{label}</p>
         <p className="text-[11px] text-[#64748b]">{hint}</p>
       </div>
       {configured ? (
-        <span className="flex items-center gap-1.5 text-xs font-medium text-[#22c55e]">
+        <span className="flex items-center gap-1.5 text-xs font-medium text-[#10b981]">
           <CheckCircle2 className="h-3.5 w-3.5" /> Configurado
         </span>
       ) : warn ? (
@@ -443,7 +443,7 @@ function AuditLogSection({ entryCount }: { entryCount: number }) {
   return (
     <Accordion
       icon={<Activity className="h-4 w-4 text-[#64748b]" />}
-      iconColor="bg-[#1e293b]"
+      iconColor="bg-[#1c1f3a]"
       title="Audit Log"
       subtitle={entryCount > 0 ? `${entryCount} registros` : 'Histórico de ações executadas'}
       onOpen={load}
@@ -461,7 +461,7 @@ function AuditLogSection({ entryCount }: { entryCount: number }) {
       ) : (
         <div className="max-h-[380px] overflow-y-auto -mx-5 -mb-5">
           <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-[#111827]">
+            <thead className="sticky top-0 bg-[#14172b]">
               <tr>
                 <th className="px-5 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#475569]">Ferramenta</th>
                 <th className="px-5 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#475569]">Caller</th>
@@ -471,16 +471,16 @@ function AuditLogSection({ entryCount }: { entryCount: number }) {
             </thead>
             <tbody className="divide-y divide-white/5">
               {entries.map((e) => (
-                <tr key={e.id} className="transition-colors hover:bg-white/5">
-                  <td className="px-5 py-2.5 font-mono text-[#f8fafc]">{e.tool}</td>
+                <tr key={e.id} className="transition-colors hover:bg-[rgba(99,102,241,0.08)]">
+                  <td className="px-5 py-2.5 font-mono text-[#f1f5f9]">{e.tool}</td>
                   <td className="px-5 py-2.5 text-[#64748b]">{e.caller || '—'}</td>
                   <td className="px-5 py-2.5">
                     {e.allowed ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#22c55e]">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#10b981]">
                         <CheckCircle2 className="h-3 w-3" /> OK
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#f87171]">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#fb7185]">
                         <XCircle className="h-3 w-3" /> Negado
                       </span>
                     )}
@@ -501,7 +501,7 @@ function AuditLogSection({ entryCount }: { entryCount: number }) {
 function Spinner() {
   return (
     <div className="flex justify-center py-8">
-      <div className="h-6 w-6 rounded-full border-2 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
+      <div className="h-6 w-6 rounded-full border-2 border-[#1c1f3a] border-t-[#6366f1] animate-spin" />
     </div>
   )
 }
@@ -517,7 +517,7 @@ function EmptyState({ icon, title, description }: { icon: React.ReactNode; title
 }
 
 function Code({ children }: { children: React.ReactNode }) {
-  return <code className="rounded bg-[#1e293b] px-1.5 py-0.5 text-[#94a3b8]">{children}</code>
+  return <code className="rounded bg-[#1c1f3a] px-1.5 py-0.5 text-[#94a3b8]">{children}</code>
 }
 
 function PermToggle({
@@ -535,22 +535,22 @@ function PermToggle({
   disabled?: boolean
   color?: 'amber' | 'red'
 }) {
-  const bgActive = color === 'red' ? 'bg-[#ef4444]/10' : 'bg-[#f59e0b]/10'
-  const trackActive = color === 'red' ? 'bg-[#ef4444]' : 'bg-[#f59e0b]'
+  const bgActive = color === 'red' ? 'bg-[#f43f5e]/10' : 'bg-[#f59e0b]/10'
+  const trackActive = color === 'red' ? 'bg-[#f43f5e]' : 'bg-[#f59e0b]'
 
   return (
     <button
       onClick={() => onChange(!enabled)}
       disabled={disabled}
       className={`flex cursor-pointer items-center gap-3 rounded-xl px-3.5 py-3 text-left border transition-all ${
-        enabled ? `${bgActive} border-white/10` : 'border-white/5 bg-[#0c1222] hover:border-white/10'
+        enabled ? `${bgActive} border-[rgba(99,102,241,0.12)]` : 'border-[rgba(99,102,241,0.06)] bg-[#0b0d17] hover:border-[rgba(99,102,241,0.12)]'
       } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold text-[#f8fafc]">{label}</p>
+        <p className="text-xs font-semibold text-[#f1f5f9]">{label}</p>
         <p className="text-[10px] text-[#64748b]">{hint}</p>
       </div>
-      <div className={`inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${enabled ? trackActive : 'bg-[#1e293b]'}`}>
+      <div className={`inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${enabled ? trackActive : 'bg-[#1c1f3a]'}`}>
         <div className={`h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${enabled ? 'translate-x-[18px]' : 'translate-x-0.5'}`} />
       </div>
     </button>
@@ -578,17 +578,17 @@ function TagList({
 }) {
   const tagClass = color === 'amber'
     ? 'bg-[#f59e0b]/10 text-[#f59e0b]'
-    : 'bg-[#22c55e]/10 text-[#22c55e]'
+    : 'bg-[#10b981]/10 text-[#10b981]'
 
   return (
-    <div className="rounded-xl bg-[#0c1222] px-4 py-3 border border-white/5">
+    <div className="rounded-xl bg-[#0b0d17] px-4 py-3 border border-[rgba(99,102,241,0.06)]">
       <p className="text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">{label}</p>
       {hint && <p className="mt-0.5 text-[10px] text-[#475569]">{hint}</p>}
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {items.map((t) => (
           <span key={t} className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-mono text-xs ${tagClass}`}>
             {t}
-            <button onClick={() => onRemove(t)} className="cursor-pointer transition-colors hover:text-[#f87171]">
+            <button onClick={() => onRemove(t)} className="cursor-pointer transition-colors hover:text-[#fb7185]">
               <X className="h-3 w-3" />
             </button>
           </span>

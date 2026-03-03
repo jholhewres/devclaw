@@ -40,8 +40,8 @@ export function Channels() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-        <div className="h-8 w-8 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
+      <div className="flex flex-1 items-center justify-center bg-[#0b0d17]">
+        <div className="h-8 w-8 rounded-full border-4 border-[#1c1f3a] border-t-[#6366f1] animate-spin" />
       </div>
     )
   }
@@ -50,7 +50,7 @@ export function Channels() {
     <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
       <div>
         <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#475569]">{t('channels.subtitle')}</p>
-        <h1 className="mt-1 text-2xl font-bold text-[#f8fafc] tracking-tight">{t('channels.title')}</h1>
+        <h1 className="mt-1 text-2xl font-bold text-[#f1f5f9] tracking-tight">{t('channels.title')}</h1>
         <p className="mt-2 text-sm text-[#64748b]">
           Conecte canais de comunicação para enviar e receber mensagens
         </p>
@@ -78,22 +78,22 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
     <div className={cn(
       'rounded-2xl p-6 border transition-all',
       connected
-        ? 'bg-[#111827] border-[#22c55e]/20'
-        : 'bg-[#111827] border-white/10'
+        ? 'bg-[#14172b] border-[#10b981]/20'
+        : 'bg-[#14172b] border-[rgba(99,102,241,0.12)]'
     )}>
       <div className="flex items-start gap-4">
         {/* Icon */}
         <div className={cn(
           'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl transition-colors',
-          connected ? 'bg-[#22c55e]/10' : 'bg-[#1e293b]'
+          connected ? 'bg-[#10b981]/10' : 'bg-[#1c1f3a]'
         )}>
-          <WhatsAppIcon className={cn('h-6 w-6', connected ? 'text-[#22c55e]' : 'text-[#64748b]')} />
+          <WhatsAppIcon className={cn('h-6 w-6', connected ? 'text-[#10b981]' : 'text-[#64748b]')} />
         </div>
 
         {/* Content */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
-            <h3 className="text-base font-semibold text-[#f8fafc]">WhatsApp</h3>
+            <h3 className="text-base font-semibold text-[#f1f5f9]">WhatsApp</h3>
             <StatusBadge connected={connected} />
           </div>
 
@@ -112,8 +112,8 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
               className={cn(
                 'flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all',
                 connected
-                  ? 'bg-[#1e293b] text-[#94a3b8] border border-white/10 hover:bg-[#334155] hover:text-[#f8fafc]'
-                  : 'bg-[#3b82f6] text-white hover:bg-[#2563eb]'
+                  ? 'bg-[#1c1f3a] text-[#94a3b8] border border-[rgba(99,102,241,0.12)] hover:bg-[#242850] hover:text-[#f1f5f9]'
+                  : 'bg-[#6366f1] text-white hover:bg-[#818cf8]'
               )}
             >
               {connected ? (
@@ -161,17 +161,17 @@ function ChannelCard({ channel }: { channel: ChannelHealth }) {
     <div className={cn(
       'rounded-xl p-5 border transition-all',
       connected
-        ? 'bg-[#111827] border-white/10'
-        : 'bg-[#111827]/50 border-white/5'
+        ? 'bg-[#14172b] border-[rgba(99,102,241,0.12)]'
+        : 'bg-[#14172b]/50 border-[rgba(99,102,241,0.06)]'
     )}>
       <div className="flex items-center gap-4">
         {/* Icon */}
         <div className={cn(
           'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors',
-          connected ? 'bg-[#1e293b]' : 'bg-[#1e293b]/50'
+          connected ? 'bg-[#1c1f3a]' : 'bg-[#1c1f3a]/50'
         )}>
           {connected ? (
-            <Wifi className="h-5 w-5 text-[#22c55e]" />
+            <Wifi className="h-5 w-5 text-[#10b981]" />
           ) : (
             <WifiOff className="h-5 w-5 text-[#475569]" />
           )}
@@ -180,7 +180,7 @@ function ChannelCard({ channel }: { channel: ChannelHealth }) {
         {/* Content */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
-            <h3 className="text-sm font-semibold text-[#f8fafc]">{config.name}</h3>
+            <h3 className="text-sm font-semibold text-[#f1f5f9]">{config.name}</h3>
             <StatusBadge connected={connected} small />
           </div>
           <p className="mt-0.5 text-xs text-[#64748b]">
@@ -216,18 +216,18 @@ function ChannelCard({ channel }: { channel: ChannelHealth }) {
 
 function EmptyChannels() {
   return (
-    <div className="mt-8 rounded-2xl border border-white/10 bg-[#111827] p-8">
+    <div className="mt-8 rounded-2xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] p-8">
       <div className="flex flex-col items-center text-center">
-        <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-[#1e293b]">
+        <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-[#1c1f3a]">
           <Radio className="h-7 w-7 text-[#64748b]" />
         </div>
-        <h3 className="mt-4 text-base font-semibold text-[#f8fafc]">Nenhum canal configurado</h3>
+        <h3 className="mt-4 text-base font-semibold text-[#f1f5f9]">Nenhum canal configurado</h3>
         <p className="mt-2 max-w-md text-sm text-[#64748b]">
           Canais permitem que o DevClaw envie e receba mensagens via WhatsApp, Discord, Telegram e Slack.
         </p>
       </div>
 
-      <div className="mt-6 mx-auto max-w-md rounded-xl bg-[#0c1222] border border-white/10 p-4">
+      <div className="mt-6 mx-auto max-w-md rounded-xl bg-[#0b0d17] border border-[rgba(99,102,241,0.12)] p-4">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-[#475569]">Exemplo em config.yaml</p>
         <pre className="mt-3 overflow-x-auto font-mono text-xs leading-relaxed text-[#94a3b8]">
 {`channels:
@@ -245,7 +245,7 @@ function EmptyChannels() {
           <MessageCircle className="h-3.5 w-3.5" />
           WhatsApp, Discord, Telegram, Slack
         </span>
-        <span className="h-3 w-px bg-white/10" />
+        <span className="h-3 w-px bg-[rgba(99,102,241,0.12)]" />
         <span>Tokens são armazenados no vault</span>
       </div>
     </div>
@@ -262,7 +262,7 @@ function StatusBadge({ connected, small = false }: { connected: boolean; small?:
         ? 'px-2 py-0.5 text-[10px]'
         : 'px-2.5 py-1 text-[11px]',
       connected
-        ? 'bg-[#22c55e]/10 text-[#22c55e]'
+        ? 'bg-[#10b981]/10 text-[#10b981]'
         : 'bg-[#475569]/20 text-[#64748b]'
     )}>
       {connected ? (

@@ -41,7 +41,7 @@ const ACTIONS = [
 // Progress bar component
 function ProgressBar({ percent, color }: { percent: number; color: string }) {
   return (
-    <div className="h-3 rounded-full bg-[#1e293b] overflow-hidden">
+    <div className="h-3 rounded-full bg-[#1c1f3a] overflow-hidden">
       <div
         className="h-full rounded-full transition-all duration-500"
         style={{ width: `${percent}%`, backgroundColor: color }}
@@ -53,9 +53,9 @@ function ProgressBar({ percent, color }: { percent: number; color: string }) {
 // Stat card component
 function StatCard({ label, value, prefix = '' }: { label: string; value: string | number; prefix?: string }) {
   return (
-    <div className="p-4 rounded-xl bg-[#1e293b]/50">
+    <div className="p-4 rounded-xl bg-[#1c1f3a]/50">
       <p className="text-xs text-[#64748b] uppercase tracking-wide">{label}</p>
-      <p className="text-xl font-semibold text-[#f8fafc] mt-1">
+      <p className="text-xl font-semibold text-[#f1f5f9] mt-1">
         {prefix}{typeof value === 'number' ? value.toLocaleString() : value}
       </p>
     </div>
@@ -128,9 +128,9 @@ export function Budget() {
 
   const getUsageColor = () => {
     const percent = getUsagePercent()
-    if (percent >= 100) return '#ef4444'
+    if (percent >= 100) return '#f43f5e'
     if (percent >= (config?.warn_at_percent || 80)) return '#f59e0b'
-    return '#22c55e'
+    return '#10b981'
   }
 
   if (loading) return <LoadingSpinner />
@@ -177,7 +177,7 @@ export function Budget() {
             <div className="flex justify-between items-center mt-2">
               <span className="text-xs text-[#64748b]">{usagePercent.toFixed(1)}%</span>
               {isOverBudget && (
-                <span className="text-xs text-[#f87171] flex items-center gap-1">
+                <span className="text-xs text-[#fb7185] flex items-center gap-1">
                   <AlertTriangle className="h-3 w-3" />
                   {t('budget.overBudget')}
                 </span>
@@ -245,7 +245,7 @@ export function Budget() {
         actions={
           <div className="text-right">
             <p className="text-xs text-[#64748b]">{t('budget.remainingBudget')}</p>
-            <p className="text-sm font-medium text-[#f8fafc]">
+            <p className="text-sm font-medium text-[#f1f5f9]">
               ${Math.max(0, config.monthly_limit_usd - (usage?.total_cost || 0)).toFixed(2)}
             </p>
           </div>
@@ -253,10 +253,10 @@ export function Budget() {
       >
         <p className={`text-sm ${
           isOverBudget
-            ? 'text-[#f87171]'
+            ? 'text-[#fb7185]'
             : usagePercent >= (config.warn_at_percent || 80)
               ? 'text-[#f59e0b]'
-              : 'text-[#22c55e]'
+              : 'text-[#10b981]'
         }`}>
           {isOverBudget
             ? t('budget.statusOver')

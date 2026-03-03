@@ -37,7 +37,7 @@ export function ProviderCard({
       className={`relative flex flex-col items-center justify-center rounded-xl border transition-all cursor-pointer ${sizeClasses} ${
         isSelected
           ? `border-[${color}]/50 bg-[${color}]/10`
-          : 'border-white/10 bg-[#0c1222] hover:border-white/20 hover:bg-[#111827]'
+          : 'border-[rgba(99,102,241,0.12)] bg-[#0b0d17] hover:border-[rgba(99,102,241,0.24)] hover:bg-[#14172b]'
       }`}
       style={isSelected ? {
         borderColor: `${color}80`,
@@ -61,7 +61,7 @@ export function ProviderCard({
       </div>
 
       <span
-        className={`font-medium ${size === 'sm' ? 'text-[10px]' : 'text-sm'} ${isSelected ? 'text-[#f8fafc]' : 'text-[#94a3b8]'}`}
+        className={`font-medium ${size === 'sm' ? 'text-[10px]' : 'text-sm'} ${isSelected ? 'text-[#f1f5f9]' : 'text-[#94a3b8]'}`}
       >
         {provider.label}
       </span>
@@ -93,7 +93,7 @@ export function ProviderCardCompact({
       className={`flex cursor-pointer flex-col items-center gap-1 rounded-xl border px-2 py-2.5 text-center transition-all ${
         isSelected
           ? `border-[${color}]/50 bg-[${color}]/10`
-          : 'border-white/10 bg-[#0c1222] hover:border-white/20 hover:bg-[#111827]'
+          : 'border-[rgba(99,102,241,0.12)] bg-[#0b0d17] hover:border-[rgba(99,102,241,0.24)] hover:bg-[#14172b]'
       }`}
       style={isSelected ? {
         borderColor: `${color}80`,
@@ -104,7 +104,7 @@ export function ProviderCardCompact({
       <div className={isSelected ? `text-[${color}]` : 'text-[#64748b]'} style={isSelected ? { color } : undefined}>
         {icon}
       </div>
-      <span className={`text-[10px] font-medium ${isSelected ? 'text-[#f8fafc]' : 'text-[#94a3b8]'}`}>
+      <span className={`text-[10px] font-medium ${isSelected ? 'text-[#f1f5f9]' : 'text-[#94a3b8]'}`}>
         {provider.label}
       </span>
     </button>

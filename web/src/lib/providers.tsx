@@ -183,7 +183,7 @@ export const PROVIDERS: ProviderDef[] = [
     isFree: true,
     freeUrl: 'https://cloud.cerebras.ai',
     freeNote: '1M tokens/day, 30 req/min',
-    color: '#22c55e',
+    color: '#10b981',
   },
   {
     value: 'mistral',
@@ -330,7 +330,7 @@ export const PROVIDERS: ProviderDef[] = [
     customBaseUrl: true,
     freeUrl: 'https://github.com/vllm-project/vllm',
     freeNote: 'Self-hosted, GPU required',
-    color: '#ef4444',
+    color: '#f43f5e',
   },
   {
     value: 'custom',
@@ -423,17 +423,17 @@ export function getProviderColor(value: string): string {
 export const PROVIDER_CATEGORIES = {
   free: {
     label: 'Free Providers',
-    borderColor: 'border-[#22c55e]/50',
-    bgColor: 'bg-[#22c55e]/10',
-    textColor: 'text-[#22c55e]',
-    accentColor: '#22c55e',
+    borderColor: 'border-[#10b981]/50',
+    bgColor: 'bg-[#10b981]/10',
+    textColor: 'text-[#10b981]',
+    accentColor: '#10b981',
   },
   paid: {
     label: 'Paid Providers',
-    borderColor: 'border-[#3b82f6]/50',
-    bgColor: 'bg-[#3b82f6]/10',
-    textColor: 'text-[#3b82f6]',
-    accentColor: '#3b82f6',
+    borderColor: 'border-[#6366f1]/50',
+    bgColor: 'bg-[#6366f1]/10',
+    textColor: 'text-[#6366f1]',
+    accentColor: '#6366f1',
   },
   local: {
     label: 'Local / Self-Hosted',

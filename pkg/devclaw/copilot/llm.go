@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -2339,7 +2340,7 @@ func (c *LLMClient) CompleteWithFallbackUsingModel(ctx context.Context, modelOve
 				break
 			}
 
-			// Compute backoff: min(initial * 2^attempt, maxBackoff)
+			// Compute backoff: min(initial * 2^attempt, maxBackoff) with ±25% jitter.
 			backoff := initialBackoff
 			for i := 0; i < attempt; i++ {
 				backoff *= 2
@@ -2348,6 +2349,9 @@ func (c *LLMClient) CompleteWithFallbackUsingModel(ctx context.Context, modelOve
 					break
 				}
 			}
+			// Apply ±25% jitter to prevent thundering herd.
+			jitter := time.Duration(float64(backoff) * (0.75 + rand.Float64()*0.5))
+			backoff = jitter
 
 			// Respect Retry-After header for 429
 			retryAfter := backoff

@@ -142,8 +142,8 @@ export function AuthProfiles() {
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-        <div className="h-8 w-8 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
+      <div className="flex flex-1 items-center justify-center bg-[#0b0d17]">
+        <div className="h-8 w-8 rounded-full border-4 border-[#1c1f3a] border-t-[#6366f1] animate-spin" />
       </div>
     )
   }
@@ -156,13 +156,13 @@ export function AuthProfiles() {
           <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#475569]">
             {t('authProfiles.subtitle')}
           </p>
-          <h1 className="mt-1 text-2xl font-bold text-[#f8fafc] tracking-tight">
+          <h1 className="mt-1 text-2xl font-bold text-[#f1f5f9] tracking-tight">
             {t('authProfiles.title')}
           </h1>
         </div>
         <button
           onClick={() => setIsCreating(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded-lg transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-[#6366f1] hover:bg-[#818cf8] text-white rounded-lg transition-colors"
         >
           <Plus className="h-4 w-4" />
           {t('authProfiles.addProfile')}
@@ -170,12 +170,12 @@ export function AuthProfiles() {
       </div>
 
       {error && (
-        <div className="mt-4 p-3 bg-[#dc2626]/10 border border-[#dc2626]/30 rounded-lg flex items-center gap-2 text-[#f87171]">
+        <div className="mt-4 p-3 bg-[#dc2626]/10 border border-[#dc2626]/30 rounded-lg flex items-center gap-2 text-[#fb7185]">
           <AlertCircle className="h-4 w-4" />
           <span className="text-sm">{error}</span>
           <button
             onClick={() => setError(null)}
-            className="ml-auto text-[#f87171] hover:text-white"
+            className="ml-auto text-[#fb7185] hover:text-white"
           >
             <X className="h-4 w-4" />
           </button>
@@ -184,8 +184,8 @@ export function AuthProfiles() {
 
       {/* Create Profile Form */}
       {isCreating && (
-        <div className="mt-6 p-6 bg-[#1e293b] rounded-xl border border-[#334155]">
-          <h3 className="text-lg font-semibold text-[#f8fafc] mb-4">
+        <div className="mt-6 p-6 bg-[#1c1f3a] rounded-xl border border-[#242850]">
+          <h3 className="text-lg font-semibold text-[#f1f5f9] mb-4">
             {t('authProfiles.createProfile')}
           </h3>
           <form onSubmit={handleCreate} className="space-y-4">
@@ -199,7 +199,7 @@ export function AuthProfiles() {
                   onChange={(e) =>
                     setFormData({ ...formData, provider: e.target.value })
                   }
-                  className="w-full px-3 py-2 bg-[#0f172a] border border-[#334155] rounded-lg text-[#f8fafc] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]"
+                  className="w-full px-3 py-2 bg-[#0f172a] border border-[#242850] rounded-lg text-[#f1f5f9] focus:outline-none focus:ring-2 focus:ring-[#6366f1]"
                   required
                 >
                   <option value="">{t('authProfiles.selectProvider')}</option>
@@ -221,7 +221,7 @@ export function AuthProfiles() {
                     setFormData({ ...formData, name: e.target.value })
                   }
                   placeholder={t('authProfiles.namePlaceholder')}
-                  className="w-full px-3 py-2 bg-[#0f172a] border border-[#334155] rounded-lg text-[#f8fafc] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]"
+                  className="w-full px-3 py-2 bg-[#0f172a] border border-[#242850] rounded-lg text-[#f1f5f9] focus:outline-none focus:ring-2 focus:ring-[#6366f1]"
                   required
                 />
               </div>
@@ -240,7 +240,7 @@ export function AuthProfiles() {
                       mode: e.target.value as 'api_key' | 'oauth' | 'token',
                     })
                   }
-                  className="w-full px-3 py-2 bg-[#0f172a] border border-[#334155] rounded-lg text-[#f8fafc] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]"
+                  className="w-full px-3 py-2 bg-[#0f172a] border border-[#242850] rounded-lg text-[#f1f5f9] focus:outline-none focus:ring-2 focus:ring-[#6366f1]"
                 >
                   <option value="api_key">{t('authProfiles.modeApiKey')}</option>
                   <option value="oauth">{t('authProfiles.modeOAuth')}</option>
@@ -260,7 +260,7 @@ export function AuthProfiles() {
                       priority: parseInt(e.target.value) || 0,
                     })
                   }
-                  className="w-full px-3 py-2 bg-[#0f172a] border border-[#334155] rounded-lg text-[#f8fafc] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]"
+                  className="w-full px-3 py-2 bg-[#0f172a] border border-[#242850] rounded-lg text-[#f1f5f9] focus:outline-none focus:ring-2 focus:ring-[#6366f1]"
                 />
               </div>
             </div>
@@ -277,7 +277,7 @@ export function AuthProfiles() {
                     setFormData({ ...formData, api_key: e.target.value })
                   }
                   placeholder={t('authProfiles.apiKeyPlaceholder')}
-                  className="w-full px-3 py-2 bg-[#0f172a] border border-[#334155] rounded-lg text-[#f8fafc] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]"
+                  className="w-full px-3 py-2 bg-[#0f172a] border border-[#242850] rounded-lg text-[#f1f5f9] focus:outline-none focus:ring-2 focus:ring-[#6366f1]"
                 />
               </div>
             )}
@@ -294,13 +294,13 @@ export function AuthProfiles() {
                     setFormData({ ...formData, token: e.target.value })
                   }
                   placeholder={t('authProfiles.tokenPlaceholder')}
-                  className="w-full px-3 py-2 bg-[#0f172a] border border-[#334155] rounded-lg text-[#f8fafc] focus:outline-none focus:ring-2 focus:ring-[#3b82f6]"
+                  className="w-full px-3 py-2 bg-[#0f172a] border border-[#242850] rounded-lg text-[#f1f5f9] focus:outline-none focus:ring-2 focus:ring-[#6366f1]"
                 />
               </div>
             )}
 
             {formData.mode === 'oauth' && (
-              <div className="p-3 bg-[#0f172a] rounded-lg border border-[#334155]">
+              <div className="p-3 bg-[#0f172a] rounded-lg border border-[#242850]">
                 <p className="text-sm text-[#94a3b8]">
                   {t('authProfiles.oauthNote')}
                 </p>
@@ -310,7 +310,7 @@ export function AuthProfiles() {
             <div className="flex gap-3 pt-2">
               <button
                 type="submit"
-                className="flex items-center gap-2 px-4 py-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded-lg transition-colors"
+                className="flex items-center gap-2 px-4 py-2 bg-[#6366f1] hover:bg-[#818cf8] text-white rounded-lg transition-colors"
               >
                 <Save className="h-4 w-4" />
                 {t('common.save')}
@@ -318,7 +318,7 @@ export function AuthProfiles() {
               <button
                 type="button"
                 onClick={() => setIsCreating(false)}
-                className="px-4 py-2 bg-[#334155] hover:bg-[#475569] text-[#f8fafc] rounded-lg transition-colors"
+                className="px-4 py-2 bg-[#242850] hover:bg-[#475569] text-[#f1f5f9] rounded-lg transition-colors"
               >
                 {t('common.cancel')}
               </button>
@@ -330,7 +330,7 @@ export function AuthProfiles() {
       {/* Profiles List */}
       <div className="mt-6 space-y-3">
         {profiles.length === 0 ? (
-          <div className="p-8 text-center bg-[#1e293b] rounded-xl border border-[#334155]">
+          <div className="p-8 text-center bg-[#1c1f3a] rounded-xl border border-[#242850]">
             <Key className="h-12 w-12 mx-auto text-[#475569] mb-3" />
             <p className="text-[#94a3b8]">{t('authProfiles.noProfiles')}</p>
             <p className="mt-1 text-sm text-[#64748b]">
@@ -341,7 +341,7 @@ export function AuthProfiles() {
           profiles.map((profile) => (
             <div
               key={profile.id}
-              className="bg-[#1e293b] rounded-xl border border-[#334155] overflow-hidden"
+              className="bg-[#1c1f3a] rounded-xl border border-[#242850] overflow-hidden"
             >
               <div
                 className="p-4 flex items-center gap-4 cursor-pointer hover:bg-[#252f47] transition-colors"
@@ -351,11 +351,11 @@ export function AuthProfiles() {
                   )
                 }
               >
-                <div className="text-[#60a5fa]">{getProviderIcon(profile.provider)}</div>
+                <div className="text-[#a5b4fc]">{getProviderIcon(profile.provider)}</div>
 
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium text-[#f8fafc]">
+                    <span className="font-medium text-[#f1f5f9]">
                       {getProviderLabel(profile.provider)}
                     </span>
                     <span className="text-[#64748b]">/</span>
@@ -368,8 +368,8 @@ export function AuthProfiles() {
                     <span
                       className={`text-xs px-2 py-0.5 rounded-full ${
                         profile.enabled
-                          ? 'bg-[#22c55e]/20 text-[#4ade80]'
-                          : 'bg-[#ef4444]/20 text-[#f87171]'
+                          ? 'bg-[#10b981]/20 text-[#4ade80]'
+                          : 'bg-[#f43f5e]/20 text-[#fb7185]'
                       }`}
                     >
                       {profile.enabled ? t('common.enabled') : t('common.disabled')}
@@ -378,12 +378,12 @@ export function AuthProfiles() {
                       {profile.mode}
                     </span>
                     {profile.valid ? (
-                      <CheckCircle2 className="h-3.5 w-3.5 text-[#22c55e]" />
+                      <CheckCircle2 className="h-3.5 w-3.5 text-[#10b981]" />
                     ) : (
-                      <XCircle className="h-3.5 w-3.5 text-[#ef4444]" />
+                      <XCircle className="h-3.5 w-3.5 text-[#f43f5e]" />
                     )}
                     {profile.expired && (
-                      <span className="text-xs text-[#f87171]">
+                      <span className="text-xs text-[#fb7185]">
                         {t('authProfiles.expired')}
                       </span>
                     )}
@@ -398,8 +398,8 @@ export function AuthProfiles() {
                     }}
                     className={`p-2 rounded-lg transition-colors ${
                       profile.enabled
-                        ? 'text-[#22c55e] hover:bg-[#22c55e]/10'
-                        : 'text-[#64748b] hover:text-[#f8fafc] hover:bg-[#334155]'
+                        ? 'text-[#10b981] hover:bg-[#10b981]/10'
+                        : 'text-[#64748b] hover:text-[#f1f5f9] hover:bg-[#242850]'
                     }`}
                     title={profile.enabled ? t('common.disable') : t('common.enable')}
                   >
@@ -415,7 +415,7 @@ export function AuthProfiles() {
                       e.stopPropagation()
                       handleTest(profile.id)
                     }}
-                    className="p-2 text-[#3b82f6] hover:bg-[#3b82f6]/10 rounded-lg transition-colors"
+                    className="p-2 text-[#6366f1] hover:bg-[#6366f1]/10 rounded-lg transition-colors"
                     title={t('authProfiles.test')}
                   >
                     <RefreshCw className="h-4 w-4" />
@@ -426,7 +426,7 @@ export function AuthProfiles() {
                       e.stopPropagation()
                       handleDelete(profile.id)
                     }}
-                    className="p-2 text-[#ef4444] hover:bg-[#ef4444]/10 rounded-lg transition-colors"
+                    className="p-2 text-[#f43f5e] hover:bg-[#f43f5e]/10 rounded-lg transition-colors"
                     title={t('common.delete')}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -441,7 +441,7 @@ export function AuthProfiles() {
               </div>
 
               {expandedProfile === profile.id && (
-                <div className="px-4 pb-4 border-t border-[#334155] bg-[#0f172a]/50">
+                <div className="px-4 pb-4 border-t border-[#242850] bg-[#0f172a]/50">
                   <div className="pt-4 space-y-3">
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div>
@@ -476,7 +476,7 @@ export function AuthProfiles() {
 
                     {profile.last_error && (
                       <div className="p-3 bg-[#dc2626]/10 border border-[#dc2626]/30 rounded-lg">
-                        <p className="text-sm text-[#f87171]">
+                        <p className="text-sm text-[#fb7185]">
                           <span className="font-medium">{t('authProfiles.lastError')}:</span>{' '}
                           {profile.last_error}
                         </p>
@@ -511,7 +511,7 @@ export function AuthProfiles() {
                               setError(err instanceof Error ? err.message : 'Failed to start OAuth')
                             }
                           }}
-                          className="flex items-center gap-2 px-3 py-2 bg-[#3b82f6] hover:bg-[#2563eb] text-white text-sm rounded-lg transition-colors"
+                          className="flex items-center gap-2 px-3 py-2 bg-[#6366f1] hover:bg-[#818cf8] text-white text-sm rounded-lg transition-colors"
                         >
                           <ExternalLink className="h-4 w-4" />
                           {t('authProfiles.connectOAuth')}

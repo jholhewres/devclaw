@@ -344,9 +344,10 @@ func (d *ToolLoopDetector) RecordAndCheck(toolName string, args map[string]any) 
 		d.destructiveStreak = 0
 	}
 
-	// 3. Check generic repeat and ping-pong patterns.
+	// 3. Check generic repeat, ping-pong, and N-cycle patterns.
 	repeatStreak := d.getRepeatStreak(hash)
 	pingPongStreak := d.getPingPongStreak(hash)
+	cycleStreak, cycleLen := d.getCycleStreak(hash)
 
 	// Use the worst streak.
 	streak := repeatStreak
@@ -354,6 +355,10 @@ func (d *ToolLoopDetector) RecordAndCheck(toolName string, args map[string]any) 
 	if pingPongStreak > streak {
 		streak = pingPongStreak
 		pattern = "ping-pong"
+	}
+	if cycleStreak > streak {
+		streak = cycleStreak
+		pattern = fmt.Sprintf("%d-cycle", cycleLen)
 	}
 
 	if streak >= d.config.CircuitBreakerThreshold {
@@ -497,6 +502,56 @@ func hashToolCall(name string, args map[string]any) string {
 
 	h := sha256.Sum256([]byte(key))
 	return fmt.Sprintf("%x", h[:8])
+}
+
+// getCycleStreak detects repeating N-cycle patterns (A→B→C→A→B→C→...) for
+// cycle lengths 3, 4, and 5. Returns the number of full cycle repetitions and
+// the cycle length. This catches cases where the agent rotates through multiple
+// tools without making progress.
+func (d *ToolLoopDetector) getCycleStreak(currentHash string) (int, int) {
+	if len(d.history) < 6 { // Need at least 2 cycles of length 3
+		return 0, 0
+	}
+
+	bestStreak := 0
+	bestLen := 0
+
+	for cycleLen := 3; cycleLen <= 5; cycleLen++ {
+		if len(d.history) < cycleLen*2 {
+			continue
+		}
+
+		// Extract the last cycleLen hashes as the candidate pattern.
+		patternStart := len(d.history) - cycleLen
+		pattern := make([]string, cycleLen)
+		for i := 0; i < cycleLen; i++ {
+			pattern[i] = d.history[patternStart+i].hash
+		}
+
+		// Walk backward in chunks of cycleLen to count how many times
+		// the same pattern repeats.
+		cycles := 1
+		for pos := patternStart - cycleLen; pos >= 0; pos -= cycleLen {
+			match := true
+			for i := 0; i < cycleLen; i++ {
+				if pos+i >= len(d.history) || d.history[pos+i].hash != pattern[i] {
+					match = false
+					break
+				}
+			}
+			if !match {
+				break
+			}
+			cycles++
+		}
+
+		if cycles >= 2 && cycles > bestStreak {
+			bestStreak = cycles
+			bestLen = cycleLen
+		}
+	}
+
+	return bestStreak, bestLen
 }
 
 // hashOutput creates a hash of tool output for progress tracking.
