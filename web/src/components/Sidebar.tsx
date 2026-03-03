@@ -122,9 +122,9 @@ function SidebarTooltip({ children, label, show }: { children: React.ReactNode; 
       {children}
       {show && isHovered && (
         <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 z-50 pointer-events-none">
-          <div className="bg-[#1e293b] text-[#f8fafc] text-xs font-medium px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg animate-fade-in border border-white/10">
+          <div className="bg-[#1c1f3a] text-[#f1f5f9] text-xs font-medium px-3 py-1.5 rounded-lg whitespace-nowrap shadow-lg animate-fade-in border border-[rgba(99,102,241,0.15)]">
             {label}
-            <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1e293b]" />
+            <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-[#1c1f3a]" />
           </div>
         </div>
       )}
@@ -194,24 +194,24 @@ export function Sidebar({ compact, setCompact }: SidebarProps) {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed top-0 left-0 z-50 h-screen bg-[#111827] border-r transition-all duration-300 flex flex-col',
+          'fixed top-0 left-0 z-50 h-screen bg-[#0f1124] border-r transition-all duration-300 flex flex-col',
           isMobileOpen ? 'w-64' : compact ? 'w-20' : 'w-64',
           isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         )}
-        style={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}
+        style={{ borderColor: 'rgba(99, 102, 241, 0.08)' }}
       >
         {/* Header com Logo */}
-        <div className="flex items-center justify-between h-16 px-4" style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
+        <div className="flex items-center justify-between h-16 px-4" style={{ borderBottom: '1px solid rgba(99, 102, 241, 0.08)' }}>
           {(isMobileOpen || !compact) ? (
             <button
               onClick={() => navigate('/')}
               className="flex items-center gap-2.5"
             >
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#3b82f6]">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-brand">
                 <Terminal className="h-4 w-4 text-white" />
               </div>
-              <span className="text-sm font-semibold text-[#f8fafc]">
-                Dev<span className="text-[#64748b]">Claw</span>
+              <span className="text-sm font-semibold gradient-text">
+                DevClaw
               </span>
             </button>
           ) : (
@@ -219,7 +219,7 @@ export function Sidebar({ compact, setCompact }: SidebarProps) {
               onClick={() => navigate('/')}
               className="flex items-center justify-center w-full"
             >
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#3b82f6]">
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-brand">
                 <Terminal className="h-4 w-4 text-white" />
               </div>
             </button>
@@ -227,7 +227,7 @@ export function Sidebar({ compact, setCompact }: SidebarProps) {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setCompact(!compact)}
-              className="hidden lg:flex items-center justify-center w-9 h-9 rounded-lg hover:bg-[#1e293b] transition-all text-[#64748b] hover:text-[#f8fafc] group"
+              className="hidden lg:flex items-center justify-center w-9 h-9 rounded-lg hover:bg-[rgba(99,102,241,0.08)] transition-all text-[#64748b] hover:text-[#f1f5f9] group"
               title={compact ? t('sidebar.expandMenu') : t('sidebar.collapseMenu')}
             >
               {compact ? (
@@ -238,7 +238,7 @@ export function Sidebar({ compact, setCompact }: SidebarProps) {
             </button>
             <button
               onClick={() => setIsMobileOpen(false)}
-              className="lg:hidden flex items-center justify-center w-9 h-9 rounded-lg hover:bg-[#1e293b] transition-colors text-[#64748b]"
+              className="lg:hidden flex items-center justify-center w-9 h-9 rounded-lg hover:bg-[rgba(99,102,241,0.08)] transition-colors text-[#64748b]"
             >
               <X className="w-5 h-5" />
             </button>
@@ -258,7 +258,7 @@ export function Sidebar({ compact, setCompact }: SidebarProps) {
               )}
               {!showFullText && (
                 <div className="flex justify-center mb-2">
-                  <div className="w-8 h-px bg-[rgba(255,255,255,0.08)]" />
+                  <div className="w-8 h-px bg-[rgba(99,102,241,0.1)]" />
                 </div>
               )}
               {items.map((item) => {
@@ -283,16 +283,16 @@ export function Sidebar({ compact, setCompact }: SidebarProps) {
                         className={cn(
                           'relative w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl transition-all duration-200',
                           active
-                            ? 'bg-white/5 text-[#f8fafc]'
-                            : 'text-[#64748b] hover:bg-white/5 hover:text-[#f8fafc]'
+                            ? 'bg-[rgba(99,102,241,0.08)] text-[#f1f5f9]'
+                            : 'text-[#64748b] hover:bg-white/5 hover:text-[#f1f5f9]'
                         )}
                       >
                         <div className="flex items-center gap-3">
                           {active && (
-                            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-[#3b82f6] rounded-full animate-fade-in" />
+                            <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 bg-gradient-brand rounded-full animate-fade-in" />
                           )}
-                          <Icon className={cn('w-5 h-5 flex-shrink-0', active && 'text-[#3b82f6]')} />
-                          <span className={cn('text-sm font-medium', active && 'text-[#f8fafc]')}>
+                          <Icon className={cn('w-5 h-5 flex-shrink-0', active && 'text-[#818cf8]')} />
+                          <span className={cn('text-sm font-medium', active && 'text-[#f1f5f9]')}>
                             {itemName}
                           </span>
                         </div>
@@ -318,12 +318,12 @@ export function Sidebar({ compact, setCompact }: SidebarProps) {
                                 className={cn(
                                   'relative flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 w-full',
                                   subActive
-                                    ? 'bg-white/5 text-[#f8fafc]'
-                                    : 'text-[#64748b] hover:bg-white/5 hover:text-[#f8fafc]'
+                                    ? 'bg-[rgba(99,102,241,0.08)] text-[#f1f5f9]'
+                                    : 'text-[#64748b] hover:bg-white/5 hover:text-[#f1f5f9]'
                                 )}
                               >
-                                <SubIcon className={cn('w-4 h-4 flex-shrink-0', subActive && 'text-[#3b82f6]')} />
-                                <span className={cn('text-sm', subActive && 'text-[#f8fafc] font-medium')}>
+                                <SubIcon className={cn('w-4 h-4 flex-shrink-0', subActive && 'text-[#818cf8]')} />
+                                <span className={cn('text-sm', subActive && 'text-[#f1f5f9] font-medium')}>
                                   {t(subitem.nameKey)}
                                 </span>
                               </button>
@@ -348,17 +348,17 @@ export function Sidebar({ compact, setCompact }: SidebarProps) {
                     className={cn(
                       'relative flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 w-full',
                       active
-                        ? 'bg-white/5 text-[#f8fafc]'
-                        : 'text-[#64748b] hover:bg-white/5 hover:text-[#f8fafc]',
+                        ? 'bg-[rgba(99,102,241,0.08)] text-[#f1f5f9]'
+                        : 'text-[#64748b] hover:bg-white/5 hover:text-[#f1f5f9]',
                       !showFullText && 'justify-center'
                     )}
                   >
                     {active && (
-                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 bg-[#3b82f6] rounded-full animate-fade-in" />
+                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-6 bg-gradient-brand rounded-full animate-fade-in" />
                     )}
-                    <Icon className={cn('w-5 h-5 flex-shrink-0', active && 'text-[#3b82f6]')} />
+                    <Icon className={cn('w-5 h-5 flex-shrink-0', active && 'text-[#818cf8]')} />
                     {showFullText && (
-                      <span className={cn('text-sm font-medium', active && 'text-[#f8fafc]')}>
+                      <span className={cn('text-sm font-medium', active && 'text-[#f1f5f9]')}>
                         {itemName}
                       </span>
                     )}
@@ -382,10 +382,10 @@ export function Sidebar({ compact, setCompact }: SidebarProps) {
       <button
         onClick={() => setIsMobileOpen(true)}
         className={cn(
-          'lg:hidden fixed top-4 left-4 z-50 flex items-center justify-center w-11 h-11 rounded-lg bg-[#111827] border text-[#f8fafc] shadow-lg',
+          'lg:hidden fixed top-4 left-4 z-50 flex items-center justify-center w-11 h-11 rounded-xl bg-[#14172b] border text-[#f1f5f9] shadow-lg',
           isMobileOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
         )}
-        style={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}
+        style={{ borderColor: 'rgba(99, 102, 241, 0.12)' }}
       >
         <Menu className="w-6 h-6" />
       </button>

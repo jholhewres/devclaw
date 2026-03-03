@@ -17,15 +17,15 @@ interface ConfigPageProps {
 
 export function ConfigPage({ title, subtitle, description, children, actions, message }: ConfigPageProps) {
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-[#0c1222]">
+    <div className="flex flex-1 flex-col overflow-hidden bg-[#0b0d17]">
       <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>
             {subtitle && (
-              <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#475569]">{subtitle}</p>
+              <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#64748b]">{subtitle}</p>
             )}
-            <h1 className="mt-1 text-2xl font-bold text-[#f8fafc] tracking-tight">{title}</h1>
+            <h1 className="mt-1 text-2xl font-bold text-[#f1f5f9] tracking-tight">{title}</h1>
             {description && (
               <p className="mt-2 text-base text-[#64748b]">{description}</p>
             )}
@@ -38,8 +38,8 @@ export function ConfigPage({ title, subtitle, description, children, actions, me
           <div className={cn(
             'mt-6 rounded-xl px-5 py-4 text-sm border',
             message.type === 'success'
-              ? 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/20'
-              : 'bg-[#ef4444]/10 text-[#f87171] border-[#ef4444]/20'
+              ? 'bg-[#10b981]/10 text-[#10b981] border-[#10b981]/20'
+              : 'bg-[#f43f5e]/10 text-[#f43f5e] border-[#f43f5e]/20'
           )}>
             {message.text}
           </div>
@@ -80,7 +80,7 @@ export function ConfigSection({
   const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed)
 
   const content = (
-    <div className={cn('space-y-5 rounded-2xl border border-white/10 bg-[#111827] p-6', className)}>
+    <div className={cn('space-y-5 rounded-2xl border border-[rgba(99,102,241,0.1)] bg-[#14172b] p-6', className)}>
       {children}
     </div>
   )
@@ -93,18 +93,18 @@ export function ConfigSection({
           className="flex items-center gap-3 mb-6 w-full text-left group"
         >
           {Icon && (
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[#111827] group-hover:border-white/20 transition-colors">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(99,102,241,0.1)] bg-[#14172b] group-hover:border-[rgba(99,102,241,0.2)] transition-colors">
               <Icon className="h-5 w-5 text-[#64748b]" />
             </div>
           )}
           <div className="flex-1">
-            <h2 className="text-lg font-semibold text-[#f8fafc]">{title}</h2>
+            <h2 className="text-lg font-semibold text-[#f1f5f9]">{title}</h2>
             {description && <p className="text-sm text-[#64748b]">{description}</p>}
           </div>
           {isCollapsed ? (
-            <ChevronDown className="h-5 w-5 text-[#64748b] group-hover:text-[#f8fafc] transition-colors" />
+            <ChevronDown className="h-5 w-5 text-[#64748b] group-hover:text-[#f1f5f9] transition-colors" />
           ) : (
-            <ChevronUp className="h-5 w-5 text-[#64748b] group-hover:text-[#f8fafc] transition-colors" />
+            <ChevronUp className="h-5 w-5 text-[#64748b] group-hover:text-[#f1f5f9] transition-colors" />
           )}
         </button>
         {!isCollapsed && content}
@@ -117,12 +117,12 @@ export function ConfigSection({
       {(Icon || title) && (
         <div className="flex items-center gap-3 mb-6">
           {Icon && (
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[#111827]">
-              <Icon className="h-5 w-5" style={{ color: iconColor || '#64748b' }} />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(99,102,241,0.1)] bg-[#14172b]">
+              <Icon className="h-5 w-5" style={{ color: iconColor || '#818cf8' }} />
             </div>
           )}
           <div>
-            <h2 className="text-lg font-semibold text-[#f8fafc]">{title}</h2>
+            <h2 className="text-lg font-semibold text-[#f1f5f9]">{title}</h2>
             {description && <p className="text-sm text-[#64748b]">{description}</p>}
           </div>
         </div>
@@ -184,7 +184,7 @@ export function ConfigInput({
       placeholder={placeholder}
       disabled={disabled}
       className={cn(
-        'h-11 w-full rounded-xl border border-white/10 bg-[#111827] px-4 text-sm text-[#f8fafc] outline-none transition-all placeholder:text-[#475569] hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20',
+        'h-11 w-full rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 text-sm text-[#f1f5f9] outline-none transition-all placeholder:text-[#475569] hover:border-[rgba(99,102,241,0.24)] focus:border-[#6366f1]/50 focus:ring-1 focus:ring-[#6366f1]/20',
         disabled && 'opacity-50 cursor-not-allowed',
         className
       )}
@@ -221,7 +221,7 @@ export function ConfigTextarea({
       rows={rows}
       disabled={disabled}
       className={cn(
-        'w-full rounded-xl border border-white/10 bg-[#111827] px-4 py-3 text-sm text-[#f8fafc] outline-none transition-all placeholder:text-[#475569] hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20 resize-none',
+        'w-full rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 py-3 text-sm text-[#f1f5f9] outline-none transition-all placeholder:text-[#475569] hover:border-[rgba(99,102,241,0.24)] focus:border-[#6366f1]/50 focus:ring-1 focus:ring-[#6366f1]/20 resize-none',
         disabled && 'opacity-50 cursor-not-allowed',
         className
       )}
@@ -261,7 +261,7 @@ export function ConfigSelect({
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       className={cn(
-        'h-11 w-full cursor-pointer appearance-none rounded-xl border border-white/10 bg-[#111827] px-4 pr-10 text-sm text-[#f8fafc] outline-none transition-all hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20',
+        'h-11 w-full cursor-pointer appearance-none rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-4 pr-10 text-sm text-[#f1f5f9] outline-none transition-all hover:border-[rgba(99,102,241,0.24)] focus:border-[#6366f1]/50 focus:ring-1 focus:ring-[#6366f1]/20',
         disabled && 'opacity-50 cursor-not-allowed',
         className
       )}
@@ -318,7 +318,7 @@ export function ConfigToggle({
       <div
         className={cn(
           'relative h-6 w-11 rounded-full transition-colors flex-shrink-0 mt-0.5',
-          enabled ? 'bg-[#3b82f6]' : 'bg-[#1e293b]'
+          enabled ? 'bg-[#6366f1]' : 'bg-[#1c1f3a]'
         )}
       >
         <div
@@ -329,11 +329,11 @@ export function ConfigToggle({
         />
       </div>
       <div className="flex flex-col items-start">
-        <span className="text-sm text-[#94a3b8] group-hover:text-[#f8fafc] transition-colors">
+        <span className="text-sm text-[#94a3b8] group-hover:text-[#f1f5f9] transition-colors">
           {label}
         </span>
         {description && (
-          <span className="text-xs text-[#475569] mt-0.5">{description}</span>
+          <span className="text-xs text-[#64748b] mt-0.5">{description}</span>
         )}
       </div>
     </button>
@@ -387,7 +387,7 @@ export function ConfigTagList({
         {tags.map((tag) => (
           <span
             key={tag}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1e293b] text-sm text-[#94a3b8] group"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1c1f3a] text-sm text-[#94a3b8] group"
           >
             {tag}
             {!readOnly && onRemove && (
@@ -413,12 +413,12 @@ export function ConfigTagList({
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={addPlaceholder}
-            className="flex-1 h-10 rounded-lg border border-white/10 bg-[#111827] px-3 text-sm text-[#f8fafc] outline-none transition-all placeholder:text-[#475569] hover:border-white/20 focus:border-[#3b82f6]/50"
+            className="flex-1 h-10 rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-3 text-sm text-[#f1f5f9] outline-none transition-all placeholder:text-[#475569] hover:border-[rgba(99,102,241,0.24)] focus:border-[#6366f1]/50"
           />
           <button
             onClick={handleAdd}
             disabled={!inputValue.trim()}
-            className="px-4 h-10 rounded-lg bg-[#3b82f6] text-sm font-medium text-white hover:bg-[#2563eb] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-4 h-10 rounded-xl bg-[#6366f1] text-sm font-medium text-white hover:bg-[#818cf8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Add
           </button>
@@ -457,7 +457,7 @@ export function ConfigActions({
         <button
           onClick={onReset}
           disabled={saving}
-          className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-[#111827] px-5 py-3 text-sm font-medium text-[#94a3b8] transition-all hover:border-white/20 hover:text-[#f8fafc] disabled:opacity-50"
+          className="flex cursor-pointer items-center gap-2 rounded-xl border border-[rgba(99,102,241,0.12)] bg-[#14172b] px-5 py-3 text-sm font-medium text-[#94a3b8] transition-all hover:border-[rgba(99,102,241,0.24)] hover:text-[#f1f5f9] disabled:opacity-50"
         >
           <RotateCcw className="h-4 w-4" />
           {resetLabel}
@@ -466,7 +466,7 @@ export function ConfigActions({
       <button
         onClick={onSave}
         disabled={!hasChanges || saving}
-        className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#3b82f6] px-5 py-3 text-sm font-semibold text-white transition-all hover:bg-[#2563eb] disabled:opacity-50 disabled:cursor-not-allowed"
+        className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#6366f1] px-5 py-3 text-sm font-semibold text-white transition-all hover:bg-[#818cf8] disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {saving ? (
           <>
@@ -510,21 +510,21 @@ export function ConfigCard({
   className,
 }: ConfigCardProps) {
   const statusColors = {
-    success: 'bg-[#22c55e]/10',
-    error: 'bg-[#ef4444]/10',
+    success: 'bg-[#10b981]/10',
+    error: 'bg-[#f43f5e]/10',
     warning: 'bg-[#f59e0b]/10',
-    neutral: 'bg-[#1e293b]',
+    neutral: 'bg-[#1c1f3a]',
   }
 
   const iconColors = {
-    success: 'text-[#22c55e]',
-    error: 'text-[#f87171]',
+    success: 'text-[#10b981]',
+    error: 'text-[#f43f5e]',
     warning: 'text-[#f59e0b]',
     neutral: 'text-[#64748b]',
   }
 
   return (
-    <div className={cn('rounded-2xl border border-white/10 bg-[#111827] p-6', className)}>
+    <div className={cn('rounded-2xl border border-[rgba(99,102,241,0.1)] bg-[#14172b] p-6', className)}>
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           {Icon && (
@@ -533,13 +533,13 @@ export function ConfigCard({
             </div>
           )}
           <div>
-            <h3 className="text-base font-semibold text-[#f8fafc]">{title}</h3>
+            <h3 className="text-base font-semibold text-[#f1f5f9]">{title}</h3>
             {subtitle && <p className="text-sm text-[#64748b]">{subtitle}</p>}
           </div>
         </div>
         {actions && <div className="flex items-center gap-2">{actions}</div>}
       </div>
-      {children && <div className="mt-4 pt-4 border-t border-white/5">{children}</div>}
+      {children && <div className="mt-4 pt-4 border-t border-[rgba(99,102,241,0.06)]">{children}</div>}
     </div>
   )
 }
@@ -557,8 +557,8 @@ interface ConfigEmptyStateProps {
 
 export function ConfigEmptyState({ icon: Icon, title, description, action }: ConfigEmptyStateProps) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#111827] p-8 text-center">
-      {Icon && <Icon className="h-12 w-12 text-[#475569] mx-auto mb-4" />}
+    <div className="rounded-2xl border border-[rgba(99,102,241,0.1)] bg-[#14172b] p-8 text-center">
+      {Icon && <Icon className="h-12 w-12 text-[#64748b] mx-auto mb-4" />}
       <p className="text-sm text-[#64748b]">{title}</p>
       {description && <p className="text-xs text-[#475569] mt-2">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
@@ -577,7 +577,7 @@ interface ConfigInfoBoxProps {
 
 export function ConfigInfoBox({ title, items }: ConfigInfoBoxProps) {
   return (
-    <div className="rounded-2xl border border-white/5 bg-[#111827]/50 p-6 mb-10">
+    <div className="rounded-2xl border border-[rgba(99,102,241,0.06)] bg-[#14172b]/50 p-6 mb-10">
       {title && <h3 className="text-sm font-semibold text-[#64748b] mb-3">{title}</h3>}
       <ul className="space-y-2 text-xs text-[#475569]">
         {items.map((item, index) => (
@@ -594,8 +594,8 @@ export function ConfigInfoBox({ title, items }: ConfigInfoBoxProps) {
 
 export function LoadingSpinner() {
   return (
-    <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-      <div className="h-10 w-10 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
+    <div className="flex flex-1 items-center justify-center bg-[#0b0d17]">
+      <div className="h-10 w-10 rounded-full border-4 border-[#1c1f3a] border-t-[#6366f1] animate-spin" />
     </div>
   )
 }
@@ -612,12 +612,12 @@ interface ErrorStateProps {
 
 export function ErrorState({ message = 'Error', onRetry, retryLabel = 'Retry' }: ErrorStateProps) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center bg-[#0c1222]">
-      <p className="text-sm text-[#f87171]">{message}</p>
+    <div className="flex flex-1 flex-col items-center justify-center bg-[#0b0d17]">
+      <p className="text-sm text-[#f43f5e]">{message}</p>
       {onRetry && (
         <button
           onClick={onRetry}
-          className="mt-3 text-xs text-[#64748b] hover:text-[#f8fafc] transition-colors cursor-pointer"
+          className="mt-3 text-xs text-[#64748b] hover:text-[#f1f5f9] transition-colors cursor-pointer"
         >
           {retryLabel}
         </button>

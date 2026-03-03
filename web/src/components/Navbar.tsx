@@ -31,10 +31,10 @@ export function Navbar({ sidebarCompact }: NavbarProps) {
   return (
     <header
       className={cn(
-        'fixed right-0 top-0 z-30 h-16 bg-[#111827] border-b transition-all duration-300',
+        'fixed right-0 top-0 z-30 h-16 bg-[#0b0d17]/80 backdrop-blur-md border-b transition-all duration-300',
         sidebarCompact ? 'lg:left-20' : 'lg:left-64'
       )}
-      style={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}
+      style={{ borderColor: 'rgba(99, 102, 241, 0.08)' }}
     >
       <div className="h-full px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-end h-full gap-4">
@@ -42,13 +42,13 @@ export function Navbar({ sidebarCompact }: NavbarProps) {
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-              className="flex items-center gap-2 hover:bg-white/5 rounded-lg px-2 py-1.5 transition-all"
+              className="flex items-center gap-2 hover:bg-[rgba(99,102,241,0.08)] rounded-xl px-2 py-1.5 transition-all"
             >
-              <div className="w-9 h-9 rounded-lg bg-[#3b82f6] flex items-center justify-center text-white">
+              <div className="w-9 h-9 rounded-xl bg-gradient-brand flex items-center justify-center text-white">
                 <Terminal className="h-4 w-4" />
               </div>
               <div className="text-left hidden md:block">
-                <div className="text-sm font-medium text-[#f8fafc]">DevClaw</div>
+                <div className="text-sm font-medium text-[#f1f5f9]">DevClaw</div>
               </div>
               <ChevronDown
                 className={cn('w-4 h-4 text-[#64748b] transition-transform duration-200', isUserMenuOpen && 'rotate-180')}
@@ -60,13 +60,13 @@ export function Navbar({ sidebarCompact }: NavbarProps) {
                 <div
                   className="absolute right-0 mt-2 w-56 rounded-xl shadow-xl overflow-hidden animate-fade-in border"
                   style={{
-                    background: '#1e293b',
-                    borderColor: 'rgba(255, 255, 255, 0.1)',
+                    background: '#1c1f3a',
+                    borderColor: 'rgba(99, 102, 241, 0.15)',
                   }}
                 >
                   {/* User Info */}
-                  <div className="px-4 py-3 border-b bg-[#111827]" style={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}>
-                    <p className="text-sm font-medium text-[#f8fafc]">DevClaw</p>
+                  <div className="px-4 py-3 border-b bg-[#14172b]" style={{ borderColor: 'rgba(99, 102, 241, 0.08)' }}>
+                    <p className="text-sm font-medium text-[#f1f5f9]">DevClaw</p>
                     <p className="text-xs text-[#64748b]">v1.6.0</p>
                   </div>
 
@@ -77,7 +77,7 @@ export function Navbar({ sidebarCompact }: NavbarProps) {
                         navigate('/system')
                         setIsUserMenuOpen(false)
                       }}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc] transition-colors w-full"
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-[#94a3b8] hover:bg-white/5 hover:text-[#f1f5f9] transition-colors w-full"
                     >
                       <Settings className="w-5 h-5" />
                       <span>Sistema</span>
@@ -85,10 +85,10 @@ export function Navbar({ sidebarCompact }: NavbarProps) {
                   </div>
 
                   {/* Logout */}
-                  <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                  <div style={{ borderTop: '1px solid rgba(99, 102, 241, 0.08)' }}>
                     <button
                       onClick={handleLogout}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc] transition-colors w-full"
+                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-[#94a3b8] hover:bg-white/5 hover:text-[#f1f5f9] transition-colors w-full"
                     >
                       <LogOut className="w-5 h-5" />
                       <span>Sair</span>

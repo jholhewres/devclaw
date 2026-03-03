@@ -7,7 +7,7 @@ export function AppLayout() {
   const [sidebarCompact, setSidebarCompact] = useState(false)
 
   return (
-    <div className="min-h-screen bg-[#0c1222]">
+    <div className="min-h-screen bg-[#0b0d17]">
       {/* Sidebar */}
       <Sidebar compact={sidebarCompact} setCompact={setSidebarCompact} />
 

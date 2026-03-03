@@ -1,31 +1,36 @@
 @import "tailwindcss";
 
-/* ── DevClaw Dark Design System ── */
+/* ── DevClaw Design System v2 — Indigo/Violet Identity ── */
 
 @theme {
   /* Text colors */
-  --color-text-primary: #f8fafc;
+  --color-text-primary: #f1f5f9;
   --color-text-secondary: #94a3b8;
   --color-text-muted: #64748b;
 
   /* Background colors */
-  --color-bg-main: #0c1222;
-  --color-bg-surface: #111827;
-  --color-bg-subtle: #1e293b;
-  --color-bg-elevated: #1e2632;
+  --color-bg-main: #0b0d17;
+  --color-bg-surface: #14172b;
+  --color-bg-subtle: #1c1f3a;
+  --color-bg-elevated: #242850;
 
   /* Brand colors */
-  --color-brand: #0081f2;
-  --color-brand-hover: #3b82f6;
+  --color-brand: #6366f1;
+  --color-brand-hover: #818cf8;
+  --color-brand-light: #8b5cf6;
+
+  /* Accent */
+  --color-accent: #06b6d4;
+  --color-accent-hover: #22d3ee;
 
   /* Border */
-  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border: rgba(99, 102, 241, 0.12);
 
   /* Functional colors */
-  --color-success: #22c55e;
-  --color-error: #ef4444;
+  --color-success: #10b981;
+  --color-error: #f43f5e;
   --color-warning: #f59e0b;
-  --color-info: #3b82f6;
+  --color-info: #6366f1;
 
   /* Radius */
   --radius-sm: 0.375rem;
@@ -42,21 +47,21 @@
 }
 
 html {
-  background-color: #0c1222;
+  background-color: #0b0d17;
 }
 
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  color: #f8fafc;
-  background: #0c1222;
+  color: #f1f5f9;
+  background: #0b0d17;
   line-height: 1.5;
 }
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -64,12 +69,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.2);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: rgba(99, 102, 241, 0.35);
 }
 
 /* ── Focus ── */
@@ -109,6 +114,33 @@ body {
   40% { opacity: 1; transform: scale(1); }
 }
 
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(-16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 4px rgba(99, 102, 241, 0.3); }
+  50% { box-shadow: 0 0 16px rgba(99, 102, 241, 0.5); }
+}
+
+@keyframes bounce-in {
+  0% { opacity: 0; transform: scale(0.3); }
+  50% { opacity: 1; transform: scale(1.05); }
+  70% { transform: scale(0.9); }
+  100% { transform: scale(1); }
+}
+
 .animate-fade-in {
   animation: fade-in 0.2s ease-out;
 }
@@ -129,6 +161,34 @@ body {
   animation: card-pop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
+.animate-bounce-in {
+  animation: bounce-in 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* Shimmer skeleton */
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(99, 102, 241, 0.05) 25%,
+    rgba(99, 102, 241, 0.12) 50%,
+    rgba(99, 102, 241, 0.05) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
 /* Thinking dots animation */
 .copilot-thinking-dots {
   display: flex;
@@ -147,6 +207,64 @@ body {
 
 .copilot-thinking-dots span:nth-child(2) { animation-delay: 0.15s; }
 .copilot-thinking-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+/* ── Glassmorphism utility ── */
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(99, 102, 241, 0.12);
+}
+
+.glass-hover:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(99, 102, 241, 0.24);
+}
+
+/* ── Glow effects ── */
+.glow-brand {
+  box-shadow: 0 0 30px rgba(99, 102, 241, 0.15);
+}
+
+.glow-brand-sm {
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.1);
+}
+
+.glow-success {
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
+}
+
+.glow-error {
+  box-shadow: 0 0 12px rgba(244, 63, 94, 0.15);
+}
+
+/* ── Gradient text ── */
+.gradient-text {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-hero {
+  background: linear-gradient(135deg, #f1f5f9, rgba(241, 245, 249, 0.6));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Gradient backgrounds ── */
+.bg-gradient-brand {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+}
+
+.bg-gradient-hero {
+  background: radial-gradient(ellipse at center, rgba(99, 102, 241, 0.15) 0%, transparent 70%);
+}
+
+.bg-gradient-card {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(139, 92, 246, 0.04) 100%);
+}
 
 /* ── Markdown Styles ── */
 .copilot-markdown {
@@ -198,7 +316,7 @@ body {
 }
 
 .copilot-markdown code {
-  background-color: #1e293b;
+  background-color: #1c1f3a;
   padding: 0.1em 0.35em;
   border-radius: 4px;
   font-size: 0.9em;
@@ -206,11 +324,12 @@ body {
 }
 
 .copilot-markdown pre {
-  background-color: #1e293b;
+  background-color: #14172b;
   padding: 0.75em;
   border-radius: 8px;
   overflow-x: auto;
   margin: 0.5em 0;
+  border: 1px solid rgba(99, 102, 241, 0.1);
 }
 
 .copilot-markdown pre code {
@@ -219,23 +338,23 @@ body {
 }
 
 .copilot-markdown blockquote {
-  border-left: 3px solid #334155;
+  border-left: 3px solid rgba(99, 102, 241, 0.3);
   padding-left: 0.75em;
   margin: 0.5em 0;
   color: #94a3b8;
 }
 
 .copilot-markdown a {
-  color: #3b82f6;
+  color: #818cf8;
   text-decoration: underline;
 }
 
 .copilot-markdown a:hover {
-  color: #60a5fa;
+  color: #a5b4fc;
 }
 
 /* ── Selection ── */
 ::selection {
-  background: rgba(59, 130, 246, 0.3);
-  color: #f8fafc;
+  background: rgba(99, 102, 241, 0.3);
+  color: #f1f5f9;
 }
