@@ -1184,14 +1184,13 @@ func (w *WhatsApp) CanResponse(msg *channels.IncomingMessage) (bool, string) {
 		}
 	}
 
-	// Apply default policy.
+	// Apply default policy (empty defaults to "deny").
 	switch w.cfg.Access.DefaultPolicy {
 	case "allow":
 		return true, "default allow"
-	case "deny":
+	case "deny", "":
 		return false, "default deny"
 	default:
-		// Unknown policy (including legacy "ask") - log warning and default to deny
 		w.logger.Warn("unknown access policy, defaulting to deny", "policy", w.cfg.Access.DefaultPolicy)
 		return false, "default deny"
 	}
@@ -1570,8 +1569,13 @@ func (w *WhatsApp) seedGroupPoliciesFromConfig() {
 // normalizeJID normalizes a JID for consistent lookups.
 // Strips companion device suffix (:XX) so that messages from linked devices
 // are treated as coming from the same user.
-// Example: 551199999999:95@s.whatsapp.net -> 551199999999@s.whatsapp.net
-// Also handles LID format: 123456:1@lid -> 123456@lid
+// Normalizes Brazilian mobile numbers (+55) to always include the 9th digit,
+// since WhatsApp is inconsistent about it.
+// Examples:
+//
+//	551199999999:95@s.whatsapp.net -> 5511999999999@s.whatsapp.net
+//	558287015132@s.whatsapp.net    -> 5582987015132@s.whatsapp.net
+//	123456:1@lid                   -> 123456@lid
 func normalizeJID(jid string) string {
 	jid = strings.TrimSpace(jid)
 
@@ -1581,12 +1585,12 @@ func normalizeJID(jid string) string {
 		base := strings.TrimSuffix(jid, "@s.whatsapp.net")
 		// Remove device suffix if present (e.g., :95, :0)
 		if idx := strings.LastIndex(base, ":"); idx > 0 {
-			// Check if it's a device suffix (numeric after colon)
 			devicePart := base[idx+1:]
 			if _, err := strconv.Atoi(devicePart); err == nil {
 				base = base[:idx]
 			}
 		}
+		base = normalizeBR9thDigit(base)
 		return base + "@s.whatsapp.net"
 	}
 
@@ -1608,7 +1612,26 @@ func normalizeJID(jid string) string {
 		return jid
 	}
 	// Assume bare phone number.
-	return jid + "@s.whatsapp.net"
+	return normalizeBR9thDigit(jid) + "@s.whatsapp.net"
+}
+
+// normalizeBR9thDigit ensures Brazilian mobile numbers always include the 9th digit.
+// WhatsApp is inconsistent: some JIDs arrive as 55DD8XXXXXXX (12 digits, without the 9)
+// while the canonical format is 55DD9XXXXXXXX (13 digits, with the 9).
+// This normalizes both to the 13-digit form so access lookups match regardless of format.
+func normalizeBR9thDigit(phone string) string {
+	// Only apply to Brazilian numbers: must start with "55" and be exactly 12 digits.
+	// 12 digits = country(55) + DDD(2) + local(8) — missing the 9th digit.
+	if len(phone) != 12 || !strings.HasPrefix(phone, "55") {
+		return phone
+	}
+	// The 5th character (index 4) is the first digit of the local number.
+	// Brazilian mobile numbers start with [6-9]; if so, prepend the 9.
+	firstLocal := phone[4]
+	if firstLocal >= '6' && firstLocal <= '9' {
+		return phone[:4] + "9" + phone[4:]
+	}
+	return phone
 }
 
 // IsValidJID checks if a JID looks valid (basic validation).

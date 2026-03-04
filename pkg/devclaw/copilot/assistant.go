@@ -1483,7 +1483,8 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 		} else {
 			logger.Info("message ignored (access denied)",
 				"reason", accessReason,
-				"from_raw", msg.From)
+				"from_raw", msg.From,
+				"chat_id", msg.ChatID)
 		}
 		return
 	}
