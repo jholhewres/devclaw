@@ -10,11 +10,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
+	"github.com/jholhewres/devclaw/pkg/devclaw/channels"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/discord"
 	slackchan "github.com/jholhewres/devclaw/pkg/devclaw/channels/slack"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/telegram"
@@ -24,6 +27,7 @@ import (
 	"github.com/jholhewres/devclaw/pkg/devclaw/media"
 	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
 	"github.com/jholhewres/devclaw/pkg/devclaw/plugins"
+	"github.com/jholhewres/devclaw/pkg/devclaw/updater"
 	"github.com/jholhewres/devclaw/pkg/devclaw/webui"
 	"github.com/spf13/cobra"
 )
@@ -168,6 +172,24 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		adapter = buildWebUIAdapter(assistant, cfg, wa, configPath)
 		webServer = webui.New(cfg.WebUI, adapter, logger)
 
+		// Register restart callback
+		webServer.OnRestartRequested(func() error {
+			logger.Info("restart requested via web UI")
+
+			// Graceful shutdown
+			cancel()
+
+			// Wait a moment for graceful shutdown
+			time.Sleep(1 * time.Second)
+
+			// Execute restart
+			if err := reloadProcess(); err != nil {
+				logger.Error("restart failed", "error", err)
+				return err
+			}
+			return nil
+		})
+
 		// Initialize OAuth handlers for OAuth providers (gemini, chatgpt, qwen, minimax, google-*)
 		oauthHandlers, err := webui.NewOAuthHandlers(paths.ResolveDataDir(), logger)
 		if err != nil {
@@ -195,6 +217,32 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			webServer.SetOAuthHandlers(oauthHandlers)
 		}
 
+		// Wire version and auto-update checker
+		webServer.SetVersion(cmd.Root().Version)
+		if cfg.Update.Enabled {
+			assetsURL := cfg.Update.AssetsURL
+			if assetsURL == "" {
+				assetsURL = "https://assets-gatorclaw.hostgator.io"
+			}
+			checkInterval := 1 * time.Hour
+			if cfg.Update.CheckInterval != "" {
+				if parsed, err := time.ParseDuration(cfg.Update.CheckInterval); err == nil {
+					checkInterval = parsed
+				} else {
+					logger.Warn("invalid update check_interval, using default 1h",
+						"value", cfg.Update.CheckInterval, "error", err)
+				}
+			}
+			checker := updater.NewChecker(cmd.Root().Version, assetsURL, checkInterval, logger)
+			checker.Start(ctx)
+			webServer.SetUpdateChecker(checker)
+			webServer.OnUpdateRequested(func() error {
+				logger.Info("update requested via web UI")
+				inst := updater.NewInstaller(assetsURL, logger)
+				return inst.InstallAndRestart()
+			})
+		}
+
 		if err := webServer.Start(ctx); err != nil {
 			logger.Error("failed to start web UI", "error", err)
 		} else {
@@ -217,6 +265,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		} else {
 			logger.Info("gateway running", "address", cfg.Gateway.Address)
 		}
+	}
+
+	// ── Wire domain config to WebUI adapter ──
+	if webServer != nil {
+		wireDomainAdapter(adapter, cfg, webServer, configPath)
 	}
 
 	// ── Wire webhook management to WebUI adapter ──
@@ -328,7 +381,7 @@ func runWebSetupMode() error {
 	fmt.Println("  │  No config.yaml found.                       │")
 	fmt.Println("  │  Starting web setup wizard...                │")
 	fmt.Println("  │                                              │")
-	fmt.Printf("  │  Open:  http://%s:8090/setup           │\n", serverIP)
+	fmt.Printf("  │  Open:  http://%s:47716/setup          │\n", serverIP)
 	fmt.Println("  ╰──────────────────────────────────────────────╯")
 	fmt.Println()
 
@@ -337,7 +390,7 @@ func runWebSetupMode() error {
 	// Start a webui server in setup-only mode (no assistant needed).
 	webuiCfg := webui.Config{
 		Enabled: true,
-		Address: ":8090",
+		Address: ":47716",
 	}
 	webServer := webui.New(webuiCfg, nil, logger)
 	webServer.SetSetupMode(true)
@@ -398,13 +451,9 @@ func reloadProcess() error {
 	// Get the original arguments (skip the program name)
 	args := os.Args[1:]
 
-	// Replace current process with a new instance
+	// Replace current process with a new instance (never returns on success).
 	err = syscall.Exec(executable, append([]string{executable}, args...), os.Environ())
-	if err != nil {
-		return fmt.Errorf("failed to reload process: %w", err)
-	}
-
-	return nil
+	return fmt.Errorf("failed to reload process: %w", err)
 }
 
 // getServerIP returns the first non-loopback IP address of the server.
@@ -445,6 +494,56 @@ func anySliceToStringSlice(items []any) []string {
 		}
 	}
 	return result
+}
+
+// wireDomainAdapter connects domain/network config functions to the WebUI adapter.
+func wireDomainAdapter(adapter *webui.AssistantAdapter, cfg *copilot.Config, ws *webui.Server, configPath string) {
+	var domainMu sync.Mutex
+
+	adapter.GetDomainConfigFn = func() webui.DomainConfigInfo {
+		domainMu.Lock()
+		defer domainMu.Unlock()
+		return webui.DomainConfigInfo{
+			WebuiAddress:   cfg.WebUI.Address,
+			WebuiAuthToken: cfg.WebUI.AuthToken != "",
+
+			GatewayEnabled:   cfg.Gateway.Enabled,
+			GatewayAddress:   cfg.Gateway.Address,
+			GatewayAuthToken: cfg.Gateway.AuthToken != "",
+			CORSOrigins:      cfg.Gateway.CORSOrigins,
+		}
+	}
+
+	adapter.UpdateDomainConfigFn = func(update webui.DomainConfigUpdate) error {
+		domainMu.Lock()
+		defer domainMu.Unlock()
+
+		if update.WebuiAddress != nil {
+			cfg.WebUI.Address = *update.WebuiAddress
+		}
+		if update.WebuiAuthToken != nil {
+			cfg.WebUI.AuthToken = *update.WebuiAuthToken
+			ws.SetAuthToken(*update.WebuiAuthToken)
+		}
+		if update.GatewayEnabled != nil {
+			cfg.Gateway.Enabled = *update.GatewayEnabled
+		}
+		if update.GatewayAddress != nil {
+			cfg.Gateway.Address = *update.GatewayAddress
+		}
+		if update.GatewayAuthToken != nil {
+			cfg.Gateway.AuthToken = *update.GatewayAuthToken
+		}
+		if update.CORSOrigins != nil {
+			cfg.Gateway.CORSOrigins = update.CORSOrigins
+		}
+
+		savePath := configPath
+		if savePath == "" {
+			savePath = "config.yaml"
+		}
+		return copilot.SaveConfigToFile(cfg, savePath)
+	}
 }
 
 // wireWebhookAdapter connects webhook management functions to the WebUI adapter.
@@ -605,14 +704,14 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 				"api_key_configured": cfg.API.APIKey != "",
 				"params":             cfg.API.Params,
 				"media": map[string]any{
-					"vision_enabled":          media.VisionEnabled,
-					"vision_model":            media.VisionModel,
-					"vision_detail":           media.VisionDetail,
-					"transcription_enabled":   media.TranscriptionEnabled,
-					"transcription_model":     media.TranscriptionModel,
-					"transcription_base_url":  media.TranscriptionBaseURL,
-					"transcription_api_key":   media.TranscriptionAPIKey != "",
-					"transcription_language":  media.TranscriptionLanguage,
+					"vision_enabled":         media.VisionEnabled,
+					"vision_model":           media.VisionModel,
+					"vision_detail":          media.VisionDetail,
+					"transcription_enabled":  media.TranscriptionEnabled,
+					"transcription_model":    media.TranscriptionModel,
+					"transcription_base_url": media.TranscriptionBaseURL,
+					"transcription_api_key":  media.TranscriptionAPIKey != "",
+					"transcription_language": media.TranscriptionLanguage,
 				},
 				"access": map[string]any{
 					"default_policy":  cfg.Access.DefaultPolicy,
@@ -625,15 +724,33 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 			}
 		},
 		UpdateConfigMapFn: func(updates map[string]any) error {
+			// Update identity fields.
+			if v, ok := updates["name"].(string); ok {
+				cfg.Name = v
+			}
+			if v, ok := updates["trigger"].(string); ok {
+				cfg.Trigger = v
+			}
+			if v, ok := updates["language"].(string); ok {
+				cfg.Language = v
+			}
+			if v, ok := updates["timezone"].(string); ok {
+				cfg.Timezone = v
+			}
+
 			// Update provider & model.
+			llmChanged := false
 			if v, ok := updates["provider"].(string); ok && v != "" {
 				cfg.API.Provider = v
+				llmChanged = true
 			}
 			if v, ok := updates["model"].(string); ok && v != "" {
 				cfg.Model = v
+				llmChanged = true
 			}
 			if v, ok := updates["base_url"].(string); ok {
 				cfg.API.BaseURL = v
+				llmChanged = true
 			}
 			if v, ok := updates["api_key"].(string); ok && v != "" {
 				// Store in vault if available and unlocked (preferred for security)
@@ -647,6 +764,7 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 				}
 				// Set in config for immediate use (will be sanitized on save)
 				cfg.API.APIKey = v
+				llmChanged = true
 			}
 			// Update API params (provider-specific settings like context1m, tool_stream).
 			if paramsRaw, ok := updates["params"]; ok {
@@ -655,7 +773,13 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 						cfg.API.Params = make(map[string]any)
 					}
 					maps.Copy(cfg.API.Params, paramsMap)
+					llmChanged = true
 				}
+			}
+
+			// Hot-reload LLM client when provider/model/key settings changed.
+			if llmChanged {
+				assistant.UpdateLLMClient(cfg)
 			}
 
 			// Update media config.
@@ -722,13 +846,14 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 			return copilot.SaveConfigToFile(cfg, savePath)
 		},
 		ListSessionsFn: func() []webui.SessionInfo {
-			sessions := assistant.SessionStore().ListSessions()
+			sessions := assistant.SessionStore().ListAllSessions()
 			result := make([]webui.SessionInfo, len(sessions))
 			for i, s := range sessions {
 				result[i] = webui.SessionInfo{
 					ID:            s.ID,
 					Channel:       s.Channel,
 					ChatID:        s.ChatID,
+					Title:         s.Title,
 					MessageCount:  s.MessageCount,
 					CreatedAt:     s.CreatedAt,
 					LastMessageAt: s.LastActiveAt,
@@ -737,7 +862,28 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 			return result
 		},
 		GetSessionMessagesFn: func(sessionID string) []webui.MessageInfo {
-			session := assistant.SessionStore().GetByID(sessionID)
+			store := assistant.SessionStore()
+
+			// Parse channel from sessionID (e.g. "webui:abc123" → channel="webui").
+			channel := "webui"
+			if idx := strings.IndexByte(sessionID, ':'); idx > 0 {
+				channel = sessionID[:idx]
+			}
+
+			// Try in-memory lookup first with the parsed channel.
+			session := store.Get(channel, sessionID)
+
+			if session == nil {
+				// Session not in memory. Search all sessions (memory + persistence)
+				// to find the correct channel — handles whatsapp, scheduler, etc.
+				// where the chatID doesn't contain a channel prefix.
+				for _, meta := range store.ListAllSessions() {
+					if meta.ChatID == sessionID {
+						session = store.GetOrCreate(meta.Channel, meta.ChatID)
+						break
+					}
+				}
+			}
 			if session == nil {
 				return nil
 			}
@@ -809,6 +955,20 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 			}
 			return result
 		},
+		ToggleJobFn: func(id string, enabled bool) error {
+			sched := assistant.Scheduler()
+			if sched == nil {
+				return fmt.Errorf("scheduler not available")
+			}
+			return sched.Toggle(id, enabled)
+		},
+		RemoveJobFn: func(id string) error {
+			sched := assistant.Scheduler()
+			if sched == nil {
+				return fmt.Errorf("scheduler not available")
+			}
+			return sched.Remove(id)
+		},
 		ListSkillsFn: func() []webui.SkillInfo {
 			reg := assistant.SkillRegistry()
 			if reg == nil {
@@ -834,6 +994,27 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 				return reg.Enable(name)
 			}
 			return reg.Disable(name)
+		},
+		RemoveSkillFn: func(name string) error {
+			reg := assistant.SkillRegistry()
+			if reg == nil {
+				return fmt.Errorf("skill registry not available")
+			}
+			reg.Remove(name)
+			// Remove skill directory from disk.
+			skillDir := filepath.Join("./skills", name)
+			if err := os.RemoveAll(skillDir); err != nil {
+				return fmt.Errorf("failed to remove skill directory: %w", err)
+			}
+			return nil
+		},
+		ReloadSkillsFn: func() error {
+			reg := assistant.SkillRegistry()
+			if reg == nil {
+				return fmt.Errorf("skill registry not available")
+			}
+			_, err := reg.Reload(context.Background())
+			return err
 		},
 		GetProfileManagerFn: func() profiles.ProfileManager {
 			return assistant.ProfileManager()
@@ -962,15 +1143,35 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 			return false
 		},
 		DeleteSessionFn: func(sessionID string) error {
-			deleted := assistant.SessionStore().Delete("webui", sessionID)
-			if !deleted {
-				// Try with the raw ID (might include channel prefix already).
-				parts := strings.SplitN(sessionID, ":", 2)
-				if len(parts) == 2 {
-					assistant.SessionStore().Delete(parts[0], parts[1])
+			store := assistant.SessionStore()
+
+			// If sessionID contains ":", it's a chatID from the chat view (e.g. "webui:abc123").
+			// Compute the hash key first (matching the GetOrCreate/Get pattern).
+			if idx := strings.IndexByte(sessionID, ':'); idx > 0 {
+				channel := sessionID[:idx]
+				hashKey := copilot.MakeSessionID(channel, sessionID)
+				if store.DeleteByID(hashKey) {
+					return nil
 				}
 			}
-			return nil
+
+			// Try as hash ID directly (from /sessions listing page).
+			if store.DeleteByID(sessionID) {
+				return nil
+			}
+
+			// Fallback: search all sessions by chatID to find correct channel
+			// (handles whatsapp, scheduler, etc. without colon prefix).
+			for _, meta := range store.ListAllSessions() {
+				if meta.ChatID == sessionID {
+					hashKey := copilot.MakeSessionID(meta.Channel, meta.ChatID)
+					if store.DeleteByID(hashKey) {
+						return nil
+					}
+				}
+			}
+
+			return fmt.Errorf("session not found: %s", sessionID)
 		},
 	}
 
@@ -1216,6 +1417,250 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 		adapter.RequestWhatsAppQRFn = func() error {
 			return wa.RequestNewQR(context.Background())
 		}
+		adapter.DisconnectWhatsAppFn = func() error {
+			return wa.Disconnect()
+		}
+
+		// Helper function to convert []any to []string
+		anySliceToStringSlice := func(slice []any) []string {
+			result := make([]string, 0, len(slice))
+			for _, v := range slice {
+				if s, ok := v.(string); ok {
+					result = append(result, s)
+				}
+			}
+			return result
+		}
+
+		// Type assert WhatsApp to WhatsAppAccessManager interface
+		waManager, ok := any(wa).(channels.WhatsAppAccessManager)
+		if !ok {
+			slog.Warn("whatsapp channel does not implement WhatsAppAccessManager, access control features disabled")
+			return adapter
+		}
+
+		// WhatsApp Access & Groups
+		adapter.GetWhatsAppAccessConfigFn = func() webui.WhatsAppAccessConfig {
+			result := webui.WhatsAppAccessConfig{
+				DefaultPolicy:  "deny",
+				PendingMessage: "Aguardando aprovação do proprietário.",
+			}
+
+			if m, ok := waManager.GetAccessConfig().(map[string]any); ok {
+				if v, ok := m["default_policy"].(string); ok && v != "" {
+					result.DefaultPolicy = v
+				}
+				if v, ok := m["owners"].([]string); ok {
+					result.Owners = v
+				} else if v, ok := m["owners"].([]any); ok {
+					result.Owners = anySliceToStringSlice(v)
+				}
+				if v, ok := m["admins"].([]string); ok {
+					result.Admins = v
+				} else if v, ok := m["admins"].([]any); ok {
+					result.Admins = anySliceToStringSlice(v)
+				}
+				if v, ok := m["allowed_users"].([]string); ok {
+					result.AllowedUsers = v
+				} else if v, ok := m["allowed_users"].([]any); ok {
+					result.AllowedUsers = anySliceToStringSlice(v)
+				}
+				if v, ok := m["blocked_users"].([]string); ok {
+					result.BlockedUsers = v
+				} else if v, ok := m["blocked_users"].([]any); ok {
+					result.BlockedUsers = anySliceToStringSlice(v)
+				}
+				if v, ok := m["allowed_groups"].([]string); ok {
+					result.AllowedGroups = v
+				} else if v, ok := m["allowed_groups"].([]any); ok {
+					result.AllowedGroups = anySliceToStringSlice(v)
+				}
+				if v, ok := m["blocked_groups"].([]string); ok {
+					result.BlockedGroups = v
+				} else if v, ok := m["blocked_groups"].([]any); ok {
+					result.BlockedGroups = anySliceToStringSlice(v)
+				}
+				if v, ok := m["pending_message"].(string); ok && v != "" {
+					result.PendingMessage = v
+				}
+			}
+
+			// Ensure slices are never nil (for JSON)
+			if result.Owners == nil {
+				result.Owners = []string{}
+			}
+			if result.Admins == nil {
+				result.Admins = []string{}
+			}
+			if result.AllowedUsers == nil {
+				result.AllowedUsers = []string{}
+			}
+			if result.BlockedUsers == nil {
+				result.BlockedUsers = []string{}
+			}
+			if result.AllowedGroups == nil {
+				result.AllowedGroups = []string{}
+			}
+			if result.BlockedGroups == nil {
+				result.BlockedGroups = []string{}
+			}
+
+			return result
+		}
+
+		adapter.GrantWhatsAppUserAccessFn = func(jid, level string) error {
+			waManager.GrantAccess(jid, level)
+			// Sync runtime state back to config and persist
+			return syncWhatsAppAccessToConfig(cfg, waManager, configPath)
+		}
+
+		adapter.RevokeWhatsAppUserAccessFn = func(jid string) error {
+			waManager.RevokeAccess(jid)
+			// Sync runtime state back to config and persist
+			return syncWhatsAppAccessToConfig(cfg, waManager, configPath)
+		}
+
+		adapter.BlockWhatsAppUserFn = func(jid string) error {
+			waManager.BlockUser(jid)
+			// Sync runtime state back to config and persist
+			return syncWhatsAppAccessToConfig(cfg, waManager, configPath)
+		}
+
+		adapter.UnblockWhatsAppUserFn = func(jid string) error {
+			waManager.UnblockUser(jid)
+			// Sync runtime state back to config and persist
+			return syncWhatsAppAccessToConfig(cfg, waManager, configPath)
+		}
+
+		adapter.UpdateWhatsAppAccessDefaultPolicyFn = func(policy string) error {
+			cfg.Channels.WhatsApp.Access.DefaultPolicy = policy
+			waManager.SetDefaultPolicy(policy)
+
+			savePath := configPath
+			if savePath == "" {
+				savePath = "config.yaml"
+			}
+			return copilot.SaveConfigToFile(cfg, savePath)
+		}
+
+		adapter.GetWhatsAppGroupPoliciesFn = func() webui.WhatsAppGroupPolicies {
+			result := webui.WhatsAppGroupPolicies{
+				DefaultPolicy: "mention",
+				Groups:        []webui.WhatsAppGroupPolicy{},
+			}
+
+			gpResult := waManager.GetGroupPolicies()
+
+			m, ok := gpResult.(map[string]any)
+			if ok {
+				if v, ok := m["default_policy"].(string); ok {
+					result.DefaultPolicy = v
+				}
+				if v, ok := m["groups"].([]any); ok {
+					result.Groups = make([]webui.WhatsAppGroupPolicy, 0, len(v))
+					for _, g := range v {
+						if gm, ok := g.(map[string]any); ok {
+							gp := webui.WhatsAppGroupPolicy{}
+							if id, ok := gm["id"].(string); ok {
+								gp.ID = id
+							}
+							if name, ok := gm["name"].(string); ok {
+								gp.Name = name
+							}
+							if policy, ok := gm["policy"].(string); ok {
+								gp.Policy = policy
+							}
+							if policies, ok := gm["policies"].([]any); ok {
+								gp.Policies = anySliceToStringSlice(policies)
+							} else if policies, ok := gm["policies"].([]string); ok {
+								gp.Policies = policies
+							}
+							if keywords, ok := gm["keywords"].([]any); ok {
+								gp.Keywords = anySliceToStringSlice(keywords)
+							} else if keywords, ok := gm["keywords"].([]string); ok {
+								gp.Keywords = keywords
+							}
+							if users, ok := gm["allowed_users"].([]any); ok {
+								gp.AllowedUsers = anySliceToStringSlice(users)
+							} else if users, ok := gm["allowed_users"].([]string); ok {
+								gp.AllowedUsers = users
+							}
+							if ws, ok := gm["workspace"].(string); ok {
+								gp.Workspace = ws
+							}
+							result.Groups = append(result.Groups, gp)
+						}
+					}
+				}
+			}
+
+			return result
+		}
+
+		adapter.SetWhatsAppGroupPolicyFn = func(jid string, policy any) error {
+			waManager.SetGroupPolicy(jid, policy)
+			// Sync runtime state back to config and persist
+			return syncWhatsAppGroupPoliciesToConfig(cfg, waManager, configPath)
+		}
+
+		adapter.UpdateWhatsAppGroupDefaultPolicyFn = func(policy string) error {
+			cfg.Channels.WhatsApp.GroupPolicies.DefaultPolicy = policy
+			waManager.SetGroupDefaultPolicy(policy)
+
+			savePath := configPath
+			if savePath == "" {
+				savePath = "config.yaml"
+			}
+			return copilot.SaveConfigToFile(cfg, savePath)
+		}
+
+		adapter.UpdateWhatsAppConfigFn = func(config map[string]any) error {
+			if autoRead, ok := config["auto_read"].(bool); ok {
+				waManager.SetAutoRead(autoRead)
+				cfg.Channels.WhatsApp.AutoRead = autoRead
+			}
+			if sendTyping, ok := config["send_typing"].(bool); ok {
+				waManager.SetSendTyping(sendTyping)
+				cfg.Channels.WhatsApp.SendTyping = sendTyping
+			}
+			if trigger, ok := config["trigger"].(string); ok {
+				waManager.SetTrigger(trigger)
+				cfg.Channels.WhatsApp.Trigger = trigger
+			}
+			if respondToGroups, ok := config["respond_to_groups"].(bool); ok {
+				cfg.Channels.WhatsApp.RespondToGroups = respondToGroups
+			}
+			if respondToDMs, ok := config["respond_to_dms"].(bool); ok {
+				cfg.Channels.WhatsApp.RespondToDMs = respondToDMs
+			}
+			savePath := configPath
+			if savePath == "" {
+				savePath = "config.yaml"
+			}
+			return copilot.SaveConfigToFile(cfg, savePath)
+		}
+
+		adapter.GetWhatsAppConfigFn = func() map[string]any {
+			return map[string]any{
+				"trigger":           cfg.Channels.WhatsApp.Trigger,
+				"respond_to_groups": cfg.Channels.WhatsApp.RespondToGroups,
+				"respond_to_dms":    cfg.Channels.WhatsApp.RespondToDMs,
+				"auto_read":         cfg.Channels.WhatsApp.AutoRead,
+				"send_typing":       cfg.Channels.WhatsApp.SendTyping,
+			}
+		}
+
+		adapter.GetWhatsAppJoinedGroupsFn = func() ([]webui.WhatsAppJoinedGroup, error) {
+			groups, err := waManager.GetJoinedGroups()
+			if err != nil {
+				return nil, err
+			}
+			result := make([]webui.WhatsAppJoinedGroup, 0, len(groups))
+			for _, g := range groups {
+				result = append(result, webui.WhatsAppJoinedGroup(g))
+			}
+			return result, nil
+		}
 	}
 
 	// ── MCP Servers ──
@@ -1252,12 +1697,12 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 	}
 	adapter.CreateMCPServerFn = func(name, command string, args []string, env map[string]string) error {
 		newServer := copilot.ManagedMCPServerConfig{
-			Name:     name,
-			Type:     copilot.MCPTypeStdio,
-			Command:  command,
-			Args:     args,
-			Env:      env,
-			Enabled:  true,
+			Name:      name,
+			Type:      copilot.MCPTypeStdio,
+			Command:   command,
+			Args:      args,
+			Env:       env,
+			Enabled:   true,
 			AutoStart: true,
 		}
 		cfg.MCP.Servers = append(cfg.MCP.Servers, newServer)
@@ -1365,4 +1810,65 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 	}
 
 	return adapter
+}
+
+// syncWhatsAppAccessToConfig syncs the WhatsApp runtime access state back to the config
+// and persists it to disk. This ensures access changes survive server restarts.
+func syncWhatsAppAccessToConfig(cfg *copilot.Config, waManager channels.WhatsAppAccessManager, configPath string) error {
+	// Get current access config from runtime
+	accessConfig := waManager.GetAccessConfig()
+	if m, ok := accessConfig.(map[string]any); ok {
+		// Sync owners
+		if v, ok := m["owners"].([]string); ok {
+			cfg.Channels.WhatsApp.Access.Owners = v
+		}
+		// Sync admins
+		if v, ok := m["admins"].([]string); ok {
+			cfg.Channels.WhatsApp.Access.Admins = v
+		}
+		// Sync allowed users
+		if v, ok := m["allowed_users"].([]string); ok {
+			cfg.Channels.WhatsApp.Access.AllowedUsers = v
+		}
+		// Sync blocked users
+		if v, ok := m["blocked_users"].([]string); ok {
+			cfg.Channels.WhatsApp.Access.BlockedUsers = v
+		}
+	}
+
+	// Save to file
+	savePath := configPath
+	if savePath == "" {
+		savePath = "config.yaml"
+	}
+	return copilot.SaveConfigToFile(cfg, savePath)
+}
+
+// syncWhatsAppGroupPoliciesToConfig syncs the WhatsApp runtime group policies
+// back to the config and persists it to disk. This ensures group policy changes
+// survive server restarts.
+func syncWhatsAppGroupPoliciesToConfig(cfg *copilot.Config, waManager channels.WhatsAppAccessManager, configPath string) error {
+	// Get current group policies from runtime
+	policies := waManager.ListGroupPoliciesForConfig()
+
+	// Convert to config format (whatsapp.GroupPolicyConfig)
+	cfg.Channels.WhatsApp.GroupPolicies.Groups = make([]whatsapp.GroupPolicyConfig, 0, len(policies))
+	for _, p := range policies {
+		cfg.Channels.WhatsApp.GroupPolicies.Groups = append(cfg.Channels.WhatsApp.GroupPolicies.Groups, whatsapp.GroupPolicyConfig{
+			ID:           p.ID,
+			Name:         p.Name,
+			Policy:       p.Policy,
+			Policies:     p.Policies,
+			Keywords:     p.Keywords,
+			AllowedUsers: p.AllowedUsers,
+			Workspace:    p.Workspace,
+		})
+	}
+
+	// Save to file
+	savePath := configPath
+	if savePath == "" {
+		savePath = "config.yaml"
+	}
+	return copilot.SaveConfigToFile(cfg, savePath)
 }

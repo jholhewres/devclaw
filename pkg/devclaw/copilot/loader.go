@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 
@@ -78,6 +79,9 @@ func ParseConfig(data []byte) (*Config, error) {
 		return nil, fmt.Errorf("mapping config: %w", err)
 	}
 
+	// Strict validation: warn about unknown top-level keys.
+	warnUnknownConfigKeys(raw, reflect.TypeOf(Config{}), "")
+
 	// YAML unmarshal zeros bool fields when absent. Merge with defaults so
 	// vision/transcription are enabled out of the box, and partial media
 	// sections (e.g. only vision_model) don't accidentally disable features.
@@ -122,13 +126,8 @@ func SaveConfigToFile(cfg *Config, path string) error {
 		return fmt.Errorf("config validation failed (refusing to write corrupt data): %w", err)
 	}
 
-	// Backup existing file before overwriting.
-	if _, err := os.Stat(path); err == nil {
-		bakPath := path + ".bak"
-		if existing, err := os.ReadFile(path); err == nil {
-			_ = os.WriteFile(bakPath, existing, 0o600)
-		}
-	}
+	// Backup with rotation: keep the last N backup copies.
+	rotateConfigBackup(path, 5)
 
 	// Write with restricted permissions (owner read/write only).
 	if err := os.WriteFile(path, data, 0o600); err != nil {
@@ -170,7 +169,114 @@ func AuditSecrets(cfg *Config, logger *slog.Logger) {
 	}
 }
 
+// ---------- Strict config validation ----------
+
+// warnUnknownConfigKeys compares raw YAML keys against struct fields and logs
+// warnings for any keys that don't map to a known field. This catches typos
+// and deprecated keys early instead of silently ignoring them.
+func warnUnknownConfigKeys(raw map[string]any, structType reflect.Type, prefix string) {
+	known := yamlFieldNames(structType)
+
+	for key := range raw {
+		fullKey := key
+		if prefix != "" {
+			fullKey = prefix + "." + key
+		}
+		fieldType, ok := known[key]
+		if !ok {
+			slog.Warn("unknown config key (typo or deprecated?)", "key", fullKey)
+			continue
+		}
+		// Recurse into nested structs if the value is a map.
+		if nested, isMap := raw[key].(map[string]any); isMap && fieldType != nil {
+			ft := fieldType
+			// Unwrap pointer types.
+			for ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct {
+				warnUnknownConfigKeys(nested, ft, fullKey)
+			}
+		}
+	}
+}
+
+// yamlFieldNames extracts the set of YAML key names from a struct type,
+// mapped to their field types for recursive descent.
+func yamlFieldNames(t reflect.Type) map[string]reflect.Type {
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+
+	names := make(map[string]reflect.Type, t.NumField())
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		// Handle embedded (anonymous) structs by unwrapping their fields.
+		if field.Anonymous {
+			ft := field.Type
+			for ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			if ft.Kind() == reflect.Struct {
+				for k, v := range yamlFieldNames(ft) {
+					names[k] = v
+				}
+			}
+			continue
+		}
+		tag := field.Tag.Get("yaml")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		// Parse the tag name (before any comma option).
+		name := tag
+		if idx := strings.Index(tag, ","); idx != -1 {
+			name = tag[:idx]
+		}
+		if name == "" {
+			continue
+		}
+		names[name] = field.Type
+	}
+	return names
+}
+
 // ---------- Internal ----------
+
+// rotateConfigBackup rotates numbered backup copies before overwriting a config file.
+// Keeps at most `keep` backups: config.yaml.bak.1 (newest) through config.yaml.bak.N (oldest).
+func rotateConfigBackup(path string, keep int) {
+	if _, err := os.Stat(path); err != nil {
+		return // nothing to back up
+	}
+	if keep < 1 {
+		keep = 1
+	}
+
+	// Shift existing backups: .bak.4 → .bak.5, .bak.3 → .bak.4, etc.
+	// Start from the highest slot to avoid overwriting.
+	for i := keep - 1; i >= 1; i-- {
+		src := fmt.Sprintf("%s.bak.%d", path, i)
+		dst := fmt.Sprintf("%s.bak.%d", path, i+1)
+		if _, err := os.Stat(src); err == nil {
+			_ = os.Rename(src, dst)
+		}
+	}
+
+	// Remove the oldest if it exceeds the keep limit.
+	_ = os.Remove(fmt.Sprintf("%s.bak.%d", path, keep+1))
+
+	// Copy current file to .bak.1 (newest backup).
+	if data, err := os.ReadFile(path); err == nil {
+		_ = os.WriteFile(fmt.Sprintf("%s.bak.1", path), data, 0o600)
+	}
+}
 
 // loadEnvFiles loads .env files from standard locations.
 // By default, godotenv does NOT overwrite existing env vars.

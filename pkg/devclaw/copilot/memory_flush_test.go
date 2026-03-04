@@ -125,8 +125,8 @@ func TestMaybeMemoryFlush_DefaultConfigValues(t *testing.T) {
 
 	cfg := DefaultAgentConfig()
 
-	if cfg.MemoryFlush.Enabled {
-		t.Error("memory flush should be disabled by default")
+	if !cfg.MemoryFlush.Enabled {
+		t.Error("memory flush should be enabled by default")
 	}
 	if cfg.MemoryFlush.ReserveTokensFloor != 20000 {
 		t.Errorf("expected ReserveTokensFloor 20000, got %d", cfg.MemoryFlush.ReserveTokensFloor)

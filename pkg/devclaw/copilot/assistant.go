@@ -125,6 +125,9 @@ type Assistant struct {
 	// profileMgr manages authentication profiles for OAuth/API keys.
 	profileMgr profiles.ProfileManager
 
+	// failoverCoordinator unifies profile and model failover with consistent error classification.
+	failoverCoordinator *FailoverCoordinator
+
 	// projectMgr manages registered development projects.
 	projectMgr *ProjectManager
 
@@ -148,6 +151,9 @@ type Assistant struct {
 
 	// pluginMgr manages installed plugins (GitHub, Jira, Sentry, etc.).
 	pluginMgr *PluginManager
+
+	// mcpBridge connects MCP servers to the ToolExecutor.
+	mcpBridge *MCPToolsBridge
 
 	// userMgr handles multi-user operations when team mode is enabled.
 	userMgr *UserManager
@@ -188,6 +194,11 @@ type Assistant struct {
 	// sessPersister is the session persistence backend (SQLite or JSONL).
 	// Stored to wire into AgentRun for compaction summary persistence.
 	sessPersister SessionPersister
+
+	// providerDiscovery probes local LLM providers (Ollama, vLLM) for models.
+	// Shutdown: uses assistant ctx — cancelled in Stop(), which terminates
+	// any in-flight HTTP requests. No explicit cleanup needed.
+	providerDiscovery *ProviderDiscovery
 
 	// configMu protects hot-reloadable config fields.
 	configMu sync.RWMutex
@@ -230,21 +241,21 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 
 	// Create assistant first (needed for onDrain closure).
 	a := &Assistant{
-		config:         cfg,
-		channelMgr:     channels.NewManager(logger.With("component", "channels")),
-		accessMgr:      NewAccessManager(cfg.Access, logger),
-		workspaceMgr:   NewWorkspaceManager(cfg, cfg.Workspaces, logger),
-		llmClient:      NewLLMClient(cfg, logger),
-		toolExecutor:   te,
-		approvalMgr:    approvalMgr,
-		skillRegistry:  skills.NewRegistry(logger.With("component", "skills")),
-		sessionStore:   NewSessionStore(logger.With("component", "sessions")),
-		promptComposer: NewPromptComposer(cfg),
-		inputGuard:     security.NewInputGuardrail(cfg.Security.MaxInputLength, cfg.Security.RateLimit),
-		outputGuard:    security.NewOutputGuardrail(),
-		subagentMgr:    NewSubagentManager(cfg.Subagents, logger),
-		hookMgr:        NewHookManager(logger),
-		projectMgr:      projectMgr,
+		config:           cfg,
+		channelMgr:       channels.NewManager(logger.With("component", "channels")),
+		accessMgr:        NewAccessManager(cfg.Access, logger),
+		workspaceMgr:     NewWorkspaceManager(cfg, cfg.Workspaces, logger),
+		llmClient:        NewLLMClient(cfg, logger),
+		toolExecutor:     te,
+		approvalMgr:      approvalMgr,
+		skillRegistry:    skills.NewRegistry(logger.With("component", "skills")),
+		sessionStore:     NewSessionStore(logger.With("component", "sessions")),
+		promptComposer:   NewPromptComposer(cfg),
+		inputGuard:       security.NewInputGuardrail(cfg.Security.MaxInputLength, cfg.Security.RateLimit),
+		outputGuard:      security.NewOutputGuardrail(),
+		subagentMgr:      NewSubagentManager(cfg.Subagents, logger),
+		hookMgr:          NewHookManager(logger),
+		projectMgr:       projectMgr,
 		activeRuns:       make(map[string]context.CancelFunc),
 		interruptInboxes: make(map[string]chan string),
 		followupQueues:   make(map[string][]*channels.IncomingMessage),
@@ -360,12 +371,12 @@ func (a *Assistant) Start(ctx context.Context) error {
 	}
 
 	// 0pre-a. Initialize auth profile manager for OAuth/API key management.
-	// This enables the google_api tool and other OAuth-based integrations.
 	if a.vault != nil && a.vault.IsUnlocked() {
 		storeCfg := profiles.StoreConfig{
-			Vault:     a.vault,
-			Logger:    a.logger.With("component", "auth-profiles"),
-			CachePath: filepath.Join(filepath.Dir(a.config.Memory.Path), "auth_profiles_cache.json"),
+			Vault:          a.vault,
+			Logger:         a.logger.With("component", "auth-profiles"),
+			CachePath:      filepath.Join(filepath.Dir(a.config.Memory.Path), "auth_profiles_cache.json"),
+			CooldownConfig: a.config.ProfileCooldowns,
 		}
 
 		// Wire up OAuth Hub adapter when mode is "hub"
@@ -391,16 +402,41 @@ func (a *Assistant) Start(ctx context.Context) error {
 			a.logger.Warn("auth profile manager not available", "error", err)
 		} else {
 			a.profileMgr = profileStore
+			profileCount := len(profileStore.List())
 			a.logger.Info("auth profile manager initialized",
-				"profiles", len(profileStore.List()),
+				"profiles", profileCount,
 			)
+			// Scale LLM retry budget by available profile count —
+			// more profiles means more credential rotation capacity.
+			a.llmClient.fallback.MaxRetries = ScaledMaxRetries(profileCount)
 		}
 	} else {
 		a.logger.Info("vault locked or unavailable, auth profile manager disabled")
 	}
 
+	// Initialize failover coordinator (unifies profile + model failover).
+	modelFallbackCfg := ModelFallbackConfig{
+		Primary:   a.config.Model,
+		Fallbacks: a.config.Fallback.Models,
+	}
+	a.failoverCoordinator = NewFailoverCoordinator(
+		a.profileMgr,
+		modelFallbackCfg,
+		a.logger,
+	)
+
 	// 0pre-b. Auto-resolve media transcription provider from main API config.
 	a.config.Media.ResolveForProvider(a.config.API.Provider, a.config.API.BaseURL)
+
+	// 0pre-c. Dynamic provider discovery (non-blocking background probe).
+	// Populates a cache of model metadata (context windows) for Ollama/vLLM.
+	if a.config.ProviderDiscovery.Enabled {
+		pd := NewProviderDiscovery(a.config.ProviderDiscovery, a.logger)
+		a.providerDiscovery = pd
+		// Wire the discovery cache into the context window resolver.
+		setDiscoveredContextWindowFn(pd.GetContextWindow)
+		go pd.DiscoverAll(a.ctx)
+	}
 
 	// 0. Initialize memory stores.
 	memDir := filepath.Join(filepath.Dir(a.config.Memory.Path), "memory")
@@ -633,7 +669,7 @@ func (a *Assistant) Start(ctx context.Context) error {
 		a.logger.Info("team manager initialized with spawn callback and notification dispatcher")
 	}
 
-	// 1d-b. Configure profile manager for OAuth/API key tools (google_api, etc.)
+	// 1d-b. Configure profile manager for OAuth/API key tools.
 	if a.profileMgr != nil {
 		a.toolExecutor.SetProfileManager(a.profileMgr)
 	}
@@ -734,9 +770,9 @@ func (a *Assistant) Start(ctx context.Context) error {
 		// Create enrichment config - sync with model capabilities
 		enrichCfg := media.EnrichmentConfig{
 			// Only auto-enrich images if vision is enabled AND config says so
-			AutoEnrichImages:    mCfg.VisionEnabled && a.config.NativeMedia.Enrichment.AutoEnrichImages,
+			AutoEnrichImages: mCfg.VisionEnabled && a.config.NativeMedia.Enrichment.AutoEnrichImages,
 			// Only auto-enrich audio if transcription is enabled AND config says so
-			AutoEnrichAudio:     mCfg.TranscriptionEnabled && a.config.NativeMedia.Enrichment.AutoEnrichAudio,
+			AutoEnrichAudio: mCfg.TranscriptionEnabled && a.config.NativeMedia.Enrichment.AutoEnrichAudio,
 			// Documents don't depend on external APIs
 			AutoEnrichDocuments: a.config.NativeMedia.Enrichment.AutoEnrichDocuments,
 		}
@@ -879,11 +915,21 @@ func (a *Assistant) Stop() {
 	a.channelMgr.Stop()
 	a.skillRegistry.ShutdownAll()
 
+	// Shut down MCP server connections.
+	if a.mcpBridge != nil {
+		a.mcpBridge.Shutdown()
+	}
+
 	// Close SQLite memory store.
 	if a.sqliteMemory != nil {
 		if err := a.sqliteMemory.Close(); err != nil {
 			a.logger.Warn("error closing SQLite memory", "error", err)
 		}
+	}
+
+	// Stop message queue dedup goroutine.
+	if a.messageQueue != nil {
+		a.messageQueue.Stop()
 	}
 
 	// Close skill database.
@@ -926,6 +972,29 @@ func (a *Assistant) ApplyConfigUpdate(newCfg *Config) {
 
 	a.logger.Info("config hot-reload applied",
 		"updated", []string{"access", "instructions", "tool_guard", "heartbeat", "token_budget"},
+	)
+}
+
+// UpdateLLMClient recreates the LLM client with the current config.
+// Call this after changing provider, model, base_url, or api_key at runtime.
+func (a *Assistant) UpdateLLMClient(cfg *Config) {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
+	a.config.API = cfg.API
+	a.config.Model = cfg.Model
+	a.config.Fallback = cfg.Fallback
+	a.llmClient = NewLLMClient(cfg, a.logger)
+
+	if a.profileMgr != nil {
+		profileCount := len(a.profileMgr.List())
+		a.llmClient.fallback.MaxRetries = ScaledMaxRetries(profileCount)
+	}
+
+	a.logger.Info("LLM client hot-reloaded",
+		"provider", cfg.API.Provider,
+		"model", cfg.Model,
+		"base_url", cfg.API.BaseURL,
 	)
 }
 
@@ -1120,12 +1189,56 @@ func (a *Assistant) handleBusySession(msg *channels.IncomingMessage, sessionID s
 	}
 }
 
-// enqueueFollowup adds a message to the followup queue with bounds checking.
+// enqueueFollowup adds a message to the followup queue with configurable drop policy.
 func (a *Assistant) enqueueFollowup(msg *channels.IncomingMessage, sessionID string, logger *slog.Logger) {
+	// Snapshot config under configMu to avoid data race with hot-reload.
+	a.configMu.RLock()
+	dropPolicy := a.config.Queue.DropPolicy
+	a.configMu.RUnlock()
+
 	a.followupQueuesMu.Lock()
 	if len(a.followupQueues[sessionID]) >= maxFollowupQueue {
-		a.followupQueues[sessionID] = a.followupQueues[sessionID][1:]
-		logger.Warn("followup queue full, dropped oldest", "session", sessionID)
+		queue := a.followupQueues[sessionID]
+		policy := dropPolicy
+		if policy == "" {
+			policy = DropOld
+		}
+
+		switch policy {
+		case DropNew:
+			// Reject the new message entirely.
+			a.followupQueuesMu.Unlock()
+			logger.Warn("followup queue full, dropped new message (policy: drop_new)",
+				"session", sessionID,
+				"content_preview", truncate(msg.Content, 50))
+			return
+
+		case DropSummarize:
+			// Summarize the two oldest messages, replace them with one summary msg.
+			// Drops 2 items + adds 1 summary = net -1, making room for the new message.
+			dropCount := 2
+			if len(queue) < 2 {
+				dropCount = 1
+			}
+			dropped := queue[:dropCount]
+			summaryContent := buildDroppedSummary(dropped)
+			summaryMsg := &channels.IncomingMessage{
+				Content: summaryContent,
+				Channel: dropped[0].Channel,
+				ChatID:  dropped[0].ChatID,
+				From:    "system",
+				ID:      dropped[0].ID + "-summarized",
+				IsGroup: dropped[0].IsGroup,
+			}
+			a.followupQueues[sessionID] = append([]*channels.IncomingMessage{summaryMsg}, queue[dropCount:]...)
+			logger.Info("followup queue full, summarized oldest (policy: summarize)",
+				"session", sessionID, "dropped_count", dropCount)
+
+		default: // DropOld
+			a.followupQueues[sessionID] = queue[1:]
+			logger.Warn("followup queue full, dropped oldest (policy: drop_old)",
+				"session", sessionID)
+		}
 	}
 	a.followupQueues[sessionID] = append(a.followupQueues[sessionID], msg)
 	qLen := len(a.followupQueues[sessionID])
@@ -1136,6 +1249,23 @@ func (a *Assistant) enqueueFollowup(msg *channels.IncomingMessage, sessionID str
 		"queue_length", qLen,
 		"content_preview", truncate(msg.Content, 50),
 	)
+}
+
+// buildDroppedSummary creates a summary of dropped messages for the summarize drop policy.
+func buildDroppedSummary(dropped []*channels.IncomingMessage) string {
+	if len(dropped) == 0 {
+		return "[Earlier messages were summarized due to queue overflow]"
+	}
+	var b strings.Builder
+	b.WriteString("[Summarized earlier messages] ")
+	for _, m := range dropped {
+		preview := m.Content
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		b.WriteString(fmt.Sprintf("From %s: %s | ", m.From, preview))
+	}
+	return b.String()
 }
 
 // enqueueFollowupMessage creates a synthetic message and enqueues it for processing.
@@ -1173,6 +1303,29 @@ func (a *Assistant) enqueueFollowupMessage(sessionID, content, channel, chatID s
 // drainFollowupQueue processes messages that were enqueued while a session was
 // busy. Each followup message is processed as a new, independent agent run.
 // When there are multiple queued messages, they are combined into a single run.
+// hasMixedChannelOrigins returns true if messages come from different channels.
+func hasMixedChannelOrigins(msgs []*channels.IncomingMessage) bool {
+	if len(msgs) <= 1 {
+		return false
+	}
+	first := msgs[0].Channel
+	for _, m := range msgs[1:] {
+		if m.Channel != first {
+			return true
+		}
+	}
+	return false
+}
+
+// groupByChannel groups messages by their source channel, preserving order within each group.
+func groupByChannel(msgs []*channels.IncomingMessage) map[string][]*channels.IncomingMessage {
+	groups := make(map[string][]*channels.IncomingMessage)
+	for _, m := range msgs {
+		groups[m.Channel] = append(groups[m.Channel], m)
+	}
+	return groups
+}
+
 func (a *Assistant) drainFollowupQueue(sessionID string) {
 	a.followupQueuesMu.Lock()
 	msgs := a.followupQueues[sessionID]
@@ -1187,6 +1340,28 @@ func (a *Assistant) drainFollowupQueue(sessionID string) {
 		"session", sessionID,
 		"count", len(msgs),
 	)
+
+	// Cross-channel check: if messages come from different channels,
+	// process each channel group separately to avoid context mixing.
+	if len(msgs) > 1 && hasMixedChannelOrigins(msgs) {
+		groups := groupByChannel(msgs)
+		a.logger.Info("cross-channel followup detected, routing separately",
+			"session", sessionID,
+			"channels", len(groups),
+		)
+		for _, group := range groups {
+			if len(group) > 1 {
+				combined := a.messageQueue.CombineMessages(group)
+				synthetic := *group[0]
+				synthetic.Content = combined
+				synthetic.ID = group[0].ID + "-followup-collected"
+				a.handleMessage(&synthetic)
+			} else {
+				a.handleMessage(group[0])
+			}
+		}
+		return
+	}
 
 	// Collect mode: combine multiple queued messages into one prompt,
 	// then process as a single agent run.
@@ -1236,12 +1411,44 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 		"is_group", msg.IsGroup,
 	)
 
-	// ── Step 0: Access control ──
-	// Check if the sender is authorized BEFORE anything else.
-	// Unknown contacts are silently ignored (deny-by-default policy).
-	accessResult := a.accessMgr.Check(msg)
+	// Check if AutoRead is enabled for this channel (used for reactions/read receipts).
+	var autoReadEnabled bool
+	ch, exists := a.channelMgr.Channel(msg.Channel)
+	if exists {
+		if arc, ok := ch.(channels.AutoReadConfigurable); ok {
+			autoReadEnabled = arc.AutoReadEnabled()
+		}
+	}
 
-	if !accessResult.Allowed {
+	// ── Step 0: Access control ──
+	// First, try to use channel's built-in access filter (if available).
+	// This allows each channel to implement its own access control logic.
+	// Otherwise, fall back to the global AccessManager.
+	var accessAllowed bool
+	var accessReason string
+	var accessLevel AccessLevel
+
+	if exists {
+		if af, ok := ch.(channels.AccessFilter); ok {
+			// Channel has its own access filter.
+			accessAllowed, accessReason = af.CanResponse(msg)
+			accessLevel = AccessLevel(accessReason)
+		} else {
+			// Fall back to global AccessManager.
+			accessResult := a.accessMgr.Check(msg)
+			accessAllowed = accessResult.Allowed
+			accessReason = accessResult.Reason
+			accessLevel = accessResult.Level
+		}
+	} else {
+		// No channel found, use global AccessManager.
+		accessResult := a.accessMgr.Check(msg)
+		accessAllowed = accessResult.Allowed
+		accessReason = accessResult.Reason
+		accessLevel = accessResult.Level
+	}
+
+	if !accessAllowed {
 		// Check if this is a DM with a potential pairing token.
 		if !msg.IsGroup && a.pairingMgr != nil {
 			token := ExtractTokenFromMessage(msg.Content)
@@ -1253,30 +1460,35 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 				}
 				a.sendReply(msg, response)
 				if approved {
-					// Re-check access now that user is approved.
-					accessResult = a.accessMgr.Check(msg)
 					logger.Info("access granted via pairing token",
 						"from", msg.From)
+					// Continue processing after pairing token approval.
+					accessAllowed = true
+					accessLevel = AccessUser
 				}
 				return
 			}
 		}
 
 		// If policy is "ask", send a one-time message.
-		if accessResult.ShouldAsk {
-			a.sendReply(msg, a.accessMgr.PendingMessage())
-			a.accessMgr.MarkAsked(msg.From)
+		if accessReason == "ask (first time)" {
+			pendingMsg := a.accessMgr.PendingMessage()
+			a.sendReply(msg, pendingMsg)
+			// Note: Channel handles its own "asked" tracking if it implements AccessFilter.
+			if _, ok := ch.(channels.AccessFilter); !ok {
+				a.accessMgr.MarkAsked(msg.From)
+			}
 			logger.Info("access pending, sent request message",
 				"from", msg.From)
 		} else {
 			logger.Info("message ignored (access denied)",
-				"reason", accessResult.Reason,
+				"reason", accessReason,
 				"from_raw", msg.From)
 		}
 		return
 	}
 
-	logger.Info("access granted", "level", accessResult.Level)
+	logger.Info("access granted", "level", accessLevel)
 
 	// ── Step 0b: Maintenance mode check ──
 	// Allow commands through, block regular messages.
@@ -1354,6 +1566,9 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	workspace := resolved.Workspace
 	session := resolved.Session
 
+	// Apply per-type history limits: DM sessions keep more history than groups.
+	session.SetMaxHistory(HistoryLimitForType(msg.IsGroup))
+
 	logger = logger.With("workspace", workspace.ID)
 
 	// ── Step 3: Check trigger ──
@@ -1366,21 +1581,78 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 
 	// ── Step 3a: Group policy check ──
 	// For group messages, check if we should respond based on group policy.
-	if msg.IsGroup && a.groupPolicyMgr != nil {
-		isReplyToBot := false // TODO: detect if message is a reply to bot
-		matchedTrigger := ""
-		if triggered {
-			matchedTrigger = trigger
+	// First, try to use channel's built-in group filter (if available).
+	// Otherwise, fall back to the global GroupPolicyManager.
+	var shouldRespond bool
+
+	if msg.IsGroup {
+		ch, exists := a.channelMgr.Channel(msg.Channel)
+		if exists {
+			if gf, ok := ch.(channels.GroupFilter); ok {
+				// Channel has its own group filter.
+				matchedTrigger := ""
+				if triggered {
+					matchedTrigger = trigger
+				}
+				shouldRespond = gf.ShouldRespond(msg, matchedTrigger)
+			} else if a.groupPolicyMgr != nil {
+				// Fall back to global GroupPolicyManager.
+				isReplyToBot := false // TODO: detect if message is a reply to bot
+				matchedTrigger := ""
+				if triggered {
+					matchedTrigger = trigger
+				}
+				shouldRespond = a.groupPolicyMgr.ShouldRespond(msg.ChatID, msg.From, msg.Content, isReplyToBot, matchedTrigger)
+			} else {
+				// No group filter configured, respond to all triggered messages.
+				shouldRespond = triggered
+			}
+		} else {
+			// No channel found, use global GroupPolicyManager if available.
+			if a.groupPolicyMgr != nil {
+				isReplyToBot := false
+				matchedTrigger := ""
+				if triggered {
+					matchedTrigger = trigger
+				}
+				shouldRespond = a.groupPolicyMgr.ShouldRespond(msg.ChatID, msg.From, msg.Content, isReplyToBot, matchedTrigger)
+			} else {
+				shouldRespond = triggered
+			}
 		}
-		if !a.groupPolicyMgr.ShouldRespond(msg.ChatID, msg.From, msg.Content, isReplyToBot, matchedTrigger) {
+
+		if !shouldRespond {
 			logger.Debug("group policy: not responding")
 			return
 		}
+
 		// Override workspace if group has a specific workspace configured.
-		if wsID := a.groupPolicyMgr.GetWorkspace(msg.ChatID); wsID != "" {
-			if altWS, ok := a.workspaceMgr.Get(wsID); ok {
-				workspace = altWS
-				logger = logger.With("workspace_override", wsID)
+		// Check channel's group filter first, then global manager.
+		if exists {
+			if _, ok := ch.(channels.GroupFilter); ok {
+				// TODO: Add GetWorkspace() to GroupFilter interface
+				if a.groupPolicyMgr != nil {
+					if wsID := a.groupPolicyMgr.GetWorkspace(msg.ChatID); wsID != "" {
+						if altWS, ok := a.workspaceMgr.Get(wsID); ok {
+							workspace = altWS
+							logger = logger.With("workspace_override", wsID)
+						}
+					}
+				}
+			} else if a.groupPolicyMgr != nil {
+				if wsID := a.groupPolicyMgr.GetWorkspace(msg.ChatID); wsID != "" {
+					if altWS, ok := a.workspaceMgr.Get(wsID); ok {
+						workspace = altWS
+						logger = logger.With("workspace_override", wsID)
+					}
+				}
+			}
+		} else if a.groupPolicyMgr != nil {
+			if wsID := a.groupPolicyMgr.GetWorkspace(msg.ChatID); wsID != "" {
+				if altWS, ok := a.workspaceMgr.Get(wsID); ok {
+					workspace = altWS
+					logger = logger.With("workspace_override", wsID)
+				}
 			}
 		}
 	} else if !triggered {
@@ -1389,13 +1661,18 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	}
 
 	logger.Info("message received, processing...",
-		"access_level", accessResult.Level)
+		"access_level", accessLevel)
 
-	// ── Step 3b: React, send typing indicator, and mark as read ──
-	// React with ⏳ to acknowledge processing.
-	a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "⏳")
-	a.channelMgr.SendTyping(a.ctx, msg.Channel, msg.ChatID)
-	a.channelMgr.MarkRead(a.ctx, msg.Channel, msg.ChatID, []string{msg.ID})
+	// ── Step 3b: React, send typing indicator, and mark as read (only if AutoRead is enabled) ──
+	// These actions only happen AFTER access control and group policy checks pass.
+	// This prevents the bot from reacting to or marking as read messages from unauthorized users
+	// or messages that don't match group activation policies.
+	if autoReadEnabled {
+		// React with ⏳ to acknowledge processing.
+		a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "⏳")
+		a.channelMgr.SendTyping(a.ctx, msg.Channel, msg.ChatID)
+		a.channelMgr.MarkRead(a.ctx, msg.Channel, msg.ChatID, []string{msg.ID})
+	}
 
 	// ── Step 4: Enrich content with media (images → description, audio → transcript) ──
 	// Phase 1 (fast): extract text immediately, schedule media for async processing.
@@ -1472,7 +1749,7 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	// tools get per-request security context without shared mutable state.
 	agentCtx := ContextWithSession(a.ctx, sessionID)
 	agentCtx = ContextWithDelivery(agentCtx, msg.Channel, msg.ChatID)
-	agentCtx = ContextWithCaller(agentCtx, accessResult.Level, msg.From)
+	agentCtx = ContextWithCaller(agentCtx, accessLevel, msg.From)
 
 	// Resolve tool profile: session > workspace > channel inference > global.
 	// Extend with active skill tool prefixes so their tools pass the filter.
@@ -1514,22 +1791,12 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 		blockStreamer = NewBlockStreamer(bsCfg, a.channelMgr, msg.Channel, msg.ChatID, msg.ID)
 	}
 
-	// Start a typing heartbeat goroutine that re-sends typing indicators
-	// every 8 seconds while the agent is processing. WhatsApp's typing
-	// indicator expires after ~10s, so refreshing keeps it alive.
-	typingDone := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(8 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-typingDone:
-				return
-			case <-ticker.C:
-				a.channelMgr.SendTyping(a.ctx, msg.Channel, msg.ChatID)
-			}
-		}
-	}()
+	// Start a lifecycle-aware typing controller that manages typing indicators
+	// with state machine transitions (Active → RunComplete → DispatchIdle → Sealed).
+	// Enforces a hard TTL and grace period for block streamer dispatch.
+	typingCtrl := NewTypingController(a.channelMgr, msg.Channel, msg.ChatID)
+	typingCtrl.Start(agentCtx)
+	defer typingCtrl.Seal()
 
 	// ── Step 8b: Schedule async media processing if pending ──
 	// Media enrichment runs in parallel with the agent. When results arrive,
@@ -1539,6 +1806,9 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 		go a.enrichMediaAsync(a.ctx, msg, sessionID, logger)
 	}
 
+	// Proactive memory flush: project token usage and flush if approaching context limit.
+	a.proactiveMemoryFlush(agentCtx, session, modelOverride)
+
 	agentStart := time.Now()
 	response, toolSummary := a.executeAgentWithStream(agentCtx, workspace.ID, session, sessionID, prompt, userContent, blockStreamer, modelOverride)
 	logger.Info("agent execution complete",
@@ -1546,13 +1816,15 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 		"response_len", len(response),
 	)
 
-	// Stop the typing heartbeat.
-	close(typingDone)
+	// Agent run complete — transition to grace period for block streamer dispatch.
+	typingCtrl.MarkRunComplete()
 
 	// Finalize the block streamer (flush remaining text).
 	if blockStreamer != nil {
 		blockStreamer.Finish()
 	}
+	// Block streamer dispatch complete — stop typing indicators.
+	typingCtrl.MarkDispatchIdle()
 
 	// ── Step 9: Validate output ──
 	if err := a.outputGuard.Validate(response); err != nil {
@@ -1583,8 +1855,10 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	// ── Step 11b: TTS — synthesize and send audio if enabled ──
 	a.maybeSendTTS(msg, response)
 
-	// React with ✅ to signal processing is complete.
-	a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "✅")
+	// React with ✅ to signal processing is complete (only if AutoRead is enabled).
+	if autoReadEnabled {
+		a.channelMgr.SendReaction(a.ctx, msg.Channel, msg.ChatID, msg.ID, "✅")
+	}
 
 	logger.Info("message processed",
 		"duration_ms", time.Since(start).Milliseconds(),
@@ -1645,10 +1919,12 @@ func (a *Assistant) matchesTrigger(content, trigger string, isGroup bool) bool {
 		return true
 	}
 
-	// In groups, require the trigger.
-	content = strings.TrimSpace(content)
-	return len(content) >= len(trigger) &&
-		strings.EqualFold(content[:len(trigger)], trigger)
+	// In groups, check if trigger is anywhere in the message.
+	// This handles cases like "Olá @sampeps, tudo bem?" where the trigger
+	// is in the middle of the message (WhatsApp @mention style).
+	content = strings.ToLower(strings.TrimSpace(content))
+	trigger = strings.ToLower(strings.TrimSpace(trigger))
+	return strings.Contains(content, trigger)
 }
 
 // resolveToolProfile returns the effective tool profile for a workspace.
@@ -1741,6 +2017,80 @@ func (a *Assistant) composePromptWithAgent(profile *AgentProfileConfig, ws *Work
 	return a.promptComposer.Compose(session, input)
 }
 
+// proactiveMemoryFlush projects token usage for the next run and triggers
+// a memory flush if context is approaching the limit. This prevents compaction
+// from discarding important context by saving memories proactively.
+func (a *Assistant) proactiveMemoryFlush(ctx context.Context, session *Session, modelOverride string) {
+	// Snapshot config fields under configMu to avoid data race with hot-reload.
+	a.configMu.RLock()
+	cfg := a.config.Agent.MemoryFlush
+	agentCfg := a.config.Agent
+	configModel := a.config.Model
+	a.configMu.RUnlock()
+
+	if !cfg.Enabled || !cfg.ProactiveEnabled {
+		return
+	}
+	if a.llmClient == nil {
+		return
+	}
+
+	// Get last-call token data for projection.
+	lastPrompt, lastOutput, lastCacheRead, lastCacheWrite := session.GetLastCallTokens()
+	if lastPrompt == 0 && lastOutput == 0 {
+		return // No prior call data — skip projection on first call.
+	}
+
+	// Project: next call will use approximately lastPrompt + lastOutput + cache tokens of context.
+	// Include cacheWrite because written tokens become cacheRead on the subsequent call.
+	projectedTokens := lastPrompt + lastOutput + lastCacheRead + lastCacheWrite
+
+	// Determine context window.
+	model := modelOverride
+	if model == "" {
+		model = configModel
+	}
+	contextWindow := getModelContextWindowByName(model)
+
+	threshold := cfg.ProjectionThreshold
+	if threshold <= 0 || threshold >= 1.0 {
+		threshold = 0.85
+	}
+
+	limit := int(float64(contextWindow) * threshold)
+	if projectedTokens < limit {
+		// Also check history byte size as a force-flush heuristic.
+		historyBytes := session.EstimateHistorySizeBytes()
+		if historyBytes < 2*1024*1024 { // 2MB
+			return
+		}
+		a.logger.Info("proactive memory flush triggered by history size",
+			"history_bytes", historyBytes)
+	} else {
+		a.logger.Info("proactive memory flush triggered by token projection",
+			"projected_tokens", projectedTokens,
+			"context_window", contextWindow,
+			"threshold", limit)
+	}
+
+	// Build a minimal agent run just for the flush.
+	agent := NewAgentRunWithConfig(a.llmClient, a.toolExecutor, agentCfg, a.logger)
+	agent.SetModelOverride(modelOverride)
+
+	// Build messages from recent history for the flush LLM call.
+	history := session.RecentHistory(10)
+	var messages []chatMessage
+	for _, entry := range history {
+		messages = append(messages, chatMessage{Role: "user", Content: entry.UserMessage})
+		if entry.AssistantResponse != "" {
+			messages = append(messages, chatMessage{Role: "assistant", Content: entry.AssistantResponse})
+		}
+	}
+
+	tokenEstimate := agent.estimateTokens(messages)
+	agent.maybeMemoryFlush(ctx, messages, tokenEstimate)
+}
+
 // executeAgentWithStream runs the agentic loop, optionally streaming text
 // progressively to the channel via a BlockStreamer.
 // sessionID is the channel:chatID key used for interrupt inbox routing.
@@ -1792,6 +2142,11 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 		agent.SetSessionPersistence(a.sessPersister, sessionID)
 	}
 
+	// Restore compaction summaries from session for context reconstruction.
+	if summaries := session.GetCompactionSummaries(); len(summaries) > 0 {
+		agent.compactionSummaries = summaries
+	}
+
 	// Wire interrupt channel for live message injection.
 	agent.SetInterruptChannel(interruptInbox)
 
@@ -1832,6 +2187,8 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 
 	if usage != nil {
 		session.AddTokenUsage(usage.PromptTokens, usage.CompletionTokens)
+		// Store last-call token snapshot for proactive memory flush projection.
+		session.UpdateLastCallTokens(usage.PromptTokens, usage.CompletionTokens, usage.CacheReadTokens, usage.CacheWriteTokens)
 	}
 
 	return response, agent.ToolSummary()
@@ -1883,6 +2240,7 @@ func (a *Assistant) executeAgent(ctx context.Context, workspaceID string, sessio
 
 	if usage != nil {
 		session.AddTokenUsage(usage.PromptTokens, usage.CompletionTokens)
+		session.UpdateLastCallTokens(usage.PromptTokens, usage.CompletionTokens, usage.CacheReadTokens, usage.CacheWriteTokens)
 	}
 
 	return response
@@ -2238,6 +2596,19 @@ func (a *Assistant) registerSkillTools() {
 	)
 }
 
+// ReloadAndInitializeSkills reloads skills from disk, initializes new
+// skills with the sandbox runner, and re-registers all skill tools.
+// This is called after installing or updating skills at runtime.
+func (a *Assistant) ReloadAndInitializeSkills(ctx context.Context) (int, error) {
+	reloaded, err := a.skillRegistry.Reload(ctx)
+	if err != nil {
+		return 0, err
+	}
+	a.initializeSkills()
+	a.registerSkillTools()
+	return reloaded, nil
+}
+
 // registerSystemTools registers core system tools (web_fetch, exec, file I/O)
 // that are always available to the agent regardless of skills configuration.
 func (a *Assistant) registerSystemTools() {
@@ -2284,7 +2655,7 @@ func (a *Assistant) registerSystemTools() {
 		if len(a.config.Skills.ClawdHubDirs) > 0 {
 			skillsDir = a.config.Skills.ClawdHubDirs[0]
 		}
-		RegisterSkillCreatorTools(a.toolExecutor, a.skillRegistry, skillsDir, a.skillDB, a.logger)
+		RegisterSkillCreatorTools(a.toolExecutor, a.skillRegistry, skillsDir, a.skillDB, a.ReloadAndInitializeSkills, a.logger)
 	}
 
 	// Register subagent tools (spawn, list, wait, stop).
@@ -2355,6 +2726,12 @@ func (a *Assistant) registerSystemTools() {
 	}
 	if a.pluginMgr.HasPlugins() {
 		RegisterPluginTools(a.toolExecutor, a.pluginMgr)
+	}
+
+	// Register MCP tools (bridge external MCP servers to ToolExecutor).
+	if a.config.MCP.Enabled && len(a.config.MCP.Servers) > 0 {
+		a.mcpBridge = NewMCPToolsBridge(a.toolExecutor, a.logger)
+		a.mcpBridge.ConnectAll(a.ctx, a.config.MCP.Servers)
 	}
 
 	// Register multi-user tools (when enabled).
@@ -3383,4 +3760,3 @@ func (a *Assistant) resumeInterruptedRuns() {
 		}(r)
 	}
 }
-

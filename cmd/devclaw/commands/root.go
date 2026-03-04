@@ -41,6 +41,9 @@ Examples:
 		newShellHookCmd(),
 		newMCPCmd(),
 		NewOAuthCommand(),
+		newUpdateCmd(version),
+		newDoctorCmd(),
+		newHooksCmd(),
 	)
 
 	// Flags globais.

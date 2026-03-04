@@ -78,15 +78,14 @@ func (m *Manager) Start(ctx context.Context) error {
 		} else {
 			connected++
 			m.logger.Info("channel connected", "channel", name)
+			// Start listening only for successfully connected channels.
+			// Channels that fail here will get a listener via ConnectChannel on reconnect.
+			m.listenWg.Add(1)
+			go func(c Channel) {
+				defer m.listenWg.Done()
+				m.listenChannel(c)
+			}(ch)
 		}
-
-		// Always start listening — if the channel reconnects later
-		// (e.g. via QR scan in the web UI), messages will flow through.
-		m.listenWg.Add(1)
-		go func(c Channel) {
-			defer m.listenWg.Done()
-			m.listenChannel(c)
-		}(ch)
 	}
 
 	if connected == 0 {

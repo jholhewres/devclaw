@@ -279,18 +279,75 @@ func (p *AuthProfile) ClearError() {
 	p.LastErrorAt = nil
 }
 
+// FailureReason categorizes why a profile authentication failed.
+// Used to determine cooldown strategy (transient vs permanent).
+type FailureReason string
+
+const (
+	FailureAuth          FailureReason = "auth"
+	FailureAuthPermanent FailureReason = "auth_permanent"
+	FailureRateLimit     FailureReason = "rate_limit"
+	FailureBilling       FailureReason = "billing"
+	FailureTimeout       FailureReason = "timeout"
+	FailureFormat        FailureReason = "format"
+	FailureModelNotFound   FailureReason = "model_not_found"
+	FailureSessionExpired  FailureReason = "session_expired"
+	FailureUnknown         FailureReason = "unknown"
+)
+
+// ProfileCooldownConfig allows overriding default cooldown durations via YAML config.
+// All fields are optional; zero values fall back to hardcoded defaults.
+type ProfileCooldownConfig struct {
+	RateLimitSeconds    int                                `yaml:"rate_limit_seconds"`     // Default: 30
+	BillingBackoffHours float64                            `yaml:"billing_backoff_hours"`  // Default: 5
+	BillingMaxHours     float64                            `yaml:"billing_max_hours"`      // Default: 24
+	FailureWindowHours  float64                            `yaml:"failure_window_hours"`   // Default: 24
+	ByProvider          map[string]ProviderCooldownOverride `yaml:"by_provider"`
+}
+
+// ProviderCooldownOverride allows per-provider cooldown tuning.
+type ProviderCooldownOverride struct {
+	RateLimitSeconds    int     `yaml:"rate_limit_seconds"`
+	BillingBackoffHours float64 `yaml:"billing_backoff_hours"`
+}
+
+// ProfileUsageStats tracks per-profile cooldown and failure state.
+// Cooldown: short lockout for transient errors (rate limit).
+// Disabled: long lockout for persistent errors (billing, auth_permanent).
+type ProfileUsageStats struct {
+	LastUsed       *time.Time            `json:"last_used,omitempty"`
+	CooldownUntil  *time.Time            `json:"cooldown_until,omitempty"`
+	DisabledUntil  *time.Time            `json:"disabled_until,omitempty"`
+	DisabledReason FailureReason         `json:"disabled_reason,omitempty"`
+	ErrorCount     int                   `json:"error_count,omitempty"`
+	FailureCounts  map[FailureReason]int `json:"failure_counts,omitempty"`
+	LastFailureAt  *time.Time            `json:"last_failure_at,omitempty"`
+}
+
 // ProfileStore is the on-disk format for auth profiles.
 type ProfileStore struct {
-	Version  int                    `json:"version"`
-	Profiles map[string]*AuthProfile `json:"profiles"` // key is "provider:name"
+	Version    int                               `json:"version"`
+	Profiles   map[string]*AuthProfile           `json:"profiles"`              // key is "provider:name"
+	UsageStats map[string]*ProfileUsageStats     `json:"usage_stats,omitempty"` // key is "provider:name"
+	LastGood   map[string]string                 `json:"last_good,omitempty"`   // provider → profileID of last successful call
 }
 
 // NewProfileStore creates a new empty profile store.
 func NewProfileStore() *ProfileStore {
 	return &ProfileStore{
-		Version:  1,
-		Profiles: make(map[string]*AuthProfile),
+		Version:    1,
+		Profiles:   make(map[string]*AuthProfile),
+		UsageStats: make(map[string]*ProfileUsageStats),
+		LastGood:   make(map[string]string),
 	}
+}
+
+// MarkAuthProfileGood records a profile as the last known good for its provider.
+func (s *ProfileStore) MarkAuthProfileGood(provider string, id ProfileID) {
+	if s.LastGood == nil {
+		s.LastGood = make(map[string]string)
+	}
+	s.LastGood[provider] = string(id)
 }
 
 // Get retrieves a profile by ID.
@@ -329,17 +386,33 @@ func (s *ProfileStore) ListByProvider(provider string) []*AuthProfile {
 	return result
 }
 
+// GetUsageStats returns usage stats for a profile, creating if absent.
+func (s *ProfileStore) GetUsageStats(id ProfileID) *ProfileUsageStats {
+	if s.UsageStats == nil {
+		s.UsageStats = make(map[string]*ProfileUsageStats)
+	}
+	stats, ok := s.UsageStats[string(id)]
+	if !ok {
+		stats = &ProfileUsageStats{}
+		s.UsageStats[string(id)] = stats
+	}
+	return stats
+}
+
 // MarshalJSON returns a JSON representation with sorted keys for consistency.
 func (s *ProfileStore) MarshalJSON() ([]byte, error) {
-	// Use a map with ordered keys for consistent serialization
 	type profileStoreJSON struct {
-		Version  int                    `json:"version"`
-		Profiles map[string]*AuthProfile `json:"profiles"`
+		Version    int                               `json:"version"`
+		Profiles   map[string]*AuthProfile           `json:"profiles"`
+		UsageStats map[string]*ProfileUsageStats     `json:"usage_stats,omitempty"`
+		LastGood   map[string]string                 `json:"last_good,omitempty"`
 	}
 
 	aux := profileStoreJSON{
-		Version:  s.Version,
-		Profiles: s.Profiles,
+		Version:    s.Version,
+		Profiles:   s.Profiles,
+		UsageStats: s.UsageStats,
+		LastGood:   s.LastGood,
 	}
 
 	return json.MarshalIndent(aux, "", "  ")
@@ -376,6 +449,9 @@ const (
 	PreferValid ProfilePreference = "valid"
 	// PreferRecent prefers the most recently used profile.
 	PreferRecent ProfilePreference = "recent"
+	// PreferType orders by auth type (oauth > token > api_key), then by
+	// least-recently-used within the same type for round-robin distribution.
+	PreferType ProfilePreference = "type"
 )
 
 // ResolutionOptions configures profile resolution behavior.
@@ -421,6 +497,15 @@ type ProfileManager interface {
 
 	// MarkError records an error for a profile.
 	MarkError(id ProfileID, err error)
+
+	// MarkFailure records a categorized failure and applies cooldown/disable.
+	MarkFailure(id ProfileID, reason FailureReason)
+
+	// IsInCooldown returns true if the profile is currently in cooldown or disabled.
+	IsInCooldown(id ProfileID) bool
+
+	// ClearExpiredCooldowns resets cooldown/disabled state for profiles whose windows have passed.
+	ClearExpiredCooldowns()
 }
 
 // OAuthTokenRefresher defines the interface for refreshing OAuth tokens.

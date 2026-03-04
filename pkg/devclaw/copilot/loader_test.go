@@ -265,13 +265,13 @@ func TestSaveConfigToFile_CreatesBackup(t *testing.T) {
 		t.Fatalf("first write: %v", err)
 	}
 
-	// Write again — should create .bak.
+	// Write again — should create .bak.1 (rotated backup).
 	cfg.Name = "v2"
 	if err := SaveConfigToFile(cfg, cfgPath); err != nil {
 		t.Fatalf("second write: %v", err)
 	}
 
-	bakPath := cfgPath + ".bak"
+	bakPath := cfgPath + ".bak.1"
 	if _, err := os.Stat(bakPath); err != nil {
 		t.Fatalf("backup not created: %v", err)
 	}
@@ -279,6 +279,22 @@ func TestSaveConfigToFile_CreatesBackup(t *testing.T) {
 	bakData, _ := os.ReadFile(bakPath)
 	if !strings.Contains(string(bakData), "v1") {
 		t.Error("backup should contain original config")
+	}
+
+	// Write a third time — .bak.1 should now have v2, .bak.2 should have v1.
+	cfg.Name = "v3"
+	if err := SaveConfigToFile(cfg, cfgPath); err != nil {
+		t.Fatalf("third write: %v", err)
+	}
+
+	bak1Data, _ := os.ReadFile(cfgPath + ".bak.1")
+	if !strings.Contains(string(bak1Data), "v2") {
+		t.Error("bak.1 should contain v2")
+	}
+
+	bak2Data, _ := os.ReadFile(cfgPath + ".bak.2")
+	if !strings.Contains(string(bak2Data), "v1") {
+		t.Error("bak.2 should contain v1")
 	}
 }
 

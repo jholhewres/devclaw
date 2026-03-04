@@ -29,6 +29,9 @@ Examples:
 		newConfigInitCmd(),
 		newConfigShowCmd(),
 		newConfigValidateCmd(),
+		newConfigGetCmd(),
+		newConfigSetCmd(),
+		newConfigUnsetCmd(),
 		newConfigSetKeyCmd(),
 		newConfigDeleteKeyCmd(),
 		newConfigKeyStatusCmd(),
@@ -253,6 +256,344 @@ func newConfigKeyStatusCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// ---------- Config get/set/unset ----------
+
+// newConfigGetCmd creates the `devclaw config get` command.
+func newConfigGetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "get <path>",
+		Short: "Get a config value by dot-separated path",
+		Long: `Get a configuration value using a dot-separated path.
+
+Examples:
+  devclaw config get model
+  devclaw config get api.base_url
+  devclaw config get fallback.models
+  devclaw config get access.owners`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if args[0] == "" {
+				return fmt.Errorf("path cannot be empty")
+			}
+			configPath, _ := cmd.Root().PersistentFlags().GetString("config")
+			if configPath == "" {
+				configPath = copilot.FindConfigFile()
+			}
+			if configPath == "" {
+				return fmt.Errorf("no config file found. Run 'devclaw config init' first")
+			}
+
+			data, err := os.ReadFile(configPath)
+			if err != nil {
+				return fmt.Errorf("reading config: %w", err)
+			}
+
+			var doc yaml.Node
+			if err := yaml.Unmarshal(data, &doc); err != nil {
+				return fmt.Errorf("parsing config: %w", err)
+			}
+
+			node := yamlGetPath(&doc, args[0])
+			if node == nil {
+				return fmt.Errorf("path %q not found in config", args[0])
+			}
+
+			out, err := yaml.Marshal(node)
+			if err != nil {
+				return fmt.Errorf("formatting value: %w", err)
+			}
+			fmt.Print(string(out))
+			return nil
+		},
+	}
+}
+
+// newConfigSetCmd creates the `devclaw config set` command.
+func newConfigSetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "set <path> <value>",
+		Short: "Set a config value by dot-separated path",
+		Long: `Set a configuration value using a dot-separated path.
+Creates intermediate keys if they don't exist.
+
+Examples:
+  devclaw config set model gpt-4o
+  devclaw config set api.base_url https://api.openai.com/v1
+  devclaw config set fallback.max_retries 5
+  devclaw config set agent.max_turns 30`,
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if args[0] == "" {
+				return fmt.Errorf("path cannot be empty")
+			}
+			configPath, _ := cmd.Root().PersistentFlags().GetString("config")
+			if configPath == "" {
+				configPath = copilot.FindConfigFile()
+			}
+			if configPath == "" {
+				return fmt.Errorf("no config file found. Run 'devclaw config init' first")
+			}
+
+			data, err := os.ReadFile(configPath)
+			if err != nil {
+				return fmt.Errorf("reading config: %w", err)
+			}
+
+			var doc yaml.Node
+			if err := yaml.Unmarshal(data, &doc); err != nil {
+				return fmt.Errorf("parsing config: %w", err)
+			}
+
+			if err := yamlSetPath(&doc, args[0], args[1]); err != nil {
+				return fmt.Errorf("setting value: %w", err)
+			}
+
+			if len(doc.Content) == 0 {
+				return fmt.Errorf("config file is empty or invalid")
+			}
+
+			// Backup before writing.
+			bakPath := configPath + ".bak"
+			if err := os.WriteFile(bakPath, data, 0o600); err != nil {
+				return fmt.Errorf("backup config: %w", err)
+			}
+
+			out, err := yaml.Marshal(doc.Content[0])
+			if err != nil {
+				return fmt.Errorf("marshaling config: %w", err)
+			}
+
+			if err := os.WriteFile(configPath, out, 0o600); err != nil {
+				return fmt.Errorf("writing config: %w", err)
+			}
+
+			fmt.Printf("Set %s = %s\n", args[0], args[1])
+			return nil
+		},
+	}
+}
+
+// newConfigUnsetCmd creates the `devclaw config unset` command.
+func newConfigUnsetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "unset <path>",
+		Short: "Remove a config value by dot-separated path",
+		Long: `Remove a configuration key using a dot-separated path.
+
+Examples:
+  devclaw config unset web_search.perplexity_api_key
+  devclaw config unset provider_discovery.ollama_url`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			configPath, _ := cmd.Root().PersistentFlags().GetString("config")
+			if configPath == "" {
+				configPath = copilot.FindConfigFile()
+			}
+			if configPath == "" {
+				return fmt.Errorf("no config file found. Run 'devclaw config init' first")
+			}
+
+			data, err := os.ReadFile(configPath)
+			if err != nil {
+				return fmt.Errorf("reading config: %w", err)
+			}
+
+			var doc yaml.Node
+			if err := yaml.Unmarshal(data, &doc); err != nil {
+				return fmt.Errorf("parsing config: %w", err)
+			}
+
+			if !yamlDeletePath(&doc, args[0]) {
+				return fmt.Errorf("path %q not found in config", args[0])
+			}
+
+			if len(doc.Content) == 0 {
+				return fmt.Errorf("config file is empty or invalid")
+			}
+
+			// Backup before writing.
+			bakPath := configPath + ".bak"
+			if err := os.WriteFile(bakPath, data, 0o600); err != nil {
+				return fmt.Errorf("backup config: %w", err)
+			}
+
+			out, err := yaml.Marshal(doc.Content[0])
+			if err != nil {
+				return fmt.Errorf("marshaling config: %w", err)
+			}
+
+			if err := os.WriteFile(configPath, out, 0o600); err != nil {
+				return fmt.Errorf("writing config: %w", err)
+			}
+
+			fmt.Printf("Removed %s\n", args[0])
+			return nil
+		},
+	}
+}
+
+// ---------- YAML path helpers ----------
+
+// yamlGetPath traverses a YAML document node tree using a dot-separated path
+// and returns the value node at that path, or nil if not found.
+func yamlGetPath(doc *yaml.Node, path string) *yaml.Node {
+	parts := strings.Split(path, ".")
+	node := doc
+
+	// Unwrap document node.
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		node = node.Content[0]
+	}
+
+	for _, part := range parts {
+		if node.Kind != yaml.MappingNode {
+			return nil
+		}
+		found := false
+		for i := 0; i < len(node.Content)-1; i += 2 {
+			if node.Content[i].Value == part {
+				node = node.Content[i+1]
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil
+		}
+	}
+	return node
+}
+
+// yamlSetPath sets a scalar value at a dot-separated path in a YAML document.
+// Creates intermediate mapping nodes as needed.
+func yamlSetPath(doc *yaml.Node, path, value string) error {
+	parts := strings.Split(path, ".")
+	node := doc
+
+	// Unwrap document node.
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		node = node.Content[0]
+	}
+
+	for i, part := range parts {
+		if node.Kind != yaml.MappingNode {
+			return fmt.Errorf("path element %q is not a mapping", strings.Join(parts[:i], "."))
+		}
+
+		found := false
+		for j := 0; j < len(node.Content)-1; j += 2 {
+			if node.Content[j].Value == part {
+				if i == len(parts)-1 {
+					// Last segment: set the value.
+					node.Content[j+1] = &yaml.Node{
+						Kind:  yaml.ScalarNode,
+						Value: value,
+						Tag:   yamlAutoTag(value),
+					}
+					return nil
+				}
+				node = node.Content[j+1]
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			if i == len(parts)-1 {
+				// Last segment: create key-value pair.
+				node.Content = append(node.Content,
+					&yaml.Node{Kind: yaml.ScalarNode, Value: part, Tag: "!!str"},
+					&yaml.Node{Kind: yaml.ScalarNode, Value: value, Tag: yamlAutoTag(value)},
+				)
+				return nil
+			}
+			// Intermediate: create a new mapping node.
+			newMap := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+			node.Content = append(node.Content,
+				&yaml.Node{Kind: yaml.ScalarNode, Value: part, Tag: "!!str"},
+				newMap,
+			)
+			node = newMap
+		}
+	}
+	return nil
+}
+
+// yamlDeletePath removes a key at a dot-separated path from a YAML document.
+// Returns true if the key was found and removed.
+func yamlDeletePath(doc *yaml.Node, path string) bool {
+	if path == "" {
+		return false
+	}
+	parts := strings.Split(path, ".")
+	node := doc
+
+	// Unwrap document node.
+	if node.Kind == yaml.DocumentNode && len(node.Content) > 0 {
+		node = node.Content[0]
+	}
+
+	// Navigate to the parent of the target key.
+	for _, part := range parts[:len(parts)-1] {
+		if node.Kind != yaml.MappingNode {
+			return false
+		}
+		found := false
+		for i := 0; i < len(node.Content)-1; i += 2 {
+			if node.Content[i].Value == part {
+				node = node.Content[i+1]
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+
+	// Delete the target key from the parent mapping.
+	target := parts[len(parts)-1]
+	if node.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i < len(node.Content)-1; i += 2 {
+		if node.Content[i].Value == target {
+			// Remove key-value pair (2 entries).
+			node.Content = append(node.Content[:i], node.Content[i+2:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// yamlAutoTag guesses the YAML tag for a scalar value.
+func yamlAutoTag(value string) string {
+	switch strings.ToLower(value) {
+	case "true", "false":
+		return "!!bool"
+	}
+	// Check if it's a number.
+	allDigits := len(value) > 0
+	hasDot := false
+	for _, c := range value {
+		if c == '.' && !hasDot {
+			hasDot = true
+			continue
+		}
+		if c < '0' || c > '9' {
+			allDigits = false
+			break
+		}
+	}
+	if allDigits {
+		if hasDot {
+			return "!!float"
+		}
+		return "!!int"
+	}
+	return "!!str"
 }
 
 // readKeyLine reads a line for the config key commands.

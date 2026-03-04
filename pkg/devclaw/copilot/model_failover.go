@@ -43,13 +43,16 @@ func DefaultCooldownConfig() CooldownConfig {
 type FailoverReason string
 
 const (
-	FailoverBilling   FailoverReason = "billing"    // 402 Payment Required
-	FailoverRateLimit FailoverReason = "rate_limit"  // 429 Too Many Requests
-	FailoverAuth      FailoverReason = "auth"        // 401/403
-	FailoverTimeout   FailoverReason = "timeout"     // 408, ETIMEDOUT, empty chunks
-	FailoverFormat    FailoverReason = "format"      // 400 Bad Request
-	FailoverServer    FailoverReason = "server"      // 5xx
-	FailoverUnknown   FailoverReason = "unknown"
+	FailoverBilling        FailoverReason = "billing"         // 402 Payment Required
+	FailoverRateLimit      FailoverReason = "rate_limit"      // 429 Too Many Requests, 529 Overloaded
+	FailoverAuth           FailoverReason = "auth"            // 401 (transient)
+	FailoverAuthPermanent  FailoverReason = "auth_permanent"  // 403, revoked keys, deactivated accounts
+	FailoverSessionExpired FailoverReason = "session_expired" // Token expired/revoked
+	FailoverTimeout        FailoverReason = "timeout"         // 408, ETIMEDOUT, empty chunks, Cloudflare 521-530
+	FailoverFormat         FailoverReason = "format"          // 400 Bad Request
+	FailoverServer         FailoverReason = "server"          // 5xx (excluding Cloudflare CDN codes)
+	FailoverModelNotFound  FailoverReason = "model_not_found" // Model doesn't exist for this provider
+	FailoverUnknown        FailoverReason = "unknown"
 )
 
 // ModelCooldown tracks a model's cooldown state.
@@ -61,12 +64,19 @@ type ModelCooldown struct {
 	LastError  time.Time
 }
 
+// probeMinInterval is the minimum time between recovery probes for the same model.
+const probeMinInterval = 30 * time.Second
+
+// probeMargin is how close to cooldown expiry we start probing.
+const probeMargin = 2 * time.Minute
+
 // ModelFailoverManager handles automatic model rotation on failures.
 type ModelFailoverManager struct {
-	config    ModelFallbackConfig
-	cooldowns map[string]*ModelCooldown // model → cooldown state
-	mu        sync.RWMutex
-	logger    *slog.Logger
+	config      ModelFallbackConfig
+	cooldowns   map[string]*ModelCooldown // model → cooldown state
+	lastProbeAt map[string]time.Time      // model → last probe attempt time
+	mu          sync.RWMutex
+	logger      *slog.Logger
 }
 
 // NewModelFailoverManager creates a failover manager.
@@ -75,15 +85,20 @@ func NewModelFailoverManager(config ModelFallbackConfig, logger *slog.Logger) *M
 		config.Cooldowns = DefaultCooldownConfig()
 	}
 	return &ModelFailoverManager{
-		config:    config,
-		cooldowns: make(map[string]*ModelCooldown),
-		logger:    logger,
+		config:      config,
+		cooldowns:   make(map[string]*ModelCooldown),
+		lastProbeAt: make(map[string]time.Time),
+		logger:      logger,
 	}
 }
 
 // SelectModel returns the best available model. It checks the primary first,
 // then iterates through fallbacks, skipping any that are in cooldown.
 // Returns the model name and whether it's the primary.
+//
+// When the primary is in cooldown but near expiry (within probeMargin),
+// the caller can check ShouldProbe() to decide whether to attempt a
+// recovery probe before committing to a fallback model.
 func (m *ModelFailoverManager) SelectModel() (model string, isPrimary bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -111,6 +126,20 @@ func (m *ModelFailoverManager) SelectModel() (model string, isPrimary bool) {
 	return m.config.Primary, true
 }
 
+// SelectFromChain tries models from a custom chain, skipping those in cooldown.
+// Returns the first available model, or empty string if all are in cooldown.
+func (m *ModelFailoverManager) SelectFromChain(chain []string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, model := range chain {
+		if model != "" && !m.isInCooldownLocked(model) {
+			return model
+		}
+	}
+	return ""
+}
+
 // ReportSuccess resets the cooldown for a model after a successful call.
 func (m *ModelFailoverManager) ReportSuccess(model string) {
 	m.mu.Lock()
@@ -122,7 +151,14 @@ func (m *ModelFailoverManager) ReportSuccess(model string) {
 // Returns the reason classification.
 func (m *ModelFailoverManager) ReportFailure(model string, statusCode int, errMsg string) FailoverReason {
 	reason := ClassifyError(statusCode, errMsg)
+	m.ApplyClassifiedFailure(model, reason)
+	return reason
+}
 
+// ApplyClassifiedFailure applies a pre-classified failure reason to a model.
+// Use this when the error has already been classified (e.g., by the FailoverCoordinator)
+// to avoid redundant re-classification.
+func (m *ModelFailoverManager) ApplyClassifiedFailure(model string, reason FailoverReason) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -176,9 +212,33 @@ func (m *ModelFailoverManager) ReportFailure(model string, statusCode int, errMs
 		}
 		duration = time.Duration(minutes * float64(time.Minute))
 
+	case FailoverAuthPermanent:
+		// Permanent auth errors (revoked keys, deactivated accounts) — same as billing.
+		hours := cfg.BillingBackoffHours
+		if hours <= 0 {
+			hours = 5
+		}
+		duration = time.Duration(hours * float64(time.Hour))
+		maxHours := cfg.BillingMaxHours
+		if maxHours <= 0 {
+			maxHours = 24
+		}
+		if duration > time.Duration(maxHours*float64(time.Hour)) {
+			duration = time.Duration(maxHours * float64(time.Hour))
+		}
+
 	case FailoverAuth:
-		// Auth errors are persistent — long cooldown.
+		// Transient auth errors — moderate cooldown.
 		duration = 1 * time.Hour
+
+	case FailoverSessionExpired:
+		// Session/token expired — short cooldown to allow token refresh.
+		duration = 5 * time.Minute
+
+	case FailoverModelNotFound:
+		// Model doesn't exist for this provider — skip until restart.
+		// Use a very long cooldown (48h) to effectively disable the model.
+		duration = 48 * time.Hour
 
 	case FailoverTimeout, FailoverServer:
 		// Transient — short cooldown with exponential backoff.
@@ -208,8 +268,43 @@ func (m *ModelFailoverManager) ReportFailure(model string, statusCode int, errMs
 		"error_count", cd.ErrorCount,
 		"cooldown_until", cd.Until.Format(time.RFC3339),
 	)
+}
 
-	return reason
+// ShouldProbe returns true if a model is in cooldown but near expiry (within
+// probeMargin) and hasn't been probed too recently. This enables auto-recovery
+// without waiting for the full cooldown to expire.
+func (m *ModelFailoverManager) ShouldProbe(model string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	cd, ok := m.cooldowns[model]
+	if !ok {
+		return false // Not in cooldown.
+	}
+
+	now := time.Now()
+
+	// Only probe if cooldown is near expiry (within probeMargin) or already expired.
+	timeUntilExpiry := cd.Until.Sub(now)
+	if timeUntilExpiry > probeMargin {
+		return false
+	}
+
+	// Throttle probes to avoid storms.
+	if lastProbe, ok := m.lastProbeAt[model]; ok {
+		if now.Sub(lastProbe) < probeMinInterval {
+			return false
+		}
+	}
+
+	return true
+}
+
+// MarkProbed records that a probe was attempted for a model.
+func (m *ModelFailoverManager) MarkProbed(model string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastProbeAt[model] = time.Now()
 }
 
 // isInCooldownLocked checks if a model is in cooldown. Must be called with mu held.
@@ -233,12 +328,22 @@ func ClassifyError(statusCode int, errMsg string) FailoverReason {
 		return FailoverBilling
 	case 429:
 		return FailoverRateLimit
-	case 401, 403:
+	case 529:
+		// Anthropic overloaded — treat as rate limit (not server error).
+		return FailoverRateLimit
+	case 401:
 		return FailoverAuth
+	case 403:
+		return FailoverAuthPermanent
 	case 408:
 		return FailoverTimeout
 	case 400:
 		return FailoverFormat
+	}
+
+	// Cloudflare CDN errors (521-530) — transient, treat as timeout.
+	if statusCode >= 521 && statusCode <= 530 {
+		return FailoverTimeout
 	}
 
 	if statusCode >= 500 {
@@ -254,13 +359,54 @@ func ClassifyError(statusCode int, errMsg string) FailoverReason {
 		return FailoverTimeout
 	case strings.Contains(lower, "ended without sending any chunks"):
 		return FailoverTimeout
+	case strings.Contains(lower, "overloaded") || strings.Contains(lower, "service unavailable") ||
+		strings.Contains(lower, "high demand"):
+		return FailoverRateLimit
 	case strings.Contains(lower, "billing") || strings.Contains(lower, "payment"):
 		return FailoverBilling
-	case strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit"):
+	case strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") ||
+		strings.Contains(lower, "too many requests"):
 		return FailoverRateLimit
+	case strings.Contains(lower, "session expired") || strings.Contains(lower, "session_expired") ||
+		strings.Contains(lower, "token expired") || strings.Contains(lower, "token has been revoked") ||
+		strings.Contains(lower, "token revoked") || strings.Contains(lower, "refresh token") ||
+		strings.Contains(lower, "session invalid"):
+		return FailoverSessionExpired
+	case strings.Contains(lower, "model not found") || strings.Contains(lower, "model_not_found") ||
+		strings.Contains(lower, "does not exist") || strings.Contains(lower, "no such model") ||
+		strings.Contains(lower, "unknown model"):
+		return FailoverModelNotFound
+	// Auth permanent — API key revoked, account deactivated, permission denied.
+	case strings.Contains(lower, "api key revoked") || strings.Contains(lower, "key has been disabled") ||
+		strings.Contains(lower, "key has been revoked") || strings.Contains(lower, "account deactivated") ||
+		strings.Contains(lower, "account has been deactivated") ||
+		strings.Contains(lower, "permission_error") || strings.Contains(lower, "not allowed for this organization"):
+		return FailoverAuthPermanent
 	}
 
 	return FailoverUnknown
+}
+
+// IsLikelyContextOverflowError returns true if the error message indicates a context
+// window overflow. Context overflow errors should NOT trigger model failover because
+// rotating to a model with a potentially smaller context window makes things worse.
+func IsLikelyContextOverflowError(errMsg string) bool {
+	lower := strings.ToLower(errMsg)
+
+	// Exclude rate limit TPM errors that mention "tokens".
+	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") ||
+		strings.Contains(lower, "tokens per minute") || strings.Contains(lower, "tpm") {
+		return false
+	}
+
+	return strings.Contains(lower, "context length exceeded") ||
+		strings.Contains(lower, "request_too_large") ||
+		strings.Contains(lower, "prompt is too long") ||
+		strings.Contains(lower, "exceeds model context window") ||
+		strings.Contains(lower, "maximum context length") ||
+		strings.Contains(lower, "request size exceeds") ||
+		strings.Contains(lower, "context window") && (strings.Contains(lower, "too large") ||
+		strings.Contains(lower, "too long") || strings.Contains(lower, "exceed"))
 }
 
 // GetCooldownStatus returns the current cooldown state of all models.

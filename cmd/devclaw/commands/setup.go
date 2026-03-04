@@ -16,7 +16,7 @@ func newSetupCmd() *cobra.Command {
 headless servers, containers, and automation tools like pm2/systemd.
 
 Just run 'devclaw serve' — if no config.yaml exists, the web setup
-wizard will start automatically at http://localhost:8090/setup`,
+wizard will start automatically at http://localhost:47716/setup`,
 		Run: func(_ *cobra.Command, _ []string) {
 			fmt.Println()
 			fmt.Println("╭────────────────────────────────────────────────╮")
@@ -25,7 +25,7 @@ wizard will start automatically at http://localhost:8090/setup`,
 			fmt.Println("│  Run:  devclaw serve                          │")
 			fmt.Println("│                                                │")
 			fmt.Println("│  If no config.yaml exists, the setup wizard   │")
-			fmt.Println("│  will start at http://localhost:8090/setup     │")
+			fmt.Println("│  will start at http://localhost:47716/setup    │")
 			fmt.Println("╰────────────────────────────────────────────────╯")
 			fmt.Println()
 		},

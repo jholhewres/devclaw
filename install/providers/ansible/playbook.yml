@@ -22,7 +22,7 @@
 
     # Ports
     devclaw_port_api: 8085
-    devclaw_port_web: 8090
+    devclaw_port_web: 47716
 
     # Environment variables (add to .env file)
     devclaw_env: {}

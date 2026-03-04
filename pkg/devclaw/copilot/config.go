@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/discord"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/slack"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/telegram"
@@ -16,6 +17,7 @@ import (
 	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
 	"github.com/jholhewres/devclaw/pkg/devclaw/plugins"
 	"github.com/jholhewres/devclaw/pkg/devclaw/sandbox"
+	"github.com/jholhewres/devclaw/pkg/devclaw/skills"
 	"github.com/jholhewres/devclaw/pkg/devclaw/webui"
 )
 
@@ -176,9 +178,33 @@ type Config struct {
 	// OAuthHub configures the OAuth Hub proxy for centralized OAuth management.
 	OAuthHub OAuthHubConfig `yaml:"oauth_hub"`
 
+	// Update configures auto-update checking and installation.
+	Update UpdateConfig `yaml:"update"`
+
+	// ProfileCooldowns configures per-profile cooldown durations for auth failures.
+	// Optional: nil/zero values fall back to hardcoded defaults.
+	ProfileCooldowns *profiles.ProfileCooldownConfig `yaml:"profile_cooldowns,omitempty"`
+
 	// DevToolsEnabled forces dev tools registration regardless of workspace detection.
 	// nil = auto-detect from workspace (default), true = always enable, false = always disable.
 	DevToolsEnabled *bool `yaml:"dev_tools_enabled,omitempty"`
+
+	// ProviderDiscovery configures dynamic model discovery for local providers
+	// (Ollama, vLLM). When enabled, DevClaw probes endpoints at startup to
+	// discover available models and their context window sizes.
+	ProviderDiscovery ProviderDiscoveryConfig `yaml:"provider_discovery"`
+}
+
+// UpdateConfig configures auto-update checking and installation.
+type UpdateConfig struct {
+	// Enabled turns auto-update checking on/off (default: true).
+	Enabled bool `yaml:"enabled"`
+
+	// AssetsURL is the base URL for release assets.
+	AssetsURL string `yaml:"assets_url"`
+
+	// CheckInterval is the duration between automatic update checks (e.g. "1h").
+	CheckInterval string `yaml:"check_interval"`
 }
 
 // OAuthHubConfig configures the OAuth Hub integration.
@@ -789,6 +815,9 @@ type SkillsConfig struct {
 
 	// ClawdHubDirs lists directories with ClawdHub SKILL.md skills.
 	ClawdHubDirs []string `yaml:"clawdhub_dirs"`
+
+	// Limits configures resource limits for skill loading.
+	Limits skills.SkillsLimitsConfig `yaml:"limits"`
 }
 
 // SchedulerConfig configures the task scheduler.
@@ -922,23 +951,39 @@ func DefaultConfig() *Config {
 		},
 		WebUI: webui.Config{
 			Enabled: false,
-			Address: ":8090",
+			Address: ":47716",
 		},
 		Browser: DefaultBrowserConfig(),
+		Update: UpdateConfig{
+			Enabled:       true,
+			AssetsURL:     "https://assets-gatorclaw.hostgator.io",
+			CheckInterval: "1h",
+		},
 	}
 }
 
 // WebSearchConfig configures the web search tool.
 type WebSearchConfig struct {
-	// Provider is the search engine to use: "duckduckgo" (default) or "brave".
+	// Provider is the search engine to use: "duckduckgo" (default), "brave", or "perplexity".
 	Provider string `yaml:"provider"`
 
 	// BraveAPIKey is the Brave Search API subscription token.
 	// Can also be set via BRAVE_API_KEY env var.
 	BraveAPIKey string `yaml:"brave_api_key"`
 
+	// PerplexityModel is the Perplexity model to use via OpenRouter (default: "perplexity/sonar").
+	// Requires the main API to be configured with OpenRouter as provider.
+	PerplexityModel string `yaml:"perplexity_model"`
+
+	// PerplexityAPIKey is the OpenRouter API key for Perplexity queries.
+	// Falls back to OPENROUTER_API_KEY env var, then to the main API key.
+	PerplexityAPIKey string `yaml:"perplexity_api_key"`
+
 	// MaxResults is the maximum number of results to return (default: 8).
 	MaxResults int `yaml:"max_results"`
+
+	// CacheTTLSeconds is how long search results are cached (default: 300 = 5 min, 0 = disabled).
+	CacheTTLSeconds int `yaml:"cache_ttl_seconds"`
 }
 
 // TTSConfig configures text-to-speech synthesis.

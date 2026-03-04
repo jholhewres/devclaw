@@ -23,10 +23,15 @@ import (
 	"github.com/jholhewres/devclaw/pkg/devclaw/skills"
 )
 
+// SkillReloadCallback reloads skills from disk, initializes them with
+// the sandbox runner, and re-registers their tools. Returns the total
+// number of skills loaded.
+type SkillReloadCallback func(ctx context.Context) (int, error)
+
 // RegisterSkillCreatorTools registers a single "skill_manage" dispatcher tool
 // that consolidates init, edit, add_script, list, test, install, search,
 // defaults_list, defaults_install, remove actions.
-func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry, skillsDir string, skillDB *SkillDB, logger *slog.Logger) {
+func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry, skillsDir string, skillDB *SkillDB, reloadCb SkillReloadCallback, logger *slog.Logger) {
 	if skillsDir == "" {
 		skillsDir = "./skills"
 	}
@@ -137,13 +142,13 @@ func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry
 			case "test":
 				return handleSkillTest(ctx, registry, args)
 			case "install":
-				return handleSkillInstall(ctx, installer, registry, args)
+				return handleSkillInstall(ctx, installer, reloadCb, args)
 			case "search":
 				return handleSkillSearch(args)
 			case "defaults_list":
 				return handleSkillDefaultsList(skillsDir)
 			case "defaults_install":
-				return handleSkillDefaultsInstall(ctx, registry, skillsDir, args)
+				return handleSkillDefaultsInstall(ctx, reloadCb, skillsDir, args)
 			case "remove":
 				return handleSkillRemove(registry, skillsDir, args)
 			default:
@@ -354,7 +359,7 @@ func handleSkillTest(ctx context.Context, registry *skills.Registry, args map[st
 	return fmt.Sprintf("Skill '%s' test result:\n\n%s", name, result), nil
 }
 
-func handleSkillInstall(ctx context.Context, installer *skills.Installer, registry *skills.Registry, args map[string]any) (any, error) {
+func handleSkillInstall(ctx context.Context, installer *skills.Installer, reloadCb SkillReloadCallback, args map[string]any) (any, error) {
 	source, _ := args["source"].(string)
 	if source == "" {
 		return nil, fmt.Errorf("source is required for install action")
@@ -367,7 +372,7 @@ func handleSkillInstall(ctx context.Context, installer *skills.Installer, regist
 	}
 	reloadCtx, reloadCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer reloadCancel()
-	reloaded, reloadErr := registry.Reload(reloadCtx)
+	reloaded, reloadErr := reloadCb(reloadCtx)
 	reloadMsg := ""
 	if reloadErr != nil {
 		reloadMsg = fmt.Sprintf("\nWarning: skill catalog refresh failed: %v", reloadErr)
@@ -424,7 +429,7 @@ func handleSkillDefaultsList(skillsDir string) (any, error) {
 	return sb.String(), nil
 }
 
-func handleSkillDefaultsInstall(ctx context.Context, registry *skills.Registry, skillsDir string, args map[string]any) (any, error) {
+func handleSkillDefaultsInstall(ctx context.Context, reloadCb SkillReloadCallback, skillsDir string, args map[string]any) (any, error) {
 	rawNames, _ := args["names"].([]any)
 	if len(rawNames) == 0 {
 		return nil, fmt.Errorf("names is required for defaults_install action: pass skill names or [\"all\"]")
@@ -441,7 +446,7 @@ func handleSkillDefaultsInstall(ctx context.Context, registry *skills.Registry, 
 	installed, skipped, failed := skills.InstallDefaultSkills(skillsDir, names)
 	reloadCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	reloaded, reloadErr := registry.Reload(reloadCtx)
+	reloaded, reloadErr := reloadCb(reloadCtx)
 	reloadMsg := ""
 	if reloadErr != nil {
 		reloadMsg = fmt.Sprintf("\nWarning: catalog refresh failed: %v", reloadErr)

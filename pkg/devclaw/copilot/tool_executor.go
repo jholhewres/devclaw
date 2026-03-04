@@ -776,11 +776,48 @@ func (e *ToolExecutor) HasTool(name string) bool {
 	return ok
 }
 
+// findToolCaseInsensitive finds a registered tool by case-insensitive name match.
+// Returns the canonical name if found, empty string otherwise.
+func (e *ToolExecutor) findToolCaseInsensitive(name string) string {
+	lower := strings.ToLower(name)
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for registered := range e.tools {
+		if strings.ToLower(registered) == lower {
+			return registered
+		}
+	}
+	return ""
+}
+
 // Execute dispatches a batch of tool calls to their registered handlers.
 // Each tool is executed with a per-tool timeout.
 // When Parallel is true and no sequential tools are in the batch, runs concurrently.
 // Returns results in the same order as the input calls.
 func (e *ToolExecutor) Execute(ctx context.Context, calls []ToolCall) []ToolResult {
+	// Normalize and filter tool calls.
+	valid := make([]ToolCall, 0, len(calls))
+	for i, c := range calls {
+		// Auto-generate ID if missing — use index for uniqueness within the batch.
+		if c.ID == "" && c.Function.Name != "" {
+			c.ID = fmt.Sprintf("call_%d_%d", time.Now().UnixMilli(), i)
+		}
+		// Trim whitespace from tool name.
+		c.Function.Name = strings.TrimSpace(c.Function.Name)
+
+		// Case-insensitive tool name matching.
+		if c.Function.Name != "" && !e.HasTool(c.Function.Name) {
+			if normalized := e.findToolCaseInsensitive(c.Function.Name); normalized != "" {
+				c.Function.Name = normalized
+			}
+		}
+
+		if c.ID != "" && c.Function.Name != "" {
+			valid = append(valid, c)
+		}
+	}
+	calls = valid
+
 	e.mu.RLock()
 	parallel := e.parallel
 	maxParallel := e.maxParallel
@@ -1082,11 +1119,11 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 	result.Content = resultStr
 
 	// ── Tool result size guard ──
-	// Cap oversized results proactively to prevent context overflow.
+	// Cap oversized results proactively using smart head+tail truncation.
+	// This preserves important tail content (errors, summaries, JSON closings).
 	if len(result.Content) > HardMaxToolResultChars {
 		original := len(result.Content)
-		result.Content = result.Content[:HardMaxToolResultChars] + "\n\n... [truncated: result was " +
-			fmt.Sprintf("%d", original) + " chars, capped at " + fmt.Sprintf("%d", HardMaxToolResultChars) + "]"
+		result.Content = TruncateToolResult(result.Content, HardMaxToolResultChars)
 		e.logger.Warn("tool result truncated by size guard",
 			"name", name,
 			"original_chars", original,

@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -37,6 +38,8 @@ type Daemon struct {
 	ringBuffer *ringBuffer
 	cancel     context.CancelFunc
 	done       chan struct{}
+	stdin      io.WriteCloser // stdin pipe for interactive processes
+	pollCount  int64          // tracks number of polls for backoff hints (atomic)
 }
 
 // DaemonManager manages a set of background daemons.
@@ -74,6 +77,13 @@ func (dm *DaemonManager) StartDaemon(label, command string, port int, readyPatte
 	cmd.Stdout = rb
 	cmd.Stderr = rb
 
+	// Set up stdin pipe for interactive communication.
+	stdinPipe, pipeErr := cmd.StdinPipe()
+	if pipeErr != nil {
+		cancel()
+		return nil, fmt.Errorf("stdin pipe for %q: %w", label, pipeErr)
+	}
+
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("starting daemon %q: %w", label, err)
@@ -90,6 +100,7 @@ func (dm *DaemonManager) StartDaemon(label, command string, port int, readyPatte
 		ringBuffer: rb,
 		cancel:     cancel,
 		done:       make(chan struct{}),
+		stdin:      stdinPipe,
 	}
 
 	// Wait for process exit in background.
@@ -252,6 +263,99 @@ func (dm *DaemonManager) List() []Daemon {
 	return result
 }
 
+// WriteToDaemon sends input to a daemon's stdin.
+func (dm *DaemonManager) WriteToDaemon(label, input string) error {
+	dm.mu.RLock()
+	d, ok := dm.daemons[label]
+	if !ok {
+		dm.mu.RUnlock()
+		return fmt.Errorf("daemon %q not found", label)
+	}
+	status := d.Status
+	stdin := d.stdin
+	dm.mu.RUnlock()
+
+	if status != "running" {
+		return fmt.Errorf("daemon %q is not running (status: %s)", label, status)
+	}
+	if stdin == nil {
+		return fmt.Errorf("daemon %q has no stdin pipe", label)
+	}
+	if _, err := fmt.Fprintln(stdin, input); err != nil {
+		return fmt.Errorf("write to %q stdin: %w", label, err)
+	}
+	return nil
+}
+
+// ClearDaemon removes a stopped/failed daemon from the registry.
+func (dm *DaemonManager) ClearDaemon(label string) error {
+	dm.mu.Lock()
+	defer dm.mu.Unlock()
+
+	d, ok := dm.daemons[label]
+	if !ok {
+		return fmt.Errorf("daemon %q not found", label)
+	}
+	if d.Status == "running" {
+		return fmt.Errorf("cannot clear running daemon %q, stop it first", label)
+	}
+	delete(dm.daemons, label)
+	return nil
+}
+
+// PollDaemon returns recent output with backoff hints.
+func (dm *DaemonManager) PollDaemon(label string) (string, error) {
+	dm.mu.RLock()
+	d, ok := dm.daemons[label]
+	if !ok {
+		dm.mu.RUnlock()
+		return "", fmt.Errorf("daemon %q not found", label)
+	}
+	status := d.Status
+	pid := d.PID
+	exitCode := d.ExitCode
+	dm.mu.RUnlock()
+
+	count := atomic.AddInt64(&d.pollCount, 1)
+	lines := d.ringBuffer.Lines()
+
+	const recentLines = 30
+	if len(lines) > recentLines {
+		lines = lines[len(lines)-recentLines:]
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("[%s] PID=%d", status, pid))
+	if status != "running" {
+		sb.WriteString(fmt.Sprintf(" exit_code=%d", exitCode))
+	}
+	sb.WriteString("\n--- recent output ---\n")
+	if len(lines) > 0 {
+		sb.WriteString(strings.Join(lines, "\n"))
+	} else {
+		sb.WriteString("(no output yet)")
+	}
+	if status == "running" {
+		backoff := daemonPollBackoff(int(count))
+		sb.WriteString(fmt.Sprintf("\n\nNext poll in ~%s", backoff.Round(time.Second)))
+	}
+	return sb.String(), nil
+}
+
+// daemonPollBackoff returns recommended wait before next poll: 5s → 10s → 30s → 60s.
+func daemonPollBackoff(pollCount int) time.Duration {
+	switch {
+	case pollCount <= 1:
+		return 5 * time.Second
+	case pollCount <= 3:
+		return 10 * time.Second
+	case pollCount <= 6:
+		return 30 * time.Second
+	default:
+		return 60 * time.Second
+	}
+}
+
 // Shutdown stops all running daemons.
 func (dm *DaemonManager) Shutdown() {
 	close(dm.stopCh)
@@ -362,8 +466,8 @@ func RegisterDaemonTools(executor *ToolExecutor, dm *DaemonManager) {
 		"properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"enum":        []string{"start", "logs", "list", "stop", "restart"},
-				"description": "Action: start (launch process), logs (view output), list (show all), stop (terminate), restart (stop+start)",
+				"enum":        []string{"start", "logs", "list", "stop", "restart", "poll", "write", "clear"},
+				"description": "Action: start, logs, list, stop, restart, poll (recent output w/ backoff), write (stdin), clear (remove stopped)",
 			},
 			"label": map[string]any{
 				"type":        "string",
@@ -392,6 +496,10 @@ func RegisterDaemonTools(executor *ToolExecutor, dm *DaemonManager) {
 			"force": map[string]any{
 				"type":        "boolean",
 				"description": "Force kill with SIGKILL (for stop, default: graceful)",
+			},
+			"input": map[string]any{
+				"type":        "string",
+				"description": "Text to write to daemon stdin (for write action)",
 			},
 		},
 		"required": []string{"action"},
@@ -439,7 +547,10 @@ func RegisterDaemonTools(executor *ToolExecutor, dm *DaemonManager) {
 				if len(daemons) == 0 {
 					return "No daemons running.", nil
 				}
-				data, _ := json.MarshalIndent(daemons, "", "  ")
+				data, err := json.MarshalIndent(daemons, "", "  ")
+				if err != nil {
+					return nil, fmt.Errorf("marshal daemon list: %w", err)
+				}
 				return string(data), nil
 
 			case "stop":
@@ -464,8 +575,39 @@ func RegisterDaemonTools(executor *ToolExecutor, dm *DaemonManager) {
 				}
 				return fmt.Sprintf("Daemon %q restarted (new PID %d, status: %s)", d.Label, d.PID, d.Status), nil
 
+			case "poll":
+				label, _ := args["label"].(string)
+				if label == "" {
+					return nil, fmt.Errorf("label is required for poll action")
+				}
+				return dm.PollDaemon(label)
+
+			case "write":
+				label, _ := args["label"].(string)
+				if label == "" {
+					return nil, fmt.Errorf("label is required for write action")
+				}
+				input, _ := args["input"].(string)
+				if input == "" {
+					return nil, fmt.Errorf("input is required for write action")
+				}
+				if err := dm.WriteToDaemon(label, input); err != nil {
+					return nil, err
+				}
+				return fmt.Sprintf("Wrote %d bytes to daemon %q stdin.", len(input)+1, label), nil
+
+			case "clear":
+				label, _ := args["label"].(string)
+				if label == "" {
+					return nil, fmt.Errorf("label is required for clear action")
+				}
+				if err := dm.ClearDaemon(label); err != nil {
+					return nil, err
+				}
+				return fmt.Sprintf("Daemon %q cleared from registry.", label), nil
+
 			default:
-				return nil, fmt.Errorf("unknown action: %s (valid: start, logs, list, stop, restart)", action)
+				return nil, fmt.Errorf("unknown action: %s (valid: start, logs, list, stop, restart, poll, write, clear)", action)
 			}
 		},
 	)

@@ -30,6 +30,30 @@ import (
 	"github.com/google/uuid"
 )
 
+// subagentDenyAlways lists tools that are NEVER available to subagents,
+// regardless of depth. These are either too dangerous for autonomous child
+// agents or only make sense for the root agent.
+var subagentDenyAlways = []string{
+	"gateway_manage",   // HTTP gateway management
+	"cron_manage",      // Scheduled task management
+	"tts_speak",        // Text-to-speech (resource-intensive)
+	"exec_sandboxed",   // Sandboxed execution (requires root context)
+	"set_config",       // Configuration changes
+}
+
+// subagentDenyLeaf lists tools denied at maximum spawn depth (leaf subagents).
+// These tools are allowed at intermediate depths but denied at the deepest level
+// to prevent unbounded recursion and session management conflicts.
+var subagentDenyLeaf = []string{
+	"spawn_subagent",   // Can't spawn children
+	"list_subagents",   // Not meaningful at leaf
+	"wait_subagent",    // No children to wait for
+	"stop_subagent",    // No children to stop
+	"sessions_list",    // Session management
+	"sessions_history", // Session history access
+	"sessions_spawn",   // Session spawning
+}
+
 // contextKeySpawnDepth is the context key for spawn depth tracking.
 type contextKeySpawnDepth struct{}
 
@@ -783,6 +807,14 @@ func (m *SubagentManager) createChildExecutor(parent *ToolExecutor, depth int) *
 		denySet[name] = true
 	}
 
+	// ── Depth-aware tool deny lists ──
+
+	// DENY_ALWAYS: tools never available to subagents regardless of depth.
+	// These are potentially dangerous or only make sense for the root agent.
+	for _, name := range subagentDenyAlways {
+		denySet[name] = true
+	}
+
 	// Determine if spawn tools should be denied based on depth.
 	maxDepth := m.cfg.MaxSpawnDepth
 	if maxDepth <= 0 {
@@ -790,13 +822,12 @@ func (m *SubagentManager) createChildExecutor(parent *ToolExecutor, depth int) *
 	}
 	canSpawn := depth < maxDepth
 
-	// Only deny subagent tools if we've reached max depth.
-	// If canSpawn is true, the subagent can spawn its own children.
+	// DENY_LEAF: tools denied at max depth (leaf subagents can't spawn children
+	// or manage sessions).
 	if !canSpawn {
-		denySet["spawn_subagent"] = true
-		denySet["list_subagents"] = true
-		denySet["wait_subagent"] = true
-		denySet["stop_subagent"] = true
+		for _, name := range subagentDenyLeaf {
+			denySet[name] = true
+		}
 	}
 
 	// Copy allowed tools from parent.
@@ -824,8 +855,9 @@ func (m *SubagentManager) createChildExecutor(parent *ToolExecutor, depth int) *
 // Subagents get a lightweight bootstrap prompt, NOT the
 // full Compose() — this saves tokens and keeps the subagent focused on its task.
 func (m *SubagentManager) buildSubagentPrompt(composer *PromptComposer, session *Session, task string) string {
-	// Use ComposeMinimal instead of full Compose — saves ~60% of system prompt tokens.
-	base := composer.ComposeMinimal()
+	// Use ComposeForSubagent — strips heartbeats, reply tags, messaging, skills
+	// and other parent-only sections, saving ~70% of system prompt tokens.
+	base := composer.ComposeForSubagent()
 
 	subagentInstructions := fmt.Sprintf(`# Subagent Context
 

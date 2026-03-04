@@ -2,6 +2,7 @@ package webui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,12 +10,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/skills"
-	"gopkg.in/yaml.v3"
 )
 
 // providerKeyNames maps provider IDs to their standard API key variable names.
@@ -54,6 +53,7 @@ type SetupRequest struct {
 	BaseURL       string          `json:"baseUrl"`
 	OwnerPhone    string          `json:"ownerPhone"`
 	WebuiPassword string          `json:"webuiPassword"`
+	Password      string          `json:"password"` // V2 wizard sends "password"
 	VaultPassword string          `json:"vaultPassword"`
 	AccessMode    string          `json:"accessMode"`
 	Channels      map[string]bool `json:"channels"`
@@ -152,6 +152,11 @@ func (s *Server) handleSetupFinalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// V2 wizard sends "password", V1 sends "webuiPassword". Merge them.
+	if setup.WebuiPassword == "" && setup.Password != "" {
+		setup.WebuiPassword = setup.Password
+	}
+
 	// Safety: don't overwrite an existing config unless in setup mode.
 	if configFileExists() && !s.setupMode {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "config.yaml already exists — use /api/config to modify"})
@@ -238,18 +243,16 @@ func (s *Server) handleSetupFinalize(w http.ResponseWriter, r *http.Request) {
 }
 
 // installSetupSkills installs selected skills as SKILL.md files into ./skills/.
-// First tries from embedded defaults, then downloads from devclaw-skills on GitHub.
+// First tries from embedded defaults, then installs from ClawHub registry.
 func (s *Server) installSetupSkills(selected []string) {
 	const skillsDir = "./skills"
-	const ghRaw = "https://raw.githubusercontent.com/jholhewres/devclaw-skills/master"
 
 	// Go-native builtins that don't need SKILL.md files (they have Go implementations).
 	goNative := map[string]bool{
 		"calculator": true, "datetime": true,
 	}
 
-	// Build path lookup from the cached catalog (index.yaml paths).
-	catalogPaths := s.buildCatalogPathMap()
+	installer := skills.NewInstaller(skillsDir, s.logger)
 
 	for _, name := range selected {
 		if goNative[name] {
@@ -270,163 +273,62 @@ func (s *Server) installSetupSkills(selected []string) {
 			continue
 		}
 
-		// Download from GitHub using catalog path or fallback flat path.
-		remotePath := "skills/" + name
-		if p, ok := catalogPaths[name]; ok {
-			remotePath = p
-		}
-		url := fmt.Sprintf("%s/%s/SKILL.md", ghRaw, remotePath)
-
-		client := &http.Client{Timeout: 15 * time.Second}
-		resp, err := client.Get(url)
+		// Install from ClawHub registry.
+		ctx := context.Background()
+		result, err := installer.Install(ctx, name)
 		if err != nil {
-			s.logger.Warn("failed to download skill from GitHub", "name", name, "error", err)
+			s.logger.Warn("failed to install skill from ClawHub", "name", name, "error", err)
 			continue
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
-		resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK || len(body) == 0 {
-			s.logger.Warn("skill not found on GitHub", "name", name, "status", resp.StatusCode)
-			continue
-		}
-
-		targetDir := filepath.Join(skillsDir, name)
-		os.MkdirAll(targetDir, 0o755)
-		if err := os.WriteFile(targetFile, body, 0o644); err != nil {
-			s.logger.Warn("failed to write skill file", "name", name, "error", err)
-			continue
-		}
-		s.logger.Info("skill installed from GitHub", "name", name)
+		s.logger.Info("skill installed from ClawHub", "name", result.Name, "source", result.Source)
 	}
 }
 
-// buildCatalogPathMap fetches index.yaml from GitHub and builds a name→path map.
-func (s *Server) buildCatalogPathMap() map[string]string {
-	result := make(map[string]string)
 
-	catalog := fetchSkillsCatalogFromGitHub(s.logger)
-	for _, entry := range catalog {
-		name, _ := entry["name"].(string)
-		path, _ := entry["path"].(string)
-		if name != "" && path != "" {
-			result[name] = path
-		}
-	}
-	return result
+// setupSkillNames is the curated list of skills shown during the setup wizard.
+// These are popular integration skills that users typically want to enable first.
+// The full catalog is available at /api/skills/available after setup.
+var setupSkillNames = []string{
+	"trello",
+	"shopify",
+	"hubspot",
 }
 
-// handleSetupSkills returns the list of skills available for installation.
-// First tries to fetch the catalog from devclaw-skills on GitHub; falls back to embedded defaults.
+// handleSetupSkills returns the curated list of skills for the setup wizard.
+// Only returns a small subset of the catalog relevant for initial setup.
 func (s *Server) handleSetupSkills(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
 
-	// Build catalog from embedded defaults (always available, enriched with starter_pack info).
-	defaults := skills.DefaultSkills()
-	result := make([]map[string]any, 0, len(defaults))
-	for _, sk := range defaults {
-		cat := sk.Category
-		if cat == "" {
-			cat = "builtin"
-		}
-		result = append(result, map[string]any{
-			"name":         sk.Name,
-			"description":  sk.Description,
-			"category":     cat,
-			"starter_pack": sk.StarterPack,
-			"enabled":      sk.StarterPack,
-			"tool_count":   0,
-		})
+	// Build lookup from embedded catalog.
+	catalog := skills.CatalogSkills()
+	byName := make(map[string]skills.CatalogEntry, len(catalog))
+	for _, entry := range catalog {
+		byName[entry.Name] = entry
 	}
 
-	// Merge extra skills from devclaw-skills GitHub catalog (non-embedded).
-	remote := fetchSkillsCatalogFromGitHub(s.logger)
-	embeddedNames := make(map[string]bool, len(defaults))
-	for _, sk := range defaults {
-		embeddedNames[sk.Name] = true
-	}
-	for _, r := range remote {
-		name, _ := r["name"].(string)
-		if !embeddedNames[name] {
-			r["starter_pack"] = false
-			result = append(result, r)
+	result := make([]map[string]any, 0, len(setupSkillNames))
+	for _, name := range setupSkillNames {
+		entry, ok := byName[name]
+		if !ok {
+			continue
 		}
+		result = append(result, map[string]any{
+			"name":           entry.Name,
+			"label":          entry.Label,
+			"label_pt":       entry.LabelPT,
+			"description":    entry.Description,
+			"description_pt": entry.DescriptionPT,
+			"category":       entry.Category,
+			"starter_pack":   false,
+			"enabled":        false,
+			"tool_count":     0,
+		})
 	}
 
 	writeJSON(w, http.StatusOK, result)
-}
-
-// skillsCatalogEntry represents a single skill in the devclaw-skills index.yaml.
-type skillsCatalogEntry struct {
-	Path        string   `yaml:"path"`
-	Version     string   `yaml:"version"`
-	Category    string   `yaml:"category"`
-	Tags        []string `yaml:"tags"`
-	Description string   `yaml:"description"`
-}
-
-// skillsCatalogFile represents the top-level structure of devclaw-skills index.yaml.
-type skillsCatalogFile struct {
-	Skills map[string]skillsCatalogEntry `yaml:"skills"`
-}
-
-// fetchSkillsCatalogFromGitHub fetches and parses the devclaw-skills index.yaml from GitHub.
-func fetchSkillsCatalogFromGitHub(logger interface{ Debug(string, ...any) }) []map[string]any {
-	const catalogURL = "https://raw.githubusercontent.com/jholhewres/devclaw-skills/master/index.yaml"
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(catalogURL)
-	if err != nil {
-		if logger != nil {
-			logger.Debug("failed to fetch skills catalog from GitHub", "error", err)
-		}
-		return nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		if logger != nil {
-			logger.Debug("skills catalog returned non-200", "status", resp.StatusCode)
-		}
-		return nil
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
-	if err != nil {
-		return nil
-	}
-
-	var catalog skillsCatalogFile
-	if err := yaml.Unmarshal(body, &catalog); err != nil {
-		if logger != nil {
-			logger.Debug("failed to parse skills catalog YAML", "error", err)
-		}
-		return nil
-	}
-
-	result := make([]map[string]any, 0, len(catalog.Skills))
-	for name, entry := range catalog.Skills {
-		result = append(result, map[string]any{
-			"name":        name,
-			"description": entry.Description,
-			"category":    entry.Category,
-			"version":     entry.Version,
-			"tags":        entry.Tags,
-			"path":        entry.Path,
-			"enabled":     false,
-			"tool_count":  0,
-		})
-	}
-
-	// Sort alphabetically by name for consistent ordering.
-	sort.Slice(result, func(i, j int) bool {
-		return result[i]["name"].(string) < result[j]["name"].(string)
-	})
-
-	return result
 }
 
 // ── Provider helpers ──
@@ -486,10 +388,11 @@ func testProviderConnection(provider, baseURL, apiKey, model string) error {
 		return testAnthropicConnection(baseURL, apiKey, model, true)
 	}
 
-	// Newer OpenAI models (o1, o3, o4, gpt-5) require max_completion_tokens instead of max_tokens
+	// Newer OpenAI models (o1, o3, o4, gpt-4.1, gpt-5) require max_completion_tokens instead of max_tokens
 	usesMaxCompletionTokens := strings.HasPrefix(model, "o1") ||
 		strings.HasPrefix(model, "o3") ||
 		strings.HasPrefix(model, "o4") ||
+		strings.HasPrefix(model, "gpt-4.1") ||
 		strings.HasPrefix(model, "gpt-5")
 
 	payload := map[string]any{
@@ -905,7 +808,7 @@ func generateConfigYAML(s *SetupRequest) string {
 	b.WriteString("# -- Web UI -----------------------------------------------\n")
 	b.WriteString("webui:\n")
 	b.WriteString("  enabled: true\n")
-	b.WriteString("  address: \"0.0.0.0:8090\"\n")
+	b.WriteString("  address: \"0.0.0.0:47716\"\n")
 	if s.WebuiPassword != "" {
 		b.WriteString("  auth_token: \"${DEVCLAW_WEBUI_TOKEN}\"\n")
 	}

@@ -87,8 +87,8 @@ func TestResolverResolveByProfileID(t *testing.T) {
 
 	// Create profiles
 	p1 := &AuthProfile{
-		ID:       NewProfileID("google-gmail", "work"),
-		Provider: "google-gmail",
+		ID:       NewProfileID("anthropic", "work"),
+		Provider: "anthropic",
 		Name:     "work",
 		Mode:     ModeOAuth,
 		Enabled:  true,
@@ -100,15 +100,15 @@ func TestResolverResolveByProfileID(t *testing.T) {
 		},
 	}
 	p2 := &AuthProfile{
-		ID:       NewProfileID("google-gmail", "personal"),
-		Provider: "google-gmail",
+		ID:       NewProfileID("anthropic", "personal"),
+		Provider: "anthropic",
 		Name:     "personal",
 		Mode:     ModeOAuth,
 		Enabled:  true,
 		OAuth: &OAuthCredential{
 			AccessToken:  "token-personal",
 			RefreshToken: "refresh-personal",
-			Email:        "personal@gmail.com",
+			Email:        "personal@example.com",
 			ExpiresAt:    future,
 		},
 	}
@@ -120,7 +120,7 @@ func TestResolverResolveByProfileID(t *testing.T) {
 	}
 
 	// Test resolve with specific profile name
-	result, err := resolver.Resolve(context.Background(), "google-gmail", "personal")
+	result, err := resolver.Resolve(context.Background(), "anthropic", "personal")
 	if err != nil {
 		t.Fatalf("Resolve failed: %v", err)
 	}

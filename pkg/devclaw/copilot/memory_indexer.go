@@ -34,6 +34,7 @@ type MemoryIndexer struct {
 	indexChunkFunc func(chunks []MemoryChunk) error
 	deleteFileFunc func(filepath string) error
 
+	mu     sync.Mutex
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -126,7 +127,9 @@ func (m *MemoryIndexer) Start(ctx context.Context) error {
 		return nil
 	}
 
+	m.mu.Lock()
 	m.ctx, m.cancel = context.WithCancel(ctx)
+	m.mu.Unlock()
 
 	// Load existing hashes from SQLite on startup
 	if m.sqliteMem != nil {
@@ -167,8 +170,11 @@ func (m *MemoryIndexer) Start(ctx context.Context) error {
 
 // Stop stops the memory indexer.
 func (m *MemoryIndexer) Stop() {
-	if m.cancel != nil {
-		m.cancel()
+	m.mu.Lock()
+	cancel := m.cancel
+	m.mu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }
 
@@ -249,11 +255,13 @@ func (m *MemoryIndexer) indexAll() {
 		}
 	}
 
-	// Update stats
+	// Update stats (protected by mu for concurrent Stats() reads)
+	m.mu.Lock()
 	m.indexedLast = int64(indexed)
 	m.indexedTotal += int64(indexed)
 	m.deletedTotal += int64(deleted)
 	m.lastIndexTime = time.Now()
+	m.mu.Unlock()
 
 	duration := time.Since(start)
 	m.logger.Info("memory index complete",
@@ -355,6 +363,8 @@ func (m *MemoryIndexer) IndexNow() {
 
 // Stats returns current indexer statistics.
 func (m *MemoryIndexer) Stats() (indexedTotal, indexedLast, deletedTotal int64, lastIndexTime time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.indexedTotal, m.indexedLast, m.deletedTotal, m.lastIndexTime
 }
 

@@ -1,0 +1,1259 @@
+# DevClaw Skills Catalog
+# Official skill collection for DevClaw Copilot.
+#
+# Each skill is a directory under skills/ containing a SKILL.md file.
+# Install with: devclaw skill install <name>
+# Browse catalog: https://clawhub.ai/
+#
+# Format: ClawdHub compatible (SKILL.md with YAML frontmatter).
+
+version: "5.0"
+updated: 2026-03-02
+
+skills:
+  # ──────────── Builtin (no API key required) ────────────
+  weather:
+    clawhub_url: "https://clawhub.ai/steipete/weather"
+    label: "Weather"
+    label_pt: "Clima"
+    path: skills/weather
+    version: 0.3.0
+    category: builtin
+    tags: [weather, forecast, temperature, wttr, open-meteo]
+    description: "Weather information and forecasts (no API key)"
+    description_pt: "Informações e previsões do tempo (sem chave de API)"
+
+  calculator:
+    clawhub_url: "https://clawhub.ai/ivangdavila/math"
+    label: "Calculator"
+    label_pt: "Calculadora"
+    path: skills/calculator
+    version: 0.2.0
+    category: builtin
+    tags: [math, calculator, conversion]
+    description: "Mathematical calculations and conversions"
+    description_pt: "Cálculos matemáticos e conversões"
+
+  timer:
+    clawhub_url: "https://clawhub.ai/hisxo/timer"
+    label: "Timer"
+    label_pt: "Temporizador"
+    path: skills/timer
+    version: 0.1.0
+    category: builtin
+    tags: [timer, alarm, pomodoro]
+    description: "Timers, alarms, and Pomodoro sessions"
+    description_pt: "Temporizadores, alarmes e sessões Pomodoro"
+
+  reminders:
+    clawhub_url: "https://clawhub.ai/lstpsche/quick-reminders"
+    label: "Reminders"
+    label_pt: "Lembretes"
+    path: skills/reminders
+    version: 0.1.0
+    category: builtin
+    tags: [reminders, schedule, alerts]
+    description: "Time-based reminders with scheduling"
+    description_pt: "Lembretes com agendamento programado"
+
+  notes:
+    clawhub_url: "https://clawhub.ai/ivangdavila/notes"
+    label: "Notes"
+    label_pt: "Notas"
+    path: skills/notes
+    version: 0.1.0
+    category: builtin
+    tags: [notes, memo, lists, ideas]
+    description: "Quick notes, lists, and ideas stored locally"
+    description_pt: "Notas rápidas, listas e ideias armazenadas localmente"
+
+  translate:
+    clawhub_url: "https://clawhub.ai/atacan/translate-cli"
+    label: "Translate"
+    label_pt: "Traduzir"
+    path: skills/translate
+    version: 0.1.0
+    category: builtin
+    tags: [translate, language, multilingual]
+    description: "Translate text between languages"
+    description_pt: "Traduza textos entre idiomas"
+
+  location:
+    clawhub_url: "https://clawhub.ai/James-southendsolutions/location-context"
+    label: "Location"
+    label_pt: "Localização"
+    path: skills/location
+    version: 0.1.0
+    category: builtin
+    tags: [geocoding, ip, timezone, maps, distance]
+    description: "Geocoding, IP lookup, distance, timezone"
+    description_pt: "Geocodificação, consulta de IP, distância, fuso horário"
+
+  qr-code:
+    clawhub_url: "https://clawhub.ai/Omar-Khaleel/qr-code-intelligence"
+    label: "QR Code"
+    label_pt: "QR Code"
+    path: skills/qr-code
+    version: 0.1.0
+    category: builtin
+    tags: [qr, qrcode, generate, decode]
+    description: "Generate and decode QR codes"
+    description_pt: "Gere e decodifique QR codes"
+
+  # ──────────── Data & Web ────────────
+  web-search:
+    clawhub_url: "https://clawhub.ai/JakeLin/ddg-web-search"
+    label: "Web Search"
+    label_pt: "Busca na Web"
+    path: skills/web-search
+    version: 0.2.0
+    category: data
+    tags: [search, web, brave, duckduckgo]
+    description: "Web search via Brave Search API or DuckDuckGo"
+    description_pt: "Busca na web via Brave Search API ou DuckDuckGo"
+    requires:
+      any_env: [BRAVE_API_KEY]
+
+  web-fetch:
+    clawhub_url: "https://clawhub.ai/xaiohuangningde/jina-web-fetcher"
+    label: "Web Fetch"
+    label_pt: "Web Fetch"
+    path: skills/web-fetch
+    version: 0.2.0
+    category: data
+    tags: [web, fetch, scrape, readability]
+    description: "Fetch URL content and extract readable text"
+    description_pt: "Busque conteúdo de URLs e extraia texto legível"
+
+  web-scraper:
+    clawhub_url: "https://clawhub.ai/Damirikys/scrapling-fetcher"
+    label: "Web Scraper"
+    label_pt: "Web Scraper"
+    path: skills/web-scraper
+    version: 0.1.0
+    category: data
+    tags: [scraping, crawl, extract, playwright]
+    description: "Web scraping with CSS selectors, Playwright, curl"
+    description_pt: "Web scraping com seletores CSS, Playwright, curl"
+
+  summarize:
+    clawhub_url: "https://clawhub.ai/steipete/summarize"
+    label: "Summarize"
+    label_pt: "Resumir"
+    path: skills/summarize
+    version: 0.2.0
+    category: data
+    tags: [summarize, transcript, youtube, podcast]
+    description: "Summarize URLs, articles, videos, and podcasts"
+    description_pt: "Resuma URLs, artigos, vídeos e podcasts"
+
+  ocr:
+    clawhub_url: "https://clawhub.ai/WhaleFell/tesseract-ocr"
+    label: "OCR"
+    label_pt: "OCR"
+    path: skills/ocr
+    version: 0.1.0
+    category: data
+    tags: [ocr, tesseract, text-extraction, pdf]
+    description: "OCR text extraction from images and PDFs"
+    description_pt: "Extração de texto via OCR de imagens e PDFs"
+    requires:
+      any_bins: [tesseract]
+
+  stock-prices:
+    clawhub_url: "https://clawhub.ai/anthonylee1994/stock-prices"
+    label: "Stock Prices"
+    label_pt: "Cotações"
+    path: skills/stock-prices
+    version: 0.1.0
+    category: data
+    tags: [stocks, finance, market, crypto, portfolio]
+    description: "Stock prices, crypto, and market data"
+    description_pt: "Cotações de ações, criptomoedas e dados de mercado"
+
+  # ──────────── Development ────────────
+  github:
+    clawhub_url: "https://clawhub.ai/steipete/github"
+    label: "GitHub"
+    label_pt: "GitHub"
+    path: skills/github
+    version: 0.3.0
+    category: development
+    tags: [github, git, issues, pull-requests, ci]
+    description: "Full GitHub integration via gh CLI"
+    description_pt: "Integração completa com GitHub via gh CLI"
+    requires:
+      bins: [gh]
+
+  jira:
+    clawhub_url: "https://clawhub.ai/jdrhyne/jira"
+    label: "Jira"
+    label_pt: "Jira"
+    path: skills/jira
+    version: 0.1.0
+    category: development
+    tags: [jira, issues, sprints, agile, atlassian]
+    description: "Jira — issues, sprints, transitions, worklogs"
+    description_pt: "Jira — issues, sprints, transições, registros de horas"
+    requires:
+      env: [JIRA_URL, JIRA_EMAIL, JIRA_API_TOKEN]
+
+  linear:
+    clawhub_url: "https://clawhub.ai/emrekilinc/linear-issues"
+    label: "Linear"
+    label_pt: "Linear"
+    path: skills/linear
+    version: 0.1.0
+    category: development
+    tags: [linear, issues, projects, agile]
+    description: "Linear — issues, teams, projects"
+    description_pt: "Linear — issues, equipes, projetos"
+    requires:
+      env: [LINEAR_API_KEY]
+
+  database:
+    clawhub_url: "https://clawhub.ai/ivangdavila/db"
+    label: "Database"
+    label_pt: "Banco de Dados"
+    path: skills/database
+    version: 0.1.0
+    category: development
+    tags: [postgresql, mysql, mongodb, redis, sqlite]
+    description: "Database queries — PostgreSQL, MySQL, MongoDB, Redis, SQLite"
+    description_pt: "Consultas em banco de dados — PostgreSQL, MySQL, MongoDB, Redis, SQLite"
+
+  docker:
+    clawhub_url: "https://clawhub.ai/ivangdavila/docker"
+    label: "Docker"
+    label_pt: "Docker"
+    path: skills/docker
+    version: 0.1.0
+    category: development
+    tags: [docker, containers, compose, images]
+    description: "Docker containers, compose, volumes, networks"
+    description_pt: "Containers Docker, compose, volumes, redes"
+    requires:
+      bins: [docker]
+
+  docker-compose:
+    clawhub_url: "https://clawhub.ai/ivangdavila/docker-compose"
+    label: "Docker Compose"
+    label_pt: "Docker Compose"
+    path: skills/docker-compose
+    version: 0.1.0
+    category: development
+    tags: [docker, compose, multi-service, scaling, profiles]
+    description: "Advanced Docker Compose — profiles, scaling, networking"
+    description_pt: "Docker Compose avançado — perfis, escalonamento, rede"
+    requires:
+      bins: [docker]
+
+  kubernetes:
+    clawhub_url: "https://clawhub.ai/kcns008/kubernetes"
+    label: "Kubernetes"
+    label_pt: "Kubernetes"
+    path: skills/kubernetes
+    version: 0.1.0
+    category: development
+    tags: [kubernetes, k8s, kubectl, pods, deployments, services]
+    description: "Kubernetes cluster management via kubectl"
+    description_pt: "Gerenciamento de cluster Kubernetes via kubectl"
+    requires:
+      bins: [kubectl]
+
+  terraform:
+    clawhub_url: "https://clawhub.ai/ivangdavila/terraform"
+    label: "Terraform"
+    label_pt: "Terraform"
+    path: skills/terraform
+    version: 0.1.0
+    category: development
+    tags: [terraform, iac, infrastructure, cloud, hcl]
+    description: "Infrastructure as Code with Terraform"
+    description_pt: "Infraestrutura como código com Terraform"
+    requires:
+      bins: [terraform]
+
+  aws-cli:
+    clawhub_url: "https://clawhub.ai/bmdhodl/aws-infra"
+    label: "AWS CLI"
+    label_pt: "AWS CLI"
+    path: skills/aws-cli
+    version: 0.1.0
+    category: development
+    tags: [aws, s3, ec2, lambda, cloudwatch, rds, ecs]
+    description: "AWS CLI — S3, EC2, Lambda, CloudWatch, RDS, ECS"
+    description_pt: "AWS CLI — S3, EC2, Lambda, CloudWatch, RDS, ECS"
+    requires:
+      bins: [aws]
+
+  gcloud:
+    clawhub_url: "https://clawhub.ai/jortega0033/gcloud"
+    label: "Google Cloud"
+    label_pt: "Google Cloud"
+    path: skills/gcloud
+    version: 0.1.0
+    category: development
+    tags: [gcp, google-cloud, compute, cloud-run, gcs, bigquery]
+    description: "Google Cloud CLI — Compute, Cloud Run, GCS, BigQuery"
+    description_pt: "Google Cloud CLI — Compute, Cloud Run, GCS, BigQuery"
+    requires:
+      bins: [gcloud]
+
+  azure-cli:
+    clawhub_url: "https://clawhub.ai/ddevaal/azure-cli"
+    label: "Azure CLI"
+    label_pt: "Azure CLI"
+    path: skills/azure-cli
+    version: 0.1.0
+    category: development
+    tags: [azure, az, vms, app-service, blob, sql]
+    description: "Azure CLI — VMs, App Service, Blob Storage, SQL"
+    description_pt: "Azure CLI — VMs, App Service, Blob Storage, SQL"
+    requires:
+      bins: [az]
+
+  cargo:
+    clawhub_url: "https://clawhub.ai/ivangdavila/rust"
+    label: "Cargo (Rust)"
+    label_pt: "Cargo (Rust)"
+    path: skills/cargo
+    version: 0.1.0
+    category: development
+    tags: [rust, cargo, build, test, clippy, publish]
+    description: "Rust development with Cargo"
+    description_pt: "Desenvolvimento Rust com Cargo"
+    requires:
+      bins: [cargo]
+
+  pip-poetry:
+    clawhub_url: "https://clawhub.ai/guoqiao/uv-global"
+    label: "pip / Poetry"
+    label_pt: "pip / Poetry"
+    path: skills/pip-poetry
+    version: 0.1.0
+    category: development
+    tags: [python, pip, poetry, pipenv, venv]
+    description: "Python package management — pip, poetry, pipenv"
+    description_pt: "Gerenciamento de pacotes Python — pip, poetry, pipenv"
+    requires:
+      bins: [python3]
+
+  tmux:
+    clawhub_url: "https://clawhub.ai/steipete/tmux"
+    label: "tmux"
+    label_pt: "tmux"
+    path: skills/tmux
+    version: 0.1.0
+    category: development
+    tags: [tmux, terminal, multiplexer, sessions]
+    description: "Terminal multiplexing with tmux"
+    description_pt: "Multiplexação de terminal com tmux"
+    requires:
+      bins: [tmux]
+
+  claude-code:
+    clawhub_url: "https://clawhub.ai/hw10181913/claude-code"
+    label: "Claude Code"
+    label_pt: "Claude Code"
+    path: skills/claude-code
+    version: 0.1.0
+    category: development
+    tags: [claude, ai, coding, assistant, anthropic]
+    description: "Advanced coding via Claude Code CLI"
+    description_pt: "Programação avançada via Claude Code CLI"
+    requires:
+      bins: [claude]
+
+  image-gen:
+    clawhub_url: "https://clawhub.ai/ivangdavila/image-generation"
+    label: "Image Generation"
+    label_pt: "Geração de Imagens"
+    path: skills/image-gen
+    version: 0.1.0
+    category: development
+    tags: [image, generation, dall-e, gpt-image, ai]
+    description: "Generate images from text descriptions"
+    description_pt: "Gere imagens a partir de descrições em texto"
+
+  project-manager:
+    clawhub_url: "https://clawhub.ai/fr0ziii/project-manager"
+    label: "Project Manager"
+    label_pt: "Gerenciador de Projetos"
+    path: skills/project-manager
+    version: 0.1.0
+    category: development
+    tags: [projects, workspace, detection, languages]
+    description: "Register and manage development projects"
+    description_pt: "Registre e gerencie projetos de desenvolvimento"
+
+  filesystem:
+    clawhub_url: "https://clawhub.ai/AmaoFx/filesystem"
+    label: "Filesystem"
+    label_pt: "Sistema de Arquivos"
+    path: skills/filesystem
+    version: 0.1.0
+    category: development
+    tags: [files, search, rsync, disk, permissions]
+    description: "Advanced filesystem operations, search, sync"
+    description_pt: "Operações avançadas de sistema de arquivos, busca, sincronização"
+
+  browser-automation:
+    clawhub_url: "https://clawhub.ai/peytoncasper/browser-automation"
+    label: "Browser Automation"
+    label_pt: "Automação de Navegador"
+    path: skills/browser-automation
+    version: 0.1.0
+    category: development
+    tags: [browser, playwright, puppeteer, automation, e2e]
+    description: "Browser automation with Playwright/Puppeteer"
+    description_pt: "Automação de navegador com Playwright/Puppeteer"
+
+  vs-code:
+    clawhub_url: "https://clawhub.ai/ivangdavila/vscode"
+    label: "VS Code"
+    label_pt: "VS Code"
+    path: skills/vs-code
+    version: 0.1.0
+    category: development
+    tags: [vscode, editor, extensions, workspace, settings]
+    description: "VS Code — manage workspaces, extensions, settings, and tasks"
+    description_pt: "VS Code — gerencie workspaces, extensões, configurações e tarefas"
+    requires:
+      any_bins: [code, code-insiders]
+
+  # ──────────── Quality & Analysis ────────────
+  lighthouse:
+    clawhub_url: "https://clawhub.ai/elithrar/web-perf"
+    label: "Lighthouse"
+    label_pt: "Lighthouse"
+    path: skills/lighthouse
+    version: 0.1.0
+    category: development
+    tags: [lighthouse, performance, a11y, seo, web-vitals]
+    description: "Web performance audit with Google Lighthouse"
+    description_pt: "Auditoria de performance web com Google Lighthouse"
+    requires:
+      bins: [npx]
+
+  sec-deps:
+    clawhub_url: "https://clawhub.ai/Fratua/dependency-audit"
+    label: "Security Audit"
+    label_pt: "Auditoria de Segurança"
+    path: skills/sec-deps
+    version: 0.1.0
+    category: development
+    tags: [security, audit, vulnerabilities, npm-audit, govulncheck]
+    description: "Security audit for dependencies across languages"
+    description_pt: "Auditoria de segurança de dependências em diversas linguagens"
+
+  a11y-axe:
+    clawhub_url: "https://clawhub.ai/dylanb/axe-devtools"
+    label: "Accessibility (axe)"
+    label_pt: "Acessibilidade (axe)"
+    path: skills/a11y-axe
+    version: 0.1.0
+    category: development
+    tags: [accessibility, axe-core, wcag, a11y, audit]
+    description: "Accessibility audit with axe-core"
+    description_pt: "Auditoria de acessibilidade com axe-core"
+    requires:
+      bins: [npx]
+
+  color-contrast:
+    clawhub_url: "https://clawhub.ai/Veeramanikandanr48/accessibility"
+    label: "Color Contrast"
+    label_pt: "Contraste de Cores"
+    path: skills/color-contrast
+    version: 0.1.0
+    category: development
+    tags: [color, contrast, wcag, accessibility, design]
+    description: "Calculate WCAG color contrast ratios"
+    description_pt: "Calcule proporções de contraste de cores WCAG"
+
+  changelog-gen:
+    clawhub_url: "https://clawhub.ai/rogue-agent1/git-changelog-gen"
+    label: "Changelog Generator"
+    label_pt: "Gerador de Changelog"
+    path: skills/changelog-gen
+    version: 0.1.0
+    category: development
+    tags: [changelog, conventional-commits, release, git]
+    description: "Generate CHANGELOG.md from conventional commits"
+    description_pt: "Gere CHANGELOG.md a partir de commits convencionais"
+
+  release-notes:
+    clawhub_url: "https://clawhub.ai/1kalin/afrexai-release-notes"
+    label: "Release Notes"
+    label_pt: "Notas de Release"
+    path: skills/release-notes
+    version: 0.1.0
+    category: development
+    tags: [release, notes, github, issues, prs]
+    description: "Generate release notes from issues + commits"
+    description_pt: "Gere notas de release a partir de issues + commits"
+
+  # ──────────── DevOps & Infrastructure ────────────
+  nginx:
+    clawhub_url: "https://clawhub.ai/ivangdavila/nginx"
+    label: "Nginx"
+    label_pt: "Nginx"
+    path: skills/nginx
+    version: 0.1.0
+    category: infra
+    tags: [nginx, webserver, proxy, ssl, reverse-proxy]
+    description: "Nginx configuration, reverse proxy, and SSL"
+    description_pt: "Configuração Nginx, proxy reverso e SSL"
+    requires:
+      bins: [nginx]
+
+  redis-cli:
+    clawhub_url: "https://clawhub.ai/ivangdavila/redis-store"
+    label: "Redis"
+    label_pt: "Redis"
+    path: skills/redis-cli
+    version: 0.1.0
+    category: infra
+    tags: [redis, cache, database, keys, pub-sub]
+    description: "Redis CLI for cache, queues, and in-memory data"
+    description_pt: "Redis CLI para cache, filas e dados em memória"
+    requires:
+      bins: [redis-cli]
+
+  systemd:
+    clawhub_url: "https://clawhub.ai/KOwl64/linux-service-triage"
+    label: "systemd"
+    label_pt: "systemd"
+    path: skills/systemd
+    version: 0.1.0
+    category: infra
+    tags: [systemd, systemctl, journalctl, linux, services]
+    description: "Manage Linux services with systemctl and journalctl"
+    description_pt: "Gerencie serviços Linux com systemctl e journalctl"
+
+  pm2:
+    clawhub_url: "https://clawhub.ai/asteinberger/pm2"
+    label: "PM2"
+    label_pt: "PM2"
+    path: skills/pm2
+    version: 0.1.0
+    category: infra
+    tags: [pm2, process, manager, nodejs, daemon]
+    description: "Process management with PM2"
+    description_pt: "Gerenciamento de processos com PM2"
+    requires:
+      bins: [pm2]
+
+  railway-deploy:
+    clawhub_url: "https://clawhub.ai/dbanys/railway-deploy"
+    label: "Railway"
+    label_pt: "Railway"
+    path: skills/railway-deploy
+    version: 0.1.0
+    category: infra
+    tags: [railway, deploy, hosting, databases]
+    description: "Railway deploy — projects, services, databases"
+    description_pt: "Deploy no Railway — projetos, serviços, bancos de dados"
+    requires:
+      bins: [railway]
+
+  backup:
+    clawhub_url: "https://clawhub.ai/VACInc/simple-backup"
+    label: "Backup"
+    label_pt: "Backup"
+    path: skills/backup
+    version: 0.1.0
+    category: infra
+    tags: [backup, rsync, tar, database-dump, cron]
+    description: "Backup scripts — rsync, tar, database dumps"
+    description_pt: "Scripts de backup — rsync, tar, dumps de banco de dados"
+
+  health:
+    clawhub_url: "https://clawhub.ai/ivangdavila/health"
+    label: "Health Check"
+    label_pt: "Verificação de Saúde"
+    path: skills/health
+    version: 0.1.0
+    category: infra
+    tags: [monitoring, healthcheck, uptime, ssl, alerting]
+    description: "Service health checks, uptime monitoring, SSL"
+    description_pt: "Verificação de saúde de serviços, monitoramento de uptime, SSL"
+
+  # ──────────── Communication ────────────
+  slack:
+    clawhub_url: "https://clawhub.ai/steipete/slack"
+    label: "Slack"
+    label_pt: "Slack"
+    path: skills/slack
+    version: 0.1.0
+    category: communication
+    tags: [slack, messaging, channels, threads]
+    description: "Slack — messages, channels, threads, reactions"
+    description_pt: "Slack — mensagens, canais, threads, reações"
+    requires:
+      env: [SLACK_BOT_TOKEN]
+
+  discord:
+    clawhub_url: "https://clawhub.ai/codedao12/discord-hub"
+    label: "Discord"
+    label_pt: "Discord"
+    path: skills/discord
+    version: 0.1.0
+    category: communication
+    tags: [discord, webhooks, bot, embeds]
+    description: "Discord webhooks and bot API"
+    description_pt: "Discord webhooks e API de bot"
+
+  telegram:
+    clawhub_url: "https://clawhub.ai/codedao12/telegram"
+    label: "Telegram"
+    label_pt: "Telegram"
+    path: skills/telegram
+    version: 0.1.0
+    category: communication
+    tags: [telegram, bot, messaging, files]
+    description: "Telegram Bot API — messages, files, interactive"
+    description_pt: "API do Telegram Bot — mensagens, arquivos, interativo"
+    requires:
+      env: [TELEGRAM_BOT_TOKEN]
+
+  email:
+    clawhub_url: "https://clawhub.ai/gzlicanyi/imap-smtp-email"
+    label: "Email"
+    label_pt: "E-mail"
+    path: skills/email
+    version: 0.1.0
+    category: communication
+    tags: [email, resend, sendgrid, mailgun, smtp]
+    description: "Send emails via Resend, SendGrid, Mailgun, SMTP"
+    description_pt: "Envie e-mails via Resend, SendGrid, Mailgun, SMTP"
+    requires:
+      any_env: [RESEND_API_KEY, SENDGRID_API_KEY, MAILGUN_API_KEY]
+
+  gmail:
+    clawhub_url: "https://clawhub.ai/byungkyu/gmail"
+    label: "Gmail"
+    label_pt: "Gmail"
+    path: skills/gmail
+    version: 0.1.0
+    category: communication
+    tags: [gmail, email, google, inbox]
+    description: "Gmail — list, read, send, labels"
+    description_pt: "Gmail — listar, ler, enviar, gerenciar marcadores"
+
+  # ──────────── Productivity ────────────
+  obsidian:
+    clawhub_url: "https://clawhub.ai/alexanderkinging/obsidian-cli-official"
+    label: "Obsidian"
+    label_pt: "Obsidian"
+    path: skills/obsidian
+    version: 0.1.0
+    category: productivity
+    tags: [obsidian, vault, notes, wikilinks, tags, daily-notes, zettelkasten]
+    description: "Manage Obsidian vaults — notes, links, tags, daily notes"
+    description_pt: "Gerencie cofres Obsidian — notas, links, tags, notas diárias"
+
+  journal:
+    clawhub_url: "https://clawhub.ai/ivangdavila/journal"
+    label: "Journal"
+    label_pt: "Diário"
+    path: skills/journal
+    version: 0.1.0
+    category: productivity
+    tags: [journal, diary, reflection, daily, writing]
+    description: "Daily journaling with structured entries and reflections"
+    description_pt: "Diário pessoal com entradas estruturadas e reflexões"
+
+  pomodoro:
+    clawhub_url: "https://clawhub.ai/vkozlovskyi/pomoclaw"
+    label: "Pomodoro"
+    label_pt: "Pomodoro"
+    path: skills/pomodoro
+    version: 0.1.0
+    category: productivity
+    tags: [pomodoro, focus, productivity, timer, sessions]
+    description: "Pomodoro technique — focus sessions, breaks, tracking"
+    description_pt: "Técnica Pomodoro — sessões de foco, pausas, acompanhamento"
+
+  time-tracker:
+    clawhub_url: "https://clawhub.ai/FlorianRauscha/timesheet"
+    label: "Time Tracker"
+    label_pt: "Controle de Tempo"
+    path: skills/time-tracker
+    version: 0.1.0
+    category: productivity
+    tags: [time, tracker, hours, projects, tasks, reporting]
+    description: "Track time spent on tasks and projects"
+    description_pt: "Acompanhe o tempo gasto em tarefas e projetos"
+
+  habits:
+    clawhub_url: "https://clawhub.ai/ivangdavila/habits"
+    label: "Habits"
+    label_pt: "Hábitos"
+    path: skills/habits
+    version: 0.1.0
+    category: productivity
+    tags: [habits, streaks, daily, tracking, routine]
+    description: "Track daily habits and streaks"
+    description_pt: "Acompanhe hábitos diários e sequências"
+
+  meeting-notes:
+    clawhub_url: "https://clawhub.ai/TinaDu-AI/meeting-notes"
+    label: "Meeting Notes"
+    label_pt: "Notas de Reunião"
+    path: skills/meeting-notes
+    version: 0.1.0
+    category: productivity
+    tags: [meetings, notes, action-items, standup, retro]
+    description: "Structured meeting notes with action items extraction"
+    description_pt: "Notas de reunião estruturadas com extração de ações"
+
+  bookmarks:
+    clawhub_url: "https://clawhub.ai/ivangdavila/bookmarks"
+    label: "Bookmarks"
+    label_pt: "Favoritos"
+    path: skills/bookmarks
+    version: 0.1.0
+    category: productivity
+    tags: [bookmarks, links, references, save, organize]
+    description: "Save, organize, and search bookmarks and references"
+    description_pt: "Salve, organize e busque favoritos e referências"
+
+  standup-summary:
+    clawhub_url: "https://clawhub.ai/zweack/git-summary"
+    label: "Standup Summary"
+    label_pt: "Resumo de Daily"
+    path: skills/standup-summary
+    version: 0.1.0
+    category: productivity
+    tags: [standup, daily, summary, git, agile]
+    description: "Generate daily standup summary from git + issues"
+    description_pt: "Gere resumo de daily standup a partir de git + issues"
+
+  sprint-report:
+    clawhub_url: "https://clawhub.ai/1kalin/afrexai-sprint-planner"
+    label: "Sprint Report"
+    label_pt: "Relatório de Sprint"
+    path: skills/sprint-report
+    version: 0.1.0
+    category: productivity
+    tags: [sprint, report, velocity, agile, scrum]
+    description: "Generate sprint reports from git + issue tracker"
+    description_pt: "Gere relatórios de sprint a partir de git + issue tracker"
+
+  calendar:
+    clawhub_url: "https://clawhub.ai/NDCCCCCC/calendar"
+    label: "Calendar (gcalcli)"
+    label_pt: "Calendário (gcalcli)"
+    path: skills/calendar
+    version: 0.2.0
+    category: productivity
+    tags: [google, calendar, events, meetings]
+    description: "Google Calendar via gcalcli or gog"
+    description_pt: "Google Calendar via gcalcli ou gog"
+    requires:
+      any_bins: [gcalcli, gog]
+
+  gog:
+    clawhub_url: "https://clawhub.ai/steipete/gog"
+    label: "Google Workspace"
+    label_pt: "Google Workspace"
+    path: skills/gog
+    version: 0.2.0
+    category: productivity
+    tags: [google, gmail, calendar, drive, workspace]
+    description: "Google Workspace (Gmail, Calendar, Drive) via gog"
+    description_pt: "Google Workspace (Gmail, Calendar, Drive) via gog"
+    requires:
+      bins: [gog]
+
+  notion:
+    clawhub_url: "https://clawhub.ai/steipete/notion"
+    label: "Notion"
+    label_pt: "Notion"
+    path: skills/notion
+    version: 0.1.0
+    category: productivity
+    tags: [notion, wiki, database, project-management]
+    description: "Notion API — pages, databases, blocks"
+    description_pt: "API do Notion — páginas, bancos de dados, blocos"
+    requires:
+      env: [NOTION_API_KEY]
+
+  trello:
+    clawhub_url: "https://clawhub.ai/steipete/trello"
+    label: "Trello"
+    label_pt: "Trello"
+    path: skills/trello
+    version: 0.1.0
+    category: productivity
+    tags: [trello, kanban, boards, tasks]
+    description: "Trello boards, lists, and cards"
+    description_pt: "Quadros, listas e cartões do Trello"
+    requires:
+      env: [TRELLO_API_KEY, TRELLO_TOKEN]
+
+  todoist:
+    clawhub_url: "https://clawhub.ai/mjrussell/todoist"
+    label: "Todoist"
+    label_pt: "Todoist"
+    path: skills/todoist
+    version: 0.1.0
+    category: productivity
+    tags: [todoist, tasks, todo]
+    description: "Todoist task management"
+    description_pt: "Gerenciamento de tarefas com Todoist"
+    requires:
+      env: [TODOIST_API_TOKEN]
+
+  asana:
+    clawhub_url: "https://clawhub.ai/k0nkupa/asana"
+    label: "Asana"
+    label_pt: "Asana"
+    path: skills/asana
+    version: 0.1.0
+    category: productivity
+    tags: [asana, tasks, projects, workspaces]
+    description: "Asana — tasks, projects, workspaces, search"
+    description_pt: "Asana — tarefas, projetos, workspaces, busca"
+    requires:
+      env: [ASANA_ACCESS_TOKEN]
+
+  clickup:
+    clawhub_url: "https://clawhub.ai/shubhs0707/clickup"
+    label: "ClickUp"
+    label_pt: "ClickUp"
+    path: skills/clickup
+    version: 0.1.0
+    category: productivity
+    tags: [clickup, tasks, time-tracking, workspaces]
+    description: "ClickUp — tasks, comments, time tracking"
+    description_pt: "ClickUp — tarefas, comentários, controle de tempo"
+    requires:
+      env: [CLICKUP_API_TOKEN]
+
+  airtable:
+    clawhub_url: "https://clawhub.ai/byungkyu/airtable"
+    label: "Airtable"
+    label_pt: "Airtable"
+    path: skills/airtable
+    version: 0.1.0
+    category: productivity
+    tags: [airtable, database, spreadsheet, records]
+    description: "Airtable — records, tables, batch operations"
+    description_pt: "Airtable — registros, tabelas, operações em lote"
+    requires:
+      env: [AIRTABLE_API_KEY]
+
+  # ──────────── Google Suite ────────────
+  google-calendar:
+    clawhub_url: "https://clawhub.ai/AdrianMiller99/google-calendar"
+    label: "Google Calendar"
+    label_pt: "Google Agenda"
+    path: skills/google-calendar
+    version: 0.1.0
+    category: productivity
+    tags: [google, calendar, scheduling, events, meetings, gcal]
+    description: "Google Calendar — list, create, and manage events via gcal CLI"
+    description_pt: "Google Calendar — liste, crie e gerencie eventos via gcal CLI"
+
+  google-drive:
+    clawhub_url: "https://clawhub.ai/byungkyu/google-drive"
+    label: "Google Drive"
+    label_pt: "Google Drive"
+    path: skills/google-drive
+    version: 0.1.0
+    category: productivity
+    tags: [google, drive, files, storage, documents, sharing]
+    description: "Google Drive — upload, download, share, and organize files"
+    description_pt: "Google Drive — upload, download, compartilhamento e organização de arquivos"
+
+  google-sheets:
+    clawhub_url: "https://clawhub.ai/byungkyu/google-sheets"
+    label: "Google Sheets"
+    label_pt: "Google Planilhas"
+    path: skills/google-sheets
+    version: 0.1.0
+    category: productivity
+    tags: [google, sheets, spreadsheet, data, formulas]
+    description: "Google Sheets — read, write, and manage spreadsheets"
+    description_pt: "Google Sheets — leia, escreva e gerencie planilhas"
+
+  google-docs:
+    clawhub_url: "https://clawhub.ai/byungkyu/google-docs"
+    label: "Google Docs"
+    label_pt: "Google Documentos"
+    path: skills/google-docs
+    version: 0.1.0
+    category: productivity
+    tags: [google, docs, documents, editing, collaboration]
+    description: "Google Docs — create, read, and edit documents"
+    description_pt: "Google Docs — crie, leia e edite documentos"
+
+  google-meet:
+    clawhub_url: "https://clawhub.ai/byungkyu/google-meet"
+    label: "Google Meet"
+    label_pt: "Google Meet"
+    path: skills/google-meet
+    version: 0.1.0
+    category: communication
+    tags: [google, meet, video, conferencing, meetings]
+    description: "Google Meet — schedule and manage video meetings"
+    description_pt: "Google Meet — agende e gerencie videoconferências"
+
+  google-tasks:
+    clawhub_url: "https://clawhub.ai/addozhang/google-tasks"
+    label: "Google Tasks"
+    label_pt: "Google Tarefas"
+    path: skills/google-tasks
+    version: 0.1.0
+    category: productivity
+    tags: [google, tasks, todo, lists]
+    description: "Google Tasks — manage task lists and items"
+    description_pt: "Google Tasks — gerencie listas de tarefas e itens"
+
+  # ──────────── Integrations (E-commerce & CRM) ────────────
+  shopify:
+    clawhub_url: "https://clawhub.ai/zachgodsell93/shopify-admin-api"
+    label: "Shopify"
+    label_pt: "Shopify"
+    path: skills/shopify
+    version: 0.1.0
+    category: integrations
+    tags: [shopify, ecommerce, orders, products, customers, inventory]
+    description: "Manage Shopify store — products, orders, customers, inventory"
+    description_pt: "Gerencie loja Shopify — produtos, pedidos, clientes, estoque"
+    requires:
+      env: [SHOPIFY_STORE, SHOPIFY_ACCESS_TOKEN]
+
+  hubspot:
+    clawhub_url: "https://clawhub.ai/kwall1/hubspot"
+    label: "HubSpot"
+    label_pt: "HubSpot"
+    path: skills/hubspot
+    version: 0.1.0
+    category: integrations
+    tags: [hubspot, crm, contacts, deals, companies, marketing, sales]
+    description: "Manage HubSpot CRM — contacts, companies, deals, tickets"
+    description_pt: "Gerencie HubSpot CRM — contatos, empresas, negócios, tickets"
+    requires:
+      env: [HUBSPOT_ACCESS_TOKEN]
+
+  # ──────────── Finance & Payments ────────────
+  payments:
+    clawhub_url: "https://clawhub.ai/ivangdavila/payments"
+    label: "Payments"
+    label_pt: "Pagamentos"
+    path: skills/payments
+    version: 0.1.0
+    category: finance
+    tags: [stripe, paypal, payments, invoices]
+    description: "Payments via Stripe, PayPal, Lightning Network"
+    description_pt: "Pagamentos via Stripe, PayPal, Lightning Network"
+    requires:
+      any_env: [STRIPE_SECRET_KEY, PAYPAL_CLIENT_ID]
+
+  stripe:
+    clawhub_url: "https://clawhub.ai/byungkyu/stripe-api"
+    label: "Stripe"
+    label_pt: "Stripe"
+    path: skills/stripe
+    version: 0.1.0
+    category: finance
+    tags: [stripe, payments, invoices, subscriptions, customers]
+    description: "Stripe — payments, invoices, subscriptions, and customer management"
+    description_pt: "Stripe — pagamentos, faturas, assinaturas e gestão de clientes"
+    requires:
+      env: [STRIPE_SECRET_KEY]
+
+  crypto-wallet:
+    clawhub_url: "https://clawhub.ai/surfer77/evm-wallet"
+    label: "Crypto Wallet"
+    label_pt: "Carteira Crypto"
+    path: skills/crypto-wallet
+    version: 0.1.0
+    category: finance
+    tags: [bitcoin, ethereum, crypto, wallet, portfolio]
+    description: "Crypto wallets, balances, and market data"
+    description_pt: "Carteiras de cripto, saldos e dados de mercado"
+
+  # ──────────── Media & Files ────────────
+  ffmpeg:
+    clawhub_url: "https://clawhub.ai/ivangdavila/ffmpeg"
+    label: "FFmpeg"
+    label_pt: "FFmpeg"
+    path: skills/ffmpeg
+    version: 0.1.0
+    category: media
+    tags: [ffmpeg, video, audio, convert, transcode, trim]
+    description: "Video and audio processing with ffmpeg"
+    description_pt: "Processamento de vídeo e áudio com ffmpeg"
+    requires:
+      bins: [ffmpeg]
+
+  imagemagick:
+    clawhub_url: "https://clawhub.ai/kesslerio/imagemagick"
+    label: "ImageMagick"
+    label_pt: "ImageMagick"
+    path: skills/imagemagick
+    version: 0.1.0
+    category: media
+    tags: [imagemagick, image, resize, convert, magick]
+    description: "Image processing with ImageMagick"
+    description_pt: "Processamento de imagens com ImageMagick"
+    requires:
+      any_bins: [magick, convert]
+
+  pandoc:
+    clawhub_url: "https://clawhub.ai/TheJorgeSchmidt/pandoc-convert-openclaw"
+    label: "Pandoc"
+    label_pt: "Pandoc"
+    path: skills/pandoc
+    version: 0.1.0
+    category: media
+    tags: [pandoc, document, conversion, pdf, markdown, docx]
+    description: "Document format conversion with Pandoc"
+    description_pt: "Conversão de formatos de documentos com Pandoc"
+    requires:
+      bins: [pandoc]
+
+  image-tools:
+    clawhub_url: "https://clawhub.ai/pr1vateer/image-resize"
+    label: "Image Tools"
+    label_pt: "Ferramentas de Imagem"
+    path: skills/image-tools
+    version: 0.1.0
+    category: media
+    tags: [image, resize, convert, compress, watermark]
+    description: "Image processing — resize, convert, compress, watermark"
+    description_pt: "Processamento de imagens — redimensionar, converter, comprimir, marca d'água"
+
+  video-tools:
+    clawhub_url: "https://clawhub.ai/ascendswang/ffmpeg-cli"
+    label: "Video Tools"
+    label_pt: "Ferramentas de Vídeo"
+    path: skills/video-tools
+    version: 0.1.0
+    category: media
+    tags: [video, ffmpeg, convert, compress, trim]
+    description: "Video processing via ffmpeg"
+    description_pt: "Processamento de vídeo via ffmpeg"
+    requires:
+      bins: [ffmpeg]
+
+  audio-tts:
+    clawhub_url: "https://clawhub.ai/pors/openai-tts"
+    label: "Text-to-Speech"
+    label_pt: "Texto para Fala"
+    path: skills/audio-tts
+    version: 0.1.0
+    category: media
+    tags: [tts, audio, speech, openai, elevenlabs]
+    description: "Text-to-speech — OpenAI, ElevenLabs, Google, Whisper"
+    description_pt: "Texto para fala — OpenAI, ElevenLabs, Google, Whisper"
+
+  pdf-tools:
+    clawhub_url: "https://clawhub.ai/cmpdchtr/pdf-tools"
+    label: "PDF Tools"
+    label_pt: "Ferramentas PDF"
+    path: skills/pdf-tools
+    version: 0.1.0
+    category: media
+    tags: [pdf, merge, split, compress, extract]
+    description: "PDF tools — merge, split, compress, extract, watermark"
+    description_pt: "Ferramentas PDF — mesclar, dividir, comprimir, extrair, marca d'água"
+
+  screenshot:
+    clawhub_url: "https://clawhub.ai/ivangdavila/screenshot"
+    label: "Screenshot"
+    label_pt: "Captura de Tela"
+    path: skills/screenshot
+    version: 0.1.0
+    category: media
+    tags: [screenshot, capture, puppeteer, playwright]
+    description: "Web page screenshots via API or headless browsers"
+    description_pt: "Capturas de tela de páginas web via API ou navegadores headless"
+
+  # ──────────── CalDAV & Calendar ────────────
+  caldav-calendar:
+    clawhub_url: "https://clawhub.ai/Asleep123/caldav-calendar"
+    label: "CalDAV Calendar"
+    label_pt: "Calendário CalDAV"
+    path: skills/caldav-calendar
+    version: 0.1.0
+    category: productivity
+    tags: [caldav, calendar, ical, events, scheduling, nextcloud, radicale]
+    description: "CalDAV Calendar — sync events with any CalDAV server (Nextcloud, Radicale, etc.)"
+    description_pt: "Calendário CalDAV — sincronize eventos com qualquer servidor CalDAV (Nextcloud, Radicale, etc.)"
+
+  # ──────────── Knowledge & Q&A ────────────
+  answer-overflow:
+    clawhub_url: "https://clawhub.ai/RhysSullivan/answeroverflow"
+    label: "Answer Overflow"
+    label_pt: "Answer Overflow"
+    path: skills/answer-overflow
+    version: 0.1.0
+    category: data
+    tags: [answer-overflow, stackoverflow, qa, knowledge, search]
+    description: "Answer Overflow — search and browse Q&A knowledge bases"
+    description_pt: "Answer Overflow — busque e navegue em bases de conhecimento Q&A"
+
+  # ──────────── AI & Automation ────────────
+  proactive-agent:
+    clawhub_url: "https://clawhub.ai/fangkelvin/proactive-agent-skill"
+    label: "Proactive Agent"
+    label_pt: "Agente Proativo"
+    path: skills/proactive-agent
+    version: 0.1.0
+    category: builtin
+    tags: [proactive, agent, automation, triggers, scheduled]
+    description: "Proactive Agent — automated actions, scheduled triggers, and smart notifications"
+    description_pt: "Agente Proativo — ações automatizadas, gatilhos agendados e notificações inteligentes"
+
+  # ──────────── Music & Media ────────────
+  spotify:
+    clawhub_url: "https://clawhub.ai/2mawi2/spotify"
+    label: "Spotify"
+    label_pt: "Spotify"
+    path: skills/spotify
+    version: 0.1.0
+    category: integrations
+    tags: [spotify, music, playlists, playback, streaming]
+    description: "Spotify — control playback, manage playlists, search music"
+    description_pt: "Spotify — controle reprodução, gerencie playlists, busque músicas"
+    requires:
+      env: [SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET]
+
+  # ──────────── Scheduling & Marketing ────────────
+  calendly:
+    clawhub_url: "https://clawhub.ai/kesslerio/calendly"
+    label: "Calendly"
+    label_pt: "Calendly"
+    path: skills/calendly
+    version: 0.1.0
+    category: integrations
+    tags: [calendly, scheduling, meetings, booking, appointments]
+    description: "Calendly — manage events, invitees, and scheduling links"
+    description_pt: "Calendly — gerencie eventos, convidados e links de agendamento"
+    requires:
+      env: [CALENDLY_API_TOKEN]
+
+  mailchimp:
+    clawhub_url: "https://clawhub.ai/byungkyu/mailchimp"
+    label: "Mailchimp"
+    label_pt: "Mailchimp"
+    path: skills/mailchimp
+    version: 0.1.0
+    category: integrations
+    tags: [mailchimp, email, marketing, campaigns, audiences, newsletters]
+    description: "Mailchimp — campaigns, audiences, templates, and analytics"
+    description_pt: "Mailchimp — campanhas, audiências, templates e análises"
+    requires:
+      env: [MAILCHIMP_API_KEY]
+
+  # ──────────── CRM ────────────
+  pipedrive:
+    clawhub_url: "https://clawhub.ai/byungkyu/pipedrive-api"
+    label: "Pipedrive"
+    label_pt: "Pipedrive"
+    path: skills/pipedrive
+    version: 0.1.0
+    category: integrations
+    tags: [pipedrive, crm, deals, contacts, sales, pipeline]
+    description: "Pipedrive CRM — deals, contacts, organizations, and pipelines"
+    description_pt: "Pipedrive CRM — negócios, contatos, organizações e funis"
+    requires:
+      env: [PIPEDRIVE_API_TOKEN]
+
+  # ──────────── Zoho Suite ────────────
+  zoho-crm:
+    clawhub_url: "https://clawhub.ai/byungkyu/zoho-crm"
+    label: "Zoho CRM"
+    label_pt: "Zoho CRM"
+    path: skills/zoho-crm
+    version: 0.1.0
+    category: integrations
+    tags: [zoho, crm, leads, contacts, deals, sales]
+    description: "Zoho CRM — leads, contacts, deals, and sales automation"
+    description_pt: "Zoho CRM — leads, contatos, negócios e automação de vendas"
+    requires:
+      env: [ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET]
+
+  zoho-books:
+    clawhub_url: "https://clawhub.ai/byungkyu/zoho-books"
+    label: "Zoho Books"
+    label_pt: "Zoho Books"
+    path: skills/zoho-books
+    version: 0.1.0
+    category: finance
+    tags: [zoho, books, accounting, invoices, expenses]
+    description: "Zoho Books — invoices, expenses, and accounting"
+    description_pt: "Zoho Books — faturas, despesas e contabilidade"
+    requires:
+      env: [ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET]
+
+  zoho-desk:
+    clawhub_url: "https://clawhub.ai/Pretid/zoho-support-claw"
+    label: "Zoho Desk"
+    label_pt: "Zoho Desk"
+    path: skills/zoho-desk
+    version: 0.1.0
+    category: integrations
+    tags: [zoho, desk, support, tickets, helpdesk]
+    description: "Zoho Desk — support tickets, agents, and knowledge base"
+    description_pt: "Zoho Desk — tickets de suporte, agentes e base de conhecimento"
+    requires:
+      env: [ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET]
+
+  zoho-mail:
+    clawhub_url: "https://clawhub.ai/byungkyu/zoho-mail"
+    label: "Zoho Mail"
+    label_pt: "Zoho Mail"
+    path: skills/zoho-mail
+    version: 0.1.0
+    category: communication
+    tags: [zoho, mail, email, inbox, folders]
+    description: "Zoho Mail — read, send, and manage emails"
+    description_pt: "Zoho Mail — leia, envie e gerencie e-mails"
+    requires:
+      env: [ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET]
+
+  zoho-projects:
+    clawhub_url: "https://clawhub.ai/byungkyu/zoho-projects"
+    label: "Zoho Projects"
+    label_pt: "Zoho Projects"
+    path: skills/zoho-projects
+    version: 0.1.0
+    category: productivity
+    tags: [zoho, projects, tasks, milestones, gantt]
+    description: "Zoho Projects — tasks, milestones, timesheets, and Gantt charts"
+    description_pt: "Zoho Projects — tarefas, marcos, planilhas de horas e gráficos Gantt"
+    requires:
+      env: [ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET]
+
+  zoho-invoice:
+    clawhub_url: "https://clawhub.ai/tmigone/invoice-generator"
+    label: "Zoho Invoice"
+    label_pt: "Zoho Invoice"
+    path: skills/zoho-invoice
+    version: 0.1.0
+    category: finance
+    tags: [zoho, invoice, billing, payments, estimates]
+    description: "Zoho Invoice — invoices, estimates, payments, and recurring billing"
+    description_pt: "Zoho Invoice — faturas, orçamentos, pagamentos e cobrança recorrente"
+    requires:
+      env: [ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET]
+
+  zoho-people:
+    clawhub_url: "https://clawhub.ai/byungkyu/zoho-people"
+    label: "Zoho People"
+    label_pt: "Zoho People"
+    path: skills/zoho-people
+    version: 0.1.0
+    category: integrations
+    tags: [zoho, people, hr, employees, attendance, leave]
+    description: "Zoho People — HR management, attendance, leave, and employee records"
+    description_pt: "Zoho People — gestão de RH, presença, licenças e registros de funcionários"
+    requires:
+      env: [ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET]
+

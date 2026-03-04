@@ -37,17 +37,16 @@ func TestManagedCompaction(t *testing.T) {
 	// Because we can't actually call LLM here, we'll test the pruning math
 	compacted := agent.managedCompaction(context.Background(), messages)
 
-	// In the logic:
-	// length = 15
-	// body count = 14
+	// With adaptive keepRecent (short messages ≈ 3-4 tokens each → keepRecent = 8):
+	// length = 15, body count = 14
 	// goal = body[0]
 	// header = 1 (system)
-	// middle = body[1 : len(body)-6] = body[1 : 14-6] = body[1 : 8] (7 messages)
-	// recent = body[14-6:] = body[8:] (6 messages)
-	// total = header (1) + goal(1) + summary_msg(1) + recent(6) = 9 messages
+	// middle = body[1 : 14-8] = body[1 : 6] (5 messages) → summarized to 1
+	// recent = body[6:] = 8 messages
+	// total = header(1) + goal(1) + summary_msg(1) + recent(8) = 11 messages
 
-	if len(compacted) != 9 {
-		t.Errorf("Expected managed compaction to yield 9 messages, got %d", len(compacted))
+	if len(compacted) != 11 {
+		t.Errorf("Expected managed compaction to yield 11 messages, got %d", len(compacted))
 	}
 
 	if compacted[0].Role != "system" {

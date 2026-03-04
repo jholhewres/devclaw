@@ -9,23 +9,23 @@ import (
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels"
 
+	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 )
 
 // ConnectionState represents the current connection state.
 type ConnectionState string
 
 const (
-	StateDisconnected  ConnectionState = "disconnected"
-	StateConnecting    ConnectionState = "connecting"
-	StateConnected     ConnectionState = "connected"
-	StateReconnecting  ConnectionState = "reconnecting"
-	StateWaitingQR     ConnectionState = "waiting_qr"
-	StateQRScanned     ConnectionState = "qr_scanned"
-	StateLoggingOut    ConnectionState = "logging_out"
-	StateBanned        ConnectionState = "banned"
+	StateDisconnected ConnectionState = "disconnected"
+	StateConnecting   ConnectionState = "connecting"
+	StateConnected    ConnectionState = "connected"
+	StateReconnecting ConnectionState = "reconnecting"
+	StateWaitingQR    ConnectionState = "waiting_qr"
+	StateQRScanned    ConnectionState = "qr_scanned"
+	StateLoggingOut   ConnectionState = "logging_out"
+	StateBanned       ConnectionState = "banned"
 )
 
 // ConnectionEvent represents a connection state change event.
@@ -39,12 +39,12 @@ type ConnectionEvent struct {
 
 // QREventEnhanced represents an enhanced QR code event with more details.
 type QREventEnhanced struct {
-	Type        string    `json:"type"`                    // "code", "success", "timeout", "error", "refresh"
-	Code        string    `json:"code,omitempty"`          // Raw QR code string
-	Message     string    `json:"message"`                 // Human-readable message
-	ExpiresAt   time.Time `json:"expires_at,omitempty"`    // When QR code expires
-	SecondsLeft int       `json:"seconds_left,omitempty"`  // Seconds until expiration
-	Attempts    int       `json:"attempts,omitempty"`      // Number of QR attempts
+	Type        string    `json:"type"`                   // "code", "success", "timeout", "error", "refresh"
+	Code        string    `json:"code,omitempty"`         // Raw QR code string
+	Message     string    `json:"message"`                // Human-readable message
+	ExpiresAt   time.Time `json:"expires_at,omitempty"`   // When QR code expires
+	SecondsLeft int       `json:"seconds_left,omitempty"` // Seconds until expiration
+	Attempts    int       `json:"attempts,omitempty"`     // Number of QR attempts
 }
 
 // ConnectionObserver receives connection state changes.
@@ -210,9 +210,9 @@ func (w *WhatsApp) handleLoggedOut(evt *events.LoggedOut) {
 		Timestamp: time.Now(),
 		Reason:    "logged_out",
 		Details: map[string]any{
-			"reason":      reason,
-			"needs_qr":    true,
-			"message":     "Session invalidated, please scan QR code again",
+			"reason":   reason,
+			"needs_qr": true,
+			"message":  "Session invalidated, please scan QR code again",
 		},
 	})
 
@@ -242,8 +242,8 @@ func (w *WhatsApp) handleTemporaryBan(evt *events.TemporaryBan) {
 		Timestamp: time.Now(),
 		Reason:    "temporary_ban",
 		Details: map[string]any{
-			"code":   evt.Code.String(),
-			"expire": evt.Expire.String(),
+			"code":    evt.Code.String(),
+			"expire":  evt.Expire.String(),
 			"message": fmt.Sprintf("WhatsApp temporary ban. Expires: %s", evt.Expire),
 		},
 	})
@@ -335,7 +335,7 @@ func (w *WhatsApp) handleStreamError(evt *events.StreamError) {
 			Timestamp: time.Now(),
 			Reason:    "stream_error",
 			Details: map[string]any{
-				"code":   evt.Code,
+				"code":    evt.Code,
 				"message": "Stream error, connection lost",
 			},
 		})
@@ -442,11 +442,11 @@ func (w *WhatsApp) handleMessageEvt(evt *events.Message) {
 	// Handle quoted/reply messages.
 	w.extractQuotedMessage(evt.Message, msg)
 
-	// Auto-read if configured.
-	if w.cfg.AutoRead {
-		go func() {
-			_ = w.MarkRead(w.ctx, msg.ChatID, []string{msg.ID})
-		}()
+	// Debug: log message type and mentions for group messages (only in debug mode)
+	if isGroup && len(msg.Mentions) > 0 {
+		w.logger.Debug("whatsapp: group message with mentions",
+			"mentions_count", len(msg.Mentions),
+			"mentions", msg.Mentions)
 	}
 
 	// Emit the message.
@@ -633,16 +633,20 @@ func (w *WhatsApp) extractMessageContent(waMsg *waE2E.Message, msg *channels.Inc
 	msg.Content = "[unsupported message type]"
 }
 
-// extractQuotedMessage extracts reply/quoted context from a message.
+// extractQuotedMessage extracts reply/quoted context and mentions from a message.
 func (w *WhatsApp) extractQuotedMessage(waMsg *waE2E.Message, msg *channels.IncomingMessage) {
 	if waMsg == nil {
 		return
 	}
 
-	// Collect context info from any message type that supports quoting.
+	// Collect context info from any message type that supports quoting/mentions.
 	var ctxInfo *waE2E.ContextInfo
 
 	switch {
+	case waMsg.Conversation != nil:
+		// Note: Conversation messages typically don't have ContextInfo,
+		// but we check anyway for completeness.
+		// Mentions usually come via ExtendedTextMessage.
 	case waMsg.ExtendedTextMessage != nil:
 		ctxInfo = waMsg.ExtendedTextMessage.GetContextInfo()
 	case waMsg.ImageMessage != nil:
@@ -666,6 +670,14 @@ func (w *WhatsApp) extractQuotedMessage(waMsg *waE2E.Message, msg *channels.Inco
 	}
 	if quoted := ctxInfo.QuotedMessage; quoted != nil {
 		msg.QuotedContent = extractQuotedText(quoted)
+	}
+
+	// Extract mentions (JIDs of users mentioned in the message).
+	if len(ctxInfo.MentionedJID) > 0 {
+		msg.Mentions = make([]string, len(ctxInfo.MentionedJID))
+		for i, jid := range ctxInfo.MentionedJID {
+			msg.Mentions[i] = jid
+		}
 	}
 }
 

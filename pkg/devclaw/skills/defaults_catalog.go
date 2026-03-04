@@ -3,8 +3,8 @@
 // Only core development/coding skills belong here. These are the "Starter Pack"
 // — pre-selected during setup and always available offline.
 //
-// Integration, productivity, infra, and other skills live in the devclaw-skills
-// repository and are fetched/installed separately.
+// Integration, productivity, infra, and other skills live on ClawHub
+// (https://clawhub.ai/) and are fetched/installed separately.
 //
 // Skills teach the LLM how to use existing native tools (bash, ssh, scp,
 // read_file, write_file, etc.) — they do NOT register new tools.

@@ -8,12 +8,21 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
 
 // DefaultMaxHistory é o limite padrão de entradas no histórico por sessão.
 const DefaultMaxHistory = 100
+
+// DefaultMaxHistoryDM is the history limit for direct message sessions.
+// DMs are linear conversations, so a higher limit preserves more context.
+const DefaultMaxHistoryDM = 100
+
+// DefaultMaxHistoryGroup is the history limit for group/channel sessions.
+// Groups are noisier with more participants, so a lower limit saves context.
+const DefaultMaxHistoryGroup = 50
 
 // DefaultSessionTTL é o tempo de inatividade antes de uma sessão ser removida.
 const DefaultSessionTTL = 24 * time.Hour
@@ -51,6 +60,12 @@ type Session struct {
 	totalPromptTokens     int
 	totalCompletionTokens int
 	totalRequests         int
+
+	// Last-call token snapshots from most recent agent run (for proactive memory flush projection).
+	lastPromptTokens int
+	lastOutputTokens int
+	lastCacheRead    int
+	lastCacheWrite   int
 
 	// CreatedAt é o timestamp de criação da sessão.
 	CreatedAt time.Time
@@ -167,6 +182,25 @@ func (s *Session) RecentHistory(maxEntries int) []ConversationEntry {
 	return result
 }
 
+// SetMaxHistory adjusts the history limit for this session. This is used
+// to differentiate DM (higher limit) from group (lower limit) sessions.
+func (s *Session) SetMaxHistory(n int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if n > 0 {
+		s.maxHistory = n
+	}
+}
+
+// HistoryLimitForType returns the appropriate history limit based on
+// whether the conversation is a DM or group/channel.
+func HistoryLimitForType(isGroup bool) int {
+	if isGroup {
+		return DefaultMaxHistoryGroup
+	}
+	return DefaultMaxHistoryDM
+}
+
 // AddFact adiciona um fato de longo prazo à sessão.
 // Persiste os fatos em disco se persistence estiver configurada.
 func (s *Session) AddFact(fact string) {
@@ -252,6 +286,17 @@ func (s *Session) HistoryLen() int {
 	return len(s.history)
 }
 
+// EstimateHistorySizeBytes estimates the total byte size of conversation history. Thread-safe.
+func (s *Session) EstimateHistorySizeBytes() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	total := 0
+	for _, entry := range s.history {
+		total += len(entry.UserMessage) + len(entry.AssistantResponse) + len(entry.ToolSummary)
+	}
+	return total
+}
+
 // AddTokenUsage records token usage from an LLM response. Thread-safe.
 func (s *Session) AddTokenUsage(promptTokens, completionTokens int) {
 	s.mu.Lock()
@@ -275,6 +320,40 @@ func (s *Session) ResetTokenUsage() {
 	s.totalPromptTokens = 0
 	s.totalCompletionTokens = 0
 	s.totalRequests = 0
+}
+
+// UpdateLastCallTokens stores the most recent LLM call's token snapshot.
+// Used by proactive memory flush to project next context size. Thread-safe.
+func (s *Session) UpdateLastCallTokens(promptTokens, outputTokens, cacheRead, cacheWrite int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastPromptTokens = promptTokens
+	s.lastOutputTokens = outputTokens
+	s.lastCacheRead = cacheRead
+	s.lastCacheWrite = cacheWrite
+}
+
+// GetLastCallTokens returns the most recent LLM call's token snapshot. Thread-safe.
+func (s *Session) GetLastCallTokens() (promptTokens, outputTokens, cacheRead, cacheWrite int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastPromptTokens, s.lastOutputTokens, s.lastCacheRead, s.lastCacheWrite
+}
+
+// GetCompactionSummaries returns the session's compaction summaries. Thread-safe.
+func (s *Session) GetCompactionSummaries() []CompactionEntry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]CompactionEntry, len(s.compactionSummaries))
+	copy(out, s.compactionSummaries)
+	return out
+}
+
+// AddCompactionSummary appends a compaction entry to the session. Thread-safe.
+func (s *Session) AddCompactionSummary(entry CompactionEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.compactionSummaries = append(s.compactionSummaries, entry)
 }
 
 // GetThinkingLevel returns the session thinking level. Thread-safe.
@@ -490,6 +569,7 @@ type SessionMeta struct {
 	ID           string
 	Channel      string
 	ChatID       string
+	Title        string
 	MessageCount int
 	CreatedAt    time.Time
 	LastActiveAt time.Time
@@ -510,10 +590,65 @@ func (ss *SessionStore) ListSessions() []SessionMeta {
 			CreatedAt:    s.CreatedAt,
 			LastActiveAt: s.lastActiveAt,
 		}
+		// Derive title from first user message
+		for _, entry := range s.history {
+			if entry.UserMessage != "" {
+				title := entry.UserMessage
+				if len(title) > 60 {
+					title = title[:60]
+				}
+				meta.Title = title
+				break
+			}
+		}
 		s.mu.RUnlock()
 		out = append(out, meta)
 	}
 	return out
+}
+
+// SessionMetaLister is an optional interface that persistence backends can implement
+// to provide a lightweight session listing without loading full history.
+type SessionMetaLister interface {
+	ListSessionsMeta() ([]SessionMeta, error)
+}
+
+// ListAllSessions returns metadata for all sessions, merging in-memory sessions
+// with persisted sessions from the database. This ensures sessions survive server restarts.
+func (ss *SessionStore) ListAllSessions() []SessionMeta {
+	// Start with in-memory sessions.
+	inMemory := ss.ListSessions()
+
+	ss.mu.RLock()
+	p := ss.persistence
+	ss.mu.RUnlock()
+
+	// If persistence supports listing, merge persisted sessions.
+	lister, ok := p.(SessionMetaLister)
+	if !ok || lister == nil {
+		return inMemory
+	}
+
+	persisted, err := lister.ListSessionsMeta()
+	if err != nil {
+		return inMemory
+	}
+
+	// Build a set of in-memory session IDs for dedup.
+	seen := make(map[string]bool, len(inMemory))
+	for i := range inMemory {
+		seen[inMemory[i].ID] = true
+	}
+
+	// Merge: in-memory sessions take precedence (fresher data), append DB-only sessions.
+	merged := make([]SessionMeta, 0, len(inMemory)+len(persisted))
+	merged = append(merged, inMemory...)
+	for _, pm := range persisted {
+		if !seen[pm.ID] {
+			merged = append(merged, pm)
+		}
+	}
+	return merged
 }
 
 // GetByID returns a session by its raw store key. Returns nil if not found.
@@ -537,18 +672,28 @@ func (ss *SessionStore) Delete(channel, chatID string) bool {
 }
 
 // DeleteByID removes a session by its hash ID.
+// It removes from both in-memory store and persistence (even if only persisted).
 func (ss *SessionStore) DeleteByID(id string) bool {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 	if s, exists := ss.sessions[id]; exists {
 		delete(ss.sessions, id)
-		// Also delete from persistence if available.
 		if ss.persistence != nil {
-			ss.persistence.DeleteSession(id)
+			if err := ss.persistence.DeleteSession(id); err != nil {
+				ss.logger.Warn("failed to delete session from persistence",
+					"id", id, "error", err)
+			}
 		}
 		ss.logger.Info("session deleted by ID",
 			"id", id, "channel", s.Channel, "chat_id", s.ChatID)
 		return true
+	}
+	// Session may have been pruned from memory but still exists in persistence.
+	if ss.persistence != nil {
+		if err := ss.persistence.DeleteSession(id); err == nil {
+			ss.logger.Info("session deleted from persistence only", "id", id)
+			return true
+		}
 	}
 	return false
 }
@@ -672,18 +817,12 @@ func splitMax(s, sep string, n int) []string {
 	}
 	var parts []string
 	for i := 0; i < n-1; i++ {
-		idx := -1
-		for j := 0; j < len(s); j++ {
-			if s[j] == sep[0] {
-				idx = j
-				break
-			}
-		}
+		idx := strings.Index(s, sep)
 		if idx < 0 {
 			break
 		}
 		parts = append(parts, s[:idx])
-		s = s[idx+1:]
+		s = s[idx+len(sep):]
 	}
 	parts = append(parts, s)
 	return parts

@@ -347,7 +347,7 @@ func (h *handlerContext) handleAgentCreate(args map[string]any) (any, error) {
 	switch levelStr {
 	case "junior", "intern":
 		level = AgentLevelIntern
-	case "senior":
+	case "mid", "specialist", "senior":
 		level = AgentLevelSpecialist
 	case "lead":
 		level = AgentLevelLead
@@ -1196,7 +1196,7 @@ func registerTeamCommDispatcher(executor *ToolExecutor, hctx *handlerContext) {
 			case "notify":
 				return hctx.handleNotify(ctx, args)
 			case "notify_list":
-				return hctx.handleNotifyList(args)
+				return hctx.handleNotifyList(ctx, args)
 			default:
 				return nil, fmt.Errorf("unknown action: %s", action)
 			}
@@ -1361,7 +1361,7 @@ func (h *handlerContext) handleNotify(ctx context.Context, args map[string]any) 
 	}
 
 	notif := &TeamNotification{
-		ID:        fmt.Sprintf("n%d", time.Now().UnixNano()%1000000),
+		ID:        generateID(),
 		TeamID:    teamID,
 		Type:      NotificationType(notifType),
 		AgentID:   agentID,
@@ -1391,7 +1391,7 @@ func (h *handlerContext) handleNotify(ctx context.Context, args map[string]any) 
 	return fmt.Sprintf("Notification sent: [%s] %s", notifType, message), nil
 }
 
-func (h *handlerContext) handleNotifyList(args map[string]any) (any, error) {
+func (h *handlerContext) handleNotifyList(ctx context.Context, args map[string]any) (any, error) {
 	teamRef, _ := args["team_id"].(string)
 	teamID, err := h.resolveTeamID(teamRef)
 	if err != nil {
@@ -1417,9 +1417,9 @@ func (h *handlerContext) handleNotifyList(args map[string]any) (any, error) {
 	var notifications []*TeamNotification
 
 	if unreadOnly {
-		notifications, err = h.teamMgr.notifDisp.GetUnreadNotifications(context.Background(), teamID)
+		notifications, err = h.teamMgr.notifDisp.GetUnreadNotifications(ctx, teamID)
 	} else {
-		notifications, err = h.teamMgr.notifDisp.GetNotifications(context.Background(), teamID, int(limit))
+		notifications, err = h.teamMgr.notifDisp.GetNotifications(ctx, teamID, int(limit))
 	}
 
 	if err != nil {

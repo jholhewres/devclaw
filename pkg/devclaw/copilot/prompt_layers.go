@@ -263,6 +263,60 @@ func (p *PromptComposer) ComposeMinimal() string {
 	return p.assembleLayers(layers)
 }
 
+// ComposeForSubagent builds a system prompt optimized for subagents.
+// Compared to ComposeMinimal, it strips sections that are irrelevant to
+// subagent execution: Heartbeats, Reply Tags, Messaging, Silent Replies,
+// and Memory Recall. This saves ~30-40% of core-layer tokens while keeping
+// tooling info, safety, epistemic restraint, and workspace context.
+func (p *PromptComposer) ComposeForSubagent() string {
+	core := p.buildCoreLayer()
+
+	// Strip sections that are only relevant for the parent agent:
+	// Heartbeats, Reply Tags, Messaging, Silent Replies, Memory Recall.
+	sectionHeaders := []string{
+		"## Heartbeats",
+		"## Reply Tags",
+		"## Messaging",
+		"## Silent Replies",
+		"## Memory Recall",
+	}
+	for _, header := range sectionHeaders {
+		core = stripPromptSection(core, header)
+	}
+
+	layers := []layerEntry{
+		{layer: LayerCore, content: core},
+		{layer: LayerSafety, content: p.buildSafetyLayer()},
+		{layer: LayerTemporal, content: p.buildTemporalLayer()},
+	}
+
+	if p.config.Instructions != "" {
+		layers = append(layers, layerEntry{
+			layer:   LayerIdentity,
+			content: "## Custom Instructions\n\n" + p.config.Instructions,
+		})
+	}
+
+	return p.assembleLayers(layers)
+}
+
+// stripPromptSection removes an entire section starting with the given header
+// (a line starting with "## ") up to the next "## " header or end of string.
+func stripPromptSection(text, header string) string {
+	idx := strings.Index(text, header)
+	if idx < 0 {
+		return text
+	}
+	// Find the end of this section (next ## header or end of text).
+	rest := text[idx+len(header):]
+	endIdx := strings.Index(rest, "\n## ")
+	if endIdx >= 0 {
+		return text[:idx] + rest[endIdx:]
+	}
+	// Section extends to end of text.
+	return strings.TrimRight(text[:idx], "\n")
+}
+
 // ComposeWithMode assembles the system prompt using the specified mode.
 // Use PromptModeFull for the main agent, PromptModeMinimal for subagents,
 // and PromptModeNone for simple tasks requiring only core identity.
@@ -855,7 +909,7 @@ func (p *PromptComposer) buildSkillsLayer(session *Session) string {
 				}
 				excess -= entries[i].chars - cut
 				entries[i].prompt = entries[i].prompt[:cut] + "\n... (truncated for token budget)"
-				entries[i].chars = cut
+				entries[i].chars = len(entries[i].prompt)
 			}
 		}
 	}
@@ -867,13 +921,31 @@ func (p *PromptComposer) buildSkillsLayer(session *Session) string {
 	b.WriteString("- If multiple could apply: choose the most specific one.\n")
 	b.WriteString("- If none clearly apply: do not read any SKILL.md.\n\n")
 
-	for _, entry := range entries {
-		b.WriteString(fmt.Sprintf("### %s\n", entry.name))
-		if entry.prompt != "" {
-			b.WriteString(entry.prompt)
+	// Compact XML format for many skills: saves ~60% tokens vs full prompts.
+	// Triggered when truncation is needed or when there are many skills.
+	const compactThreshold = 15
+	if truncated || len(entries) > compactThreshold {
+		b.WriteString("<skills>\n")
+		for _, entry := range entries {
+			desc := entry.prompt
+			if len(desc) > 200 {
+				desc = desc[:200] + "..."
+			}
+			// Strip newlines for compact one-line format.
+			desc = strings.ReplaceAll(desc, "\n", " ")
+			desc = strings.Join(strings.Fields(desc), " ")
+			b.WriteString(fmt.Sprintf("  <skill name=%q>%s</skill>\n", entry.name, desc))
+		}
+		b.WriteString("</skills>\n")
+	} else {
+		for _, entry := range entries {
+			b.WriteString(fmt.Sprintf("### %s\n", entry.name))
+			if entry.prompt != "" {
+				b.WriteString(entry.prompt)
+				b.WriteString("\n")
+			}
 			b.WriteString("\n")
 		}
-		b.WriteString("\n")
 	}
 
 	if truncated {
@@ -957,16 +1029,26 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 
 // buildTemporalLayer adds date/time context.
 func (p *PromptComposer) buildTemporalLayer() string {
-	loc, err := time.LoadLocation(p.config.Timezone)
-	if err != nil {
-		loc = time.UTC
+	tz := p.config.Timezone
+	var loc *time.Location
+
+	if tz != "" {
+		var err error
+		loc, err = time.LoadLocation(tz)
+		if err != nil {
+			loc = time.Local
+			tz = loc.String()
+		}
+	} else {
+		loc = time.Local
+		tz = loc.String()
 	}
 
 	now := time.Now().In(loc)
 
 	return fmt.Sprintf("## Current Date & Time\n\n%s\nTimezone: %s\nDay: %s",
 		now.Format("2006-01-02 15:04:05"),
-		p.config.Timezone,
+		tz,
 		now.Format("Monday"),
 	)
 }

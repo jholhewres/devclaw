@@ -14,9 +14,9 @@ func TestNewProfileID(t *testing.T) {
 	}{
 		{
 			name:     "simple provider and profile",
-			provider: "google-gmail",
+			provider: "anthropic",
 			profile:  "work",
-			want:     ProfileID("google-gmail:work"),
+			want:     ProfileID("anthropic:work"),
 		},
 		{
 			name:     "profile with special chars",
@@ -44,8 +44,8 @@ func TestProfileIDProvider(t *testing.T) {
 	}{
 		{
 			name: "valid ID",
-			id:   ProfileID("google-gmail:work"),
-			want: "google-gmail",
+			id:   ProfileID("anthropic:work"),
+			want: "anthropic",
 		},
 		{
 			name: "ID without colon",
@@ -82,7 +82,7 @@ func TestProfileIDName(t *testing.T) {
 	}{
 		{
 			name: "valid ID",
-			id:   ProfileID("google-gmail:work"),
+			id:   ProfileID("anthropic:work"),
 			want: "work",
 		},
 		{
@@ -576,7 +576,7 @@ func TestProfileStoreList(t *testing.T) {
 	profiles := []*AuthProfile{
 		{ID: NewProfileID("openai", "default"), Provider: "openai"},
 		{ID: NewProfileID("anthropic", "default"), Provider: "anthropic"},
-		{ID: NewProfileID("google-gmail", "work"), Provider: "google-gmail"},
+		{ID: NewProfileID("anthropic", "work"), Provider: "anthropic"},
 	}
 
 	for _, p := range profiles {

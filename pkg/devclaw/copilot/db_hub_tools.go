@@ -208,11 +208,13 @@ func RegisterDBHubTools(executor *ToolExecutor, hub *database.Hub) {
 			return nil, fmt.Errorf("rows error: %w", err)
 		}
 
+		truncated := count >= maxRows && rows.Next()
+
 		return map[string]any{
-			"columns": columns,
-			"rows":    results,
-			"count":   len(results),
-			"truncated": count >= maxRows && rows.Next(),
+			"columns":   columns,
+			"rows":      results,
+			"count":     len(results),
+			"truncated": truncated,
 		}, nil
 	})
 

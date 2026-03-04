@@ -6,8 +6,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Registry é o registro central que gerencia todas as skills disponíveis.
@@ -23,6 +26,14 @@ type Registry struct {
 
 	// index mantém índices para busca eficiente.
 	index *Index
+
+	// snapshotVersion is bumped when skills are added/removed/reloaded.
+	// Consumers can compare against their cached version to know when to refresh.
+	snapshotVersion int64
+
+	// watchDirs lists directories being watched for skill changes.
+	watchDirs []string
+	watchStop chan struct{}
 
 	logger *slog.Logger
 	mu     sync.RWMutex
@@ -78,6 +89,21 @@ func (r *Registry) LoadAll(ctx context.Context) error {
 
 		for _, skill := range skills {
 			meta := skill.Metadata()
+
+			// Three-tier precedence: workspace > managed > bundled.
+			// Only override if the new skill has equal or higher tier.
+			if existing, exists := r.skills[meta.Name]; exists {
+				existingTier := existing.Metadata().SourceTier
+				if meta.SourceTier < existingTier {
+					r.logger.Debug("skill skipped (lower tier)",
+						"name", meta.Name,
+						"new_tier", meta.SourceTier,
+						"existing_tier", existingTier,
+					)
+					continue
+				}
+			}
+
 			// Só indexa se a skill ainda não existia para evitar duplicatas no índice.
 			if _, existed := r.skills[meta.Name]; !existed {
 				r.indexSkill(meta)
@@ -88,10 +114,12 @@ func (r *Registry) LoadAll(ctx context.Context) error {
 				"name", meta.Name,
 				"version", meta.Version,
 				"source", loader.Source(),
+				"tier", meta.SourceTier,
 			)
 		}
 	}
 
+	r.bumpVersion()
 	return nil
 }
 
@@ -199,6 +227,7 @@ func (r *Registry) Reload(ctx context.Context) (int, error) {
 		}
 	}
 
+	r.bumpVersion()
 	r.logger.Info("skills reloaded", "count", loaded)
 	return loaded, nil
 }
@@ -267,6 +296,109 @@ func (r *Registry) indexSkill(meta Metadata) {
 	for _, tag := range meta.Tags {
 		r.index.ByTag[tag] = append(r.index.ByTag[tag], meta.Name)
 	}
+}
+
+// SnapshotVersion returns the current snapshot version. Consumers can compare
+// this against a cached value to know when skills have changed.
+func (r *Registry) SnapshotVersion() int64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.snapshotVersion
+}
+
+// bumpVersion increments the snapshot version (must be called under write lock).
+func (r *Registry) bumpVersion() {
+	r.snapshotVersion++
+}
+
+// WatchDirs starts polling the given directories for skill file changes.
+// When a change is detected (debounced at 250ms), all skills are reloaded.
+func (r *Registry) WatchDirs(dirs []string) {
+	r.mu.Lock()
+	r.watchDirs = dirs
+	if r.watchStop != nil {
+		// Safe close: only close if not already closed.
+		select {
+		case <-r.watchStop:
+			// Already closed, nothing to do.
+		default:
+			close(r.watchStop)
+		}
+	}
+	r.watchStop = make(chan struct{})
+	stopCh := r.watchStop
+	r.mu.Unlock()
+
+	go r.watchLoop(dirs, stopCh)
+}
+
+// StopWatch stops the filesystem watcher.
+func (r *Registry) StopWatch() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.watchStop != nil {
+		close(r.watchStop)
+		r.watchStop = nil
+	}
+}
+
+// watchLoop polls directories for changes and triggers reload.
+const watchPollInterval = 2 * time.Second
+
+func (r *Registry) watchLoop(dirs []string, stopCh chan struct{}) {
+	// Build initial mtime snapshot.
+	snapshot := buildDirSnapshot(dirs)
+	ticker := time.NewTicker(watchPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-ticker.C:
+			current := buildDirSnapshot(dirs)
+			if !snapshotsEqual(snapshot, current) {
+				r.logger.Info("skill files changed, reloading",
+					"dirs", len(dirs))
+				reloadCtx, reloadCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				_, _ = r.Reload(reloadCtx)
+				reloadCancel()
+				snapshot = current
+			}
+		}
+	}
+}
+
+// dirSnapshot maps file paths to their mtime+size fingerprint.
+type dirSnapshot map[string]string
+
+func buildDirSnapshot(dirs []string) dirSnapshot {
+	snap := make(dirSnapshot)
+	for _, dir := range dirs {
+		_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() {
+				return nil
+			}
+			ext := filepath.Ext(info.Name())
+			if ext == ".md" || ext == ".yaml" || ext == ".yml" || ext == ".go" || ext == ".py" || ext == ".js" || ext == ".ts" {
+				snap[path] = fmt.Sprintf("%d:%d", info.ModTime().UnixNano(), info.Size())
+			}
+			return nil
+		})
+	}
+	return snap
+}
+
+func snapshotsEqual(a, b dirSnapshot) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 // matchesQuery verifica se uma skill corresponde à query de busca.

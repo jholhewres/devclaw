@@ -14,7 +14,7 @@ import (
 )
 
 // HubAdapter implements OAuthManager by delegating to an OAuth Hub instance.
-// It maps DevClaw provider names (e.g. "google-gmail") to Hub connection IDs.
+// It maps DevClaw provider names to Hub connection IDs.
 type HubAdapter struct {
 	mu     sync.RWMutex
 	hubURL string
@@ -193,7 +193,7 @@ func (h *HubAdapter) refreshConnections() error {
 		}
 
 		// Map Hub connection to DevClaw provider names.
-		// Hub uses "google" provider + "gmail" service → DevClaw uses "google-gmail"
+		// Hub uses provider + service → DevClaw uses "provider-service"
 		providerKey := conn.Provider + "-" + conn.Service
 		h.connectionCache[providerKey] = conn.ID
 

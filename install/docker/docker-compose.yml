@@ -16,7 +16,7 @@ services:
       - TZ=America/Sao_Paulo
     ports:
       - "8085:8085"
-      - "8090:8090"
+      - "47716:47716"
     logging:
       driver: json-file
       options:

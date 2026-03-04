@@ -12,16 +12,16 @@ func TestGetProvider(t *testing.T) {
 		wantLabel  string
 	}{
 		{
-			name:      "google provider",
-			provider:  "google",
+			name:      "openai provider",
+			provider:  "openai",
 			wantOK:    true,
-			wantLabel: "Google",
+			wantLabel: "OpenAI",
 		},
 		{
-			name:      "google-gmail provider",
-			provider:  "google-gmail",
+			name:      "anthropic provider",
+			provider:  "anthropic",
 			wantOK:    true,
-			wantLabel: "Gmail",
+			wantLabel: "Anthropic",
 		},
 		{
 			name:     "unknown provider",
@@ -30,9 +30,9 @@ func TestGetProvider(t *testing.T) {
 		},
 		{
 			name:      "case insensitive",
-			provider:  "GOOGLE",
+			provider:  "OPENAI",
 			wantOK:    true,
-			wantLabel: "Google",
+			wantLabel: "OpenAI",
 		},
 	}
 
@@ -57,16 +57,16 @@ func TestListProviders(t *testing.T) {
 		t.Error("ListProviders should return at least one provider")
 	}
 
-	// Check that google is included
+	// Check that openai is included
 	found := false
 	for _, p := range providers {
-		if p.Name == "google" {
+		if p.Name == "openai" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Error("ListProviders should include google provider")
+		t.Error("ListProviders should include openai provider")
 	}
 }
 
@@ -97,10 +97,10 @@ func TestIsValidProvider(t *testing.T) {
 		provider string
 		want     bool
 	}{
-		{"google", true},
 		{"openai", true},
+		{"anthropic", true},
 		{"unknown", false},
-		{"GOOGLE", true}, // case insensitive
+		{"OPENAI", true}, // case insensitive
 		{"", false},
 	}
 
@@ -119,8 +119,8 @@ func TestSupportsMode(t *testing.T) {
 		mode     AuthMode
 		want     bool
 	}{
-		{"google", ModeOAuth, true},
-		{"google", ModeAPIKey, false},
+		{"anthropic", ModeOAuth, true},
+		{"anthropic", ModeAPIKey, true},
 		{"openai", ModeAPIKey, true},
 		{"openai", ModeOAuth, false},
 		{"unknown", ModeAPIKey, false},
@@ -144,25 +144,11 @@ func TestGetOAuthScopes(t *testing.T) {
 		wantErr    bool
 	}{
 		{
-			name:       "google with gmail service",
-			provider:   "google-gmail",
+			name:       "gemini provider",
+			provider:   "gemini",
 			service:    "",
 			wantScopes: true,
 			wantErr:    false,
-		},
-		{
-			name:       "google with calendar service",
-			provider:   "google-calendar",
-			service:    "",
-			wantScopes: true,
-			wantErr:    false,
-		},
-		{
-			name:       "unknown provider",
-			provider:   "unknown",
-			service:    "",
-			wantScopes: false,
-			wantErr:    true,
 		},
 	}
 
@@ -185,9 +171,8 @@ func TestGetSuggestedProfileNames(t *testing.T) {
 		provider string
 		wantMin  int
 	}{
-		{"google-gmail", 1},
-		{"google-calendar", 1},
 		{"openai", 1},
+		{"anthropic", 1},
 		{"unknown", 1}, // should return default
 	}
 
@@ -234,8 +219,8 @@ func TestRegisterCustomProvider(t *testing.T) {
 		{
 			name: "existing provider",
 			metadata: &ProviderMetadata{
-				Name:        "google", // Already exists
-				Label:       "Google",
+				Name:        "openai", // Already exists
+				Label:       "OpenAI",
 				Description: "Should fail",
 				Modes:       []AuthMode{ModeAPIKey},
 			},
@@ -264,14 +249,9 @@ func TestRegisterCustomProvider(t *testing.T) {
 }
 
 func TestProviderMetadata(t *testing.T) {
-	meta, ok := GetProvider("google-gmail")
+	meta, ok := GetProvider("gemini")
 	if !ok {
-		t.Fatal("google-gmail provider not found")
-	}
-
-	// Test ParentProvider
-	if meta.ParentProvider != "google" {
-		t.Errorf("ParentProvider = %q, want %q", meta.ParentProvider, "google")
+		t.Fatal("gemini provider not found")
 	}
 
 	// Test OAuthEndpoint

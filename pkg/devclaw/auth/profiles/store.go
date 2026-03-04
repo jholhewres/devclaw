@@ -16,12 +16,13 @@ import (
 
 // vaultStore implements ProfileManager using the encrypted vault for storage.
 type vaultStore struct {
-	mu        sync.RWMutex
-	profiles  *ProfileStore
-	vault     VaultInterface
-	oauthMgr  OAuthManager
-	logger    *slog.Logger
-	cachePath string // Optional: cache decrypted profiles for faster access
+	mu          sync.RWMutex
+	profiles    *ProfileStore
+	vault       VaultInterface
+	oauthMgr    OAuthManager
+	logger      *slog.Logger
+	cachePath   string                // Optional: cache decrypted profiles for faster access
+	cooldownCfg *ProfileCooldownConfig // Optional: configurable cooldown durations
 }
 
 // VaultInterface defines the interface for vault operations.
@@ -53,6 +54,10 @@ type StoreConfig struct {
 	// CachePath is an optional path to cache decrypted profiles.
 	// If empty, no disk cache is used.
 	CachePath string
+
+	// CooldownConfig allows overriding default cooldown durations.
+	// If nil, hardcoded defaults are used.
+	CooldownConfig *ProfileCooldownConfig
 }
 
 // NewStore creates a new profile store backed by the encrypted vault.
@@ -66,11 +71,12 @@ func NewStore(cfg StoreConfig) (*vaultStore, error) {
 	}
 
 	s := &vaultStore{
-		profiles:  NewProfileStore(),
-		vault:     cfg.Vault,
-		oauthMgr:  cfg.OAuthManager,
-		logger:    cfg.Logger.With("component", "auth-profiles"),
-		cachePath: cfg.CachePath,
+		profiles:    NewProfileStore(),
+		vault:       cfg.Vault,
+		oauthMgr:    cfg.OAuthManager,
+		logger:      cfg.Logger.With("component", "auth-profiles"),
+		cachePath:   cfg.CachePath,
+		cooldownCfg: cfg.CooldownConfig,
 	}
 
 	// Load existing profiles
@@ -115,9 +121,14 @@ func (s *vaultStore) load() error {
 		return fmt.Errorf("failed to parse profiles: %w", err)
 	}
 
-	// Ensure providers map is initialized
 	if store.Profiles == nil {
 		store.Profiles = make(map[string]*AuthProfile)
+	}
+	if store.UsageStats == nil {
+		store.UsageStats = make(map[string]*ProfileUsageStats)
+	}
+	if store.LastGood == nil {
+		store.LastGood = make(map[string]string)
 	}
 
 	s.profiles = &store
@@ -174,10 +185,31 @@ func (s *vaultStore) Get(id ProfileID) (*AuthProfile, bool) {
 	return profile, ok
 }
 
+// authModeRank returns a sort rank for auth modes.
+// Lower rank = preferred: oauth (0) > token (1) > api_key (2).
+func authModeRank(mode AuthMode) int {
+	switch mode {
+	case ModeOAuth:
+		return 0
+	case ModeToken:
+		return 1
+	case ModeAPIKey:
+		return 2
+	default:
+		return 3
+	}
+}
+
 // GetByProvider retrieves all profiles for a provider, sorted by preference.
+// Profiles in cooldown are moved to the end, sorted by soonest expiry.
 func (s *vaultStore) GetByProvider(provider string, preference ProfilePreference) []*AuthProfile {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	// Use a single write lock for the entire operation to avoid TOCTOU between
+	// ClearExpiredCooldowns and the read. The write lock is necessary because
+	// ClearExpiredCooldowns mutates state.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ClearExpiredCooldowns(s.profiles)
 
 	profiles := s.profiles.ListByProvider(provider)
 
@@ -185,17 +217,14 @@ func (s *vaultStore) GetByProvider(provider string, preference ProfilePreference
 	switch preference {
 	case PreferValid:
 		sort.Slice(profiles, func(i, j int) bool {
-			// Valid profiles first
 			iValid := profiles[i].IsValid()
 			jValid := profiles[j].IsValid()
 			if iValid != jValid {
 				return iValid && !jValid
 			}
-			// Then by priority (higher first)
 			if profiles[i].Priority != profiles[j].Priority {
 				return profiles[i].Priority > profiles[j].Priority
 			}
-			// Then by last used (recent first)
 			if profiles[i].LastUsedAt != nil && profiles[j].LastUsedAt != nil {
 				return profiles[i].LastUsedAt.After(*profiles[j].LastUsedAt)
 			}
@@ -203,22 +232,40 @@ func (s *vaultStore) GetByProvider(provider string, preference ProfilePreference
 		})
 	case PreferRecent:
 		sort.Slice(profiles, func(i, j int) bool {
-			// Recent first
 			if profiles[i].LastUsedAt != nil && profiles[j].LastUsedAt != nil {
 				return profiles[i].LastUsedAt.After(*profiles[j].LastUsedAt)
 			}
 			return profiles[i].LastUsedAt != nil
 		})
+	case PreferType:
+		// Order by auth type (oauth=0 > token=1 > api_key=2), then by
+		// least-recently-used within the same type for round-robin distribution.
+		sort.Slice(profiles, func(i, j int) bool {
+			iType := authModeRank(profiles[i].Mode)
+			jType := authModeRank(profiles[j].Mode)
+			if iType != jType {
+				return iType < jType
+			}
+			// Within same type: prefer least recently used (round-robin).
+			if profiles[i].LastUsedAt == nil && profiles[j].LastUsedAt == nil {
+				return profiles[i].Name < profiles[j].Name
+			}
+			if profiles[i].LastUsedAt == nil {
+				return true // Never used = try first.
+			}
+			if profiles[j].LastUsedAt == nil {
+				return false
+			}
+			return profiles[i].LastUsedAt.Before(*profiles[j].LastUsedAt)
+		})
 	default: // PreferDefault
 		sort.Slice(profiles, func(i, j int) bool {
-			// Default profile first
 			if profiles[i].Name == "default" {
 				return true
 			}
 			if profiles[j].Name == "default" {
 				return false
 			}
-			// Then by priority (higher first)
 			if profiles[i].Priority != profiles[j].Priority {
 				return profiles[i].Priority > profiles[j].Priority
 			}
@@ -226,7 +273,47 @@ func (s *vaultStore) GetByProvider(provider string, preference ProfilePreference
 		})
 	}
 
-	return profiles
+	// Partition: available profiles first, cooldown profiles last (sorted by expiry).
+	var available, inCooldown []*AuthProfile
+	for _, p := range profiles {
+		if IsProfileInCooldown(s.profiles, p.ID) {
+			inCooldown = append(inCooldown, p)
+		} else {
+			available = append(available, p)
+		}
+	}
+
+	if len(inCooldown) > 0 {
+		sort.Slice(inCooldown, func(i, j int) bool {
+			iUntil := ResolveProfileUnusableUntil(s.profiles, inCooldown[i].ID)
+			jUntil := ResolveProfileUnusableUntil(s.profiles, inCooldown[j].ID)
+			if iUntil == nil {
+				return true
+			}
+			if jUntil == nil {
+				return false
+			}
+			return iUntil.Before(*jUntil)
+		})
+		available = append(available, inCooldown...)
+	}
+
+	// Boost lastGood profile to the front of available (if it's there).
+	if lastGoodID, ok := s.profiles.LastGood[provider]; ok && len(available) > 1 {
+		for i, p := range available {
+			if string(p.ID) == lastGoodID && i > 0 {
+				// Move to front using safe slice construction (avoids aliasing).
+				front := make([]*AuthProfile, 0, len(available))
+				front = append(front, p)
+				front = append(front, available[:i]...)
+				front = append(front, available[i+1:]...)
+				available = front
+				break
+			}
+		}
+	}
+
+	return available
 }
 
 // Save stores a profile.
@@ -255,7 +342,14 @@ func (s *vaultStore) Delete(id ProfileID) error {
 		return fmt.Errorf("profile %s not found", id)
 	}
 
+	provider := profile.Provider
 	s.profiles.Delete(id)
+
+	// Clean orphaned usage stats and last-good references.
+	delete(s.profiles.UsageStats, string(id))
+	if s.profiles.LastGood[provider] == string(id) {
+		delete(s.profiles.LastGood, provider)
+	}
 
 	if err := s.save(); err != nil {
 		return fmt.Errorf("failed to delete profile %s: %w", id, err)
@@ -291,6 +385,7 @@ func (s *vaultStore) Resolve(opts ResolutionOptions) *ProfileResolutionResult {
 
 		if profile, ok := s.Get(id); ok {
 			if resolved := s.resolveProfile(profile, opts); resolved.Error == nil {
+				s.markGood(opts.Provider, profile.ID)
 				return resolved
 			} else {
 				result.Error = resolved.Error
@@ -322,16 +417,17 @@ func (s *vaultStore) Resolve(opts ResolutionOptions) *ProfileResolutionResult {
 
 		resolved := s.resolveProfile(profile, opts)
 		if resolved.Error == nil {
+			s.markGood(opts.Provider, profile.ID)
 			return resolved
 		}
 
-		// Save the first error
+		s.MarkFailure(profile.ID, ClassifyFailure(resolved.Error))
+
 		if result.Error == nil {
 			result.Error = resolved.Error
 		}
 	}
 
-	// No profile resolved
 	if result.Error == nil {
 		result.Error = fmt.Errorf("no valid profile found for provider %s", opts.Provider)
 	}
@@ -411,6 +507,14 @@ func (s *vaultStore) resolveProfile(profile *AuthProfile, _ ResolutionOptions) *
 	return result
 }
 
+// markGood records a profile as the last known good for its provider.
+// Caller must NOT hold s.mu (acquires write lock internally).
+func (s *vaultStore) markGood(provider string, id ProfileID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.profiles.MarkAuthProfileGood(provider, id)
+}
+
 // MarkUsed updates the last used timestamp for a profile.
 func (s *vaultStore) MarkUsed(id ProfileID) {
 	s.mu.Lock()
@@ -418,6 +522,7 @@ func (s *vaultStore) MarkUsed(id ProfileID) {
 
 	if profile, ok := s.profiles.Get(id); ok {
 		profile.MarkUsed()
+		s.profiles.MarkAuthProfileGood(profile.Provider, id)
 		// Don't save here to avoid overhead - save on next explicit Save() call
 	}
 }
@@ -429,7 +534,40 @@ func (s *vaultStore) MarkError(id ProfileID, err error) {
 
 	if profile, ok := s.profiles.Get(id); ok {
 		profile.MarkError(err)
-		// Don't save here to avoid overhead
+	}
+}
+
+// MarkFailure records a categorized failure and applies cooldown/disable.
+func (s *vaultStore) MarkFailure(id ProfileID, reason FailureReason) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.markFailureUnlocked(id, reason)
+}
+
+// markFailureUnlocked records a failure without acquiring the lock (caller must hold it).
+func (s *vaultStore) markFailureUnlocked(id ProfileID, reason FailureReason) {
+	MarkProfileFailure(s.profiles, id, reason, s.cooldownCfg)
+	s.logger.Debug("profile failure recorded",
+		"id", id, "reason", reason,
+		"error_count", s.profiles.GetUsageStats(id).ErrorCount)
+}
+
+// IsInCooldown returns true if the profile is currently in cooldown or disabled.
+func (s *vaultStore) IsInCooldown(id ProfileID) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return IsProfileInCooldown(s.profiles, id)
+}
+
+// ClearExpiredCooldowns resets cooldown/disabled state for profiles whose windows have passed.
+func (s *vaultStore) ClearExpiredCooldowns() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if ClearExpiredCooldowns(s.profiles) {
+		s.logger.Debug("cleared expired profile cooldowns")
 	}
 }
 

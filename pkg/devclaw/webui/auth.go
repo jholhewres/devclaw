@@ -3,10 +3,18 @@ package webui
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
 )
+
+// deriveToken produces a hex-encoded SHA-256 hash of the raw password so that
+// the plain-text secret is never stored in cookies or returned to the client.
+func deriveToken(raw string) string {
+	h := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(h[:])
+}
 
 // compareTokens performs timing-safe comparison by hashing both inputs with
 // SHA-256 before calling ConstantTimeCompare to prevent length-based leakage.
@@ -32,7 +40,8 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// If no auth configured, login is not needed.
-	if s.cfg.AuthToken == "" {
+	raw, derived := s.getAuth()
+	if raw == "" {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"token":   "",
 			"message": "authentication not required",
@@ -41,15 +50,17 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Constant-time comparison to prevent timing attacks.
-	if !compareTokens(body.Password, s.cfg.AuthToken) {
+	if !compareTokens(body.Password, raw) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "senha incorreta"})
 		return
 	}
 
+	token := derived
+
 	// Set HttpOnly cookie for browser sessions.
 	http.SetCookie(w, &http.Cookie{
 		Name:     "devclaw_token",
-		Value:    s.cfg.AuthToken,
+		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
@@ -57,7 +68,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"token": s.cfg.AuthToken,
+		"token": token,
 	})
 }
 
@@ -69,13 +80,14 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	authRequired := s.cfg.AuthToken != ""
+	raw, derived := s.getAuth()
+	authRequired := raw != ""
 	authenticated := !authRequired // no auth = always authenticated
 
 	if authRequired {
 		token := extractToken(r)
 		if token != "" {
-			authenticated = compareTokens(token, s.cfg.AuthToken)
+			authenticated = compareTokens(token, derived)
 		}
 	}
 
@@ -86,7 +98,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAuthLogout clears the auth cookie.
+// handleAuthLogout clears the auth cookie. POST only to prevent CSRF via GET.
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})

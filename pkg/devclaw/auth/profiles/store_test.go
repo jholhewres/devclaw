@@ -97,8 +97,8 @@ func TestStoreDelete(t *testing.T) {
 	}
 
 	profile := &AuthProfile{
-		ID:       NewProfileID("google-gmail", "work"),
-		Provider: "google-gmail",
+		ID:       NewProfileID("anthropic", "work"),
+		Provider: "anthropic",
 		Name:     "work",
 		Mode:     ModeOAuth,
 		Enabled:  true,
@@ -156,15 +156,12 @@ func TestStoreList(t *testing.T) {
 			APIKey:   &APIKeyCredential{Key: "key2"},
 		},
 		{
-			ID:       NewProfileID("google-gmail", "personal"),
-			Provider: "google-gmail",
+			ID:       NewProfileID("groq", "personal"),
+			Provider: "groq",
 			Name:     "personal",
-			Mode:     ModeOAuth,
+			Mode:     ModeAPIKey,
 			Enabled:  true,
-			OAuth: &OAuthCredential{
-				AccessToken: "token",
-				Email:       "user@gmail.com",
-			},
+			APIKey:   &APIKeyCredential{Key: "key3"},
 		},
 	}
 
@@ -181,7 +178,7 @@ func TestStoreList(t *testing.T) {
 	}
 
 	// Test GetByProvider
-	byProvider := store.GetByProvider("google-gmail", PreferValid)
+	byProvider := store.GetByProvider("groq", PreferValid)
 	if len(byProvider) != 1 {
 		t.Errorf("GetByProvider returned %d profiles, want 1", len(byProvider))
 	}
@@ -327,8 +324,8 @@ func TestStorePersistence(t *testing.T) {
 func TestProfileMarshalUnmarshal(t *testing.T) {
 	now := time.Now()
 	profile := &AuthProfile{
-		ID:        NewProfileID("google-gmail", "test"),
-		Provider:  "google-gmail",
+		ID:        NewProfileID("anthropic", "test"),
+		Provider:  "anthropic",
 		Name:      "test",
 		Mode:      ModeOAuth,
 		Enabled:   true,
@@ -339,7 +336,7 @@ func TestProfileMarshalUnmarshal(t *testing.T) {
 			AccessToken:  "access-token-123",
 			RefreshToken: "refresh-token-456",
 			Email:        "user@example.com",
-			Scopes:       []string{"https://www.googleapis.com/auth/gmail.readonly"},
+			Scopes:       []string{"openid", "email", "profile"},
 		},
 	}
 

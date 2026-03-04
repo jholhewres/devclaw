@@ -530,16 +530,44 @@ func extractZip(data []byte, targetDir string) error {
 			continue
 		}
 
-		// Ensure parent directory exists.
 		_ = os.MkdirAll(filepath.Dir(targetPath), 0o755)
+
+		// Race-safe write: check for symlinks before and after open.
+		if info, err := os.Lstat(targetPath); err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				os.Remove(targetPath)
+			}
+		}
 
 		rc, err := f.Open()
 		if err != nil {
 			return err
 		}
 
-		outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode())
+		outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, f.Mode())
+		if os.IsExist(err) {
+			if err := os.Remove(targetPath); err != nil {
+				rc.Close()
+				return fmt.Errorf("removing existing file before overwrite: %w", err)
+			}
+			outFile, err = os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, f.Mode())
+		}
 		if err != nil {
+			rc.Close()
+			return err
+		}
+
+		// Post-open validation: ensure we opened a regular file inside the target dir.
+		if fi, statErr := outFile.Stat(); statErr != nil || !fi.Mode().IsRegular() {
+			outFile.Close()
+			rc.Close()
+			if statErr != nil {
+				return statErr
+			}
+			return fmt.Errorf("refusing to write to non-regular file: %s", targetPath)
+		}
+		if err := outFile.Truncate(0); err != nil {
+			outFile.Close()
 			rc.Close()
 			return err
 		}

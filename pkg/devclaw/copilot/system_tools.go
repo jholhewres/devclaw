@@ -4,6 +4,7 @@
 package copilot
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -98,9 +99,98 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 		EmbeddingCfg:  memCfg.Embedding,
 	})
 
-	// Register Google API tool for accessing Gmail, Calendar, Drive, etc.
-	// This tool requires OAuth profiles to be configured via auth_profile_add.
-	registerGoogleAPITool(executor)
+}
+
+// ---------- Script Preflight Validation ----------
+
+// scriptRunners maps script command prefixes to their file extensions.
+var scriptRunners = map[string]string{
+	"python ": ".py", "python3 ": ".py",
+	"node ":   ".js", "npx ":    ".js",
+}
+
+// checkScriptPreflight detects when a bash command runs a Python/JS script
+// that might contain shell variable patterns ($VAR, ${VAR}). These patterns
+// are valid shell syntax but are bugs in Python/JS — they indicate the user
+// likely intended the variable to be resolved by the shell, not by the script.
+// Returns a warning string if suspicious, empty string if OK.
+func checkScriptPreflight(command string) string {
+	var scriptPath string
+	for prefix, ext := range scriptRunners {
+		if strings.HasPrefix(command, prefix) {
+			rest := strings.TrimPrefix(command, prefix)
+			parts := strings.Fields(rest)
+			if len(parts) > 0 && strings.HasSuffix(parts[0], ext) {
+				scriptPath = parts[0]
+				break
+			}
+		}
+	}
+	if scriptPath == "" {
+		return ""
+	}
+
+	// Try to read the script.
+	content, err := os.ReadFile(resolvePath(scriptPath))
+	if err != nil {
+		return "" // File doesn't exist yet or can't be read — skip check.
+	}
+
+	// Scan for shell variable patterns in script content.
+	text := string(content)
+	var shellVars []string
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// Skip comments.
+		if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		// Look for $VAR or ${VAR} patterns that aren't inside strings that use shell expansion.
+		if idx := strings.Index(trimmed, "$"); idx >= 0 {
+			// Extract the variable name.
+			rest := trimmed[idx+1:]
+			if strings.HasPrefix(rest, "{") {
+				if end := strings.Index(rest, "}"); end > 1 {
+					shellVars = append(shellVars, "${"+rest[1:end]+"}")
+				}
+			} else {
+				// $VAR — collect until non-alphanumeric/underscore.
+				var varName strings.Builder
+				for _, ch := range rest {
+					if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' {
+						varName.WriteRune(ch)
+					} else {
+						break
+					}
+				}
+				if varName.Len() > 0 {
+					shellVars = append(shellVars, "$"+varName.String())
+				}
+			}
+		}
+	}
+
+	if len(shellVars) == 0 {
+		return ""
+	}
+
+	// Deduplicate.
+	seen := make(map[string]bool)
+	var unique []string
+	for _, v := range shellVars {
+		if !seen[v] {
+			seen[v] = true
+			unique = append(unique, v)
+		}
+	}
+	if len(unique) > 5 {
+		unique = unique[:5]
+	}
+
+	return fmt.Sprintf("⚠️ Script preflight warning: %s contains shell variable references (%s) "+
+		"that won't be expanded by the script runtime. Consider using environment variables "+
+		"(os.environ in Python, process.env in Node.js) or passing values as command-line arguments instead.",
+		scriptPath, strings.Join(unique, ", "))
 }
 
 // ---------- External Content Security ----------
@@ -123,7 +213,7 @@ func wrapExternalContent(source, ref, content string) string {
 // ---------- Web Search Tool ----------
 
 func registerWebSearchTool(executor *ToolExecutor, cfg WebSearchConfig) {
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second}
 
 	// Resolve Brave API key: config > env var.
 	braveKey := cfg.BraveAPIKey
@@ -131,9 +221,22 @@ func registerWebSearchTool(executor *ToolExecutor, cfg WebSearchConfig) {
 		braveKey = os.Getenv("BRAVE_API_KEY")
 	}
 
-	// Auto-select provider: if brave key is available and configured, use Brave.
+	// Resolve Perplexity/OpenRouter API key: config > env > main API.
+	perplexityKey := cfg.PerplexityAPIKey
+	if perplexityKey == "" {
+		perplexityKey = os.Getenv("OPENROUTER_API_KEY")
+	}
+	perplexityModel := cfg.PerplexityModel
+	if perplexityModel == "" {
+		perplexityModel = "perplexity/sonar"
+	}
+
+	// Auto-select provider: check key availability.
 	provider := cfg.Provider
 	if provider == "brave" && braveKey == "" {
+		provider = "duckduckgo" // fallback if no API key
+	}
+	if provider == "perplexity" && perplexityKey == "" {
 		provider = "duckduckgo" // fallback if no API key
 	}
 
@@ -142,11 +245,17 @@ func registerWebSearchTool(executor *ToolExecutor, cfg WebSearchConfig) {
 		maxResults = 8
 	}
 
-	description := "Search the web and return results with titles, URLs, and snippets."
-	if provider == "brave" {
-		description = "Search the web using Brave Search. Returns results with titles, URLs, and descriptions."
+	// Set up search result cache.
+	var searchCache *WebFetchCache
+	cacheTTL := time.Duration(cfg.CacheTTLSeconds) * time.Second
+	if cacheTTL <= 0 {
+		cacheTTL = 5 * time.Minute
+	}
+	if cfg.CacheTTLSeconds != -1 { // -1 explicitly disables caching
+		searchCache = NewWebFetchCache(cacheTTL, 50)
 	}
 
+	description := "Search the web and return results."
 	executor.Register(
 		MakeToolDefinition("web_search", description, map[string]any{
 			"type": "object",
@@ -154,6 +263,15 @@ func registerWebSearchTool(executor *ToolExecutor, cfg WebSearchConfig) {
 				"query": map[string]any{
 					"type":        "string",
 					"description": "Search query",
+				},
+				"count": map[string]any{
+					"type":        "integer",
+					"description": "Number of results (1-10, default: provider-dependent)",
+				},
+				"freshness": map[string]any{
+					"type":        "string",
+					"enum":        []string{"pd", "pw", "pm", "py"},
+					"description": "Recency filter: pd=past day, pw=past week, pm=past month, py=past year",
 				},
 			},
 			"required": []string{"query"},
@@ -164,21 +282,114 @@ func registerWebSearchTool(executor *ToolExecutor, cfg WebSearchConfig) {
 				return nil, fmt.Errorf("query is required")
 			}
 
-			var result any
+			count := maxResults
+			if c, ok := args["count"].(float64); ok && c > 0 && c <= 10 {
+				count = int(c)
+			}
+			freshness, _ := args["freshness"].(string)
+
+			// Check cache first.
+			cacheKey := fmt.Sprintf("%s:%s:%d:%s", provider, query, count, freshness)
+			if searchCache != nil {
+				if cached, ok := searchCache.Get(cacheKey); ok {
+					return wrapExternalContent("web_search", query, cached+" (cached)"), nil
+				}
+			}
+
+			var result string
 			var err error
-			// Use Brave Search if configured and key is available.
-			if provider == "brave" && braveKey != "" {
-				result, err = searchBrave(ctx, client, query, braveKey, maxResults)
-			} else {
-				// Fallback to DuckDuckGo HTML search.
-				result, err = searchDDG(ctx, client, query, maxResults)
+
+			switch provider {
+			case "brave":
+				r, e := searchBrave(ctx, client, query, braveKey, count)
+				if e != nil {
+					return nil, e
+				}
+				result = fmt.Sprintf("%v", r)
+			case "perplexity":
+				result, err = searchPerplexity(ctx, client, query, perplexityKey, perplexityModel, freshness)
+			default:
+				r, e := searchDDG(ctx, client, query, count)
+				if e != nil {
+					return nil, e
+				}
+				result = fmt.Sprintf("%v", r)
 			}
 			if err != nil {
 				return nil, err
 			}
-			return wrapExternalContent("web_search", query, fmt.Sprintf("%v", result)), nil
+
+			// Cache the result.
+			if searchCache != nil {
+				searchCache.Set(cacheKey, result)
+			}
+
+			return wrapExternalContent("web_search", query, result), nil
 		},
 	)
+}
+
+// searchPerplexity queries Perplexity via OpenRouter and returns a grounded answer.
+func searchPerplexity(ctx context.Context, client *http.Client, query, apiKey, model, freshness string) (string, error) {
+	systemPrompt := "You are a web search assistant. Provide comprehensive, factual search results with sources. Include URLs when available."
+	if freshness != "" {
+		timeMap := map[string]string{"pd": "past 24 hours", "pw": "past week", "pm": "past month", "py": "past year"}
+		if tf, ok := timeMap[freshness]; ok {
+			systemPrompt += fmt.Sprintf(" Focus on results from the %s.", tf)
+		}
+	}
+
+	reqBody := map[string]any{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": query},
+		},
+		"max_tokens": 2048,
+	}
+	bodyJSON, _ := json.Marshal(reqBody)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://openrouter.ai/api/v1/chat/completions",
+		bytes.NewReader(bodyJSON))
+	if err != nil {
+		return "", fmt.Errorf("perplexity request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("HTTP-Referer", "https://devclaw.dev")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("perplexity search failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", fmt.Errorf("perplexity returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 100*1024))
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("parsing perplexity response: %w", err)
+	}
+	if len(result.Choices) == 0 {
+		return "No results from Perplexity.", nil
+	}
+
+	content := result.Choices[0].Message.Content
+	if len(content) > 8000 {
+		content = content[:8000] + "\n... (truncated)"
+	}
+	return fmt.Sprintf("Search results for: %s\n\n%s", query, content), nil
 }
 
 // searchBrave queries the Brave Search API and returns formatted results.
@@ -354,15 +565,29 @@ func stripHTMLTags(s string) string {
 }
 
 func registerWebFetchTool(executor *ToolExecutor, ssrfGuard *security.SSRFGuard) {
-	client := &http.Client{Timeout: 20 * time.Second}
+	client := &http.Client{
+		Timeout: 20 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return fmt.Errorf("too many redirects (max 3)")
+			}
+			return nil
+		},
+	}
+	cache := NewWebFetchCache(15*time.Minute, 100)
 
 	executor.Register(
-		MakeToolDefinition("web_fetch", "Fetch content from a URL and return the text. Use for reading web pages, APIs, etc.", map[string]any{
+		MakeToolDefinition("web_fetch", "Fetch content from a URL and return the text. Supports HTML extraction to readable text.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"url": map[string]any{
 					"type":        "string",
 					"description": "The URL to fetch",
+				},
+				"extract_mode": map[string]any{
+					"type":        "string",
+					"enum":        []string{"text", "raw"},
+					"description": "Extraction mode: 'text' extracts readable text from HTML (default), 'raw' returns raw content",
 				},
 			},
 			"required": []string{"url"},
@@ -376,10 +601,21 @@ func registerWebFetchTool(executor *ToolExecutor, ssrfGuard *security.SSRFGuard)
 				url = "https://" + url
 			}
 
+			extractMode, _ := args["extract_mode"].(string)
+			if extractMode == "" {
+				extractMode = "text"
+			}
+
 			if ssrfGuard != nil {
 				if err := ssrfGuard.IsAllowed(url); err != nil {
 					return nil, err
 				}
+			}
+
+			// Check cache.
+			cacheKey := url + ":" + extractMode
+			if cached, ok := cache.Get(cacheKey); ok {
+				return cached, nil
 			}
 
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -395,14 +631,38 @@ func registerWebFetchTool(executor *ToolExecutor, ssrfGuard *security.SSRFGuard)
 			}
 			defer resp.Body.Close()
 
-			body, _ := io.ReadAll(io.LimitReader(resp.Body, 50*1024))
-			content := string(body)
-			if len(content) > 10000 {
-				content = content[:10000] + "\n... [truncated]"
+			const maxReadBytes = 200 * 1024 // 200KB read limit
+			const maxOutputChars = 50000    // 50K output cap
+
+			ct := resp.Header.Get("Content-Type")
+			isHTML := strings.Contains(ct, "text/html")
+
+			var content string
+			if extractMode == "text" && isHTML {
+				// Use readability extraction for HTML.
+				title, text := ExtractReadableText(io.LimitReader(resp.Body, int64(maxReadBytes)))
+				if title != "" {
+					content = "# " + title + "\n\n" + text
+				} else {
+					content = text
+				}
+			} else {
+				// Raw mode or non-HTML.
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, int64(maxReadBytes)))
+				content = string(body)
 			}
 
-			return wrapExternalContent("web_fetch", url, fmt.Sprintf("Status: %d\nContent-Type: %s\n\n%s",
-				resp.StatusCode, resp.Header.Get("Content-Type"), content)), nil
+			if len(content) > maxOutputChars {
+				content = content[:maxOutputChars] + "\n... [truncated]"
+			}
+
+			result := wrapExternalContent("web_fetch", url, fmt.Sprintf("Status: %d\nContent-Type: %s\n\n%s",
+				resp.StatusCode, ct, content))
+
+			// Cache the result.
+			cache.Set(cacheKey, result)
+
+			return result, nil
 		},
 	)
 }
@@ -481,6 +741,12 @@ func registerBashTool(executor *ToolExecutor) {
 			command, _ := args["command"].(string)
 			if command == "" {
 				return nil, fmt.Errorf("command is required")
+			}
+
+			// Script preflight: warn if a python/node command references a script
+			// file that contains shell variable patterns ($VAR, ${VAR}).
+			if warning := checkScriptPreflight(command); warning != "" {
+				return warning, nil
 			}
 
 			timeout := 120 * time.Second
@@ -758,9 +1024,9 @@ type persistentShellState struct {
 // ---------- File Tools (full filesystem access) ----------
 
 func registerFileTools(executor *ToolExecutor, _ string) {
-	// read_file — reads any file on the machine.
+	// read_file — reads any file on the machine with adaptive paging.
 	executor.Register(
-		MakeToolDefinition("read_file", "Read the contents of any file on the machine. Supports absolute and relative paths. Returns up to 100KB of text content.", map[string]any{
+		MakeToolDefinition("read_file", "Read the contents of any file on the machine. Supports absolute and relative paths. Large files are automatically paged with continuation hints.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"path": map[string]any{
@@ -773,7 +1039,7 @@ func registerFileTools(executor *ToolExecutor, _ string) {
 				},
 				"limit": map[string]any{
 					"type":        "integer",
-					"description": "Maximum number of lines to return (default: all)",
+					"description": "Maximum number of lines to return (default: auto-paged)",
 				},
 			},
 			"required": []string{"path"},
@@ -792,33 +1058,52 @@ func registerFileTools(executor *ToolExecutor, _ string) {
 			}
 
 			text := string(content)
+			lines := strings.Split(text, "\n")
+			totalLines := len(lines)
 
-			// Apply offset/limit if specified.
+			// Apply offset if specified.
 			offset := 0
 			if o, ok := args["offset"].(float64); ok && o > 1 {
 				offset = int(o) - 1 // Convert 1-based to 0-based.
 			}
+			if offset >= totalLines {
+				return "(offset beyond end of file)", nil
+			}
+			lines = lines[offset:]
 
-			limit := 0
+			// Determine page size: user limit > adaptive.
+			// Adaptive page size: min(512KB worth of lines, max(50KB, contextWindow * 4 * 0.2))
+			pageLimit := 0
 			if l, ok := args["limit"].(float64); ok && l > 0 {
-				limit = int(l)
+				pageLimit = int(l)
 			}
 
-			if offset > 0 || limit > 0 {
-				lines := strings.Split(text, "\n")
-				if offset >= len(lines) {
-					return "(offset beyond end of file)", nil
-				}
-				lines = lines[offset:]
-				if limit > 0 && limit < len(lines) {
-					lines = lines[:limit]
-				}
+			if pageLimit > 0 && pageLimit < len(lines) {
+				lines = lines[:pageLimit]
 				text = strings.Join(lines, "\n")
+				// Add continuation hint.
+				text += fmt.Sprintf("\n\n... [showing lines %d-%d of %d total. Use offset=%d to continue reading]",
+					offset+1, offset+pageLimit, totalLines, offset+pageLimit+1)
+				return text, nil
 			}
 
-			// Truncate for safety.
-			if len(text) > 100000 {
-				text = text[:100000] + "\n... [truncated at 100KB]"
+			text = strings.Join(lines, "\n")
+
+			// Adaptive truncation: cap at 100KB with continuation hint.
+			const maxPageBytes = 100000
+			if len(text) > maxPageBytes {
+				// Find a line boundary near the limit.
+				cutLines := strings.Split(text[:maxPageBytes], "\n")
+				shownLines := len(cutLines) - 1 // Drop potentially partial last line.
+				if shownLines < 1 {
+					shownLines = 1
+				}
+				text = strings.Join(cutLines[:shownLines], "\n")
+				remainingLines := totalLines - offset - shownLines
+				if remainingLines > 0 {
+					text += fmt.Sprintf("\n\n... [showing lines %d-%d of %d total. Use offset=%d to continue reading]",
+						offset+1, offset+shownLines, totalLines, offset+shownLines+1)
+				}
 			}
 
 			return text, nil

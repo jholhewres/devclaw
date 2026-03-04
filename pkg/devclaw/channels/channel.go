@@ -84,6 +84,81 @@ type ReactionChannel interface {
 	SendReaction(ctx context.Context, chatID, messageID, emoji string) error
 }
 
+// AutoReadConfigurable extends Channel with AutoRead configuration access.
+// Channels that support configurable auto-read behavior should implement this.
+type AutoReadConfigurable interface {
+	Channel
+
+	// AutoReadEnabled returns true if the channel should automatically mark
+	// messages as read after passing access control and policy checks.
+	AutoReadEnabled() bool
+
+	// SetAutoRead enables or disables auto-read behavior.
+	SetAutoRead(enabled bool)
+}
+
+// AccessFilter extends Channel with access control capabilities.
+// Channels that implement this filter their own messages before sending to the assistant.
+type AccessFilter interface {
+	Channel
+
+	// CanResponse checks if the sender is allowed to interact with the bot.
+	// Returns (allowed, reason). If allowed is false, the message is ignored.
+	CanResponse(msg *IncomingMessage) (allowed bool, reason string)
+}
+
+// GroupFilter extends Channel with group-specific policies.
+// Channels that implement this filter group messages based on activation modes.
+type GroupFilter interface {
+	Channel
+
+	// ShouldRespond checks if the bot should respond to a group message.
+	// Returns true if the message matches the group's activation policy.
+	ShouldRespond(msg *IncomingMessage, trigger string) bool
+}
+
+// WhatsAppAccessManager provides access control and group policy management
+// for WhatsApp channels. This interface allows the API layer to manage
+// access control without using reflection.
+type WhatsAppAccessManager interface {
+	// Access control
+	GetAccessConfig() any
+	GrantAccess(jid, level string)
+	RevokeAccess(jid string)
+	BlockUser(jid string)
+	UnblockUser(jid string)
+	SetDefaultPolicy(policy string)
+
+	// Group policies
+	GetGroupPolicies() any
+	SetGroupPolicy(groupJID string, policy any)
+	SetGroupDefaultPolicy(policy string)
+	GetJoinedGroups() ([]WhatsAppJoinedGroup, error)
+	ListGroupPoliciesForConfig() []GroupPolicyConfig
+
+	// Configuration
+	SetAutoRead(enabled bool)
+	SetSendTyping(enabled bool)
+	SetTrigger(trigger string)
+}
+
+// GroupPolicyConfig defines policy for a specific group (for interface/cross-package use).
+type GroupPolicyConfig struct {
+	ID           string   `yaml:"id"`
+	Name         string   `yaml:"name"`
+	Policy       string   `yaml:"policy"`
+	Policies     []string `yaml:"policies,omitempty"`
+	Keywords     []string `yaml:"keywords,omitempty"`
+	AllowedUsers []string `yaml:"allowed_users,omitempty"`
+	Workspace    string   `yaml:"workspace,omitempty"`
+}
+
+// WhatsAppJoinedGroup represents a WhatsApp group the bot is part of.
+type WhatsAppJoinedGroup struct {
+	JID  string
+	Name string
+}
+
 // IncomingMessage represents a message received from any channel.
 type IncomingMessage struct {
 	// ID is the unique message identifier in the source channel.
@@ -118,6 +193,9 @@ type IncomingMessage struct {
 
 	// QuotedContent is the text of the quoted message (if replying).
 	QuotedContent string
+
+	// Mentions contains JIDs of users mentioned in the message (for groups).
+	Mentions []string
 
 	// Media contains media attachment details (if any).
 	Media *MediaInfo
@@ -243,12 +321,12 @@ type MediaInfo struct {
 
 // LocationInfo contains location coordinates.
 type LocationInfo struct {
-	Latitude    float64
-	Longitude   float64
-	Name        string
-	Address     string
-	URL         string
-	AccuracyM   uint32
+	Latitude  float64
+	Longitude float64
+	Name      string
+	Address   string
+	URL       string
+	AccuracyM uint32
 }
 
 // ContactInfo contains shared contact data.

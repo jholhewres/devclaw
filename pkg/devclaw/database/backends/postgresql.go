@@ -139,9 +139,6 @@ func buildPostgreSQLDSN(config PostgreSQLConfig) string {
 		u, err := url.Parse(config.SupabaseURL)
 		if err == nil {
 			host := u.Host
-			if strings.HasPrefix(host, "https://") {
-				host = strings.TrimPrefix(host, "https://")
-			}
 			// Convert to database host format
 			parts := strings.Split(host, ".")
 			if len(parts) >= 3 && parts[1] == "supabase" {

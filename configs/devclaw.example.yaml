@@ -139,6 +139,13 @@ skills:
 scheduler:
   enabled: true
 
+# ── Update ─────────────────────────────────────────────────
+# Auto-update checking and installation.
+update:
+  enabled: true                        # Enable automatic update checks
+  assets_url: ""  # Base URL for release assets
+  check_interval: "1h"                 # How often to check for updates
+
 # ── Logging ────────────────────────────────────────────────
 logging:
   level: "info"                        # debug | info | warn | error

@@ -218,7 +218,7 @@ func loginGemini(ctx context.Context, tm *oauth.TokenManager) error {
 
 func loginChatGPT(ctx context.Context, tm *oauth.TokenManager) error {
 	fmt.Println("🔐 Starting ChatGPT OAuth login...")
-	fmt.Println(providers.ExperimentalWarning)
+	fmt.Print(providers.ExperimentalWarning)
 
 	// Create provider
 	p := providers.NewChatGPTProvider()

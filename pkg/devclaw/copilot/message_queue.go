@@ -29,12 +29,115 @@ const (
 // OnDrainFunc is called when the debounce timer fires with drained messages.
 type OnDrainFunc func(sessionID string, msgs []*channels.IncomingMessage)
 
+// DedupCache provides Message-ID based deduplication with automatic TTL expiration.
+// This catches duplicate deliveries from messaging platforms (webhook retries,
+// reconnection replays) that content-match alone misses.
+type DedupCache struct {
+	entries map[string]time.Time // key → expiry timestamp
+	ttl     time.Duration        // default: 20 minutes
+	stop    chan struct{}         // signals cleanup goroutine to terminate
+	mu      sync.Mutex
+}
+
+// NewDedupCache creates a new dedup cache with the given TTL.
+func NewDedupCache(ttl time.Duration) *DedupCache {
+	if ttl <= 0 {
+		ttl = 20 * time.Minute
+	}
+	dc := &DedupCache{
+		entries: make(map[string]time.Time),
+		ttl:     ttl,
+		stop:    make(chan struct{}),
+	}
+	// Start periodic cleanup goroutine.
+	go dc.cleanupLoop()
+	return dc
+}
+
+// Stop terminates the background cleanup goroutine.
+func (dc *DedupCache) Stop() {
+	select {
+	case <-dc.stop:
+		// Already stopped.
+	default:
+		close(dc.stop)
+	}
+}
+
+// dedupKey builds a composite dedup key from message fields.
+func dedupKey(channel, from, chatID, messageID string) string {
+	return channel + "|" + from + "|" + chatID + "|" + messageID
+}
+
+// IsDuplicate returns true if the key was already seen and still within TTL.
+func (dc *DedupCache) IsDuplicate(key string) bool {
+	dc.mu.Lock()
+	defer dc.mu.Unlock()
+	expiry, ok := dc.entries[key]
+	if !ok {
+		return false
+	}
+	if time.Now().After(expiry) {
+		delete(dc.entries, key)
+		return false
+	}
+	return true
+}
+
+// Record stores a key with its TTL expiry.
+func (dc *DedupCache) Record(key string) {
+	dc.mu.Lock()
+	defer dc.mu.Unlock()
+	dc.entries[key] = time.Now().Add(dc.ttl)
+}
+
+// CheckAndRecord atomically checks if a key is a duplicate and records it if not.
+// Returns true if the key was already seen (duplicate).
+func (dc *DedupCache) CheckAndRecord(key string) bool {
+	dc.mu.Lock()
+	defer dc.mu.Unlock()
+	expiry, ok := dc.entries[key]
+	if ok && time.Now().Before(expiry) {
+		return true // Duplicate.
+	}
+	dc.entries[key] = time.Now().Add(dc.ttl)
+	return false
+}
+
+// cleanupLoop removes expired entries every 5 minutes.
+// Stops when the stop channel is closed.
+func (dc *DedupCache) cleanupLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			dc.cleanup()
+		case <-dc.stop:
+			return
+		}
+	}
+}
+
+// cleanup removes all expired entries.
+func (dc *DedupCache) cleanup() {
+	dc.mu.Lock()
+	defer dc.mu.Unlock()
+	now := time.Now()
+	for k, expiry := range dc.entries {
+		if now.After(expiry) {
+			delete(dc.entries, k)
+		}
+	}
+}
+
 // MessageQueue handles message bursts with per-session debouncing.
 type MessageQueue struct {
 	queues     map[string]*sessionQueue
 	debounceMs int
 	maxPending int
 	dedupSec   int
+	dedupCache *DedupCache // Message-ID deduplication cache
 	onDrain    OnDrainFunc
 	mu         sync.Mutex
 	logger     *slog.Logger
@@ -72,8 +175,18 @@ func NewMessageQueue(debounceMs, maxPending int, onDrain OnDrainFunc, logger *sl
 		debounceMs: debounceMs,
 		maxPending: maxPending,
 		dedupSec:   DedupWindowSec,
+		dedupCache: NewDedupCache(20 * time.Minute),
 		onDrain:    onDrain,
 		logger:     logger.With("component", "message_queue"),
+	}
+}
+
+// Stop shuts down the message queue and its dedup cache goroutine.
+func (q *MessageQueue) Stop() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.dedupCache != nil {
+		q.dedupCache.Stop()
 	}
 }
 
@@ -91,11 +204,20 @@ func (q *MessageQueue) Enqueue(sessionID string, msg *channels.IncomingMessage) 
 		q.queues[sessionID] = sq
 	}
 
-	// Deduplication: skip if same content within dedup window.
+	// Message-ID deduplication: catch platform-level duplicate deliveries (webhook retries, etc.)
+	if msg.ID != "" && q.dedupCache != nil {
+		key := dedupKey(msg.Channel, msg.From, msg.ChatID, msg.ID)
+		if q.dedupCache.CheckAndRecord(key) {
+			q.logger.Debug("message deduplicated by ID", "session", sessionID, "msg_id", msg.ID)
+			return false
+		}
+	}
+
+	// Content deduplication: skip if same content within dedup window.
 	now := time.Now()
 	for _, m := range sq.items {
 		if m.msg.Content == msg.Content && now.Sub(m.enqueued) < time.Duration(q.dedupSec)*time.Second {
-			q.logger.Debug("message deduplicated", "session", sessionID, "content_preview", truncate(msg.Content, 30))
+			q.logger.Debug("message deduplicated by content", "session", sessionID, "content_preview", truncate(msg.Content, 30))
 			return false
 		}
 	}

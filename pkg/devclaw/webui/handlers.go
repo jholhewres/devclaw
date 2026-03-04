@@ -1,12 +1,28 @@
 package webui
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/jholhewres/devclaw/pkg/devclaw/skills"
 )
 
 // ── Dashboard ──
+
+func (s *Server) handleAPIHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	resp := map[string]string{"status": "ok"}
+	if s.version != "" {
+		resp["version"] = s.version
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
 
 func (s *Server) handleAPIDashboard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -316,11 +332,40 @@ func (s *Server) handleChatStreamUnified(w http.ResponseWriter, r *http.Request,
 func (s *Server) handleAPISkills(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		skills := s.api.ListSkills()
-		if skills == nil {
-			skills = []SkillInfo{}
+		list := s.api.ListSkills()
+		if list == nil {
+			list = []SkillInfo{}
 		}
-		writeJSON(w, http.StatusOK, skills)
+
+		// Enrich with label/label_pt from embedded catalog.
+		catalog := skills.CatalogSkills()
+		byName := make(map[string]skills.CatalogEntry, len(catalog))
+		for _, e := range catalog {
+			byName[e.Name] = e
+		}
+
+		result := make([]map[string]any, 0, len(list))
+		for _, sk := range list {
+			desc := sk.Description
+			item := map[string]any{
+				"name":       sk.Name,
+				"enabled":    sk.Enabled,
+				"tool_count": sk.ToolCount,
+			}
+			if ce, ok := byName[sk.Name]; ok {
+				item["label"] = ce.Label
+				item["label_pt"] = ce.LabelPT
+				item["description_pt"] = ce.DescriptionPT
+				// Prefer catalog description (always well-formed) over registry
+				// description which may be empty or malformed (e.g. YAML multi-line pipe).
+				if ce.Description != "" {
+					desc = ce.Description
+				}
+			}
+			item["description"] = desc
+			result = append(result, item)
+		}
+		writeJSON(w, http.StatusOK, result)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}
@@ -337,25 +382,53 @@ func (s *Server) handleAPISkillsAction(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(path, "/toggle") && r.Method == http.MethodPost:
 		name := strings.TrimSuffix(path, "/toggle")
 		s.handleSkillToggle(w, r, name)
+	case strings.HasSuffix(path, "/remove") && r.Method == http.MethodPost:
+		name := strings.TrimSuffix(path, "/remove")
+		s.handleSkillRemove(w, r, name)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
 }
 
 func (s *Server) handleSkillsAvailable(w http.ResponseWriter, _ *http.Request) {
-	result := fetchSkillsCatalogFromGitHub(s.logger)
-	if len(result) == 0 {
-		result = []map[string]any{}
+	// Go-native builtins have Go implementations and don't need SKILL.md installation.
+	goNative := map[string]bool{
+		"calculator": true, "web-fetch": true, "datetime": true,
+		"image-gen": true, "claude-code": true, "project-manager": true,
+		"weather": true, "web-search": true,
 	}
 
+	// Build set of already installed skills.
 	installed := s.api.ListSkills()
 	installedSet := make(map[string]bool, len(installed))
 	for _, sk := range installed {
 		installedSet[sk.Name] = true
 	}
-	for i := range result {
-		name, _ := result[i]["name"].(string)
-		result[i]["installed"] = installedSet[name]
+
+	// Use the embedded catalog, excluding Go-native builtins and already installed skills.
+	catalog := skills.CatalogSkills()
+	result := make([]map[string]any, 0, len(catalog))
+	for _, entry := range catalog {
+		if goNative[entry.Name] || installedSet[entry.Name] {
+			continue
+		}
+		item := map[string]any{
+			"name":           entry.Name,
+			"label":          entry.Label,
+			"label_pt":       entry.LabelPT,
+			"description":    entry.Description,
+			"description_pt": entry.DescriptionPT,
+			"category":       entry.Category,
+			"version":        entry.Version,
+			"tags":           entry.Tags,
+			"path":           entry.Path,
+			"enabled":        false,
+			"tool_count":     0,
+		}
+		if entry.ClawHubURL != "" {
+			item["clawhub_url"] = entry.ClawHubURL
+		}
+		result = append(result, item)
 	}
 
 	writeJSON(w, http.StatusOK, result)
@@ -370,12 +443,46 @@ func (s *Server) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.installSetupSkills([]string{body.Name})
+	source := strings.TrimSpace(body.Name)
+
+	// Try embedded defaults first (starter pack skills).
+	installed, err := skills.InstallDefaultSkill("./skills", source)
+	if err == nil && installed {
+		// Reload registry so the new skill appears in ListSkills immediately.
+		_ = s.api.ReloadSkills()
+		writeJSON(w, http.StatusOK, map[string]string{
+			"status":  "ok",
+			"message": "Skill " + source + " installed successfully.",
+		})
+		return
+	}
+
+	// Use the Installer for ClawHub, GitHub, URLs, and local paths.
+	installer := skills.NewInstaller("./skills", s.logger)
+	ctx := context.Background()
+	result, err := installer.Install(ctx, source)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to install skill: " + err.Error(),
+		})
+		return
+	}
+
+	// Reload registry so the new skill appears in ListSkills immediately.
+	_ = s.api.ReloadSkills()
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
-		"message": "Skill " + body.Name + " instalada. Reinicie para ativar.",
+		"message": "Skill " + result.Name + " installed successfully.",
 	})
+}
+
+func (s *Server) handleSkillRemove(w http.ResponseWriter, _ *http.Request, name string) {
+	if err := s.api.RemoveSkill(name); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleSkillToggle(w http.ResponseWriter, r *http.Request, name string) {
@@ -613,6 +720,42 @@ func (s *Server) handleAPIJobs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleAPIJobByID(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/api/jobs/")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "job ID is required"})
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPatch:
+		var body struct {
+			Enabled *bool `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		if body.Enabled == nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "enabled field is required"})
+			return
+		}
+		if err := s.api.ToggleJob(id, *body.Enabled); err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+	case http.MethodDelete:
+		if err := s.api.RemoveJob(id); err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
 // ── Settings: Tool Profiles ──
 
 func (s *Server) handleAPISettingsToolProfiles(w http.ResponseWriter, r *http.Request) {
@@ -687,3 +830,95 @@ func (s *Server) handleAPISettingsToolProfileByName(w http.ResponseWriter, r *ht
 	}
 }
 
+// ── System ──
+
+func (s *Server) handleAPISystemRestart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	if s.onRestartRequested == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "restart not available"})
+		return
+	}
+
+	// Prevent multiple concurrent restart requests
+	if !s.restartPending.CompareAndSwap(false, true) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "restart already in progress"})
+		return
+	}
+
+	// Execute in goroutine to allow HTTP response to be sent before restart
+	go func() {
+		time.Sleep(500 * time.Millisecond) // Wait for response to be sent
+		s.onRestartRequested()
+		// Note: restartPending is not reset because the process will be replaced
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "restarting"})
+}
+
+func (s *Server) handleAPISystemVersion(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	resp := map[string]any{
+		"version": s.version,
+	}
+	if s.updater != nil {
+		resp["update"] = s.updater.LastCheck()
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleAPISystemCheckUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	if s.updater == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "update checker not available"})
+		return
+	}
+
+	info, err := s.updater.CheckNow()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, info)
+}
+
+func (s *Server) handleAPISystemUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	if s.onUpdateRequested == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "update not available"})
+		return
+	}
+
+	// Prevent multiple concurrent update requests (reuse restartPending).
+	if !s.restartPending.CompareAndSwap(false, true) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "update or restart already in progress"})
+		return
+	}
+
+	// Execute in goroutine to allow HTTP response to be sent before update.
+	go func() {
+		if err := s.onUpdateRequested(); err != nil {
+			s.logger.Error("update failed", "error", err)
+			s.restartPending.Store(false)
+		}
+		// Note: restartPending is not reset on success because the process will be replaced.
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updating"})
+}

@@ -257,6 +257,47 @@ func (s *Scheduler) Remove(jobID string) error {
 	return nil
 }
 
+// Toggle enables or disables a job by ID.
+func (s *Scheduler) Toggle(jobID string, enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	job, exists := s.jobs[jobID]
+	if !exists {
+		return fmt.Errorf("job %q not found", jobID)
+	}
+
+	if job.Enabled == enabled {
+		return nil // already in desired state
+	}
+
+	if enabled {
+		// Enable: schedule the cron job if cron is running.
+		if s.cron != nil {
+			if err := s.scheduleCronJob(job); err != nil {
+				return fmt.Errorf("failed to schedule job %q: %w", jobID, err)
+			}
+		}
+	} else {
+		// Disable: remove from cron if registered.
+		if entryID, ok := s.cronIDs[jobID]; ok {
+			s.cron.Remove(entryID)
+			delete(s.cronIDs, jobID)
+		}
+	}
+
+	job.Enabled = enabled
+
+	if s.storage != nil {
+		if err := s.storage.Save(job); err != nil {
+			s.logger.Error("failed to persist job toggle", "id", jobID, "error", err)
+		}
+	}
+
+	s.logger.Info("job toggled", "id", jobID, "enabled", enabled)
+	return nil
+}
+
 // List returns all registered jobs.
 func (s *Scheduler) List() []*Job {
 	s.mu.RLock()
@@ -599,6 +640,7 @@ func (s *Scheduler) executeJob(job *Job) {
 					announceMsg += "\n\nPartial output:\n" + result
 				}
 			}
+			announceMsg = stripSilentTokens(announceMsg)
 			if announceMsg != "" {
 				if aErr := announcer(job.Channel, job.ChatID, announceMsg); aErr != nil {
 					s.logger.Error("failed to announce cron result",
@@ -641,6 +683,18 @@ func resolveStableCronOffset(jobID string, maxStagger time.Duration) time.Durati
 	n := binary.BigEndian.Uint32(h[:4])
 	ms := int64(n) % maxStagger.Milliseconds()
 	return time.Duration(ms) * time.Millisecond
+}
+
+// stripSilentTokens removes internal sentinel tokens (NO_REPLY, HEARTBEAT_OK)
+// from cron announce messages to prevent them from leaking to users.
+func stripSilentTokens(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "NO_REPLY" || trimmed == "HEARTBEAT_OK" {
+		return ""
+	}
+	s = strings.ReplaceAll(s, "NO_REPLY", "")
+	s = strings.ReplaceAll(s, "HEARTBEAT_OK", "")
+	return strings.TrimSpace(s)
 }
 
 // isTopOfHourSchedule detects schedules that fire at the top of the hour

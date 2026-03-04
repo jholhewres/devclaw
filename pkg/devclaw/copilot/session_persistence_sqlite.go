@@ -116,6 +116,56 @@ func (p *SQLiteSessionPersistence) LoadSession(sessionID string) ([]Conversation
 	return entries, facts, factRows.Err()
 }
 
+// ListSessionsMeta returns lightweight metadata for all sessions without loading
+// full conversation history. Used by the web UI sidebar to list conversations.
+func (p *SQLiteSessionPersistence) ListSessionsMeta() ([]SessionMeta, error) {
+	query := `
+		SELECT
+			m.session_id,
+			m.channel,
+			m.chat_id,
+			m.updated_at,
+			COALESCE((SELECT COUNT(*) FROM session_entries e WHERE e.session_id = m.session_id), 0) AS msg_count,
+			COALESCE((SELECT e.user_message FROM session_entries e WHERE e.session_id = m.session_id ORDER BY e.id ASC LIMIT 1), '') AS first_msg,
+			COALESCE((SELECT e.created_at FROM session_entries e WHERE e.session_id = m.session_id ORDER BY e.id ASC LIMIT 1), m.updated_at) AS created_at
+		FROM session_meta m
+		ORDER BY m.updated_at DESC
+	`
+	rows, err := p.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions meta: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SessionMeta
+	for rows.Next() {
+		var (
+			id, channel, chatID, updatedAt, firstMsg, createdAt string
+			msgCount                                            int
+		)
+		if err := rows.Scan(&id, &channel, &chatID, &updatedAt, &msgCount, &firstMsg, &createdAt); err != nil {
+			p.logger.Warn("list sessions meta: scan row failed", "error", err)
+			continue
+		}
+		title := firstMsg
+		if len(title) > 60 {
+			title = title[:60]
+		}
+		parsedCreated, _ := time.Parse(time.RFC3339, createdAt)
+		parsedUpdated, _ := time.Parse(time.RFC3339, updatedAt)
+		out = append(out, SessionMeta{
+			ID:           id,
+			Channel:      channel,
+			ChatID:       chatID,
+			Title:        title,
+			MessageCount: msgCount,
+			CreatedAt:    parsedCreated,
+			LastActiveAt: parsedUpdated,
+		})
+	}
+	return out, rows.Err()
+}
+
 // LoadAll scans all sessions from the database and returns SessionData for each.
 func (p *SQLiteSessionPersistence) LoadAll() (map[string]*SessionData, error) {
 	// Collect all unique session IDs from entries.
@@ -217,13 +267,23 @@ func (p *SQLiteSessionPersistence) SaveMeta(sessionID, channel, chatID string, c
 }
 
 // DeleteSession removes all data for a session (entries, facts, meta).
+// Returns an error if the session was not found in any table.
 func (p *SQLiteSessionPersistence) DeleteSession(sessionID string) error {
+	var totalAffected int64
 	for _, table := range []string{"session_entries", "session_facts", "session_meta"} {
-		if _, err := p.db.Exec(
+		res, err := p.db.Exec(
 			fmt.Sprintf("DELETE FROM %s WHERE session_id = ?", table), sessionID,
-		); err != nil {
+		)
+		if err != nil {
 			p.logger.Warn("failed to delete from table", "table", table, "session", sessionID, "err", err)
+			continue
 		}
+		if n, err := res.RowsAffected(); err == nil {
+			totalAffected += n
+		}
+	}
+	if totalAffected == 0 {
+		return fmt.Errorf("session %s not found in persistence", sessionID)
 	}
 	return nil
 }

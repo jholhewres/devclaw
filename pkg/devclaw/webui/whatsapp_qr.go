@@ -7,9 +7,11 @@ import (
 )
 
 // handleAPIWhatsAppQR routes WhatsApp QR-related requests.
-//   GET  /api/channels/whatsapp/status → connection status
-//   GET  /api/channels/whatsapp/qr     → SSE stream of QR events
-//   POST /api/channels/whatsapp/qr     → request a new QR code
+//
+//	GET  /api/channels/whatsapp/status     → connection status
+//	GET  /api/channels/whatsapp/qr         → SSE stream of QR events
+//	POST /api/channels/whatsapp/qr         → request a new QR code
+//	POST /api/channels/whatsapp/disconnect → disconnect from WhatsApp
 func (s *Server) handleAPIWhatsAppQR(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/channels/whatsapp")
 	adapter, ok := s.api.(*AssistantAdapter)
@@ -27,6 +29,8 @@ func (s *Server) handleAPIWhatsAppQR(w http.ResponseWriter, r *http.Request) {
 		s.handleWhatsAppQRStream(w, r, adapter)
 	case path == "/qr" && r.Method == http.MethodPost:
 		s.handleWhatsAppQRRequest(w, r, adapter)
+	case path == "/disconnect" && r.Method == http.MethodPost:
+		s.handleWhatsAppDisconnect(w, r, adapter)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
@@ -113,7 +117,29 @@ func (s *Server) handleWhatsAppQRRequest(w http.ResponseWriter, _ *http.Request,
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
-		"status": "ok",
+		"status":  "ok",
 		"message": "QR code generation started",
+	})
+}
+
+// handleWhatsAppDisconnect disconnects from WhatsApp.
+func (s *Server) handleWhatsAppDisconnect(w http.ResponseWriter, _ *http.Request, adapter *AssistantAdapter) {
+	if adapter.DisconnectWhatsAppFn == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{
+			"error": "WhatsApp disconnect not available",
+		})
+		return
+	}
+
+	if err := adapter.DisconnectWhatsAppFn(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"message": "WhatsApp disconnected",
 	})
 }

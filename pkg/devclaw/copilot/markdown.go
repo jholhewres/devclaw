@@ -228,7 +228,7 @@ func StripInternalTags(text string) string {
 	text = strings.ReplaceAll(text, TokenNoReply, "")
 	text = strings.ReplaceAll(text, TokenHeartbeatOK, "")
 
-	return strings.TrimSpace(text)
+	return text
 }
 
 // StripReplyTags is an alias for StripInternalTags for backward compatibility.

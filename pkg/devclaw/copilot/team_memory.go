@@ -977,12 +977,12 @@ func (tm *TeamMemory) NotifySubscribers(threadID, fromAgent, content string, exc
 		// Trigger immediate run via TeamManager if available
 		if tm.teamManager != nil {
 			notification := fmt.Sprintf("New activity in thread %s", threadID)
-			go func() {
+			go func(id string) {
 				// Use timeout to prevent goroutine leak on shutdown
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
-				tm.teamManager.SendToAgent(ctx, agentID, fromAgent, notification)
-			}()
+				tm.teamManager.SendToAgent(ctx, id, fromAgent, notification)
+			}(agentID)
 		}
 	}
 
@@ -1012,15 +1012,7 @@ func (tm *TeamMemory) DeleteAllData() error {
 	}
 
 	for _, table := range tables {
-		// Add team_id condition only for tables that have it
-		var query string
-		switch table {
-		case "agent_working_state":
-			// This table doesn't have team_id, need subquery
-			query = fmt.Sprintf("DELETE FROM %s WHERE team_id = ?", table)
-		default:
-			query = fmt.Sprintf("DELETE FROM %s WHERE team_id = ?", table)
-		}
+		query := fmt.Sprintf("DELETE FROM %s WHERE team_id = ?", table)
 		_, err := tm.db.Exec(query, tm.teamID)
 		if err != nil {
 			tm.logger.Warn("failed to delete from table during cleanup", "table", table, "error", err)

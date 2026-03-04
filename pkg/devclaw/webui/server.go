@@ -11,9 +11,11 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
+	"github.com/jholhewres/devclaw/pkg/devclaw/updater"
 )
 
 // StreamEvent is a typed SSE event sent to the frontend.
@@ -54,11 +56,23 @@ type AssistantAPI interface {
 	// GetSchedulerJobs returns all scheduler jobs.
 	GetSchedulerJobs() []JobInfo
 
+	// ToggleJob enables or disables a scheduler job by ID.
+	ToggleJob(id string, enabled bool) error
+
+	// RemoveJob removes a scheduler job by ID.
+	RemoveJob(id string) error
+
 	// ListSkills returns available skills.
 	ListSkills() []SkillInfo
 
 	// ToggleSkill enables or disables a skill by name.
 	ToggleSkill(name string, enabled bool) error
+
+	// RemoveSkill uninstalls a skill by name (removes from registry and disk).
+	RemoveSkill(name string) error
+
+	// ReloadSkills reloads the skill registry from disk (after install/remove).
+	ReloadSkills() error
 
 	// SendChatMessage sends a message and blocks until the full response is ready.
 	// Used as fallback when streaming is not available.
@@ -127,6 +141,7 @@ type SessionInfo struct {
 	ID            string    `json:"id"`
 	Channel       string    `json:"channel"`
 	ChatID        string    `json:"chat_id"`
+	Title         string    `json:"title,omitempty"`
 	MessageCount  int       `json:"message_count"`
 	LastMessageAt time.Time `json:"last_message_at"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -205,17 +220,17 @@ type MCPServerInfo struct {
 
 // DatabaseStatusInfo contains database health status for the UI.
 type DatabaseStatusInfo struct {
-	Name           string `json:"name"`
-	Healthy        bool   `json:"healthy"`
-	Latency        int64  `json:"latency"` // ms
-	Version        string `json:"version"`
-	OpenConns      int    `json:"open_connections"`
-	InUse          int    `json:"in_use"`
-	Idle           int    `json:"idle"`
-	WaitCount      int    `json:"wait_count"`
-	WaitDuration   int64  `json:"wait_duration"` // ms
-	MaxOpenConns   int    `json:"max_open_conns"`
-	Error          string `json:"error,omitempty"`
+	Name         string `json:"name"`
+	Healthy      bool   `json:"healthy"`
+	Latency      int64  `json:"latency"` // ms
+	Version      string `json:"version"`
+	OpenConns    int    `json:"open_connections"`
+	InUse        int    `json:"in_use"`
+	Idle         int    `json:"idle"`
+	WaitCount    int    `json:"wait_count"`
+	WaitDuration int64  `json:"wait_duration"` // ms
+	MaxOpenConns int    `json:"max_open_conns"`
+	Error        string `json:"error,omitempty"`
 }
 
 // WebhookInfo contains webhook metadata for the UI.
@@ -272,11 +287,17 @@ type Config struct {
 	// Enabled turns the web UI on/off.
 	Enabled bool `yaml:"enabled"`
 
-	// Address is the listen address (default: ":8090").
+	// Address is the listen address (default: ":47716").
 	Address string `yaml:"address"`
 
 	// AuthToken is the Bearer token for authentication (empty = no auth).
 	AuthToken string `yaml:"auth_token"`
+}
+
+// UpdateChecker is the interface used by the web UI to query update status.
+type UpdateChecker interface {
+	LastCheck() updater.UpdateInfo
+	CheckNow() (updater.UpdateInfo, error)
 }
 
 // Server is the web UI HTTP server.
@@ -287,7 +308,7 @@ type Server struct {
 	server *http.Server
 
 	// activeStreams tracks SSE connections waiting for events by runID.
-	activeStreams   map[string]*RunHandle
+	activeStreams  map[string]*RunHandle
 	activeStreamMu sync.Mutex
 
 	// setupMode is true when the server runs without a full config (setup wizard only).
@@ -300,27 +321,54 @@ type Server struct {
 	// Receives (masterPassword, secrets map[name]value) and returns error.
 	onVaultInit func(password string, secrets map[string]string) error
 
+	// onRestartRequested is called when the user requests a restart via the web UI.
+	onRestartRequested func() error
+
+	// restartPending prevents multiple concurrent restart requests.
+	restartPending atomic.Bool
+
+	// authMu protects authToken and derivedToken from concurrent access.
+	authMu       sync.RWMutex
+	authToken    string // plain-text password from config
+	derivedToken string // SHA-256 hex of authToken (cached)
+
 	// mediaAPI provides media upload/download operations (optional).
 	mediaAPI MediaAPI
 
 	// oauthHandlers provides OAuth endpoints (optional).
 	oauthHandlers *OAuthHandlers
+
+	// version is the current binary version.
+	version string
+
+	// updater provides update checking (optional).
+	updater UpdateChecker
+
+	// onUpdateRequested is called when the user requests an update via the web UI.
+	onUpdateRequested func() error
 }
 
 // New creates a new web UI server.
 func New(cfg Config, api AssistantAPI, logger *slog.Logger) *Server {
 	if cfg.Address == "" {
-		cfg.Address = ":8090"
+		cfg.Address = ":47716"
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
 
+	derived := ""
+	if cfg.AuthToken != "" {
+		derived = deriveToken(cfg.AuthToken)
+	}
+
 	return &Server{
-		cfg:            cfg,
-		api:            api,
-		logger:         logger.With("component", "webui"),
-		activeStreams:   make(map[string]*RunHandle),
+		cfg:           cfg,
+		api:           api,
+		logger:        logger.With("component", "webui"),
+		activeStreams: make(map[string]*RunHandle),
+		authToken:    cfg.AuthToken,
+		derivedToken: derived,
 	}
 }
 
@@ -335,6 +383,11 @@ func (s *Server) OnVaultInit(fn func(password string, secrets map[string]string)
 	s.onVaultInit = fn
 }
 
+// OnRestartRequested registers a callback invoked when the user requests a restart.
+func (s *Server) OnRestartRequested(fn func() error) {
+	s.onRestartRequested = fn
+}
+
 // SetMediaAPI sets the media API for file upload/download operations.
 func (s *Server) SetMediaAPI(api MediaAPI) {
 	s.mediaAPI = api
@@ -344,6 +397,34 @@ func (s *Server) SetMediaAPI(api MediaAPI) {
 func (s *Server) SetOAuthHandlers(handlers *OAuthHandlers) {
 	s.oauthHandlers = handlers
 }
+
+// SetAuthToken updates the auth token at runtime (e.g. when changed via the domain settings page).
+func (s *Server) SetAuthToken(token string) {
+	s.authMu.Lock()
+	defer s.authMu.Unlock()
+	s.authToken = token
+	if token != "" {
+		s.derivedToken = deriveToken(token)
+	} else {
+		s.derivedToken = ""
+	}
+}
+
+// getAuth returns the current plain-text token and its cached SHA-256 derived form.
+func (s *Server) getAuth() (raw, derived string) {
+	s.authMu.RLock()
+	defer s.authMu.RUnlock()
+	return s.authToken, s.derivedToken
+}
+
+// SetVersion sets the current binary version for the version endpoint.
+func (s *Server) SetVersion(v string) { s.version = v }
+
+// SetUpdateChecker sets the update checker for update endpoints.
+func (s *Server) SetUpdateChecker(uc UpdateChecker) { s.updater = uc }
+
+// OnUpdateRequested registers a callback invoked when the user requests an update.
+func (s *Server) OnUpdateRequested(fn func() error) { s.onUpdateRequested = fn }
 
 // GetOAuthHandlers returns the OAuth handlers (may be nil).
 func (s *Server) GetOAuthHandlers() *OAuthHandlers {
@@ -358,6 +439,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/auth/login", s.handleAuthLogin)
 	mux.HandleFunc("/api/auth/logout", s.handleAuthLogout)
 	mux.HandleFunc("/api/auth/status", s.handleAuthStatus)
+	mux.HandleFunc("/api/health", s.handleAPIHealth)
 	mux.HandleFunc("/api/setup/", s.handleAPISetup)
 
 	// ── Protected routes (require auth, require assistant) ──
@@ -367,6 +449,15 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/skills", s.authMiddleware(s.requireAssistant(s.handleAPISkills)))
 	mux.HandleFunc("/api/skills/", s.authMiddleware(s.requireAssistant(s.handleAPISkillsAction)))
 	mux.HandleFunc("/api/channels", s.authMiddleware(s.requireAssistant(s.handleAPIChannels)))
+	// WhatsApp-specific routes (must be before generic /api/channels/whatsapp/)
+	mux.HandleFunc("/api/channels/whatsapp/access", s.authMiddleware(s.requireAssistant(s.handleAPIWhatsAppAccess)))
+	mux.HandleFunc("/api/channels/whatsapp/access/users/", s.authMiddleware(s.requireAssistant(s.handleAPIWhatsAppAccessUser)))
+	mux.HandleFunc("/api/channels/whatsapp/access/blocked/", s.authMiddleware(s.requireAssistant(s.handleAPIWhatsAppBlockedUser)))
+	mux.HandleFunc("/api/channels/whatsapp/groups/joined", s.authMiddleware(s.requireAssistant(s.handleAPIWhatsAppJoinedGroups)))
+	mux.HandleFunc("/api/channels/whatsapp/groups", s.authMiddleware(s.requireAssistant(s.handleAPIWhatsAppGroups)))
+	mux.HandleFunc("/api/channels/whatsapp/groups/", s.authMiddleware(s.requireAssistant(s.handleAPIWhatsAppGroups)))
+	mux.HandleFunc("/api/channels/whatsapp/config", s.authMiddleware(s.requireAssistant(s.handleAPIWhatsAppConfig)))
+	// Generic WhatsApp routes
 	mux.HandleFunc("/api/channels/whatsapp/", s.authMiddleware(s.requireAssistant(s.handleAPIWhatsAppQR)))
 	mux.HandleFunc("/api/config", s.authMiddleware(s.requireAssistant(s.handleAPIConfig)))
 	mux.HandleFunc("/api/domain", s.authMiddleware(s.requireAssistant(s.handleAPIDomain)))
@@ -376,6 +467,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/hooks/", s.authMiddleware(s.requireAssistant(s.handleAPIHookByName)))
 	mux.HandleFunc("/api/usage", s.authMiddleware(s.requireAssistant(s.handleAPIUsage)))
 	mux.HandleFunc("/api/jobs", s.authMiddleware(s.requireAssistant(s.handleAPIJobs)))
+	mux.HandleFunc("/api/jobs/", s.authMiddleware(s.requireAssistant(s.handleAPIJobByID)))
 	mux.HandleFunc("/api/security/", s.authMiddleware(s.requireAssistant(s.handleAPISecurity)))
 	mux.HandleFunc("/api/security", s.authMiddleware(s.requireAssistant(s.handleAPISecurity)))
 	mux.HandleFunc("/api/chat/", s.authMiddleware(s.requireAssistant(s.handleAPIChat)))
@@ -386,6 +478,12 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Database
 	mux.HandleFunc("/api/database/status", s.authMiddleware(s.requireAssistant(s.handleAPIDatabaseStatus)))
+
+	// System
+	mux.HandleFunc("/api/system/restart", s.authMiddleware(s.requireAssistant(s.handleAPISystemRestart)))
+	mux.HandleFunc("/api/system/version", s.authMiddleware(s.handleAPISystemVersion))
+	mux.HandleFunc("/api/system/check-update", s.authMiddleware(s.requireAssistant(s.handleAPISystemCheckUpdate)))
+	mux.HandleFunc("/api/system/update", s.authMiddleware(s.requireAssistant(s.handleAPISystemUpdate)))
 
 	// Settings / Tool Profiles
 	mux.HandleFunc("/api/settings/tool-profiles", s.authMiddleware(s.requireAssistant(s.handleAPISettingsToolProfiles)))
@@ -469,13 +567,14 @@ func (s *Server) getRun(runID string) *RunHandle {
 // authMiddleware validates the bearer token if configured.
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if s.cfg.AuthToken == "" {
+		raw, derived := s.getAuth()
+		if raw == "" {
 			next(w, r)
 			return
 		}
 
 		token := extractToken(r)
-		if !compareTokens(token, s.cfg.AuthToken) {
+		if !compareTokens(token, derived) {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "Unauthorized"})
 			return
 		}

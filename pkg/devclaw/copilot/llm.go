@@ -395,6 +395,7 @@ type chatRequest struct {
 	MaxTokens           *int             `json:"max_tokens,omitempty"`
 	MaxCompletionTokens *int             `json:"max_completion_tokens,omitempty"` // OpenAI o1/o3/o4/gpt-5 models
 	ToolStream          *bool            `json:"tool_stream,omitempty"`           // Z.AI: real-time tool call streaming
+	Options             map[string]any   `json:"options,omitempty"`               // Ollama: runtime options (num_ctx, etc.)
 }
 
 // modelDefaults holds per-model/provider behavior overrides.
@@ -423,18 +424,18 @@ func getModelDefaults(model, provider string) modelDefaults {
 
 	switch {
 	// ── OpenAI models ──
-	// gpt-5-mini and gpt-5-nano only support default temperature (1.0)
-	case strings.HasPrefix(model, "gpt-5-mini"), strings.HasPrefix(model, "gpt-5-nano"):
-		d.SupportsTemperature = false // only default (1.0) supported
-		d.MaxOutputTokens = 16384
-		d.UsesMaxCompletionTokens = true
+	// gpt-5 family: temperature not reliably supported across all models.
 	case strings.HasPrefix(model, "gpt-5"):
-		d.DefaultTemperature = 0.7
+		d.SupportsTemperature = false
 		d.MaxOutputTokens = 16384
 		d.UsesMaxCompletionTokens = true
 	case strings.HasPrefix(model, "o1"), strings.HasPrefix(model, "o3"), strings.HasPrefix(model, "o4"):
 		d.SupportsTemperature = false // o-series only supports default (1.0)
 		d.MaxOutputTokens = 100000
+		d.UsesMaxCompletionTokens = true
+	case strings.HasPrefix(model, "gpt-4.1"):
+		d.SupportsTemperature = false
+		d.MaxOutputTokens = 16384
 		d.UsesMaxCompletionTokens = true
 	case strings.HasPrefix(model, "gpt-4o"):
 		d.DefaultTemperature = 0.7
@@ -454,9 +455,22 @@ func getModelDefaults(model, provider string) modelDefaults {
 	case strings.HasPrefix(model, "claude-sonnet-4"):
 		d.DefaultTemperature = 1.0
 		d.MaxOutputTokens = 16384
+	case strings.HasPrefix(model, "claude-haiku"):
+		d.DefaultTemperature = 1.0
+		d.MaxOutputTokens = 8192
 	case strings.HasPrefix(model, "claude-3"):
 		d.DefaultTemperature = 1.0
 		d.MaxOutputTokens = 4096
+
+	// ── Google models ──
+	case strings.HasPrefix(model, "gemini-2.5"),
+		strings.HasPrefix(model, "gemini-3"):
+		d.DefaultTemperature = 1.0
+		d.MaxOutputTokens = 8192
+	case strings.HasPrefix(model, "gemini-2"),
+		strings.HasPrefix(model, "gemini-1.5"):
+		d.DefaultTemperature = 1.0
+		d.MaxOutputTokens = 8192
 
 	// ── GLM models (Z.AI) ──
 	case strings.HasPrefix(model, "glm-5"):
@@ -523,6 +537,24 @@ func (c *LLMClient) applyModelDefaults(req *chatRequest) {
 	if !d.SupportsTools {
 		req.Tools = nil
 	}
+
+	// Ollama: inject num_ctx to ensure the model uses the correct context window.
+	// Without this, Ollama defaults to 2048 tokens which is too small for agent use.
+	if c.provider == "ollama" {
+		ctxWindow := getModelContextWindowByName(req.Model)
+		if ctxWindow > 0 {
+			if req.Options == nil {
+				req.Options = make(map[string]any)
+			}
+			if _, exists := req.Options["num_ctx"]; !exists {
+				req.Options["num_ctx"] = ctxWindow
+			}
+		}
+	}
+
+	// xAI/Grok rejects reasoning_effort in the payload.
+	// If reasoning_effort is added to chatRequest in the future,
+	// skip it when c.needsSchemaStrip(req.Model) returns true.
 
 	// Prompt caching: mark system messages with cache_control for supported providers.
 	// Anthropic and Z.AI (anthropic proxy) support it natively.
@@ -684,8 +716,9 @@ func (c *LLMClient) applyPromptCaching(req *chatRequest) {
 type streamChoice struct {
 	Index int `json:"index"`
 	Delta struct {
-		Content   string           `json:"content"`
-		ToolCalls []streamToolCall `json:"tool_calls,omitempty"`
+		Content          string           `json:"content"`
+		ReasoningContent string           `json:"reasoning_content"` // OpenAI reasoning models (o-series, gpt-5-mini)
+		ToolCalls        []streamToolCall `json:"tool_calls,omitempty"`
 	} `json:"delta"`
 	FinishReason *string `json:"finish_reason"`
 }
@@ -708,6 +741,9 @@ type streamResponse struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
+		PromptTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details,omitempty"`
 	} `json:"usage,omitempty"`
 }
 
@@ -724,6 +760,9 @@ type chatResponse struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
+		PromptTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details,omitempty"`
 	} `json:"usage"`
 	Error *struct {
 		Message string `json:"message"`
@@ -784,9 +823,11 @@ type anthropicResponse struct {
 	Model      string             `json:"model"`
 	Content    []anthropicContent `json:"content"`
 	StopReason string             `json:"stop_reason"` // "end_turn", "tool_use", "max_tokens"
-	Usage      struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+	Usage struct {
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 	} `json:"usage"`
 	Error *struct {
 		Type    string `json:"type"`
@@ -992,6 +1033,8 @@ func convertFromAnthropicResponse(resp *anthropicResponse) *LLMResponse {
 			PromptTokens:     resp.Usage.InputTokens,
 			CompletionTokens: resp.Usage.OutputTokens,
 			TotalTokens:      resp.Usage.InputTokens + resp.Usage.OutputTokens,
+			CacheReadTokens:  resp.Usage.CacheReadInputTokens,
+			CacheWriteTokens: resp.Usage.CacheCreationInputTokens,
 		},
 	}
 }
@@ -1024,6 +1067,71 @@ type FunctionCall struct {
 	Arguments string `json:"arguments"`
 }
 
+// unsupportedSchemaKeywords lists JSON Schema keywords that xAI/Grok rejects.
+var unsupportedSchemaKeywords = map[string]bool{
+	"minLength": true, "maxLength": true,
+	"minItems": true, "maxItems": true,
+	"minimum": true, "maximum": true,
+	"exclusiveMinimum": true, "exclusiveMaximum": true,
+	"pattern": true, "format": true,
+	"uniqueItems": true,
+}
+
+// needsSchemaStrip returns true if the provider/model requires schema sanitization.
+func (c *LLMClient) needsSchemaStrip(model string) bool {
+	if c.provider == "xai" {
+		return true
+	}
+	if c.provider == "openrouter" {
+		lower := strings.ToLower(model)
+		if strings.HasPrefix(lower, "grok") || strings.HasPrefix(lower, "xai/") {
+			return true
+		}
+	}
+	return false
+}
+
+// stripToolSchemaKeywords returns a copy of tools with unsupported keywords removed
+// from each function's parameter schema.
+func stripToolSchemaKeywords(tools []ToolDefinition) []ToolDefinition {
+	out := make([]ToolDefinition, len(tools))
+	for i, t := range tools {
+		out[i] = t
+		if len(t.Function.Parameters) == 0 {
+			continue
+		}
+		var schema map[string]any
+		if err := json.Unmarshal(t.Function.Parameters, &schema); err != nil {
+			continue
+		}
+		stripSchemaKeysRecursive(schema)
+		cleaned, err := json.Marshal(schema)
+		if err != nil {
+			continue
+		}
+		out[i].Function.Parameters = cleaned
+	}
+	return out
+}
+
+func stripSchemaKeysRecursive(obj map[string]any) {
+	for k := range obj {
+		if unsupportedSchemaKeywords[k] {
+			delete(obj, k)
+		}
+	}
+	if props, ok := obj["properties"].(map[string]any); ok {
+		for _, v := range props {
+			if sub, ok := v.(map[string]any); ok {
+				stripSchemaKeysRecursive(sub)
+			}
+		}
+	}
+	if items, ok := obj["items"].(map[string]any); ok {
+		stripSchemaKeysRecursive(items)
+	}
+}
+
 // ---------- Response Types ----------
 
 // LLMResponse holds the parsed response from a chat completion.
@@ -1040,6 +1148,8 @@ type LLMUsage struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
+	CacheReadTokens  int // Tokens read from provider cache (Anthropic: cache_read_input_tokens)
+	CacheWriteTokens int // Tokens written to provider cache (Anthropic: cache_creation_input_tokens)
 }
 
 // ---------- Error Classification ----------
@@ -1428,6 +1538,10 @@ func envOrEmpty(key string) string {
 // completeOnce performs a single chat completion request. Returns *apiError on HTTP errors
 // so the caller can classify and decide retry/fallback.
 func (c *LLMClient) completeOnce(ctx context.Context, model string, messages []chatMessage, tools []ToolDefinition) (*LLMResponse, error) {
+	// Apply per-provider transcript policy to sanitize messages.
+	policy := GetTranscriptPolicy(c.provider)
+	messages = ApplyTranscriptPolicy(messages, policy)
+
 	if c.isAnthropicAPI() {
 		return c.completeOnceAnthropic(ctx, model, messages, tools)
 	}
@@ -1544,6 +1658,9 @@ func (c *LLMClient) completeOnceOpenAI(ctx context.Context, model string, messag
 		Messages: messages,
 	}
 	if len(tools) > 0 {
+		if c.needsSchemaStrip(model) {
+			tools = stripToolSchemaKeywords(tools)
+		}
 		reqBody.Tools = tools
 	}
 	c.applyModelDefaults(&reqBody)
@@ -1632,6 +1749,11 @@ func (c *LLMClient) completeOnceOpenAI(ctx context.Context, model string, messag
 		"tool_calls", len(choice.Message.ToolCalls),
 	)
 
+	cacheRead := 0
+	if chatResp.Usage.PromptTokensDetails != nil {
+		cacheRead = chatResp.Usage.PromptTokensDetails.CachedTokens
+	}
+
 	return &LLMResponse{
 		Content:      content,
 		ToolCalls:    choice.Message.ToolCalls,
@@ -1641,6 +1763,7 @@ func (c *LLMClient) completeOnceOpenAI(ctx context.Context, model string, messag
 			PromptTokens:     chatResp.Usage.PromptTokens,
 			CompletionTokens: chatResp.Usage.CompletionTokens,
 			TotalTokens:      chatResp.Usage.TotalTokens,
+			CacheReadTokens:  cacheRead,
 		},
 	}, nil
 }
@@ -1737,6 +1860,10 @@ func (c *LLMClient) CompleteWithToolsStreamUsingModel(ctx context.Context, model
 
 // completeOnceStream performs a single streaming chat completion. Uses SSE parsing.
 func (c *LLMClient) completeOnceStream(ctx context.Context, model string, messages []chatMessage, tools []ToolDefinition, onChunk StreamCallback) (*LLMResponse, error) {
+	// Apply per-provider transcript policy to sanitize messages.
+	policy := GetTranscriptPolicy(c.provider)
+	messages = ApplyTranscriptPolicy(messages, policy)
+
 	if c.isAnthropicAPI() {
 		return c.completeOnceStreamAnthropic(ctx, model, messages, tools, onChunk)
 	}
@@ -1842,6 +1969,8 @@ func (c *LLMClient) completeOnceStreamAnthropic(ctx context.Context, model strin
 		case "message_start":
 			if event.Message != nil {
 				usage.PromptTokens = event.Message.Usage.InputTokens
+				usage.CacheReadTokens = event.Message.Usage.CacheReadInputTokens
+				usage.CacheWriteTokens = event.Message.Usage.CacheCreationInputTokens
 			}
 
 		// Native thinking_start event: marks the beginning of an extended
@@ -1994,6 +2123,9 @@ func (c *LLMClient) completeOnceStreamOpenAI(ctx context.Context, model string, 
 		Stream:   true,
 	}
 	if len(tools) > 0 {
+		if c.needsSchemaStrip(model) {
+			tools = stripToolSchemaKeywords(tools)
+		}
 		reqBody.Tools = tools
 	}
 	c.applyModelDefaults(&reqBody)
@@ -2035,8 +2167,10 @@ func (c *LLMClient) completeOnceStreamOpenAI(ctx context.Context, model string, 
 
 	// Accumulated response
 	var contentBuilder strings.Builder
+	var streamUsage LLMUsage
 	toolCallsAccum := make(map[int]*ToolCall) // index -> accumulated tool call
 	finishReason := ""
+	reasoningActive := false // tracks whether we're inside a reasoning block
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024) // 64KB initial, 1MB max line
@@ -2062,8 +2196,29 @@ func (c *LLMClient) completeOnceStreamOpenAI(ctx context.Context, model string, 
 		}
 
 		for _, choice := range chunk.Choices {
-			// Text delta
+			// Reasoning content delta (OpenAI reasoning models: o-series, gpt-5-mini).
+			// Wrap in <thinking> tags so the frontend can extract and display it
+			// in a collapsible ThinkingBlock instead of showing empty "thinking..." dots.
+			if choice.Delta.ReasoningContent != "" {
+				if !reasoningActive {
+					reasoningActive = true
+					if onChunk != nil {
+						onChunk("<thinking>")
+					}
+				}
+				if onChunk != nil {
+					onChunk(choice.Delta.ReasoningContent)
+				}
+			}
+
+			// Text delta — if reasoning was active, close the thinking tag first.
 			if choice.Delta.Content != "" {
+				if reasoningActive {
+					reasoningActive = false
+					if onChunk != nil {
+						onChunk("</thinking>")
+					}
+				}
 				contentBuilder.WriteString(choice.Delta.Content)
 				if onChunk != nil {
 					onChunk(choice.Delta.Content)
@@ -2094,9 +2249,21 @@ func (c *LLMClient) completeOnceStreamOpenAI(ctx context.Context, model string, 
 			}
 		}
 
-		// Usage in final chunk
+		// Usage in final chunk (OpenAI sends usage in the last SSE event)
 		if chunk.Usage != nil {
-			// Could capture usage if needed
+			streamUsage.PromptTokens = chunk.Usage.PromptTokens
+			streamUsage.CompletionTokens = chunk.Usage.CompletionTokens
+			streamUsage.TotalTokens = chunk.Usage.TotalTokens
+			if chunk.Usage.PromptTokensDetails != nil {
+				streamUsage.CacheReadTokens = chunk.Usage.PromptTokensDetails.CachedTokens
+			}
+		}
+	}
+
+	// Close any open reasoning block at the end of stream.
+	if reasoningActive {
+		if onChunk != nil {
+			onChunk("</thinking>")
 		}
 	}
 
@@ -2132,7 +2299,7 @@ func (c *LLMClient) completeOnceStreamOpenAI(ctx context.Context, model string, 
 		ToolCalls:    toolCalls,
 		FinishReason: finishReason,
 		ModelUsed:    model,
-		Usage:        LLMUsage{},
+		Usage:        streamUsage,
 	}, nil
 }
 

@@ -24,8 +24,8 @@ func TestStripInternalTags(t *testing.T) {
 		{"NO_REPLY in text", "result is NO_REPLY done", "result is  done"},
 		{"combined tags", "[[reply_to_current]]<final>text</final>NO_REPLY", ""},
 		{"nested tags", "<final><thinking>deep</thinking></final>", ""},
-		{"text with mixed tags", "Hello [[reply_to_current]] world <final>dup</final>", "Hello  world"},
-		{"only whitespace after strip", "  [[reply_to_current]]  ", ""},
+		{"text with mixed tags", "Hello [[reply_to_current]] world <final>dup</final>", "Hello  world "}, // trailing space from final block removal
+		{"only whitespace after strip", "  [[reply_to_current]]  ", "    "},                              // TrimSpace removed to preserve streaming chunks
 		{"tools used annotation", "[Tools used: cron_add, web_search]\nHello", "Hello"},
 		{"tools used inline", "[Tools used: calculator_calculate, timestamp_convert]\nDone!", "Done!"},
 		{"tool_provenance tag", "<tool_provenance>cron_list</tool_provenance>\nNo jobs.", "No jobs."},
@@ -104,8 +104,8 @@ func TestFormatForWhatsApp(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"bold", "**hello**", "_hello_"},      // **x** → *x* → _x_ (italic pass)
-		{"header h1", "# Title", "_Title_"},    // header → *Title* → _Title_
+		{"bold", "**hello**", "_hello_"},    // **x** → *x* → _x_ (italic pass)
+		{"header h1", "# Title", "_Title_"}, // header → *Title* → _Title_
 		{"header h2", "## Subtitle", "_Subtitle_"},
 		{"header h3", "### Deep", "_Deep_"},
 		{"link", "[click](http://x.com)", "click (http://x.com)"},

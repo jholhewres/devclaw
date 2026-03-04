@@ -98,6 +98,71 @@ type VaultReader interface {
 	Has(key string) bool
 }
 
+// SourceTier indicates where a skill was loaded from.
+// Higher tiers override lower tiers when skills have the same name.
+type SourceTier int
+
+const (
+	// TierBundled is for skills bundled with DevClaw (lowest priority).
+	TierBundled SourceTier = 0
+	// TierManaged is for skills installed via the managed skill system.
+	TierManaged SourceTier = 1
+	// TierWorkspace is for skills defined in the workspace directory (highest priority).
+	TierWorkspace SourceTier = 2
+)
+
+// String returns a human-readable tier name.
+func (t SourceTier) String() string {
+	switch t {
+	case TierWorkspace:
+		return "workspace"
+	case TierManaged:
+		return "managed"
+	default:
+		return "bundled"
+	}
+}
+
+// SkillsLimitsConfig configures resource limits for skill loading.
+type SkillsLimitsConfig struct {
+	// MaxCandidatesPerRoot is the maximum skills scanned per workspace root (default: 300).
+	MaxCandidatesPerRoot int `yaml:"max_candidates_per_root"`
+	// MaxSkillsInPrompt is the maximum skills included in the system prompt (default: 150).
+	MaxSkillsInPrompt int `yaml:"max_skills_in_prompt"`
+	// MaxSkillsPromptChars is the total character budget for skills in the prompt (default: 30000).
+	MaxSkillsPromptChars int `yaml:"max_skills_prompt_chars"`
+	// MaxSkillFileBytes is the maximum size of a single skill file (default: 256000).
+	MaxSkillFileBytes int `yaml:"max_skill_file_bytes"`
+}
+
+// DefaultSkillsLimits returns sensible defaults for skill loading limits.
+func DefaultSkillsLimits() SkillsLimitsConfig {
+	return SkillsLimitsConfig{
+		MaxCandidatesPerRoot: 300,
+		MaxSkillsInPrompt:    150,
+		MaxSkillsPromptChars: 30000,
+		MaxSkillFileBytes:    256000,
+	}
+}
+
+// Effective returns a copy with default values filled in for zero fields.
+func (c SkillsLimitsConfig) Effective() SkillsLimitsConfig {
+	out := c
+	if out.MaxCandidatesPerRoot <= 0 {
+		out.MaxCandidatesPerRoot = 300
+	}
+	if out.MaxSkillsInPrompt <= 0 {
+		out.MaxSkillsInPrompt = 150
+	}
+	if out.MaxSkillsPromptChars <= 0 {
+		out.MaxSkillsPromptChars = 30000
+	}
+	if out.MaxSkillFileBytes <= 0 {
+		out.MaxSkillFileBytes = 256000
+	}
+	return out
+}
+
 // Metadata contém os metadados de uma skill.
 type Metadata struct {
 	// Name é o identificador único da skill (ex: "calendar", "github").
@@ -117,6 +182,10 @@ type Metadata struct {
 
 	// Tags são palavras-chave para busca e indexação.
 	Tags []string `yaml:"tags"`
+
+	// SourceTier indicates the load priority tier of this skill.
+	// Higher tiers override lower tiers with the same name.
+	SourceTier SourceTier `yaml:"-" json:"-"`
 }
 
 // Tool representa uma função/ferramenta exposta por uma skill ao agente LLM.

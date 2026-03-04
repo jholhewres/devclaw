@@ -10,7 +10,7 @@ import (
 
 // WhatsAppQREvent mirrors whatsapp.QREvent without importing the channel package.
 type WhatsAppQREvent struct {
-	Type        string `json:"type"`                   // "code", "success", "timeout", "error", "refresh"
+	Type        string `json:"type"` // "code", "success", "timeout", "error", "refresh"
 	Code        string `json:"code,omitempty"`
 	Message     string `json:"message"`
 	ExpiresAt   string `json:"expires_at,omitempty"`   // ISO timestamp
@@ -20,13 +20,48 @@ type WhatsAppQREvent struct {
 // WhatsAppStatus holds the current WhatsApp connection state for the UI.
 type WhatsAppStatus struct {
 	Connected         bool   `json:"connected"`
-	State             string `json:"state"`              // "disconnected", "connecting", "connected", "waiting_qr", etc.
+	State             string `json:"state"` // "disconnected", "connecting", "connected", "waiting_qr", etc.
 	NeedsQR           bool   `json:"needs_qr"`
 	Phone             string `json:"phone,omitempty"`
 	Platform          string `json:"platform,omitempty"`
 	ErrorCount        int    `json:"error_count"`
 	ReconnectAttempts int    `json:"reconnect_attempts"`
 	Message           string `json:"message,omitempty"` // Human-readable status message
+}
+
+// WhatsAppAccessConfig holds the WhatsApp access control configuration.
+type WhatsAppAccessConfig struct {
+	DefaultPolicy  string   `json:"default_policy"`
+	Owners         []string `json:"owners"`
+	Admins         []string `json:"admins"`
+	AllowedUsers   []string `json:"allowed_users"`
+	BlockedUsers   []string `json:"blocked_users"`
+	AllowedGroups  []string `json:"allowed_groups"`
+	BlockedGroups  []string `json:"blocked_groups"`
+	PendingMessage string   `json:"pending_message"`
+}
+
+// WhatsAppGroupPolicy holds a single group's policy configuration.
+type WhatsAppGroupPolicy struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Policy       string   `json:"policy"`
+	Policies     []string `json:"policies,omitempty"`
+	Keywords     []string `json:"keywords,omitempty"`
+	AllowedUsers []string `json:"allowed_users,omitempty"`
+	Workspace    string   `json:"workspace,omitempty"`
+}
+
+// WhatsAppGroupPolicies holds all group policies.
+type WhatsAppGroupPolicies struct {
+	DefaultPolicy string                `json:"default_policy"`
+	Groups        []WhatsAppGroupPolicy `json:"groups"`
+}
+
+// WhatsAppJoinedGroup represents a WhatsApp group the bot is part of.
+type WhatsAppJoinedGroup struct {
+	JID  string `json:"jid"`
+	Name string `json:"name"`
 }
 
 // AssistantAdapter wraps a generic set of callbacks to satisfy the AssistantAPI
@@ -39,8 +74,12 @@ type AssistantAdapter struct {
 	GetUsageGlobalFn     func() UsageInfo
 	GetChannelHealthFn   func() []ChannelHealthInfo
 	GetSchedulerJobsFn   func() []JobInfo
+	ToggleJobFn          func(id string, enabled bool) error
+	RemoveJobFn          func(id string) error
 	ListSkillsFn         func() []SkillInfo
 	ToggleSkillFn        func(name string, enabled bool) error
+	RemoveSkillFn        func(name string) error
+	ReloadSkillsFn       func() error
 	SendChatMessageFn    func(sessionID, content string) (string, error)
 	StartChatStreamFn    func(ctx context.Context, sessionID, content string) (*RunHandle, error)
 	AbortRunFn           func(sessionID string) bool
@@ -50,6 +89,21 @@ type AssistantAdapter struct {
 	GetWhatsAppStatusFn   func() WhatsAppStatus
 	SubscribeWhatsAppQRFn func() (chan WhatsAppQREvent, func())
 	RequestWhatsAppQRFn   func() error
+	DisconnectWhatsAppFn  func() error
+
+	// WhatsApp Access & Groups
+	GetWhatsAppAccessConfigFn           func() WhatsAppAccessConfig
+	GrantWhatsAppUserAccessFn           func(jid, level string) error
+	RevokeWhatsAppUserAccessFn          func(jid string) error
+	BlockWhatsAppUserFn                 func(jid string) error
+	UnblockWhatsAppUserFn               func(jid string) error
+	GetWhatsAppGroupPoliciesFn          func() WhatsAppGroupPolicies
+	SetWhatsAppGroupPolicyFn            func(jid string, policy any) error
+	UpdateWhatsAppGroupDefaultPolicyFn  func(policy string) error
+	UpdateWhatsAppAccessDefaultPolicyFn func(policy string) error
+	GetWhatsAppJoinedGroupsFn           func() ([]WhatsAppJoinedGroup, error)
+	GetWhatsAppConfigFn                 func() map[string]any
+	UpdateWhatsAppConfigFn              func(config map[string]any) error
 
 	// Security: Audit Log
 	GetAuditLogFn   func(limit int) []AuditEntry
@@ -83,21 +137,21 @@ type AssistantAdapter struct {
 	GetHookEventsFn  func() []HookEventInfo
 
 	// MCP Servers
-	ListMCPServersFn    func() []MCPServerInfo
-	CreateMCPServerFn   func(name, command string, args []string, env map[string]string) error
-	UpdateMCPServerFn   func(name string, enabled bool) error
-	DeleteMCPServerFn   func(name string) error
-	StartMCPServerFn    func(name string) error
-	StopMCPServerFn     func(name string) error
+	ListMCPServersFn  func() []MCPServerInfo
+	CreateMCPServerFn func(name, command string, args []string, env map[string]string) error
+	UpdateMCPServerFn func(name string, enabled bool) error
+	DeleteMCPServerFn func(name string) error
+	StartMCPServerFn  func(name string) error
+	StopMCPServerFn   func(name string) error
 
 	// Database
 	GetDatabaseStatusFn func() DatabaseStatusInfo
 
 	// Settings: Tool Profiles
-	ListToolProfilesFn   func() []ToolProfileInfo
-	CreateToolProfileFn  func(profile ToolProfileDef) error
-	UpdateToolProfileFn  func(name string, profile ToolProfileDef) error
-	DeleteToolProfileFn  func(name string) error
+	ListToolProfilesFn  func() []ToolProfileInfo
+	CreateToolProfileFn func(profile ToolProfileDef) error
+	UpdateToolProfileFn func(name string, profile ToolProfileDef) error
+	DeleteToolProfileFn func(name string) error
 
 	// Auth Profiles
 	GetProfileManagerFn func() profiles.ProfileManager
@@ -169,6 +223,20 @@ func (a *AssistantAdapter) GetSchedulerJobs() []JobInfo {
 	return nil
 }
 
+func (a *AssistantAdapter) ToggleJob(id string, enabled bool) error {
+	if a.ToggleJobFn != nil {
+		return a.ToggleJobFn(id, enabled)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) RemoveJob(id string) error {
+	if a.RemoveJobFn != nil {
+		return a.RemoveJobFn(id)
+	}
+	return errors.New("not implemented")
+}
+
 func (a *AssistantAdapter) ListSkills() []SkillInfo {
 	if a.ListSkillsFn != nil {
 		return a.ListSkillsFn()
@@ -179,6 +247,20 @@ func (a *AssistantAdapter) ListSkills() []SkillInfo {
 func (a *AssistantAdapter) ToggleSkill(name string, enabled bool) error {
 	if a.ToggleSkillFn != nil {
 		return a.ToggleSkillFn(name, enabled)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) RemoveSkill(name string) error {
+	if a.RemoveSkillFn != nil {
+		return a.RemoveSkillFn(name)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) ReloadSkills() error {
+	if a.ReloadSkillsFn != nil {
+		return a.ReloadSkillsFn()
 	}
 	return errors.New("not implemented")
 }
@@ -207,6 +289,99 @@ func (a *AssistantAdapter) AbortRun(sessionID string) bool {
 func (a *AssistantAdapter) DeleteSession(sessionID string) error {
 	if a.DeleteSessionFn != nil {
 		return a.DeleteSessionFn(sessionID)
+	}
+	return errors.New("not implemented")
+}
+
+// ── WhatsApp Access & Groups ──
+
+func (a *AssistantAdapter) GetWhatsAppAccessConfig() WhatsAppAccessConfig {
+	if a.GetWhatsAppAccessConfigFn != nil {
+		return a.GetWhatsAppAccessConfigFn()
+	}
+	return WhatsAppAccessConfig{}
+}
+
+func (a *AssistantAdapter) GrantWhatsAppUserAccess(jid, level string) error {
+	if a.GrantWhatsAppUserAccessFn != nil {
+		return a.GrantWhatsAppUserAccessFn(jid, level)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) RevokeWhatsAppUserAccess(jid string) error {
+	if a.RevokeWhatsAppUserAccessFn != nil {
+		return a.RevokeWhatsAppUserAccessFn(jid)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) BlockWhatsAppUser(jid string) error {
+	if a.BlockWhatsAppUserFn != nil {
+		return a.BlockWhatsAppUserFn(jid)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) UnblockWhatsAppUser(jid string) error {
+	if a.UnblockWhatsAppUserFn != nil {
+		return a.UnblockWhatsAppUserFn(jid)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) GetWhatsAppGroupPolicies() WhatsAppGroupPolicies {
+	if a.GetWhatsAppGroupPoliciesFn != nil {
+		return a.GetWhatsAppGroupPoliciesFn()
+	}
+	return WhatsAppGroupPolicies{}
+}
+
+func (a *AssistantAdapter) SetWhatsAppGroupPolicy(jid string, policy any) error {
+	if a.SetWhatsAppGroupPolicyFn != nil {
+		return a.SetWhatsAppGroupPolicyFn(jid, policy)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) UpdateWhatsAppAccessDefaultPolicy(policy string) error {
+	if a.UpdateWhatsAppAccessDefaultPolicyFn != nil {
+		return a.UpdateWhatsAppAccessDefaultPolicyFn(policy)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) UpdateWhatsAppGroupDefaultPolicy(policy string) error {
+	if a.UpdateWhatsAppGroupDefaultPolicyFn != nil {
+		return a.UpdateWhatsAppGroupDefaultPolicyFn(policy)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) UpdateWhatsAppConfig(config map[string]any) error {
+	if a.UpdateWhatsAppConfigFn != nil {
+		return a.UpdateWhatsAppConfigFn(config)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) GetWhatsAppConfig() map[string]any {
+	if a.GetWhatsAppConfigFn != nil {
+		return a.GetWhatsAppConfigFn()
+	}
+	return map[string]any{}
+}
+
+func (a *AssistantAdapter) GetWhatsAppJoinedGroups() ([]WhatsAppJoinedGroup, error) {
+	if a.GetWhatsAppJoinedGroupsFn != nil {
+		return a.GetWhatsAppJoinedGroupsFn()
+	}
+	return nil, errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) DisconnectWhatsApp() error {
+	if a.DisconnectWhatsAppFn != nil {
+		return a.DisconnectWhatsAppFn()
 	}
 	return errors.New("not implemented")
 }
