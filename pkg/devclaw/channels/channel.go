@@ -125,6 +125,7 @@ type WhatsAppAccessManager interface {
 	GetAccessConfig() any
 	GrantAccess(jid, level string)
 	RevokeAccess(jid string)
+	ReplaceAccessList(owners, admins, allowedUsers, blockedUsers []string, defaultPolicy, pendingMessage string)
 	BlockUser(jid string)
 	UnblockUser(jid string)
 	SetDefaultPolicy(policy string)

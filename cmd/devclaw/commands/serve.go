@@ -663,9 +663,45 @@ func wireMediaAdapter(webServer *webui.Server, assistant *copilot.Assistant, log
 
 // buildWebUIAdapter creates the adapter that bridges the Assistant to the WebUI.
 func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *whatsapp.WhatsApp, configPath string) *webui.AssistantAdapter {
+	// waMgr is set later if WhatsApp implements WhatsAppAccessManager.
+	// Closures capture it by reference so they see the updated value.
+	var waMgr channels.WhatsAppAccessManager
+
 	adapter := &webui.AssistantAdapter{
 		GetConfigMapFn: func() map[string]any {
 			media := cfg.Media.Effective()
+
+			accessMap := map[string]any{
+				"default_policy":  string(cfg.Access.DefaultPolicy),
+				"owners":          cfg.Access.Owners,
+				"admins":          cfg.Access.Admins,
+				"allowed_users":   cfg.Access.AllowedUsers,
+				"blocked_users":   cfg.Access.BlockedUsers,
+				"pending_message": cfg.Access.PendingMessage,
+			}
+			if waMgr != nil {
+				if m, ok := waMgr.GetAccessConfig().(map[string]any); ok {
+					if v, ok := m["owners"].([]string); ok {
+						accessMap["owners"] = v
+					}
+					if v, ok := m["admins"].([]string); ok {
+						accessMap["admins"] = v
+					}
+					if v, ok := m["allowed_users"].([]string); ok {
+						accessMap["allowed_users"] = v
+					}
+					if v, ok := m["blocked_users"].([]string); ok {
+						accessMap["blocked_users"] = v
+					}
+					if v, ok := m["default_policy"].(string); ok && v != "" {
+						accessMap["default_policy"] = v
+					}
+					if v, ok := m["pending_message"].(string); ok && v != "" {
+						accessMap["pending_message"] = v
+					}
+				}
+			}
+
 			return map[string]any{
 				"name":               cfg.Name,
 				"trigger":            cfg.Trigger,
@@ -686,14 +722,7 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 					"transcription_api_key":  media.TranscriptionAPIKey != "",
 					"transcription_language": media.TranscriptionLanguage,
 				},
-				"access": map[string]any{
-					"default_policy":  cfg.Access.DefaultPolicy,
-					"owners":          cfg.Access.Owners,
-					"admins":          cfg.Access.Admins,
-					"allowed_users":   cfg.Access.AllowedUsers,
-					"blocked_users":   cfg.Access.BlockedUsers,
-					"pending_message": cfg.Access.PendingMessage,
-				},
+				"access": accessMap,
 			}
 		},
 		UpdateConfigMapFn: func(updates map[string]any) error {
@@ -791,8 +820,12 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 			// Update access config.
 			if accessRaw, ok := updates["access"]; ok {
 				if accessMap, ok := accessRaw.(map[string]any); ok {
+					defaultPolicy := string(cfg.Access.DefaultPolicy)
+					pendingMsg := cfg.Access.PendingMessage
+
 					if v, ok := accessMap["default_policy"].(string); ok {
 						cfg.Access.DefaultPolicy = copilot.AccessPolicy(v)
+						defaultPolicy = v
 					}
 					if v, ok := accessMap["owners"].([]any); ok {
 						cfg.Access.Owners = anySliceToStringSlice(v)
@@ -808,6 +841,25 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 					}
 					if v, ok := accessMap["pending_message"].(string); ok {
 						cfg.Access.PendingMessage = v
+						pendingMsg = v
+					}
+
+					// Mirror access changes to WhatsApp channel runtime + config.
+					if waMgr != nil {
+						waMgr.ReplaceAccessList(
+							cfg.Access.Owners,
+							cfg.Access.Admins,
+							cfg.Access.AllowedUsers,
+							cfg.Access.BlockedUsers,
+							defaultPolicy,
+							pendingMsg,
+						)
+						cfg.Channels.WhatsApp.Access.Owners = cfg.Access.Owners
+						cfg.Channels.WhatsApp.Access.Admins = cfg.Access.Admins
+						cfg.Channels.WhatsApp.Access.AllowedUsers = cfg.Access.AllowedUsers
+						cfg.Channels.WhatsApp.Access.BlockedUsers = cfg.Access.BlockedUsers
+						cfg.Channels.WhatsApp.Access.DefaultPolicy = defaultPolicy
+						cfg.Channels.WhatsApp.Access.PendingMessage = pendingMsg
 					}
 				}
 			}
@@ -1411,6 +1463,7 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 			slog.Warn("whatsapp channel does not implement WhatsAppAccessManager, access control features disabled")
 			return adapter
 		}
+		waMgr = waManager
 
 		// WhatsApp Access & Groups
 		adapter.GetWhatsAppAccessConfigFn = func() webui.WhatsAppAccessConfig {

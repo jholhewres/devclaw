@@ -1219,6 +1219,40 @@ func (w *WhatsApp) RevokeAccess(jid string) {
 	w.logger.Info("whatsapp: access revoked", "jid", jid)
 }
 
+// ReplaceAccessList atomically replaces the entire access list.
+// Used when the generic /api/config endpoint updates access settings.
+func (w *WhatsApp) ReplaceAccessList(owners, admins, allowedUsers, blockedUsers []string, defaultPolicy, pendingMessage string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.accessUsers = make(map[string]string)
+	w.blockedUsers = make(map[string]struct{})
+
+	for _, jid := range owners {
+		w.accessUsers[normalizeJID(jid)] = "owner"
+	}
+	for _, jid := range admins {
+		w.accessUsers[normalizeJID(jid)] = "admin"
+	}
+	for _, jid := range allowedUsers {
+		w.accessUsers[normalizeJID(jid)] = "user"
+	}
+	for _, jid := range blockedUsers {
+		w.blockedUsers[normalizeJID(jid)] = struct{}{}
+	}
+
+	if defaultPolicy != "" {
+		w.cfg.Access.DefaultPolicy = defaultPolicy
+	}
+	if pendingMessage != "" {
+		w.cfg.Access.PendingMessage = pendingMessage
+	}
+
+	w.logger.Info("whatsapp: access list replaced",
+		"owners", len(owners), "admins", len(admins),
+		"allowed", len(allowedUsers), "blocked", len(blockedUsers))
+}
+
 // BlockUser blocks a user.
 func (w *WhatsApp) BlockUser(jid string) {
 	w.mu.Lock()
