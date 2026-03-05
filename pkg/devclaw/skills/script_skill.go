@@ -188,6 +188,12 @@ func (s *ScriptSkill) Execute(ctx context.Context, input string) (string, error)
 		"using other tools (bash, file operations, etc.) or inform the user that manual setup is needed.", s.def.Name), nil
 }
 
+// IsPromptOnly returns true if this skill has no executable scripts
+// and only provides instructions via its SystemPrompt.
+func (s *ScriptSkill) IsPromptOnly() bool {
+	return len(s.scripts) == 0
+}
+
 // Shutdown releases resources.
 func (s *ScriptSkill) Shutdown() error {
 	return nil

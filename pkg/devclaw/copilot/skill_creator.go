@@ -350,6 +350,25 @@ func handleSkillTest(ctx context.Context, registry *skills.Registry, args map[st
 	if !ok {
 		return nil, fmt.Errorf("skill '%s' not found in registry", name)
 	}
+
+	// Check if this is a prompt-only skill before attempting execution.
+	// Prompt-only skills have no scripts and will only return instruction text,
+	// which causes the agent to loop trying to "execute" them.
+	if ss, ok := skill.(*skills.ScriptSkill); ok && ss.IsPromptOnly() {
+		prompt := skill.SystemPrompt()
+		// Extract actionable commands from the instructions (bash, curl, etc.)
+		actionHints := extractActionableCommands(prompt)
+		msg := fmt.Sprintf(
+			"Skill '%s' is a prompt-only skill (no executable scripts). "+
+				"It provides instructions only — DO NOT call test/execute again.\n\n"+
+				"Instead, follow the instructions from the skill's system prompt using available tools.",
+			name)
+		if actionHints != "" {
+			msg += "\n\nActionable commands found in instructions:\n" + actionHints
+		}
+		return msg, nil
+	}
+
 	testCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	result, err := skill.Execute(testCtx, input)
@@ -357,6 +376,35 @@ func handleSkillTest(ctx context.Context, registry *skills.Registry, args map[st
 		return nil, fmt.Errorf("skill execution failed: %w", err)
 	}
 	return fmt.Sprintf("Skill '%s' test result:\n\n%s", name, result), nil
+}
+
+// extractActionableCommands scans skill instructions for bash/curl/git commands
+// that the agent should execute directly instead of calling the skill tool.
+func extractActionableCommands(instructions string) string {
+	lines := strings.Split(instructions, "\n")
+	var commands []string
+	inCodeBlock := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inCodeBlock = !inCodeBlock
+			continue
+		}
+		if inCodeBlock && trimmed != "" {
+			// Collect commands from code blocks
+			commands = append(commands, "  "+trimmed)
+			if len(commands) >= 10 {
+				commands = append(commands, "  ...")
+				break
+			}
+		}
+	}
+
+	if len(commands) == 0 {
+		return ""
+	}
+	return strings.Join(commands, "\n")
 }
 
 func handleSkillInstall(ctx context.Context, installer *skills.Installer, reloadCb SkillReloadCallback, args map[string]any) (any, error) {
