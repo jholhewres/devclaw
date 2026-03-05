@@ -126,11 +126,14 @@ func (s *ScriptSkill) SystemPrompt() string {
 		notice := `
 
 ---
-**Skill Notice:** This skill provides instructions only and has no executable scripts.
+**Skill Notice:** This is a prompt-only skill with no executable scripts.
 
-- If the skill references specific tools, use the ` + "`bash`" + ` tool to run CLI commands
-- If the skill mentions external CLIs (e.g., gog, gh, aws), ensure they are installed: ` + "`which <cli-name>`" + `
-- If no CLI is mentioned and no tools are available, inform the user that this skill requires additional setup
+**IMPORTANT:** Do NOT call the skill execute tool repeatedly — it will only return this same notice.
+Instead:
+- Follow the instructions above using ` + "`bash`" + ` tool to run CLI commands directly
+- If the skill mentions external CLIs (e.g., git, gh, aws), verify they are installed: ` + "`which <cli-name>`" + `
+- If no CLI is available, inform the user that manual setup is needed
+- Do NOT retry the skill tool with different arguments — it has no scripts to run
 `
 
 		body += notice
@@ -179,7 +182,10 @@ func (s *ScriptSkill) Execute(ctx context.Context, input string) (string, error)
 	}
 
 	// No scripts — this is a prompt-only skill.
-	return fmt.Sprintf("[%s] This skill provides instructions only. Use the system prompt for guidance.", s.def.Name), nil
+	// Return a clear signal so the agent does NOT retry this tool.
+	return fmt.Sprintf("[%s] This skill provides instructions only and has no executable scripts. "+
+		"DO NOT call this tool again. Instead, follow the instructions from the system prompt "+
+		"using other tools (bash, file operations, etc.) or inform the user that manual setup is needed.", s.def.Name), nil
 }
 
 // Shutdown releases resources.
