@@ -74,8 +74,8 @@ export function useChat(sessionId: string | null) {
 
     api.chat
       .history(sessionId)
-      .then((messages) => {
-        const cleaned = messages.map((m) =>
+      .then((msgs) => {
+        const cleaned = (msgs || []).map((m) =>
           m.role === 'assistant' ? { ...m, content: stripInternalTags(m.content).trim() } : m
         );
         setState((s) => ({ ...s, messages: cleaned, error: null, isLoadingHistory: false }));

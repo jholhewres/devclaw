@@ -16,7 +16,7 @@ export function Jobs() {
 
   useEffect(() => {
     api.jobs.list()
-      .then(setJobs)
+      .then((data) => setJobs(data || []))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])

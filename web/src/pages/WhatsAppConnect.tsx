@@ -495,10 +495,10 @@ function AccessTab() {
   }
 
   const allUsers: { jid: string; level: UserLevel }[] = [
-    ...config.owners.map((jid) => ({ jid, level: 'owner' as UserLevel })),
-    ...config.admins.map((jid) => ({ jid, level: 'admin' as UserLevel })),
-    ...config.allowed_users.map((jid) => ({ jid, level: 'user' as UserLevel })),
-    ...config.blocked_users.map((jid) => ({ jid, level: 'blocked' as UserLevel })),
+    ...(config.owners || []).map((jid) => ({ jid, level: 'owner' as UserLevel })),
+    ...(config.admins || []).map((jid) => ({ jid, level: 'admin' as UserLevel })),
+    ...(config.allowed_users || []).map((jid) => ({ jid, level: 'user' as UserLevel })),
+    ...(config.blocked_users || []).map((jid) => ({ jid, level: 'blocked' as UserLevel })),
   ]
 
   return (

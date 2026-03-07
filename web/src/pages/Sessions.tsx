@@ -42,7 +42,7 @@ export function Sessions() {
     api.sessions
       .list()
       .then((all) => {
-        const sorted = all.sort(
+        const sorted = (all || []).sort(
           (a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime()
         );
         setSessions(sorted);

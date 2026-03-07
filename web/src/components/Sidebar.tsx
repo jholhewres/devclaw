@@ -61,7 +61,7 @@ export function Sidebar() {
     api.sessions
       .list()
       .then((sessions) => {
-        const webuiSessions = sessions
+        const webuiSessions = (sessions || [])
           .filter((s) => s.channel === 'webui' || s.id.startsWith('webui:'))
           .slice(0, 8)
         setRecentSessions(webuiSessions)
