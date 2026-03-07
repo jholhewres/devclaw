@@ -141,7 +141,11 @@
     "tabAI": "AI & Models",
     "tabAccess": "Access & Security",
     "tabData": "Data & Storage",
-    "tabIntegrations": "Integrations"
+    "tabIntegrations": "Integrations",
+    "tabSystem": "System",
+    "tabCanais": "Channels",
+    "tabSeguranca": "Security",
+    "tabDev": "Developer Settings"
   },
   "sidebarSections": {
     "start": "Start",

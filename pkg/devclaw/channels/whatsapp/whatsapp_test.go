@@ -424,6 +424,75 @@ func TestRequestNewQR(t *testing.T) {
 	})
 }
 
+func TestNormalizeJID(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		// Companion device stripping
+		{"strip companion device", "5511999999999:95@s.whatsapp.net", "5511999999999@s.whatsapp.net"},
+		{"strip companion device :0", "5511999999999:0@s.whatsapp.net", "5511999999999@s.whatsapp.net"},
+
+		// Brazilian number normalization (12 digits -> 13 digits)
+		{"BR 12-digit with @", "551199999999@s.whatsapp.net", "5511999999999@s.whatsapp.net"},
+		{"BR 12-digit bare", "551199999999", "5511999999999@s.whatsapp.net"},
+		{"BR 12-digit + companion", "551199999999:5@s.whatsapp.net", "5511999999999@s.whatsapp.net"},
+
+		// Brazilian number already 13 digits (no change)
+		{"BR 13-digit with @", "5511999999999@s.whatsapp.net", "5511999999999@s.whatsapp.net"},
+		{"BR 13-digit bare", "5511999999999", "5511999999999@s.whatsapp.net"},
+
+		// Non-Brazilian numbers (no change)
+		{"US number", "12025551234@s.whatsapp.net", "12025551234@s.whatsapp.net"},
+		{"other country", "4915123456789@s.whatsapp.net", "4915123456789@s.whatsapp.net"},
+
+		// LID format (no BR normalization)
+		{"LID format", "123456:1@lid", "123456@lid"},
+		{"LID without device", "123456@lid", "123456@lid"},
+
+		// Group JIDs (no BR normalization)
+		{"group JID", "120363012345678901@g.us", "120363012345678901@g.us"},
+
+		// Edge cases
+		{"bare number with spaces", "  5511999999999  ", "5511999999999@s.whatsapp.net"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeJID(tt.input)
+			if got != tt.expected {
+				t.Errorf("normalizeJID(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNormalizeBRPhone(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"12-digit SP", "551199999999", "5511999999999"},
+		{"12-digit RJ", "552199999999", "5521999999999"},
+		{"12-digit MG", "553199999999", "5531999999999"},
+		{"13-digit already", "5511999999999", "5511999999999"},
+		{"non-BR number", "12025551234", "12025551234"},
+		{"short number", "5511", "5511"},
+		{"empty", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeBRPhone(tt.input)
+			if got != tt.expected {
+				t.Errorf("normalizeBRPhone(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
 // Test helper types
 
 type testConnectionObserver struct {

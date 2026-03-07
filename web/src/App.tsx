@@ -2,16 +2,31 @@ import { useEffect, useState } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AppLayout } from '@/layouts/AppLayout'
 import { SetupLayout } from '@/layouts/SetupLayout'
+import { SettingsLayout } from '@/layouts/SettingsLayout'
 import { Chat } from '@/pages/Chat'
-import { Dashboard } from '@/pages/Dashboard'
 import { Sessions } from '@/pages/Sessions'
 import { Skills } from '@/pages/Skills'
 import { Jobs } from '@/pages/Jobs'
-import { Settings } from '@/pages/Settings'
 import { Login } from '@/pages/Login'
 import { SetupWizard } from '@/pages/Setup/SetupWizard'
-import { WhatsAppConnect } from '@/pages/WhatsAppConnect'
+
+// Settings pages
+import { System } from '@/pages/System'
 import { Channels } from '@/pages/Channels'
+import { WhatsAppConnect } from '@/pages/WhatsAppConnect'
+import { Security } from '@/pages/Security'
+import { DevSettings } from '@/pages/DevSettings'
+import { Config } from '@/pages/Config'
+import { ApiConfig } from '@/pages/ApiConfig'
+import { Webhooks } from '@/pages/Webhooks'
+import { Hooks } from '@/pages/Hooks'
+import { Memory } from '@/pages/Memory'
+import { DatabasePage } from '@/pages/Database'
+import { Budget } from '@/pages/Budget'
+import { Domain } from '@/pages/Domain'
+import { Mcp } from '@/pages/Mcp'
+import { Access } from '@/pages/Access'
+import { Groups } from '@/pages/Groups'
 
 /** Estado global de autenticação obtido de /api/auth/status */
 interface AuthState {
@@ -103,14 +118,39 @@ export function App() {
         <Route element={<AppLayout />}>
           <Route path="/" element={<Chat />} />
           <Route path="/chat/:sessionId" element={<Chat />} />
-          <Route path="/stats" element={<Dashboard />} />
           <Route path="/sessions" element={<Sessions />} />
           <Route path="/skills" element={<Skills />} />
-          <Route path="/channels" element={<Channels />} />
-          <Route path="/channels/whatsapp" element={<WhatsAppConnect />} />
           <Route path="/jobs" element={<Jobs />} />
-          <Route path="/settings" element={<Settings />} />
+
+          {/* Settings — route-based tabs */}
+          <Route element={<SettingsLayout />}>
+            {/* System tab */}
+            <Route path="/system" element={<System />} />
+
+            {/* Channels tab */}
+            <Route path="/channels" element={<Channels />} />
+            <Route path="/channels/whatsapp" element={<WhatsAppConnect />} />
+
+            {/* Security tab */}
+            <Route path="/security" element={<Security />} />
+
+            {/* Dev tab */}
+            <Route path="/dev" element={<DevSettings />} />
+            <Route path="/config" element={<><Config /><ApiConfig /></>} />
+            <Route path="/webhooks" element={<Webhooks />} />
+            <Route path="/hooks" element={<Hooks />} />
+            <Route path="/memory" element={<Memory />} />
+            <Route path="/database" element={<DatabasePage />} />
+            <Route path="/budget" element={<Budget />} />
+            <Route path="/domain" element={<Domain />} />
+            <Route path="/mcp" element={<Mcp />} />
+            <Route path="/access" element={<Access />} />
+            <Route path="/groups" element={<Groups />} />
+          </Route>
         </Route>
+
+        {/* Fallback: redirect old /settings to /system */}
+        <Route path="/settings" element={<Navigate to="/system" replace />} />
       </Routes>
     </AuthGuard>
   )

@@ -1569,7 +1569,9 @@ func (w *WhatsApp) seedGroupPoliciesFromConfig() {
 // normalizeJID normalizes a JID for consistent lookups.
 // Strips companion device suffix (:XX) so that messages from linked devices
 // are treated as coming from the same user.
-// Example: 551199999999:95@s.whatsapp.net -> 551199999999@s.whatsapp.net
+// Also normalizes Brazilian phone numbers to always include the 9th digit,
+// so that numbers with/without the mobile prefix match correctly.
+// Example: 551199999999:95@s.whatsapp.net -> 5511999999999@s.whatsapp.net
 // Also handles LID format: 123456:1@lid -> 123456@lid
 func normalizeJID(jid string) string {
 	jid = strings.TrimSpace(jid)
@@ -1586,6 +1588,7 @@ func normalizeJID(jid string) string {
 				base = base[:idx]
 			}
 		}
+		base = normalizeBRPhone(base)
 		return base + "@s.whatsapp.net"
 	}
 
@@ -1607,7 +1610,33 @@ func normalizeJID(jid string) string {
 		return jid
 	}
 	// Assume bare phone number.
-	return jid + "@s.whatsapp.net"
+	base := normalizeBRPhone(jid)
+	return base + "@s.whatsapp.net"
+}
+
+// normalizeBRPhone normalizes Brazilian phone numbers to the canonical 13-digit
+// format (55 + 2-digit area code + 9 + 8-digit number).
+// Brazilian mobile numbers transitioned from 8 to 9 digits (adding a leading 9).
+// WhatsApp may store/send numbers in either format, and users may configure
+// either format in config.yaml. This function ensures consistent matching.
+// Example: 551199999999 (12 digits, old) -> 5511999999999 (13 digits, new)
+func normalizeBRPhone(phone string) string {
+	// Only process numbers starting with Brazil country code "55".
+	if !strings.HasPrefix(phone, "55") {
+		return phone
+	}
+
+	digits := phone
+	// Brazilian numbers: 55 + area(2) + number(8 or 9) = 12 or 13 digits.
+	if len(digits) == 12 {
+		// Old format without the 9th digit: 55 + XX + XXXXXXXX
+		// Insert the 9 after the area code: 55 + XX + 9 + XXXXXXXX
+		areaCode := digits[2:4]
+		localNum := digits[4:]
+		return "55" + areaCode + "9" + localNum
+	}
+
+	return phone
 }
 
 // IsValidJID checks if a JID looks valid (basic validation).
