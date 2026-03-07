@@ -1444,6 +1444,17 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 			// Channel has its own access filter.
 			accessAllowed, accessReason = af.CanResponse(msg)
 			accessLevel = AccessLevel(accessReason)
+			// Validate: if the reason isn't a recognized level, default to user (if allowed).
+			switch accessLevel {
+			case AccessOwner, AccessAdmin, AccessUser, AccessBlocked:
+				// Valid level, keep as-is.
+			default:
+				if accessAllowed {
+					accessLevel = AccessUser
+				} else {
+					accessLevel = AccessNone
+				}
+			}
 		} else {
 			// Fall back to global AccessManager.
 			accessResult := a.accessMgr.Check(msg)

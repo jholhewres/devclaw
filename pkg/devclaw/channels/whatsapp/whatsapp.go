@@ -1187,13 +1187,13 @@ func (w *WhatsApp) CanResponse(msg *channels.IncomingMessage) (bool, string) {
 	// Apply default policy.
 	switch w.cfg.Access.DefaultPolicy {
 	case "allow":
-		return true, "default allow"
+		return true, "user"
 	case "deny":
-		return false, "default deny"
+		return false, "denied"
 	default:
 		// Unknown policy (including legacy "ask") - log warning and default to deny
 		w.logger.Warn("unknown access policy, defaulting to deny", "policy", w.cfg.Access.DefaultPolicy)
-		return false, "default deny"
+		return false, "denied"
 	}
 }
 
