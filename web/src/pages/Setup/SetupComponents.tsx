@@ -1,5 +1,6 @@
 import { useState, type ReactNode, type FC } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 /* ─────────────────────────────────────────────────────────────
    Layout Components
@@ -12,8 +13,8 @@ export function StepContainer({ children }: { children: ReactNode }) {
 export function StepHeader({ title, description }: { title: string; description: string }) {
   return (
     <div>
-      <h2 className="text-base font-semibold text-[#f8fafc]">{title}</h2>
-      <p className="mt-1 text-sm text-[#94a3b8]">{description}</p>
+      <h2 className="text-base font-semibold text-text-primary">{title}</h2>
+      <p className="mt-1 text-sm text-text-secondary">{description}</p>
     </div>
   )
 }
@@ -36,12 +37,12 @@ interface FieldProps {
 export function Field({ label, icon: Icon, hint, children }: FieldProps) {
   return (
     <div>
-      <label className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#64748b]">
+      <label className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
         {Icon && <Icon className="h-3.5 w-3.5" />}
         {label}
       </label>
       {children}
-      {hint && <p className="mt-1.5 text-xs text-[#64748b]">{hint}</p>}
+      {hint && <p className="mt-1.5 text-xs text-text-muted">{hint}</p>}
     </div>
   )
 }
@@ -76,7 +77,13 @@ export function Input({
       autoComplete="off"
       data-lpignore="true"
       data-form-type="other"
-      className={`h-11 w-full rounded-xl border border-white/10 bg-[#0c1222] px-4 text-sm text-[#f8fafc] placeholder:text-[#475569] outline-none transition-all hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-2 focus:ring-[#3b82f6]/20 ${mono ? 'font-mono' : ''} ${className}`}
+      className={cn(
+        'h-11 w-full rounded-xl border border-border-hover bg-bg-main px-4 text-sm text-text-primary',
+        'placeholder:text-text-muted outline-none transition-all',
+        'hover:border-border-hover focus:border-brand/50 focus:ring-2 focus:ring-brand/20',
+        mono && 'font-mono',
+        className,
+      )}
     />
   )
 }
@@ -106,12 +113,16 @@ export function PasswordInput({ value, onChange, placeholder }: PasswordInputPro
         data-form-type="other"
         data-1p-ignore=""
         readOnly={!focused}
-        className="h-11 w-full rounded-xl border border-white/10 bg-[#0c1222] px-4 pr-10 text-sm text-[#f8fafc] placeholder:text-[#475569] outline-none transition-all hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-2 focus:ring-[#3b82f6]/20"
+        className={cn(
+          'h-11 w-full rounded-xl border border-border-hover bg-bg-main px-4 pr-10 text-sm text-text-primary',
+          'placeholder:text-text-muted outline-none transition-all',
+          'hover:border-border-hover focus:border-brand/50 focus:ring-2 focus:ring-brand/20',
+        )}
       />
       <button
         type="button"
         onMouseDown={(e) => { e.preventDefault(); setShow(!show) }}
-        className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-[#64748b] hover:text-[#f8fafc] transition-colors"
+        className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-text-muted transition-colors hover:text-text-primary"
       >
         {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
       </button>
@@ -132,7 +143,11 @@ export function Select({ value, onChange, placeholder, options = [], groups }: S
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className="h-11 w-full cursor-pointer rounded-xl border border-white/10 bg-[#0c1222] px-4 text-sm text-[#f8fafc] outline-none transition-all hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-2 focus:ring-[#3b82f6]/20"
+      className={cn(
+        'h-11 w-full cursor-pointer rounded-xl border border-border-hover bg-bg-main px-4 text-sm text-text-primary',
+        'outline-none transition-all',
+        'hover:border-border-hover focus:border-brand/50 focus:ring-2 focus:ring-brand/20',
+      )}
     >
       {placeholder && <option value="">{placeholder}</option>}
       {options.map((opt) => (
@@ -161,18 +176,20 @@ interface CardProps {
 
 export function Card({ children, className = '', highlight }: CardProps) {
   const highlightStyles = {
-    blue: 'border-[#3b82f6]/30 bg-[#3b82f6]/5',
-    green: 'border-[#22c55e]/30 bg-[#22c55e]/5',
-    amber: 'border-[#f59e0b]/30 bg-[#f59e0b]/5',
-    red: 'border-[#ef4444]/30 bg-[#ef4444]/5',
+    blue: 'border-brand/30 bg-brand-subtle',
+    green: 'border-success/30 bg-success-subtle',
+    amber: 'border-warning/30 bg-warning-subtle',
+    red: 'border-error/30 bg-error-subtle',
   }
 
   return (
-    <div className={`rounded-xl border p-4 transition-all ${
+    <div className={cn(
+      'rounded-xl border p-4 transition-all',
       highlight
         ? highlightStyles[highlight]
-        : 'border-white/[0.06] bg-[#0c1222]/50'
-    } ${className}`}>
+        : 'border-border bg-bg-main/50',
+      className,
+    )}>
       {children}
     </div>
   )
@@ -200,26 +217,31 @@ export function SelectableCard({
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition-all ${
+      className={cn(
+        'flex w-full cursor-pointer items-start gap-3 rounded-xl border px-4 py-3 text-left transition-all',
         selected
-          ? 'border-[#3b82f6]/50 bg-[#3b82f6]/10'
-          : 'border-white/[0.06] bg-[#0c1222]/50 hover:border-white/10 hover:bg-[#111827]'
-      }`}
+          ? 'border-brand/50 bg-brand-subtle'
+          : 'border-border bg-bg-main/50 hover:border-border-hover hover:bg-bg-surface',
+      )}
       style={selected && accentColor ? { borderColor: accentColor, backgroundColor: `${accentColor}15` } : undefined}
     >
       {Icon && (
-        <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${
-          selected ? 'bg-white/5' : 'bg-[#1e293b]'
-        }`}>
-          <Icon className={`h-3.5 w-3.5 ${selected ? (iconColor || 'text-[#3b82f6]') : 'text-[#64748b]'}`} />
+        <div className={cn(
+          'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg',
+          selected ? 'bg-white/5' : 'bg-bg-subtle',
+        )}>
+          <Icon className={cn(
+            'h-3.5 w-3.5',
+            selected ? (iconColor || 'text-brand') : 'text-text-muted',
+          )} />
         </div>
       )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-[#f8fafc]">{title}</span>
-          {selected && <span className="h-1.5 w-1.5 rounded-full bg-[#3b82f6]" />}
+          <span className="text-sm font-medium text-text-primary">{title}</span>
+          {selected && <span className="h-1.5 w-1.5 rounded-full bg-brand" />}
         </div>
-        {description && <p className="mt-0.5 text-xs text-[#94a3b8]">{description}</p>}
+        {description && <p className="mt-0.5 text-xs text-text-secondary">{description}</p>}
       </div>
     </button>
   )
@@ -242,14 +264,16 @@ export function Toggle({ enabled, onChange, label }: ToggleProps) {
       onClick={() => onChange(!enabled)}
       className="flex cursor-pointer items-center gap-2"
     >
-      <div className={`relative h-5 w-9 rounded-full transition-colors ${
-        enabled ? 'bg-[#3b82f6]' : 'bg-[#1e293b]'
-      }`}>
-        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-          enabled ? 'translate-x-4' : 'translate-x-0.5'
-        }`} />
+      <div className={cn(
+        'relative h-5 w-9 rounded-full transition-colors',
+        enabled ? 'bg-brand' : 'bg-bg-subtle',
+      )}>
+        <span className={cn(
+          'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform',
+          enabled ? 'translate-x-4' : 'translate-x-0.5',
+        )} />
       </div>
-      {label && <span className="text-xs text-[#94a3b8]">{label}</span>}
+      {label && <span className="text-xs text-text-secondary">{label}</span>}
     </button>
   )
 }
@@ -263,11 +287,12 @@ interface CheckboxProps {
 export function Checkbox({ checked, onChange, children }: CheckboxProps) {
   return (
     <button onClick={onChange} className="flex cursor-pointer items-center gap-2.5">
-      <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-all ${
+      <div className={cn(
+        'flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-all',
         checked
-          ? 'border-transparent bg-[#3b82f6] text-white'
-          : 'border-white/20 bg-[#1e293b] hover:border-white/40'
-      }`}>
+          ? 'border-transparent bg-brand text-white'
+          : 'border-border-hover bg-bg-subtle hover:border-text-muted',
+      )}>
         {checked && (
           <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -303,9 +328,9 @@ export function Button({
   icon: Icon,
 }: ButtonProps) {
   const variants = {
-    primary: 'bg-[#f8fafc] text-[#0f1419] shadow-lg shadow-white/5 hover:bg-white',
-    secondary: 'border border-white/10 bg-[#1e293b] text-[#f8fafc] hover:border-white/20 hover:bg-[#334155]',
-    ghost: 'text-[#64748b] hover:text-[#f8fafc]',
+    primary: 'bg-text-primary text-text-inverse shadow-lg hover:bg-white',
+    secondary: 'border border-border-hover bg-bg-subtle text-text-primary hover:border-text-muted hover:bg-bg-elevated',
+    ghost: 'text-text-muted hover:text-text-primary',
   }
 
   const sizes = {
@@ -317,7 +342,12 @@ export function Button({
     <button
       onClick={onClick}
       disabled={disabled || loading}
-      className={`flex cursor-pointer items-center justify-center gap-2 rounded-xl font-medium transition-all disabled:cursor-not-allowed disabled:opacity-40 ${variants[variant]} ${sizes[size]}`}
+      className={cn(
+        'flex cursor-pointer items-center justify-center gap-2 rounded-xl font-medium transition-all',
+        'disabled:cursor-not-allowed disabled:opacity-40',
+        variants[variant],
+        sizes[size],
+      )}
     >
       {loading ? (
         <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
@@ -344,11 +374,13 @@ export function OptionButton({ selected, onClick, children, className = '' }: Op
   return (
     <button
       onClick={onClick}
-      className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-all ${
+      className={cn(
+        'flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-all',
         selected
-          ? 'border-[#3b82f6]/50 bg-[#3b82f6]/10 text-[#f8fafc]'
-          : 'border-white/10 bg-[#0c1222] text-[#94a3b8] hover:border-white/20 hover:bg-[#111827]'
-      } ${className}`}
+          ? 'border-brand/50 bg-brand-subtle text-text-primary'
+          : 'border-border-hover bg-bg-main text-text-secondary hover:border-text-muted hover:bg-bg-surface',
+        className,
+      )}
     >
       {children}
     </button>
@@ -366,13 +398,13 @@ interface InfoBoxProps {
 
 export function InfoBox({ icon: Icon, children }: InfoBoxProps) {
   return (
-    <div className="flex items-start gap-2.5 rounded-xl border border-white/[0.06] bg-[#0c1222]/50 px-4 py-3">
+    <div className="flex items-start gap-2.5 rounded-xl border border-border bg-bg-main/50 px-4 py-3">
       {Icon && (
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#1e293b]">
-          <Icon className="h-3.5 w-3.5 text-[#64748b]" />
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-bg-subtle">
+          <Icon className="h-3.5 w-3.5 text-text-muted" />
         </div>
       )}
-      <p className="text-xs text-[#94a3b8]">{children}</p>
+      <p className="text-xs text-text-secondary">{children}</p>
     </div>
   )
 }

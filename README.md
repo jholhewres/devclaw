@@ -15,7 +15,7 @@ Open-source AI agent for tech teams — devs, DevOps, QA, PMs, designers, and ev
 
 **Not a chatbot. Not an IDE. Not a framework.** DevClaw is the AI backend that IDEs, terminals, and channels access — giving any tool persistent memory, infrastructure access, and integrations.
 
-[**Docs**](docs/) | [**Getting Started**](#quick-start) | [**Skills**](https://github.com/jholhewres/devclaw-skills) | [**Releases**](https://github.com/jholhewres/devclaw/releases)
+[**Docs**](docs/) | [**Getting Started**](#quick-start) | [**Skills**](https://clawhub.ai/) | [**Releases**](https://github.com/jholhewres/devclaw/releases)
 
 ---
 
@@ -44,7 +44,7 @@ pm2 status
 pm2 logs devclaw
 
 # Access setup wizard (configure API key)
-open http://localhost:8090/setup
+open http://localhost:47716/setup
 ```
 
 **Install options:**
@@ -94,7 +94,7 @@ git clone https://github.com/jholhewres/devclaw.git && cd devclaw
 docker compose up -d
 ```
 
-Open **http://localhost:8090/setup** to configure your API key and start using DevClaw.
+Open **http://localhost:47716/setup** to configure your API key and start using DevClaw.
 
 The container includes bash, python, node, git, and other tools the agent needs to execute scripts.
 
@@ -126,7 +126,7 @@ devclaw serve
 After starting the server, the setup wizard is available at:
 
 ```
-http://localhost:8090/setup
+http://localhost:47716/setup
 ```
 
 It guides you through:
@@ -150,7 +150,7 @@ All secrets are stored in the encrypted vault (`.devclaw.vault`), never in plain
 - **MCP server** — any IDE (Cursor, VSCode, Claude Code, Windsurf) connects via Model Context Protocol
 - **Pipe mode** — `git diff | devclaw diff` or `npm build 2>&1 | devclaw fix`
 - **Quick commands** — `devclaw fix`, `devclaw explain .`, `devclaw commit`, `devclaw how "task"`
-- **Extensible skills** — install from [devclaw-skills](https://github.com/jholhewres/devclaw-skills) or create your own
+- **Extensible skills** — install from [ClawHub](https://clawhub.ai/) or create your own
 - **4 channels** — WhatsApp, Discord, Telegram, Slack
 - **WebUI** — React dashboard with SSE streaming, session management, and setup wizard
 - **Gateway API** — OpenAI-compatible HTTP API + WebSocket JSON-RPC
@@ -325,7 +325,7 @@ api:
 
 webui:
   enabled: true
-  address: ":8090"
+  address: ":47716"
 ```
 
 See [`configs/devclaw.example.yaml`](configs/devclaw.example.yaml) for the full reference.
@@ -353,7 +353,7 @@ devclaw skill search kubernetes
 devclaw skill list
 ```
 
-Browse the catalog: [devclaw-skills](https://github.com/jholhewres/devclaw-skills)
+Browse the catalog: [ClawHub](https://clawhub.ai/)
 
 ---
 
@@ -500,7 +500,7 @@ curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/u
 1. Binary installed to `/opt/devclaw`
 2. PM2 configured with auto-restart
 3. Service starts automatically in "First Run Setup" mode
-4. Access `http://localhost:8090/setup` to configure API key
+4. Access `http://localhost:47716/setup` to configure API key
 
 **PM2 management:**
 ```bash

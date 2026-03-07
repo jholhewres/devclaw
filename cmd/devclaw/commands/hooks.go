@@ -101,10 +101,7 @@ func newHooksListCmd() *cobra.Command {
 			}
 
 			if jsonOutput {
-				data, err := json.MarshalIndent(entries, "", "  ")
-				if err != nil {
-					return fmt.Errorf("marshaling hooks: %w", err)
-				}
+				data, _ := json.MarshalIndent(entries, "", "  ")
 				fmt.Println(string(data))
 				return nil
 			}
@@ -269,15 +266,9 @@ func toggleHookInConfig(cmd *cobra.Command, name string, enabled bool) error {
 		return fmt.Errorf("hook %q not found in webhooks", name)
 	}
 
-	if len(doc.Content) == 0 {
-		return fmt.Errorf("config file is empty or invalid")
-	}
-
 	// Backup and save.
 	bakPath := configPath + ".bak"
-	if err := os.WriteFile(bakPath, data, 0o600); err != nil {
-		return fmt.Errorf("backup config: %w", err)
-	}
+	_ = os.WriteFile(bakPath, data, 0o600)
 
 	out, err := yaml.Marshal(doc.Content[0])
 	if err != nil {

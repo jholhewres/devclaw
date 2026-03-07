@@ -10,13 +10,14 @@ type fakeSkill struct {
 	meta Metadata
 }
 
-func (f *fakeSkill) Metadata() Metadata                                 { return f.meta }
-func (f *fakeSkill) Tools() []Tool                                      { return nil }
-func (f *fakeSkill) SystemPrompt() string                               { return "" }
-func (f *fakeSkill) Triggers() []string                                 { return nil }
-func (f *fakeSkill) Init(_ context.Context, _ map[string]any) error     { return nil }
+func (f *fakeSkill) Metadata() Metadata                                  { return f.meta }
+func (f *fakeSkill) Tools() []Tool                                       { return nil }
+func (f *fakeSkill) SystemPrompt() string                                { return "" }
+func (f *fakeSkill) Location() string                                    { return "" }
+func (f *fakeSkill) Triggers() []string                                  { return nil }
+func (f *fakeSkill) Init(_ context.Context, _ map[string]any) error      { return nil }
 func (f *fakeSkill) Execute(_ context.Context, _ string) (string, error) { return "", nil }
-func (f *fakeSkill) Shutdown() error                                    { return nil }
+func (f *fakeSkill) Shutdown() error                                     { return nil }
 
 func newFake(name, category string, tags []string) *fakeSkill {
 	return &fakeSkill{meta: Metadata{

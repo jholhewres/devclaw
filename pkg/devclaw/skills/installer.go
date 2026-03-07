@@ -546,11 +546,7 @@ func extractZip(data []byte, targetDir string) error {
 
 		outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, f.Mode())
 		if os.IsExist(err) {
-			if err := os.Remove(targetPath); err != nil {
-				rc.Close()
-				return fmt.Errorf("removing existing file before overwrite: %w", err)
-			}
-			outFile, err = os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, f.Mode())
+			outFile, err = os.OpenFile(targetPath, os.O_WRONLY, f.Mode())
 		}
 		if err != nil {
 			rc.Close()

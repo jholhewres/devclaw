@@ -28,9 +28,10 @@ import (
 // number of skills loaded.
 type SkillReloadCallback func(ctx context.Context) (int, error)
 
-// RegisterSkillCreatorTools registers a single "skill_manage" dispatcher tool
-// that consolidates init, edit, add_script, list, test, install, search,
-// defaults_list, defaults_install, remove actions.
+// RegisterSkillCreatorTools registers individual skill management tools.
+// Replaces the old dispatcher pattern with focused tools:
+// skill_init, skill_edit, skill_add_script, skill_list, skill_test,
+// skill_install, skill_defaults_list, skill_defaults_install, skill_remove.
 func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry, skillsDir string, skillDB *SkillDB, reloadCb SkillReloadCallback, logger *slog.Logger) {
 	if skillsDir == "" {
 		skillsDir = "./skills"
@@ -41,120 +42,169 @@ func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry
 
 	installer := skills.NewInstaller(skillsDir, logger)
 
-	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"action": map[string]any{
-				"type":        "string",
-				"enum":        []string{"init", "edit", "add_script", "list", "test", "install", "search", "defaults_list", "defaults_install", "remove"},
-				"description": "Action: init (create skill), edit (modify SKILL.md), add_script, list, test, install (from ClawHub/GitHub/URL), search (ClawHub), defaults_list, defaults_install, remove",
-			},
-			"name": map[string]any{
-				"type":        "string",
-				"description": "Skill name (for init/edit/test/remove)",
-			},
-			"description": map[string]any{
-				"type":        "string",
-				"description": "Skill description (for init)",
-			},
-			"instructions": map[string]any{
-				"type":        "string",
-				"description": "Agent instructions markdown (for init)",
-			},
-			"emoji": map[string]any{
-				"type":        "string",
-				"description": "Skill emoji (for init)",
-			},
-			"with_database": map[string]any{
-				"type":        "boolean",
-				"description": "Create database table (for init)",
-			},
-			"database_table": map[string]any{
-				"type":        "string",
-				"description": "Database table name (for init, default: 'data')",
-			},
-			"database_schema": map[string]any{
-				"type":        "object",
-				"description": "Column definitions (for init with_database)",
-				"additionalProperties": map[string]any{"type": "string"},
-			},
-			"content": map[string]any{
-				"type":        "string",
-				"description": "New SKILL.md content (for edit) or script source (for add_script)",
-			},
-			"skill_name": map[string]any{
-				"type":        "string",
-				"description": "Target skill (for add_script)",
-			},
-			"script_name": map[string]any{
-				"type":        "string",
-				"description": "Script filename (for add_script)",
-			},
-			"input": map[string]any{
-				"type":        "string",
-				"description": "Test input (for test)",
-			},
-			"source": map[string]any{
-				"type":        "string",
-				"description": "Install source: ClawHub slug, GitHub URL, or local path (for install)",
-			},
-			"query": map[string]any{
-				"type":        "string",
-				"description": "Search query (for search)",
-			},
-			"names": map[string]any{
-				"type":        "array",
-				"items":       map[string]any{"type": "string"},
-				"description": "Skill names to install (for defaults_install). Use [\"all\"] for all.",
-			},
-		},
-		"required": []string{"action"},
+	// withAdminCheck wraps a handler to require admin access for write operations.
+	withAdminCheck := func(handler func(context.Context, map[string]any) (any, error)) func(context.Context, map[string]any) (any, error) {
+		return func(ctx context.Context, args map[string]any) (any, error) {
+			level := CallerLevelFromContext(ctx)
+			if level != AccessOwner && level != AccessAdmin {
+				return nil, fmt.Errorf("this action requires admin access (current: %s)", level)
+			}
+			return handler(ctx, args)
+		}
 	}
 
+	// ── skill_init ──
 	executor.Register(
-		MakeToolDefinition("skill_manage",
-			"Manage skills: init, edit, add_script, list, test, install, search, defaults_list, defaults_install, remove.",
-			schema),
-		func(ctx context.Context, args map[string]any) (any, error) {
-			action, _ := args["action"].(string)
-			if action == "" {
-				return nil, fmt.Errorf("action is required")
-			}
+		MakeToolDefinition("skill_init",
+			"Create a new skill with a SKILL.md template. Optionally creates a database table for structured data storage.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":        map[string]any{"type": "string", "description": "Skill name (will be sanitized to lowercase-hyphenated)"},
+					"description": map[string]any{"type": "string", "description": "Brief description of what the skill does"},
+					"instructions": map[string]any{"type": "string", "description": "Agent instructions in Markdown format"},
+					"emoji":       map[string]any{"type": "string", "description": "Emoji icon for the skill"},
+					"with_database": map[string]any{"type": "boolean", "description": "Create a database table for structured data storage"},
+					"database_table": map[string]any{"type": "string", "description": "Database table name (default: 'data')"},
+					"database_schema": map[string]any{
+						"type": "object", "description": "Column definitions as {name: type} pairs",
+						"additionalProperties": map[string]any{"type": "string"},
+					},
+				},
+				"required": []string{"name", "description"},
+			}),
+		withAdminCheck(func(_ context.Context, args map[string]any) (any, error) {
+			return handleSkillInit(registry, skillsDir, skillDB, args)
+		}),
+	)
 
-			// Write actions require admin level (they create files/directories).
-			// Read-only actions (list, search, test, defaults_list) are safe for any user.
-			if isSkillWriteAction(action) {
-				level := CallerLevelFromContext(ctx)
-				if level != AccessOwner && level != AccessAdmin {
-					return nil, fmt.Errorf("action %q requires admin access (current: %s). Ask an admin to perform this action", action, level)
-				}
-			}
+	// ── skill_edit ──
+	executor.Register(
+		MakeToolDefinition("skill_edit",
+			"Edit an existing skill's SKILL.md content.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":    map[string]any{"type": "string", "description": "Skill name to edit"},
+					"content": map[string]any{"type": "string", "description": "New SKILL.md content (full replacement)"},
+				},
+				"required": []string{"name", "content"},
+			}),
+		withAdminCheck(func(_ context.Context, args map[string]any) (any, error) {
+			return handleSkillEdit(skillsDir, args)
+		}),
+	)
 
-			switch action {
-			case "init":
-				return handleSkillInit(registry, skillsDir, skillDB, args)
-			case "edit":
-				return handleSkillEdit(skillsDir, args)
-			case "add_script":
-				return handleSkillAddScript(skillsDir, args)
-			case "list":
-				return handleSkillList(registry, skillsDir)
-			case "test":
-				return handleSkillTest(ctx, registry, args)
-			case "install":
-				return handleSkillInstall(ctx, installer, reloadCb, args)
-			case "search":
-				return handleSkillSearch(args)
-			case "defaults_list":
-				return handleSkillDefaultsList(skillsDir)
-			case "defaults_install":
-				return handleSkillDefaultsInstall(ctx, reloadCb, skillsDir, args)
-			case "remove":
-				return handleSkillRemove(registry, skillsDir, args)
-			default:
-				return nil, fmt.Errorf("unknown action: %s", action)
-			}
+	// ── skill_add_script ──
+	executor.Register(
+		MakeToolDefinition("skill_add_script",
+			"Add an executable script (Python, Node.js, Shell) to an existing skill.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"skill_name":  map[string]any{"type": "string", "description": "Target skill name"},
+					"script_name": map[string]any{"type": "string", "description": "Script filename (e.g. main.py, run.sh)"},
+					"content":     map[string]any{"type": "string", "description": "Script source code"},
+				},
+				"required": []string{"skill_name", "script_name", "content"},
+			}),
+		withAdminCheck(func(_ context.Context, args map[string]any) (any, error) {
+			return handleSkillAddScript(skillsDir, args)
+		}),
+	)
+
+	// ── skill_list ──
+	executor.Register(
+		MakeToolDefinition("skill_list",
+			"List all installed skills with name, version, author, description, category, and tags.",
+			map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			}),
+		func(_ context.Context, _ map[string]any) (any, error) {
+			return handleSkillList(registry, skillsDir)
 		},
+	)
+
+	// ── skill_test ──
+	executor.Register(
+		MakeToolDefinition("skill_test",
+			"Test a skill by executing it with sample input.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name":  map[string]any{"type": "string", "description": "Skill name to test"},
+					"input": map[string]any{"type": "string", "description": "Test input to send to the skill"},
+				},
+				"required": []string{"name"},
+			}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			return handleSkillTest(ctx, registry, args)
+		},
+	)
+
+	// ── skill_install ──
+	executor.Register(
+		MakeToolDefinition("skill_install",
+			"Install a skill from ClawHub (slug), GitHub URL, or local path.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"source": map[string]any{"type": "string", "description": "Install source: ClawHub slug, GitHub URL, or local path"},
+				},
+				"required": []string{"source"},
+			}),
+		withAdminCheck(func(ctx context.Context, args map[string]any) (any, error) {
+			return handleSkillInstall(ctx, installer, reloadCb, args)
+		}),
+	)
+
+	// ── skill_defaults_list ──
+	executor.Register(
+		MakeToolDefinition("skill_defaults_list",
+			"List available default skills that can be installed.",
+			map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			}),
+		func(_ context.Context, _ map[string]any) (any, error) {
+			return handleSkillDefaultsList(skillsDir)
+		},
+	)
+
+	// ── skill_defaults_install ──
+	executor.Register(
+		MakeToolDefinition("skill_defaults_install",
+			"Install one or more default skills. Pass [\"all\"] to install all defaults.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"names": map[string]any{
+						"type": "array", "items": map[string]any{"type": "string"},
+						"description": "Skill names to install, or [\"all\"] for all defaults",
+					},
+				},
+				"required": []string{"names"},
+			}),
+		withAdminCheck(func(ctx context.Context, args map[string]any) (any, error) {
+			return handleSkillDefaultsInstall(ctx, reloadCb, skillsDir, args)
+		}),
+	)
+
+	// ── skill_remove ──
+	executor.Register(
+		MakeToolDefinition("skill_remove",
+			"Remove an installed skill and its directory.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string", "description": "Skill name to remove"},
+				},
+				"required": []string{"name"},
+			}),
+		withAdminCheck(func(_ context.Context, args map[string]any) (any, error) {
+			return handleSkillRemove(registry, skillsDir, args)
+		}),
 	)
 }
 
@@ -188,12 +238,12 @@ func handleSkillInit(registry *skills.Registry, skillsDir string, skillDB *Skill
 	}
 
 	if _, exists := registry.Get(name); exists {
-		return nil, fmt.Errorf("skill '%s' already exists. Use action=edit to modify it", name)
+		return nil, fmt.Errorf("skill '%s' already exists. Use skill_edit to modify it", name)
 	}
 
 	skillDir := filepath.Join(skillsDir, name)
 	if _, err := os.Stat(skillDir); err == nil {
-		return nil, fmt.Errorf("skill directory '%s' already exists. Use action=edit to modify it", skillDir)
+		return nil, fmt.Errorf("skill directory '%s' already exists. Use skill_edit to modify it", skillDir)
 	}
 
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
@@ -281,7 +331,7 @@ skill_db(action="delete", skill_name="%s", table_name="%s", row_id="ID")
 		return nil, fmt.Errorf("writing SKILL.md: %w", err)
 	}
 
-	return fmt.Sprintf("Skill '%s' created at %s%s\n\nTo add scripts: use action=add_script.\nTo test: use action=test.", name, skillDir, dbInfo), nil
+	return fmt.Sprintf("Skill '%s' created at %s%s\n\nTo add scripts: use skill_add_script.\nTo test: use skill_test.", name, skillDir, dbInfo), nil
 }
 
 func handleSkillEdit(skillsDir string, args map[string]any) (any, error) {
@@ -350,25 +400,6 @@ func handleSkillTest(ctx context.Context, registry *skills.Registry, args map[st
 	if !ok {
 		return nil, fmt.Errorf("skill '%s' not found in registry", name)
 	}
-
-	// Check if this is a prompt-only skill before attempting execution.
-	// Prompt-only skills have no scripts and will only return instruction text,
-	// which causes the agent to loop trying to "execute" them.
-	if ss, ok := skill.(*skills.ScriptSkill); ok && ss.IsPromptOnly() {
-		prompt := skill.SystemPrompt()
-		// Extract actionable commands from the instructions (bash, curl, etc.)
-		actionHints := extractActionableCommands(prompt)
-		msg := fmt.Sprintf(
-			"Skill '%s' is a prompt-only skill (no executable scripts). "+
-				"It provides instructions only — DO NOT call test/execute again.\n\n"+
-				"Instead, follow the instructions from the skill's system prompt using available tools.",
-			name)
-		if actionHints != "" {
-			msg += "\n\nActionable commands found in instructions:\n" + actionHints
-		}
-		return msg, nil
-	}
-
 	testCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	result, err := skill.Execute(testCtx, input)
@@ -376,35 +407,6 @@ func handleSkillTest(ctx context.Context, registry *skills.Registry, args map[st
 		return nil, fmt.Errorf("skill execution failed: %w", err)
 	}
 	return fmt.Sprintf("Skill '%s' test result:\n\n%s", name, result), nil
-}
-
-// extractActionableCommands scans skill instructions for bash/curl/git commands
-// that the agent should execute directly instead of calling the skill tool.
-func extractActionableCommands(instructions string) string {
-	lines := strings.Split(instructions, "\n")
-	var commands []string
-	inCodeBlock := false
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") {
-			inCodeBlock = !inCodeBlock
-			continue
-		}
-		if inCodeBlock && trimmed != "" {
-			// Collect commands from code blocks
-			commands = append(commands, "  "+trimmed)
-			if len(commands) >= 10 {
-				commands = append(commands, "  ...")
-				break
-			}
-		}
-	}
-
-	if len(commands) == 0 {
-		return ""
-	}
-	return strings.Join(commands, "\n")
 }
 
 func handleSkillInstall(ctx context.Context, installer *skills.Installer, reloadCb SkillReloadCallback, args map[string]any) (any, error) {
@@ -435,28 +437,6 @@ func handleSkillInstall(ctx context.Context, installer *skills.Installer, reload
 		result.Name, status, result.Path, result.Source, reloadMsg), nil
 }
 
-func handleSkillSearch(args map[string]any) (any, error) {
-	query, _ := args["query"].(string)
-	if query == "" {
-		return nil, fmt.Errorf("query is required for search action")
-	}
-	client := skills.NewClawHubClient("")
-	result, err := client.Search(query, 10)
-	if err != nil {
-		return nil, fmt.Errorf("ClawHub search failed: %w", err)
-	}
-	if len(result.Results) == 0 {
-		return fmt.Sprintf("No skills found for %q on ClawHub.", query), nil
-	}
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "ClawHub results for %q (%d found):\n\n", query, len(result.Results))
-	for _, s := range result.Results {
-		fmt.Fprintf(&sb, "- **%s** (%s)\n  %s\n  Score: %.2f\n  Install: skill_manage action=install source=%q\n\n",
-			s.DisplayName, s.Slug, s.Summary, s.Score, s.Slug)
-	}
-	return sb.String(), nil
-}
-
 func handleSkillDefaultsList(skillsDir string) (any, error) {
 	defaults := skills.DefaultSkills()
 	installed := listUserSkillDirs(skillsDir)
@@ -473,7 +453,7 @@ func handleSkillDefaultsList(skillsDir string) (any, error) {
 		}
 		fmt.Fprintf(&sb, "- **%s** — %s [%s]\n", d.Name, d.Description, status)
 	}
-	sb.WriteString("\nUse action=defaults_install with names to install. Pass [\"all\"] for all.")
+	sb.WriteString("\nUse skill_defaults_install(names=[...]) to install. Pass [\"all\"] for all.")
 	return sb.String(), nil
 }
 
@@ -526,7 +506,7 @@ func handleSkillRemove(registry *skills.Registry, skillsDir string, args map[str
 	if err := os.RemoveAll(targetDir); err != nil {
 		return nil, fmt.Errorf("removing skill: %w", err)
 	}
-	registry.Remove(name)
+	registry.Remove(sanitizeSkillName(name))
 	return fmt.Sprintf("Skill '%s' removed successfully.", name), nil
 }
 
@@ -563,14 +543,3 @@ func listUserSkillDirs(skillsDir string) []string {
 	return names
 }
 
-// isSkillWriteAction returns true for actions that create, modify, or delete
-// files on disk. These require admin access to prevent privilege escalation
-// in restricted profiles (e.g., messaging channels).
-func isSkillWriteAction(action string) bool {
-	switch action {
-	case "init", "edit", "add_script", "install", "defaults_install", "remove":
-		return true
-	default:
-		return false
-	}
-}

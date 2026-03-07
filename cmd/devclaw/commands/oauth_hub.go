@@ -65,8 +65,7 @@ type hubConfig struct {
 }
 
 func hubConfigPath() string {
-	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".devclaw", "oauth_hub.json")
+	return "hub_config.json"
 }
 
 func loadHubConfig() (*hubConfig, error) {

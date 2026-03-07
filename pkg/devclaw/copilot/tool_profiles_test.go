@@ -249,9 +249,12 @@ func TestExpandProfileList_Group(t *testing.T) {
 		expandedMap[t] = true
 	}
 
-	// Verify memory tool is included.
-	if !expandedMap["memory"] {
-		t.Error("expected memory from group:memory")
+	// Verify memory tools are included.
+	if !expandedMap["memory_save"] {
+		t.Error("expected memory_save from group:memory")
+	}
+	if !expandedMap["memory_search"] {
+		t.Error("expected memory_search from group:memory")
 	}
 }
 
@@ -453,13 +456,16 @@ func TestInferToolCategory(t *testing.T) {
 		{"web_fetch", "Web"},
 
 		// Memory
-		{"memory", "Memory"},
+		{"memory_save", "Memory"},
+		{"memory_search", "Memory"},
 
 		// Scheduling
-		{"scheduler", "Scheduling"},
+		{"scheduler_add", "Scheduling"},
+		{"scheduler_remove", "Scheduling"},
 
 		// Vault
-		{"vault", "Vault"},
+		{"vault_status", "Vault"},
+		{"vault_save", "Vault"},
 
 		// Agents
 		{"sessions", "Agents"},
@@ -489,7 +495,8 @@ func TestInferToolCategory(t *testing.T) {
 		{"team_task", "Team"},
 
 		// Skills
-		{"skill_manage", "Skills"},
+		{"skill_init", "Skills"},
+		{"skill_edit", "Skills"},
 
 		// Media
 		{"describe_image", "Media"},
@@ -519,7 +526,7 @@ func TestCategorizeTools(t *testing.T) {
 		makeTestTool("read_file", "Read file"),
 		makeTestTool("bash", "Run command"),
 		makeTestTool("web_search", "Search web"),
-		makeTestTool("memory", "Memory operations"),
+		makeTestTool("memory_save", "Memory operations"),
 	}
 
 	result := CategorizeTools(tools)

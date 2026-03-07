@@ -7,6 +7,7 @@ import {
   CheckCircle2,
 } from 'lucide-react'
 import { api } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import {
   ConfigPage,
   ConfigSection,
@@ -41,7 +42,7 @@ const ACTIONS = [
 // Progress bar component
 function ProgressBar({ percent, color }: { percent: number; color: string }) {
   return (
-    <div className="h-3 rounded-full bg-[#1e293b] overflow-hidden">
+    <div className="h-3 rounded-full bg-bg-subtle overflow-hidden">
       <div
         className="h-full rounded-full transition-all duration-500"
         style={{ width: `${percent}%`, backgroundColor: color }}
@@ -53,9 +54,9 @@ function ProgressBar({ percent, color }: { percent: number; color: string }) {
 // Stat card component
 function StatCard({ label, value, prefix = '' }: { label: string; value: string | number; prefix?: string }) {
   return (
-    <div className="p-4 rounded-xl bg-[#1e293b]/50">
-      <p className="text-xs text-[#64748b] uppercase tracking-wide">{label}</p>
-      <p className="text-xl font-semibold text-[#f8fafc] mt-1">
+    <div className="p-4 rounded-xl bg-bg-subtle/50">
+      <p className="text-xs text-text-muted uppercase tracking-wide">{label}</p>
+      <p className="text-xl font-semibold text-text-primary mt-1">
         {prefix}{typeof value === 'number' ? value.toLocaleString() : value}
       </p>
     </div>
@@ -168,16 +169,16 @@ export function Budget() {
           {/* Progress Bar */}
           <div className="mb-6">
             <div className="flex justify-between items-center mb-2">
-              <span className="text-sm text-[#94a3b8]">{t('budget.monthlyUsage')}</span>
+              <span className="text-sm text-text-secondary">{t('budget.monthlyUsage')}</span>
               <span className="text-sm font-medium" style={{ color: usageColor }}>
                 ${usage.total_cost.toFixed(2)} / ${config.monthly_limit_usd.toFixed(2)}
               </span>
             </div>
             <ProgressBar percent={usagePercent} color={usageColor} />
             <div className="flex justify-between items-center mt-2">
-              <span className="text-xs text-[#64748b]">{usagePercent.toFixed(1)}%</span>
+              <span className="text-xs text-text-muted">{usagePercent.toFixed(1)}%</span>
               {isOverBudget && (
-                <span className="text-xs text-[#f87171] flex items-center gap-1">
+                <span className="text-xs text-error flex items-center gap-1">
                   <AlertTriangle className="h-3 w-3" />
                   {t('budget.overBudget')}
                 </span>
@@ -203,7 +204,7 @@ export function Budget() {
       >
         <ConfigField label={t('budget.monthlyLimit')} hint={t('budget.monthlyLimitHint')}>
           <div className="relative">
-            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-[#64748b] z-10">$</span>
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm text-text-muted z-10">$</span>
             <ConfigInput
               type="number"
               value={config.monthly_limit_usd}
@@ -223,7 +224,7 @@ export function Budget() {
               placeholder="80"
               className="pr-10"
             />
-            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-[#64748b]">%</span>
+            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-text-muted">%</span>
           </div>
         </ConfigField>
 
@@ -244,20 +245,21 @@ export function Budget() {
         className="mb-10"
         actions={
           <div className="text-right">
-            <p className="text-xs text-[#64748b]">{t('budget.remainingBudget')}</p>
-            <p className="text-sm font-medium text-[#f8fafc]">
+            <p className="text-xs text-text-muted">{t('budget.remainingBudget')}</p>
+            <p className="text-sm font-medium text-text-primary">
               ${Math.max(0, config.monthly_limit_usd - (usage?.total_cost || 0)).toFixed(2)}
             </p>
           </div>
         }
       >
-        <p className={`text-sm ${
+        <p className={cn(
+          'text-sm',
           isOverBudget
-            ? 'text-[#f87171]'
+            ? 'text-error'
             : usagePercent >= (config.warn_at_percent || 80)
-              ? 'text-[#f59e0b]'
-              : 'text-[#22c55e]'
-        }`}>
+              ? 'text-warning'
+              : 'text-success'
+        )}>
           {isOverBudget
             ? t('budget.statusOver')
             : usagePercent >= (config.warn_at_percent || 80)

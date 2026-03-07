@@ -289,8 +289,10 @@ func (s *Server) installSetupSkills(selected []string) {
 // These are popular integration skills that users typically want to enable first.
 // The full catalog is available at /api/skills/available after setup.
 var setupSkillNames = []string{
+	"google-calendar",
 	"trello",
 	"shopify",
+	"gmail",
 	"hubspot",
 }
 

@@ -480,6 +480,14 @@ func getModelDefaults(model, provider string) modelDefaults {
 		d.DefaultTemperature = 0.7
 		d.MaxOutputTokens = 4096
 
+	// ── Google Gemini models ──
+	case strings.HasPrefix(model, "gemini-3"), strings.HasPrefix(model, "gemini-2.5-pro"):
+		d.DefaultTemperature = 1.0
+		d.MaxOutputTokens = 8192
+	case strings.HasPrefix(model, "gemini-2"), strings.HasPrefix(model, "gemini-1.5"):
+		d.DefaultTemperature = 1.0
+		d.MaxOutputTokens = 8192
+
 	// ── xAI (Grok) models ──
 	case strings.HasPrefix(model, "grok"):
 		d.DefaultTemperature = 0.7
@@ -1235,8 +1243,8 @@ func classifyAPIError(statusCode int, body string) LLMErrorKind {
 	bodyLower := strings.ToLower(body)
 
 	// Context overflow — highest priority check.
-	if strings.Contains(bodyLower, "context_length_exceeded") ||
-		strings.Contains(bodyLower, "maximum context length") {
+	// Delegates to the comprehensive heuristic to catch all provider patterns.
+	if IsLikelyContextOverflowError(body) {
 		return LLMErrorContext
 	}
 
@@ -1535,6 +1543,34 @@ func envOrEmpty(key string) string {
 	return os.Getenv(key)
 }
 
+// isXAIProvider returns true if the provider is xAI/Grok.
+func isXAIProvider(provider string) bool {
+	p := strings.ToLower(strings.TrimSpace(provider))
+	return p == "xai" || p == "grok" || strings.Contains(p, "x.ai")
+}
+
+// xaiHTMLEntityReplacer decodes common HTML entities that xAI/Grok providers
+// sometimes encode in tool call arguments.
+var xaiHTMLEntityReplacer = strings.NewReplacer(
+	"&amp;", "&",
+	"&lt;", "<",
+	"&gt;", ">",
+	"&quot;", `"`,
+	"&#39;", "'",
+	"&apos;", "'",
+)
+
+// decodeXAIToolCallArgs decodes HTML entities in tool call arguments
+// for xAI/Grok providers that sometimes encode them.
+func decodeXAIToolCallArgs(toolCalls []ToolCall) {
+	for i := range toolCalls {
+		args := toolCalls[i].Function.Arguments
+		if strings.Contains(args, "&") {
+			toolCalls[i].Function.Arguments = xaiHTMLEntityReplacer.Replace(args)
+		}
+	}
+}
+
 // completeOnce performs a single chat completion request. Returns *apiError on HTTP errors
 // so the caller can classify and decide retry/fallback.
 func (c *LLMClient) completeOnce(ctx context.Context, model string, messages []chatMessage, tools []ToolDefinition) (*LLMResponse, error) {
@@ -1752,6 +1788,11 @@ func (c *LLMClient) completeOnceOpenAI(ctx context.Context, model string, messag
 	cacheRead := 0
 	if chatResp.Usage.PromptTokensDetails != nil {
 		cacheRead = chatResp.Usage.PromptTokensDetails.CachedTokens
+	}
+
+	// xAI/Grok: decode HTML entities in tool call arguments.
+	if isXAIProvider(c.provider) && len(choice.Message.ToolCalls) > 0 {
+		decodeXAIToolCallArgs(choice.Message.ToolCalls)
 	}
 
 	return &LLMResponse{
@@ -2284,6 +2325,11 @@ func (c *LLMClient) completeOnceStreamOpenAI(ctx context.Context, model string, 
 		if acc, ok := toolCallsAccum[i]; ok && (acc.ID != "" || acc.Function.Name != "") {
 			toolCalls = append(toolCalls, *acc)
 		}
+	}
+
+	// xAI/Grok: decode HTML entities in tool call arguments.
+	if isXAIProvider(c.provider) && len(toolCalls) > 0 {
+		decodeXAIToolCallArgs(toolCalls)
 	}
 
 	duration := time.Since(start)

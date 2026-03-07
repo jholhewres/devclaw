@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { createSSEConnection, type SSEEvent } from '@/lib/sse'
+import { useEffect, useRef } from 'react';
+import { createSSEConnection, type SSEEvent } from '@/lib/sse';
 
 /**
  * Hook para conectar a um endpoint SSE com auto-reconexão.
@@ -8,20 +8,19 @@ import { createSSEConnection, type SSEEvent } from '@/lib/sse'
 export function useSSE(
   url: string | null,
   onEvent: (event: SSEEvent) => void,
-  deps: unknown[] = [],
+  deps: unknown[] = []
 ) {
-  const callbackRef = useRef(onEvent)
-  callbackRef.current = onEvent
+  const callbackRef = useRef(onEvent);
+  callbackRef.current = onEvent;
 
   useEffect(() => {
-    if (!url) return
+    if (!url) return;
 
     const cleanup = createSSEConnection({
       url,
       onEvent: (event) => callbackRef.current(event),
-    })
+    });
 
-    return cleanup
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url, ...deps])
+    return cleanup;
+  }, [url, ...deps]);
 }

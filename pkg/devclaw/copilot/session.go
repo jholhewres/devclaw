@@ -679,16 +679,15 @@ func (ss *SessionStore) DeleteByID(id string) bool {
 	if s, exists := ss.sessions[id]; exists {
 		delete(ss.sessions, id)
 		if ss.persistence != nil {
-			if err := ss.persistence.DeleteSession(id); err != nil {
-				ss.logger.Warn("failed to delete session from persistence",
-					"id", id, "error", err)
-			}
+			ss.persistence.DeleteSession(id)
 		}
 		ss.logger.Info("session deleted by ID",
 			"id", id, "channel", s.Channel, "chat_id", s.ChatID)
 		return true
 	}
 	// Session may have been pruned from memory but still exists in persistence.
+	// TODO: SQLite DeleteSession always returns nil (even for 0 rows affected),
+	// so this returns true for any ID. Consider checking rows affected for stricter semantics.
 	if ss.persistence != nil {
 		if err := ss.persistence.DeleteSession(id); err == nil {
 			ss.logger.Info("session deleted from persistence only", "id", id)

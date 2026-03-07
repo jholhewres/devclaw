@@ -143,7 +143,7 @@ scheduler:
 # Auto-update checking and installation.
 update:
   enabled: true                        # Enable automatic update checks
-  assets_url: ""  # Base URL for release assets
+  assets_url: "https://assets-gatorclaw.hostgator.io"  # Base URL for release assets
   check_interval: "1h"                 # How often to check for updates
 
 # ── Logging ────────────────────────────────────────────────

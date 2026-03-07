@@ -9,6 +9,7 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import { api } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import {
   ConfigPage,
   ConfigSection,
@@ -42,14 +43,14 @@ function ColoredTagList({ tags, onRemove, color = 'blue' }: {
   color?: 'blue' | 'green' | 'red' | 'yellow'
 }) {
   const colorClasses = {
-    blue: 'bg-[#3b82f6]/10 text-[#3b82f6] border-[#3b82f6]/20',
-    green: 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/20',
-    red: 'bg-[#ef4444]/10 text-[#f87171] border-[#ef4444]/20',
-    yellow: 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/20',
+    blue: 'bg-brand-subtle text-brand border-brand/20',
+    green: 'bg-success-subtle text-success border-success/20',
+    red: 'bg-error-subtle text-error border-error/20',
+    yellow: 'bg-warning-subtle text-warning border-warning/20',
   }
 
   if (tags.length === 0) {
-    return <p className="text-sm text-[#64748b]">None</p>
+    return <p className="text-sm text-text-muted">None</p>
   }
 
   return (
@@ -57,7 +58,10 @@ function ColoredTagList({ tags, onRemove, color = 'blue' }: {
       {tags.map((tag) => (
         <span
           key={tag}
-          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border ${colorClasses[color]}`}
+          className={cn(
+            'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border',
+            colorClasses[color]
+          )}
         >
           {tag}
           <button
@@ -77,6 +81,7 @@ function AddTagInput({ onAdd, placeholder }: {
   onAdd: (tag: string) => void
   placeholder: string
 }) {
+  const { t } = useTranslation()
   const [value, setValue] = useState('')
 
   const handleAdd = () => {
@@ -94,14 +99,14 @@ function AddTagInput({ onAdd, placeholder }: {
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAdd())}
         placeholder={placeholder}
-        className="h-10 flex-1 rounded-lg border border-white/10 bg-[#111827] px-3 text-sm text-[#f8fafc] outline-none transition-all placeholder:text-[#475569] hover:border-white/20 focus:border-[#3b82f6]/50"
+        className="h-10 flex-1 rounded-lg border border-border bg-bg-surface px-3 text-sm text-text-primary outline-none transition-all placeholder:text-text-muted hover:border-border-hover focus:border-brand/50"
       />
       <button
         onClick={handleAdd}
-        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#1e293b] border border-white/10 text-sm text-[#94a3b8] hover:text-[#f8fafc] hover:border-white/20 transition-all cursor-pointer"
+        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-bg-subtle border border-border text-sm text-text-secondary hover:text-text-primary hover:border-border-hover transition-all cursor-pointer"
       >
         <UserPlus className="h-4 w-4" />
-        Add
+        {t('common.add')}
       </button>
     </div>
   )
@@ -279,11 +284,11 @@ export function Access() {
 
       {/* Warning */}
       <div className="mb-10">
-        <div className="flex items-start gap-3 rounded-xl border border-[#f59e0b]/20 bg-[#f59e0b]/5 p-4">
-          <AlertTriangle className="h-5 w-5 text-[#f59e0b] flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 rounded-xl border border-warning/20 bg-warning-subtle p-4">
+          <AlertTriangle className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
           <div>
-            <h3 className="text-sm font-semibold text-[#f59e0b]">{t('access.warning')}</h3>
-            <p className="text-xs text-[#94a3b8] mt-1">{t('access.warningDesc')}</p>
+            <h3 className="text-sm font-semibold text-warning">{t('access.warning')}</h3>
+            <p className="text-xs text-text-secondary mt-1">{t('access.warningDesc')}</p>
           </div>
         </div>
       </div>

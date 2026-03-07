@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Search, ToggleLeft, ToggleRight, Zap, Package, Wrench, Plus, Download, X, Loader2, CheckCircle2 } from 'lucide-react'
+import { ToggleLeft, ToggleRight, Package, Wrench, Plus, Download, X, Loader2, CheckCircle2 } from 'lucide-react'
 import { api, type SkillInfo } from '@/lib/api'
+import { cn } from '@/lib/utils'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { SearchInput } from '@/components/ui/SearchInput'
+import { Badge } from '@/components/ui/Badge'
+import { Card } from '@/components/ui/Card'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { Tabs } from '@/components/ui/Tabs'
+import { LoadingSpinner, ErrorState } from '@/components/ui/ConfigComponents'
 
 interface AvailableSkill {
   name: string
@@ -52,114 +60,107 @@ export function Skills() {
   const enabledCount = skills.filter((s) => s.enabled).length
 
   if (loading) {
-    return (
-      <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-        <div className="h-10 w-10 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
-      </div>
-    )
+    return <LoadingSpinner />
   }
 
   if (loadError) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center bg-[#0c1222]">
-        <p className="text-sm text-[#f87171]">{t('common.error')}</p>
-        <button onClick={() => window.location.reload()} className="mt-3 text-xs text-[#64748b] hover:text-[#f8fafc] transition-colors cursor-pointer">
-          {t('common.loading')}
-        </button>
-      </div>
+      <ErrorState
+        message={t('common.error')}
+        onRetry={() => window.location.reload()}
+        retryLabel={t('common.loading')}
+      />
     )
   }
 
   return (
     <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-screen-2xl mx-auto">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#475569]">{t('skills.subtitle')}</p>
-          <h1 className="mt-1 text-2xl font-bold text-[#f8fafc] tracking-tight">{t('skills.title')}</h1>
-          <p className="mt-2 text-base text-[#64748b]">
-            {enabledCount} {t('skills.enabled').toLowerCase()} / {skills.length}
-          </p>
-        </div>
-        <button
-          onClick={() => setShowInstall(true)}
-          className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#3b82f6] px-4 py-2.5 text-sm font-medium text-white transition-all hover:bg-[#2563eb]"
-        >
-          <Plus className="h-4 w-4" />
-          Instalar Skill
-        </button>
-      </div>
+      <PageHeader
+        title={t('skills.title')}
+        description={`${enabledCount} ${t('skills.enabled').toLowerCase()} / ${skills.length}`}
+        actions={
+          <button
+            onClick={() => setShowInstall(true)}
+            className="flex cursor-pointer items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white transition-all hover:bg-brand-hover"
+          >
+            <Plus className="h-4 w-4" />
+            {t('skillsPage.install')}
+          </button>
+        }
+      />
 
       {/* Search */}
-      <div className="relative mt-6">
-          <Search className="absolute left-5 top-1/2 h-5 w-5 -translate-y-1/2 text-[#475569]" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar skills..."
-            className="w-full rounded-2xl border border-white/10 bg-[#111827] px-5 py-4 pl-14 text-base text-[#f8fafc] outline-none placeholder:text-[#475569] transition-all focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20"
-          />
-        </div>
+      <SearchInput
+        value={search}
+        onChange={setSearch}
+        placeholder={t('skillsPage.searchPlaceholder')}
+        className="mt-6"
+      />
 
-        {/* Grid */}
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((skill) => (
-            <div
-              key={skill.name}
-              className={`group relative overflow-hidden rounded-2xl border p-6 transition-all ${
-                skill.enabled
-                  ? 'border-[#3b82f6]/30 bg-[#111827]'
-                  : 'border-white/10 bg-[#111827] hover:border-white/20'
-              }`}
-            >
-              {skill.enabled && (
-                <div className="absolute right-4 top-4">
-                  <span className="rounded-full bg-[#3b82f6]/20 px-2.5 py-0.5 text-[10px] font-semibold text-[#3b82f6]">ativa</span>
-                </div>
-              )}
-
-                <div className={`flex h-14 w-14 items-center justify-center rounded-xl ${
-                skill.enabled ? 'bg-[#3b82f6]/10 text-[#3b82f6]' : 'bg-[#1e293b] text-[#64748b] group-hover:text-[#94a3b8]'
-              } transition-colors`}>
-                <Package className="h-7 w-7" />
+      {/* Grid */}
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {filtered.map((skill) => (
+          <Card
+            key={skill.name}
+            padding="lg"
+            className={cn(
+              'group relative overflow-hidden rounded-2xl transition-all',
+              skill.enabled
+                ? 'border-brand/30'
+                : 'hover:border-border-hover'
+            )}
+          >
+            {skill.enabled && (
+              <div className="absolute right-4 top-4">
+                <Badge className="bg-brand-subtle text-brand">
+                  {t('skills.enabled').toLowerCase()}
+                </Badge>
               </div>
+            )}
 
-              <h3 className="mt-4 text-lg font-semibold text-[#f8fafc]">{skill.name}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-[#94a3b8] line-clamp-2">{skill.description}</p>
+            <div className={cn(
+              'flex h-14 w-14 items-center justify-center rounded-xl transition-colors',
+              skill.enabled
+                ? 'bg-brand-subtle text-brand'
+                : 'bg-bg-subtle text-text-muted group-hover:text-text-secondary'
+            )}>
+              <Package className="h-7 w-7" />
+            </div>
 
-              <div className="mt-4 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="flex items-center gap-1.5 rounded-full bg-[#1e293b] px-3 py-1 text-xs font-medium text-[#64748b]">
-                    <Wrench className="h-3 w-3" />
-                    {skill.tool_count} ferramentas
-                  </span>
-                </div>
-                <button
-                  onClick={() => handleToggle(skill.name, skill.enabled)}
-                  aria-label={skill.enabled ? `Desativar ${skill.name}` : `Ativar ${skill.name}`}
-                  className="cursor-pointer text-[#64748b] transition-colors hover:text-[#f8fafc]"
-                >
-                  {skill.enabled ? (
-                    <ToggleRight className="h-7 w-7 text-[#3b82f6]" />
-                  ) : (
-                    <ToggleLeft className="h-7 w-7" />
-                  )}
-                </button>
+            <h3 className="mt-4 text-lg font-semibold text-text-primary">{skill.name}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-text-secondary line-clamp-2">{skill.description}</p>
+
+            <div className="mt-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center gap-1.5 rounded-full bg-bg-subtle px-3 py-1 text-xs font-medium text-text-muted">
+                  <Wrench className="h-3 w-3" />
+                  {skill.tool_count} {t('skills.tools')}
+                </span>
               </div>
+              <button
+                onClick={() => handleToggle(skill.name, skill.enabled)}
+                aria-label={skill.enabled ? t('skillsPage.deactivate') : t('skillsPage.activate')}
+                className="cursor-pointer text-text-muted transition-colors hover:text-text-primary"
+              >
+                {skill.enabled ? (
+                  <ToggleRight className="h-7 w-7 text-brand" />
+                ) : (
+                  <ToggleLeft className="h-7 w-7" />
+                )}
+              </button>
             </div>
-          ))}
-        </div>
+          </Card>
+        ))}
+      </div>
 
-        {filtered.length === 0 && (
-          <div className="mt-20 flex flex-col items-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#1e293b]">
-              <Zap className="h-8 w-8 text-[#475569]" />
-            </div>
-            <p className="mt-4 text-base font-medium text-[#64748b]">
-              {search ? 'Nenhuma skill encontrada' : 'Nenhuma skill disponível'}
-            </p>
-          </div>
-        )}
+      {filtered.length === 0 && (
+        <EmptyState
+          icon={<Package className="h-6 w-6" />}
+          title={search ? t('skillsPage.emptySearch') : t('skillsPage.emptyInstalled')}
+          description={!search ? t('skillsPage.emptyInstalledDesc') : undefined}
+        />
+      )}
 
       {showInstall && (
         <InstallModal
@@ -172,7 +173,8 @@ export function Skills() {
 }
 
 function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstalled: (name: string) => void }) {
-  const [tab, setTab] = useState<'catalog' | 'manual'>('catalog')
+  const { t } = useTranslation()
+  const [tab, setTab] = useState<string>('catalog')
   const [available, setAvailable] = useState<AvailableSkill[]>([])
   const [loading, setLoading] = useState(true)
   const [fetchError, setFetchError] = useState(false)
@@ -226,10 +228,10 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
       await api.skills.install(name)
       setInstalled((prev) => new Set([...prev, name]))
       onInstalled(name)
-      setManualMsg({ type: 'success', text: `"${name}" instalada com sucesso.` })
+      setManualMsg({ type: 'success', text: t('skillsPage.manualInstallSuccess', { name }) })
       setManualName('')
     } catch {
-      setManualMsg({ type: 'error', text: `Falha ao instalar "${name}". Verifique o nome.` })
+      setManualMsg({ type: 'error', text: t('skillsPage.manualInstallError', { name }) })
     }
     setInstalling(null)
   }
@@ -251,63 +253,53 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
       <div
-        className="relative w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-2xl border border-white/10 bg-[#111827] shadow-2xl"
+        className="relative w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-2xl border border-border bg-bg-surface shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4">
           <div className="flex items-center gap-4">
-            <h2 className="text-lg font-semibold text-[#f8fafc]">Instalar Skill</h2>
-            <div className="flex rounded-lg bg-[#1e293b] p-0.5">
-              <button
-                onClick={() => setTab('catalog')}
-                className={`cursor-pointer rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                  tab === 'catalog' ? 'bg-[#3b82f6] text-white' : 'text-[#64748b] hover:text-[#f8fafc]'
-                }`}
-              >
-                Catálogo
-              </button>
-              <button
-                onClick={() => setTab('manual')}
-                className={`cursor-pointer rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                  tab === 'manual' ? 'bg-[#3b82f6] text-white' : 'text-[#64748b] hover:text-[#f8fafc]'
-                }`}
-              >
-                Manual
-              </button>
-            </div>
+            <h2 className="text-lg font-semibold text-text-primary">{t('skillsPage.manualInstallTitle')}</h2>
           </div>
-          <button onClick={onClose} className="cursor-pointer rounded-lg p-1.5 text-[#64748b] hover:bg-white/5 hover:text-[#f8fafc] transition-colors">
+          <button onClick={onClose} className="cursor-pointer rounded-lg p-1.5 text-text-muted hover:bg-bg-hover hover:text-text-primary transition-colors">
             <X className="h-5 w-5" />
           </button>
+        </div>
+
+        {/* Tabs */}
+        <div className="px-6">
+          <Tabs
+            tabs={[
+              { id: 'catalog', label: t('skillsPage.tabAvailable') },
+              { id: 'manual', label: t('skillsPage.installManually') },
+            ]}
+            activeTab={tab}
+            onChange={setTab}
+          />
         </div>
 
         {/* Catalog tab */}
         {tab === 'catalog' && (
           <>
             {/* Search + categories */}
-            <div className="border-t border-white/10 px-6 py-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#475569]" />
-                <input
-                  value={search}
-                  onChange={(e) => { setSearch(e.target.value); setActiveCategory(null) }}
-                  placeholder="Buscar skills..."
-                  autoFocus
-                  className="w-full rounded-lg border border-white/10 bg-[#0c1222] px-3 py-2.5 pl-10 text-sm text-[#f8fafc] placeholder:text-[#475569] outline-none transition-all focus:border-[#3b82f6]/50"
-                />
-              </div>
+            <div className="border-t border-border px-6 py-3">
+              <SearchInput
+                value={search}
+                onChange={(v) => { setSearch(v); setActiveCategory(null) }}
+                placeholder={t('skillsPage.searchPlaceholder')}
+              />
               {categories.length > 0 && !search && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {categories.map((cat) => (
                     <button
                       key={cat}
                       onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
-                      className={`cursor-pointer rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      className={cn(
+                        'cursor-pointer rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
                         activeCategory === cat
-                          ? 'bg-[#3b82f6]/20 text-[#3b82f6]'
-                          : 'bg-[#1e293b] text-[#64748b] hover:bg-[#334155] hover:text-[#f8fafc]'
-                      }`}
+                          ? 'bg-brand-subtle text-brand'
+                          : 'bg-bg-subtle text-text-muted hover:bg-bg-hover hover:text-text-primary'
+                      )}
                     >
                       {cat}
                     </button>
@@ -320,50 +312,39 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
             <div className="overflow-y-auto px-6 py-4" style={{ maxHeight: 'calc(85vh - 200px)' }}>
               {loading ? (
                 <div className="flex flex-col items-center gap-3 py-16">
-                  <Loader2 className="h-6 w-6 animate-spin text-[#64748b]" />
-                  <p className="text-xs text-[#64748b]">Carregando catálogo do GitHub...</p>
+                  <Loader2 className="h-6 w-6 animate-spin text-text-muted" />
+                  <p className="text-xs text-text-muted">{t('skillsPage.loadingCatalog')}</p>
                 </div>
               ) : fetchError ? (
                 <div className="flex flex-col items-center py-12">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#ef4444]/10">
-                    <X className="h-7 w-7 text-[#f87171]" />
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-error-subtle">
+                    <X className="h-7 w-7 text-error" />
                   </div>
-                  <p className="mt-4 text-sm font-medium text-[#f8fafc]">Could not load the catalog</p>
-                  <p className="mt-1 text-xs text-[#64748b] text-center max-w-xs">
-                    Verifique a conexão com a internet. O catálogo é baixado de github.com/jholhewres/devclaw-skills.
+                  <p className="mt-4 text-sm font-medium text-text-primary">{t('skillsPage.errorCatalogTitle')}</p>
+                  <p className="mt-1 text-xs text-text-muted text-center max-w-xs">
+                    {t('skillsPage.errorCatalogDesc')}
                   </p>
                   <button
                     onClick={fetchCatalog}
-                    className="mt-4 cursor-pointer rounded-lg bg-[#1e293b] px-4 py-2 text-xs font-medium text-[#94a3b8] transition-colors hover:bg-[#334155] hover:text-[#f8fafc]"
+                    className="mt-4 cursor-pointer rounded-lg bg-bg-subtle px-4 py-2 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
                   >
-                    Tentar novamente
+                    {t('skillsPage.retry')}
                   </button>
                 </div>
               ) : displayList.length === 0 ? (
-                <div className="flex flex-col items-center py-12">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#1e293b]">
-                    <Package className="h-7 w-7 text-[#475569]" />
-                  </div>
-                  {search || activeCategory ? (
-                    <>
-                      <p className="mt-4 text-sm font-medium text-[#94a3b8]">Nenhuma skill encontrada</p>
-                      <p className="mt-1 text-xs text-[#64748b]">Tente outro termo ou use a aba Manual</p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="mt-4 text-sm font-medium text-[#94a3b8]">Catálogo vazio</p>
-                      <p className="mt-1 text-xs text-[#64748b] text-center max-w-xs">
-                        O catálogo remoto retornou vazio. Você pode instalar manualmente pela aba Manual.
-                      </p>
-                      <button
-                        onClick={() => setTab('manual')}
-                        className="mt-3 cursor-pointer text-xs font-medium text-[#64748b] hover:text-[#f8fafc] transition-colors"
-                      >
-                        Instalar manualmente →
-                      </button>
-                    </>
-                  )}
-                </div>
+                <EmptyState
+                  icon={<Package className="h-6 w-6" />}
+                  title={search || activeCategory ? t('skillsPage.emptySearch') : t('skillsPage.emptyAvailable')}
+                  description={!(search || activeCategory) ? t('skillsPage.emptyInstalledDesc') : undefined}
+                  action={!(search || activeCategory) ? (
+                    <button
+                      onClick={() => setTab('manual')}
+                      className="cursor-pointer text-xs font-medium text-text-muted hover:text-text-primary transition-colors"
+                    >
+                      {t('skillsPage.installManually')} &rarr;
+                    </button>
+                  ) : undefined}
+                />
               ) : (
                 <div className="space-y-1.5">
                   {displayList.map((skill) => {
@@ -373,49 +354,51 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
                     return (
                       <div
                         key={skill.name}
-                        className={`flex items-center gap-4 rounded-xl px-4 py-3 transition-colors ${
+                        className={cn(
+                          'flex items-center gap-4 rounded-xl px-4 py-3 transition-colors border',
                           isInstalled
-                            ? 'bg-[#22c55e]/10 border border-[#22c55e]/20'
-                            : 'bg-[#0c1222] border border-white/10 hover:border-white/20'
-                        }`}
+                            ? 'bg-success-subtle border-success/20'
+                            : 'bg-bg-main border-border hover:border-border-hover'
+                        )}
                       >
-                        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                          isInstalled ? 'bg-[#22c55e]/20' : 'bg-[#1e293b]'
-                        }`}>
-                          <Package className={`h-4 w-4 ${isInstalled ? 'text-[#22c55e]' : 'text-[#64748b]'}`} />
+                        <div className={cn(
+                          'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
+                          isInstalled ? 'bg-success-subtle' : 'bg-bg-subtle'
+                        )}>
+                          <Package className={cn('h-4 w-4', isInstalled ? 'text-success' : 'text-text-muted')} />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <h3 className="text-sm font-semibold text-[#f8fafc]">{skill.name}</h3>
+                            <h3 className="text-sm font-semibold text-text-primary">{skill.name}</h3>
                             {skill.version && (
-                              <span className="text-[10px] text-[#475569]">v{skill.version}</span>
+                              <span className="text-[10px] text-text-muted">v{skill.version}</span>
                             )}
                             {skill.category && (
-                              <span className="rounded bg-[#1e293b] px-1.5 py-0.5 text-[10px] font-medium text-[#64748b]">{skill.category}</span>
+                              <Badge>{skill.category}</Badge>
                             )}
                           </div>
                           {skill.description && (
-                            <p className="mt-0.5 text-xs text-[#64748b] line-clamp-1">{skill.description}</p>
+                            <p className="mt-0.5 text-xs text-text-muted line-clamp-1">{skill.description}</p>
                           )}
                         </div>
                         <div className="shrink-0">
                           {isInstalled ? (
-                            <span className="flex items-center gap-1 text-xs font-medium text-[#22c55e]">
+                            <span className="flex items-center gap-1 text-xs font-medium text-success">
                               <CheckCircle2 className="h-3.5 w-3.5" />
-                              Instalada
+                              {t('skillsPage.installed')}
                             </span>
                           ) : (
                             <button
                               onClick={() => handleInstall(skill.name)}
                               disabled={isInstalling}
-                              className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-[#3b82f6] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#2563eb] disabled:opacity-50"
+                              className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-hover disabled:opacity-50"
                             >
                               {isInstalling ? (
                                 <Loader2 className="h-3 w-3 animate-spin" />
                               ) : (
                                 <Download className="h-3 w-3" />
                               )}
-                              {isInstalling ? 'Instalando...' : 'Instalar'}
+                              {isInstalling ? t('common.loading') : t('skillsPage.install')}
                             </button>
                           )}
                         </div>
@@ -430,25 +413,17 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
 
         {/* Manual tab */}
         {tab === 'manual' && (
-          <div className="border-t border-white/10 px-6 py-6">
+          <div className="border-t border-border px-6 py-6">
             <div className="space-y-5">
               <div>
-                <p className="text-sm text-[#f8fafc]">
-                  Instale uma skill pelo nome exato do diretório no repositório{' '}
-                  <a
-                    href="https://github.com/jholhewres/devclaw-skills"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[#3b82f6] hover:text-[#60a5fa] transition-colors"
-                  >
-                    devclaw-skills
-                  </a>.
+                <p className="text-sm text-text-primary">
+                  {t('skillsPage.manualInstallDesc')}
                 </p>
               </div>
 
               <div>
-                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">
-                  Nome da Skill
+                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                  {t('skillsPage.manualInstallPlaceholder')}
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -456,47 +431,44 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
                     onChange={(e) => setManualName(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleManualInstall()}
                     placeholder="ex: docker-manager, api-tester, aws-tools"
-                    className="flex-1 rounded-lg border border-white/10 bg-[#0c1222] px-3 py-2.5 text-sm text-[#f8fafc] placeholder:text-[#475569] outline-none transition-all focus:border-[#3b82f6]/50"
+                    className="flex-1 rounded-lg border border-border bg-bg-main px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all focus:border-brand/50 hover:border-border-hover"
                   />
                   <button
                     onClick={handleManualInstall}
                     disabled={!manualName.trim() || installing !== null}
-                    className="flex cursor-pointer items-center gap-2 rounded-lg bg-[#3b82f6] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#2563eb] disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex cursor-pointer items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {installing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                    Instalar
+                    {t('skillsPage.install')}
                   </button>
                 </div>
               </div>
 
               {manualMsg && (
-                <div className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs border ${
+                <div className={cn(
+                  'flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs border',
                   manualMsg.type === 'success'
-                    ? 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/20'
-                    : 'bg-[#ef4444]/10 text-[#f87171] border-[#ef4444]/20'
-                }`}>
+                    ? 'bg-success-subtle text-success border-success/20'
+                    : 'bg-error-subtle text-error border-error/20'
+                )}>
                   {manualMsg.type === 'success' ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> : <X className="h-3.5 w-3.5 shrink-0" />}
                   {manualMsg.text}
                 </div>
               )}
 
-              <div className="rounded-xl bg-[#0c1222] px-4 py-3 border border-white/10">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">Como funciona</p>
-                <ul className="mt-2 space-y-1.5 text-xs text-[#94a3b8]">
+              <Card className="rounded-xl bg-bg-main">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">{t('skillsPage.browseClawHub')}</p>
+                <ul className="mt-2 space-y-1.5 text-xs text-text-secondary">
                   <li className="flex items-start gap-2">
-                    <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#64748b]" />
-                    O DevClaw baixa o <code className="text-[#f8fafc]">SKILL.md</code> do repositório no GitHub
+                    <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-text-muted" />
+                    {t('skillsPage.aboutSkill')} — SKILL.md
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#64748b]" />
-                    O arquivo é salvo em <code className="text-[#f8fafc]">./skills/{'{nome}'}/SKILL.md</code>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#64748b]" />
-                    Reinicie o servidor para que a skill fique disponível
+                    <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-text-muted" />
+                    ./skills/{'{name}'}/SKILL.md
                   </li>
                 </ul>
-              </div>
+              </Card>
             </div>
           </div>
         )}

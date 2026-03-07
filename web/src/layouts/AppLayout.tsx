@@ -1,23 +1,19 @@
 import { Outlet } from 'react-router-dom'
-import { useState } from 'react'
 import { Sidebar } from '@/components/Sidebar'
-import { Navbar } from '@/components/Navbar'
+import { useAppStore } from '@/stores/app'
 
 export function AppLayout() {
-  const [sidebarCompact, setSidebarCompact] = useState(false)
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed)
 
   return (
-    <div className="min-h-screen bg-[#0c1222]">
-      {/* Sidebar */}
-      <Sidebar compact={sidebarCompact} setCompact={setSidebarCompact} />
-
-      {/* Main content */}
-      <div className={`transition-all duration-300 ${sidebarCompact ? 'lg:pl-20' : 'lg:pl-64'}`}>
-        {/* Navbar */}
-        <Navbar sidebarCompact={sidebarCompact} />
-
-        {/* Page content */}
-        <main className="pt-16 min-h-screen">
+    <div className="min-h-screen bg-bg-main">
+      <Sidebar />
+      <div
+        className={`transition-all duration-200 ${
+          sidebarCollapsed ? 'lg:pl-[72px]' : 'lg:pl-64'
+        }`}
+      >
+        <main className="min-h-screen pt-14 lg:pt-0">
           <Outlet />
         </main>
       </div>

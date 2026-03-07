@@ -578,14 +578,14 @@ func (a *AssistantAdapter) ListToolProfiles() []ToolProfileInfo {
 func (a *AssistantAdapter) GetToolGroups() map[string][]string {
 	// Tool groups are defined in copilot package, return static list
 	return map[string][]string{
-		"group:memory":    {"memory"},
+		"group:memory":    {"memory_save", "memory_search", "memory_list", "memory_index"},
 		"group:web":       {"web_search", "web_fetch"},
-		"group:fs":        {"read_file", "write_file", "edit_file", "list_files", "search_files", "glob_files", "apply_patch"},
+		"group:fs":        {"read_file", "write_file", "edit_file", "list_files", "search_files", "glob_files"},
 		"group:runtime":   {"bash", "exec", "ssh", "scp", "set_env"},
 		"group:subagents": {"spawn_subagent", "list_subagents", "wait_subagent", "stop_subagent"},
-		"group:skills":    {"skill_manage"},
-		"group:scheduler": {"scheduler"},
-		"group:vault":     {"vault"},
+		"group:skills":    {"skill_init", "skill_edit", "skill_add_script", "skill_list", "skill_test", "skill_install", "skill_defaults_list", "skill_defaults_install", "skill_remove"},
+		"group:scheduler": {"scheduler_add", "scheduler_list", "scheduler_remove", "scheduler_search"},
+		"group:vault":     {"vault_status", "vault_save", "vault_get", "vault_list", "vault_delete"},
 		"group:sessions":  {"sessions"},
 		"group:daemon":    {"daemon"},
 		"group:media":     {"describe_image", "transcribe_audio", "image-gen_generate_image"},

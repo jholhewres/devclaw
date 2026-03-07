@@ -70,12 +70,12 @@ function PasswordInput({ value, onChange, placeholder }: {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="h-11 w-full rounded-xl border border-white/10 bg-[#111827] px-4 pr-10 text-sm text-[#f8fafc] outline-none transition-all placeholder:text-[#475569] hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20"
+        className="h-11 w-full rounded-xl border border-border bg-bg-surface px-4 pr-10 text-sm text-text-primary outline-none transition-all placeholder:text-text-muted hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
       />
       <button
         type="button"
         onClick={() => setShow(!show)}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#64748b] hover:text-[#f8fafc] cursor-pointer"
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer"
       >
         {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
       </button>
@@ -275,9 +275,9 @@ export function ApiConfig() {
     >
       {/* Restart Warning */}
       {hasChanges && (
-        <div className="mb-6 flex items-center gap-2 rounded-xl border border-[#f59e0b]/20 bg-[#f59e0b]/5 px-4 py-3">
-          <AlertCircle className="h-4 w-4 text-[#f59e0b] flex-shrink-0" />
-          <p className="text-sm text-[#fcd34d]">{t('apiConfig.restartWarning')}</p>
+        <div className="mb-6 flex items-center gap-2 rounded-xl border border-warning/20 bg-warning-subtle px-4 py-3">
+          <AlertCircle className="h-4 w-4 text-warning flex-shrink-0" />
+          <p className="text-sm text-warning">{t('apiConfig.restartWarning')}</p>
         </div>
       )}
 
@@ -349,9 +349,9 @@ export function ApiConfig() {
       >
         {/* Provider info with link */}
         {provider && provider.freeUrl && (
-          <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-[#0c1222] px-3 py-2 mb-4">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-main px-3 py-2 mb-4">
             <div className="flex-1">
-              <p className="text-xs text-[#94a3b8]">
+              <p className="text-xs text-text-secondary">
                 {provider.freeNote || provider.description}
               </p>
             </div>
@@ -359,7 +359,7 @@ export function ApiConfig() {
               href={provider.freeUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs text-[#3b82f6] hover:text-[#60a5fa] transition-colors"
+              className="flex items-center gap-1 text-xs text-brand hover:text-brand-hover transition-colors"
             >
               {t('apiConfig.getApiKey')}
               <ExternalLink className="h-3 w-3" />
@@ -403,7 +403,7 @@ export function ApiConfig() {
               />
             </ConfigField>
             {validationErrors.apiKey && (
-              <p className="text-xs text-[#f87171]">{validationErrors.apiKey}</p>
+              <p className="text-xs text-error">{validationErrors.apiKey}</p>
             )}
           </div>
         )}
@@ -430,7 +430,7 @@ export function ApiConfig() {
           )}
         </ConfigField>
         {validationErrors.model && (
-          <p className="text-xs text-[#f87171] -mt-3">{validationErrors.model}</p>
+          <p className="text-xs text-error -mt-3">{validationErrors.model}</p>
         )}
         </div>
 
@@ -445,11 +445,11 @@ export function ApiConfig() {
                   ...prev,
                   params: { ...prev.params, context1m: e.target.checked }
                 } : prev)}
-                className="h-4 w-4 rounded border-white/20 bg-[#111827] text-[#3b82f6] focus:ring-[#3b82f6]/20"
+                className="h-4 w-4 rounded border-border-hover bg-bg-surface text-brand focus:ring-brand/20"
               />
-              <span className="text-sm text-[#94a3b8]">{t('apiConfig.context1m')}</span>
+              <span className="text-sm text-text-secondary">{t('apiConfig.context1m')}</span>
             </label>
-            <span className="text-xs text-[#64748b]">{t('apiConfig.context1mDesc')}</span>
+            <span className="text-xs text-text-muted">{t('apiConfig.context1mDesc')}</span>
           </div>
         )}
 
@@ -463,21 +463,21 @@ export function ApiConfig() {
                   ...prev,
                   params: { ...prev.params, tool_stream: e.target.checked }
                 } : prev)}
-                className="h-4 w-4 rounded border-white/20 bg-[#111827] text-[#3b82f6] focus:ring-[#3b82f6]/20"
+                className="h-4 w-4 rounded border-border-hover bg-bg-surface text-brand focus:ring-brand/20"
               />
-              <span className="text-sm text-[#94a3b8]">{t('apiConfig.toolStream')}</span>
+              <span className="text-sm text-text-secondary">{t('apiConfig.toolStream')}</span>
             </label>
-            <span className="text-xs text-[#64748b]">{t('apiConfig.toolStreamDesc')}</span>
+            <span className="text-xs text-text-muted">{t('apiConfig.toolStreamDesc')}</span>
           </div>
         )}
 
         {/* Connection Test */}
-        <div className="pt-4 border-t border-white/5">
+        <div className="pt-4 border-t border-border">
           <div className="flex items-center justify-between">
             <button
               onClick={handleTestConnection}
               disabled={testingConnection || !config.base_url}
-              className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-[#1e293b] px-4 py-2.5 text-sm font-medium text-[#94a3b8] transition-all hover:border-white/20 hover:text-[#f8fafc] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-bg-subtle px-4 py-2.5 text-sm font-medium text-text-secondary transition-all hover:border-border-hover hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {testingConnection ? (
                 <>
@@ -496,8 +496,8 @@ export function ApiConfig() {
             {testResult && (
               <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${
                 testResult.success
-                  ? 'bg-[#22c55e]/10 text-[#22c55e]'
-                  : 'bg-[#ef4444]/10 text-[#f87171]'
+                  ? 'bg-success-subtle text-success'
+                  : 'bg-error-subtle text-error'
               }`}>
                 {testResult.success ? (
                   <>
@@ -518,9 +518,9 @@ export function ApiConfig() {
 
           {/* Error Message */}
           {testResult && !testResult.success && testResult.error && (
-            <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#ef4444]/5 border border-[#ef4444]/10 p-3">
-              <AlertTriangle className="h-4 w-4 text-[#f87171] flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-[#f87171]">{testResult.error}</p>
+            <div className="mt-3 flex items-start gap-2 rounded-lg bg-error-subtle border border-error/10 p-3">
+              <AlertTriangle className="h-4 w-4 text-error flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-error">{testResult.error}</p>
             </div>
           )}
         </div>
@@ -534,12 +534,12 @@ export function ApiConfig() {
         className="mb-10"
         actions={
           <div className="text-right">
-            <p className="text-xs text-[#64748b]">{t('apiConfig.currentProvider')}</p>
-            <p className="text-sm font-medium text-[#f8fafc] capitalize">{config.provider}</p>
+            <p className="text-xs text-text-muted">{t('apiConfig.currentProvider')}</p>
+            <p className="text-sm font-medium text-text-primary capitalize">{config.provider}</p>
           </div>
         }
       >
-        <p className={`text-sm ${config.api_key_configured ? 'text-[#22c55e]' : 'text-[#f59e0b]'}`}>
+        <p className={`text-sm ${config.api_key_configured ? 'text-success' : 'text-warning'}`}>
           {config.api_key_configured
             ? t('apiConfig.statusConfigured')
             : t('apiConfig.statusNotConfigured')

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # DevClaw Installer — Linux + macOS
-# Usage: curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/install.sh | bash
+# Usage: curl -fsSL <domain>/install.sh | bash -s -- [--stage <test|production>]
 #
 # Options:
-#   --url <base_url>    Base URL to download release (required)
+#   --stage <env>       Environment: test (homologação) or production (default: production)
+#   --url <base_url>    Override base URL (optional)
 #   --local <path>      Use local directory instead of downloading (for testing)
-#   --version <tag>     Install specific version (default: latest)
-#   --port <port>       Server port (default: 8090)
+#   --version <tag>     Install specific version (default: auto-detect latest from S3)
+#   --port <port>       Server port (default: 47716)
 #   --no-prompt         Non-interactive mode
 #   --dry-run           Show what would happen without making changes
 #   --verbose           Show detailed output
@@ -19,7 +20,11 @@ set -euo pipefail
 # =============================================================================
 
 BINARY="devclaw"
-SCRIPT_VERSION="2.0.0"
+SCRIPT_VERSION="2.1.0"
+
+# GatorClaw Assets URLs
+PRODUCTION_URL="https://assets-gatorclaw.hostgator.io"
+TEST_URL="https://test-assets-gatorclaw.hostgator.io"
 
 # Installation directories
 LINUX_INSTALL_DIR="/opt/devclaw"
@@ -36,11 +41,14 @@ MUTED='\033[38;2;90;100;128m'
 NC='\033[0m'
 
 # Flags
+STAGE="production"
 BASE_URL=""
 LOCAL_PATH=""
 VERSION=""
-PORT="8090"
+VERSION_SPECIFIED=""
+PORT="47716"
 NO_PROMPT=0
+SKIP_DEPS=0
 DRY_RUN=0
 VERBOSE=0
 
@@ -93,38 +101,47 @@ print_usage() {
 DevClaw Installer v${SCRIPT_VERSION}
 
 Usage:
-  curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/install.sh | bash -s -- --url <base_url>
+  curl -fsSL <domain>/install.sh | bash -s -- [--stage <test|production>]
   ./install.sh --local <path> [--version <tag>]
 
 Options:
-  --url <base_url>    Base URL to download release (required if not using --local)
-                      Example: https://downloads.example.com/devclaw
+  --stage <env>       Environment: test (homologação) or production (default: production)
+  --url <base_url>    Override base URL (optional)
   --local <path>      Use local directory instead of downloading (for testing)
-                      Example: ./dist
-  --version <tag>     Install specific version (default: latest, or from metadata)
-  --port <port>       Server port (default: 8090)
+  --version <tag>     Install specific version (default: auto-detect latest from S3)
+  --port <port>       Server port (default: 47716)
   --no-prompt         Non-interactive mode (skip confirmations)
+  --skip-deps         Skip dependency installation (use if already installed)
   --dry-run           Show what would happen without making changes
   --verbose           Show detailed output (set -x)
   --help, -h          Show this help message
 
 Environment:
+  DEVCLAW_STAGE       Environment: test or production (same as --stage)
+  DEVCLAW_URL         Override base URL (same as --url)
   DEVCLAW_VERSION     Version to install (same as --version)
   DEVCLAW_PORT        Server port (same as --port)
   DEVCLAW_NO_PROMPT   Set to 1 for non-interactive mode
+  DEVCLAW_SKIP_DEPS   Set to 1 to skip dependency installation
 
 Examples:
-  # Install from remote URL (latest version)
-  curl -fsSL ... | bash -s -- --url https://downloads.example.com/devclaw
+  # Install latest from production (default)
+  curl -fsSL ... | bash -s --
 
-  # Install from remote URL (specific version)
-  curl -fsSL ... | bash -s -- --url https://downloads.example.com/devclaw --version v1.2.3 --port 3000
+  # Install latest from test/homologação
+  curl -fsSL ... | bash -s -- --stage test
+
+  # Install specific version from production
+  curl -fsSL ... | bash -s -- --version v1.2.3
 
   # Install from local directory (for testing)
   ./install.sh --local ./dist --version v1.0.0
 
   # Non-interactive (for CI/CD)
-  curl -fsSL ... | bash -s -- --url https://downloads.example.com/devclaw --no-prompt
+  curl -fsSL ... | bash -s -- --no-prompt
+
+  # Skip dependency installation (if already installed)
+  curl -fsSL ... | bash -s -- --skip-deps --no-prompt
 EOF
 }
 
@@ -135,11 +152,13 @@ EOF
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --stage) STAGE="$2"; shift 2 ;;
       --url) BASE_URL="$2"; shift 2 ;;
       --local) LOCAL_PATH="$2"; shift 2 ;;
-      --version) VERSION="$2"; shift 2 ;;
+      --version) VERSION="$2"; VERSION_SPECIFIED="1"; shift 2 ;;
       --port) PORT="$2"; shift 2 ;;
       --no-prompt) NO_PROMPT=1; shift ;;
+      --skip-deps) SKIP_DEPS=1; shift ;;
       --dry-run) DRY_RUN=1; shift ;;
       --verbose) VERBOSE=1; shift ;;
       --help|-h) print_usage; exit 0 ;;
@@ -148,23 +167,48 @@ parse_args() {
   done
 
   # Environment variable fallbacks
-  VERSION="${VERSION:-${DEVCLAW_VERSION:-latest}}"
-  PORT="${PORT:-${DEVCLAW_PORT:-8090}}"
+  STAGE="${STAGE:-${DEVCLAW_STAGE:-production}}"
+  BASE_URL="${BASE_URL:-${DEVCLAW_URL:-}}"
+  VERSION="${VERSION:-${DEVCLAW_VERSION:-}}"
+  PORT="${PORT:-${DEVCLAW_PORT:-47716}}"
   NO_PROMPT="${NO_PROMPT:-${DEVCLAW_NO_PROMPT:-0}}"
+  SKIP_DEPS="${SKIP_DEPS:-${DEVCLAW_SKIP_DEPS:-0}}"
 
   if [[ "$VERBOSE" == "1" ]]; then
     set -x
   fi
 
-  # Validate required arguments (either --url or --local)
+  # Set base URL from stage if not explicitly provided via --url or --local
   if [[ -z "$BASE_URL" && -z "$LOCAL_PATH" ]]; then
-    ui_error "Missing required argument: --url or --local"
+    case "$STAGE" in
+      test|staging|homolog|hml)
+        BASE_URL="$TEST_URL"
+        STAGE="test"
+        ;;
+      production|prod|prd)
+        BASE_URL="$PRODUCTION_URL"
+        STAGE="production"
+        ;;
+      *)
+        ui_error "Invalid stage: $STAGE"
+        echo "Valid stages: test (homologação), production"
+        exit 1
+        ;;
+    esac
+  fi
+
+  # Validate that we have a source (either URL or local path)
+  if [[ -z "$BASE_URL" && -z "$LOCAL_PATH" ]]; then
+    ui_error "Missing required argument: --stage or --url or --local"
     echo ""
-    echo "Usage: install.sh --url <base_url> [--version <tag>] [--port <port>]"
+    echo "Usage: install.sh [--stage <test|production>] [--version <tag>] [--port <port>]"
+    echo "   or: install.sh --url <base_url> [--version <tag>] [--port <port>]"
     echo "   or: install.sh --local <path> [--version <tag>] [--port <port>]"
     echo ""
     echo "Examples:"
-    echo "  install.sh --url https://downloads.example.com/devclaw"
+    echo "  install.sh                          # Production (default)"
+    echo "  install.sh --stage test             # Test/homologação"
+    echo "  install.sh --url https://assets.example.com/devclaw"
     echo "  install.sh --local ./dist --version v1.0.0"
     exit 1
   fi
@@ -284,18 +328,18 @@ install_deps_linux() {
   # Node.js
   ui_info "Checking Node.js..."
   if ! check_command node; then
-    ui_info "Installing Node.js 20.x..."
+    ui_info "Installing Node.js 22.x..."
     if [[ "$DRY_RUN" != "1" ]]; then
       if [[ "$pkg_manager" == "apt" ]]; then
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -
+        curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
         sudo apt-get install -y nodejs
       else
         # For RHEL-based systems
         if [[ "$(id -u)" == "0" ]]; then
-          curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+          curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
           $install_cmd nodejs
         else
-          curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+          curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash -
           sudo $install_cmd nodejs
         fi
       fi
@@ -435,7 +479,7 @@ install_deps_macos() {
   # Basic tools
   ui_info "Installing basic tools..."
   if [[ "$DRY_RUN" != "1" ]]; then
-    brew install wget git curl || ui_warn "Some tools may already be installed"
+    brew install wget git curl unzip || ui_warn "Some tools may already be installed"
   fi
 
   # Python 3
@@ -454,7 +498,7 @@ install_deps_macos() {
   if ! check_command node; then
     ui_info "Installing Node.js..."
     if [[ "$DRY_RUN" != "1" ]]; then
-      brew install node@20 || brew install node || ui_warn "Node.js installation may need manual setup"
+      brew install node@22 || brew install node || ui_warn "Node.js installation may need manual setup"
     fi
   else
     local node_version
@@ -493,6 +537,11 @@ install_deps_macos() {
 }
 
 install_dependencies() {
+  if [[ "$SKIP_DEPS" == "1" ]]; then
+    ui_info "Skipping dependency installation (--skip-deps)"
+    return 0
+  fi
+
   case "$OS" in
     linux)  install_deps_linux ;;
     darwin) install_deps_macos ;;
@@ -520,12 +569,14 @@ fetch_metadata() {
   fi
 
   # Remote mode: download via curl
-  local metadata_url="${BASE_URL}/metadata.json"
+  # Add cache-busting query parameter to avoid stale CDN/S3 responses
+  local cache_buster="_=$(date +%s)"
+  local metadata_url="${BASE_URL}/metadata.json?${cache_buster}"
 
-  ui_info "Fetching metadata from $metadata_url..."
+  ui_info "Fetching metadata from ${BASE_URL}/metadata.json..."
 
   if [[ "$DRY_RUN" == "1" ]]; then
-    ui_info "[dry-run] Would fetch: $metadata_url"
+    ui_info "[dry-run] Would fetch: ${BASE_URL}/metadata.json"
     echo '{"version": "dry-run", "binary": "devclaw"}'
     return 0
   fi
@@ -540,21 +591,62 @@ fetch_metadata() {
   echo "$metadata"
 }
 
+detect_latest_version() {
+  # Detect latest version from latest.txt file
+  # The deployment process should update this file with the current version tag
+  local latest_version=""
+
+  # Add cache-busting query parameter to avoid stale CDN/S3 responses
+  local cache_buster="_=$(date +%s)"
+  local latest_url="${BASE_URL}/latest.txt?${cache_buster}"
+  ui_info "Detecting latest version from ${BASE_URL}/latest.txt..."
+
+  if [[ "$DRY_RUN" == "1" ]]; then
+    latest_version="v1.0.0-dryrun"
+  else
+    latest_version=$(curl -fsSL "$latest_url" 2>/dev/null | head -1 | tr -d '[:space:]') || true
+  fi
+
+  if [[ -n "$latest_version" ]]; then
+    echo "$latest_version"
+    return 0
+  fi
+
+  return 1
+}
+
 resolve_version() {
   local metadata="$1"
 
-  if [[ "$VERSION" == "latest" ]]; then
+  # If version is explicitly specified, show it
+  if [[ -n "$VERSION_SPECIFIED" ]]; then
+    ui_kv "Version" "$VERSION (specified)"
+    return 0
+  fi
+
+  # If version is not specified, detect latest from S3
+  if [[ -z "$VERSION" ]]; then
+    ui_info "Version not specified, detecting latest from S3..."
     local detected_version
-    detected_version=$(echo "$metadata" | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*: *"\([^"]*\)".*/\1/')
+    detected_version=$(detect_latest_version)
+
     if [[ -n "$detected_version" ]]; then
       VERSION="$detected_version"
-      ui_kv "Version" "$VERSION (from metadata)"
+      ui_kv "Version" "$VERSION (latest)"
     else
-      VERSION="latest"
-      ui_warn "Could not detect version from metadata, using 'latest'"
+      # Fallback: try to get from metadata.json
+      detected_version=$(echo "$metadata" | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*: *"\([^"]*\)".*/\1/')
+      if [[ -n "$detected_version" ]]; then
+        VERSION="$detected_version"
+        ui_kv "Version" "$VERSION (from metadata)"
+      else
+        # Final fallback: use "latest" as version (will download latest.zip)
+        VERSION="latest"
+        ui_kv "Version" "latest (fallback)"
+      fi
     fi
   else
-    ui_kv "Version" "$VERSION (specified)"
+    ui_kv "Version" "latest (auto-detect)"
   fi
 }
 
@@ -562,7 +654,23 @@ download_and_install() {
   local tmpdir
   tmpdir="$(mktempdir)"
 
-  local archive="devclaw-${VERSION}.zip"
+  # Determine which archive to download:
+  # - If version was explicitly specified: use devclaw-{VERSION}.zip
+  # - If version was auto-detected (latest): use latest.zip
+  local archive=""
+  local use_latest=0
+
+  if [[ -n "$LOCAL_PATH" ]]; then
+    # Local mode
+    archive="devclaw-${VERSION}.zip"
+  elif [[ -n "${VERSION_SPECIFIED:-}" ]]; then
+    # User explicitly specified a version
+    archive="devclaw-${VERSION}.zip"
+  else
+    # Version was auto-detected, use latest.zip
+    archive="latest.zip"
+    use_latest=1
+  fi
 
   # Local mode: copy from local directory
   if [[ -n "$LOCAL_PATH" ]]; then
@@ -570,13 +678,20 @@ download_and_install() {
 
     local local_archive="${LOCAL_PATH}/${archive}"
 
-    # If specific version zip doesn't exist, try to find any zip file
+    # If latest.zip doesn't exist locally, try devclaw-{VERSION}.zip, then any zip
     if [[ ! -f "$local_archive" ]]; then
-      local found_zip
-      found_zip=$(find "$LOCAL_PATH" -name "devclaw*.zip" -type f 2>/dev/null | head -1)
-      if [[ -n "$found_zip" ]]; then
-        local_archive="$found_zip"
-        ui_info "Found archive: $local_archive"
+      # Try devclaw-{VERSION}.zip as fallback
+      if [[ -f "${LOCAL_PATH}/devclaw-${VERSION}.zip" ]]; then
+        local_archive="${LOCAL_PATH}/devclaw-${VERSION}.zip"
+        ui_info "Found versioned archive: $local_archive"
+      else
+        # Try any devclaw zip
+        local found_zip
+        found_zip=$(find "$LOCAL_PATH" -name "devclaw*.zip" -type f 2>/dev/null | head -1)
+        if [[ -n "$found_zip" ]]; then
+          local_archive="$found_zip"
+          ui_info "Found archive: $local_archive"
+        fi
       fi
     fi
 
@@ -619,11 +734,20 @@ download_and_install() {
     fi
   else
     # Remote mode: download via curl
+    # Add cache-busting query parameter for latest.zip to avoid stale CDN/S3 responses
     local download_url="${BASE_URL}/${archive}"
+    if [[ "$use_latest" == "1" ]]; then
+      local cache_buster="_=$(date +%s)"
+      download_url="${download_url}?${cache_buster}"
+    fi
 
     ui_section "Downloading DevClaw"
 
-    ui_info "Downloading: $download_url"
+    if [[ "$use_latest" == "1" ]]; then
+      ui_info "Downloading latest release: ${BASE_URL}/${archive}"
+    else
+      ui_info "Downloading version ${VERSION}: ${BASE_URL}/${archive}"
+    fi
 
     if [[ "$DRY_RUN" == "1" ]]; then
       ui_info "[dry-run] Would download to: ${tmpdir}/${archive}"
@@ -635,8 +759,13 @@ download_and_install() {
     if ! curl -fsSL --progress-bar -o "${tmpdir}/${archive}" "$download_url"; then
       ui_error "Failed to download: $download_url"
       echo ""
-      echo "Make sure the release exists at:"
-      echo "  ${BASE_URL}/${archive}"
+      if [[ "$use_latest" == "1" ]]; then
+        echo "Make sure latest.zip exists at:"
+        echo "  ${BASE_URL}/latest.zip"
+      else
+        echo "Make sure the release exists at:"
+        echo "  ${BASE_URL}/${archive}"
+      fi
       exit 1
     fi
 
@@ -799,6 +928,7 @@ start_with_pm2() {
   if [[ "$DRY_RUN" == "1" ]]; then
     ui_info "[dry-run] Would run: pm2 start ${INSTALL_DIR}/ecosystem.config.js"
     ui_info "[dry-run] Would run: pm2 save"
+    ui_info "[dry-run] Would run: pm2 startup"
     return 0
   fi
 
@@ -817,32 +947,57 @@ start_with_pm2() {
   # Save PM2 configuration
   pm2 save
 
+  # Configure PM2 startup (auto-start on boot)
+  ui_info "Configuring PM2 startup..."
+
+  if [[ "$(id -u)" == "0" ]]; then
+    # Running as root: pm2 startup executes directly (no sudo command printed)
+    pm2 startup 2>/dev/null || ui_warn "PM2 startup command failed"
+    pm2 save 2>/dev/null || true
+    ui_success "PM2 startup configured"
+  else
+    # Running as non-root: pm2 startup prints a sudo command we need to execute
+    local startup_output
+    startup_output=$(pm2 startup 2>&1) || true
+
+    # Extract the sudo command from pm2 startup output
+    # PM2 outputs something like:
+    # [PM2] To setup the Startup Script, copy/paste the following command:
+    # sudo env PATH=$PATH:/usr/bin pm2 startup systemd -u user --hp /home/user
+    local startup_cmd
+    startup_cmd=$(echo "$startup_output" | grep -E "sudo env PATH" | tail -1 | sed 's/^[[:space:]]*//') || true
+
+    if [[ -z "$startup_cmd" ]]; then
+      # Fallback: try to find any line with sudo
+      startup_cmd=$(echo "$startup_output" | grep -E "^\s*sudo" | tail -1 | sed 's/^[[:space:]]*//') || true
+    fi
+
+    if [[ -n "$startup_cmd" ]]; then
+      ui_info "Running: $startup_cmd"
+      eval "$startup_cmd" 2>/dev/null || ui_warn "Startup command failed"
+      pm2 save 2>/dev/null || true
+      ui_success "PM2 startup configured"
+    else
+      ui_warn "Could not auto-detect PM2 startup command"
+      ui_info "Run these commands manually:"
+      echo ""
+      echo "    pm2 startup"
+      echo "    pm2 save"
+      echo ""
+    fi
+  fi
+
   if [[ "$CONFIG_WAS_CREATED" == "1" ]]; then
     ui_success "DevClaw started with PM2 (First Run Setup mode)"
-    # Get server IP for display
-    local server_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "SERVER_IP")
-    ui_info "Access http://${server_ip}:${PORT}/setup to complete configuration"
+    ui_info "Access http://0.0.0.0:${PORT}/setup to complete configuration"
   else
     ui_success "DevClaw started with PM2"
   fi
 }
 
 print_pm2_startup() {
-  if [[ "$DRY_RUN" == "1" ]]; then
-    return 0
-  fi
-
-  # Skip if config was just created (service not started yet)
-  if [[ "$CONFIG_WAS_CREATED" == "1" ]]; then
-    return 0
-  fi
-
-  echo ""
-  ui_info "To enable auto-start on boot, run:"
-  echo ""
-  echo "    pm2 startup"
-  echo ""
-  echo "  Then run the command it prints."
+  # PM2 startup is now configured automatically in start_with_pm2
+  return 0
 }
 
 print_success() {
@@ -857,22 +1012,17 @@ print_success() {
   printf "\n"
 
   if [[ "$CONFIG_WAS_CREATED" == "1" ]]; then
-    # Get server IP for display
-    local server_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "SERVER_IP")
     printf "  ${ACCENT}${BOLD}→ First Run Setup${NC}\n"
     printf "\n"
     printf "  DevClaw is running in setup mode.\n"
     printf "  Complete the configuration by accessing:\n"
     printf "\n"
-    printf "    http://%s:%s/setup\n" "$server_ip" "${PORT}"
+    printf "    http://0.0.0.0:%s/setup\n" "${PORT}"
     printf "\n"
     printf "  Or run manually:\n"
     printf "    devclaw setup\n"
     printf "\n"
   fi
-
-  # Get server IP for display
-  local display_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
 
   printf "  Commands:\n"
   printf "    devclaw --version    # Check version\n"
@@ -883,8 +1033,8 @@ print_success() {
   printf "    pm2 stop devclaw     # Stop service\n"
   printf "\n"
   printf "  Web UI:\n"
-  printf "    http://%s:%s\n" "$display_ip" "${PORT}"
-  printf "    http://%s:%s/setup\n" "$display_ip" "${PORT}"
+  printf "    http://0.0.0.0:%s\n" "${PORT}"
+  printf "    http://0.0.0.0:%s/setup\n" "${PORT}"
   printf "\n"
 }
 
@@ -899,7 +1049,7 @@ print_install_plan() {
     ui_kv "Source" "local directory"
     ui_kv "Local path" "$LOCAL_PATH"
   else
-    ui_kv "Source" "remote URL"
+    ui_kv "Stage" "$STAGE"
     ui_kv "Base URL" "$BASE_URL"
   fi
 

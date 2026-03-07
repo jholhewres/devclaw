@@ -7,7 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -57,6 +59,21 @@ type OAuthHandlers struct {
 
 	// Hub mode: delegate to OAuth Hub for external service connections
 	hubConfig *HubConfig
+
+	// onSkillInstall writes a skill to disk and reloads the registry.
+	onSkillInstall func(name, content string) error
+
+	// onSkillBundleInstall writes multiple files for a skill bundle and reloads the registry.
+	onSkillBundleInstall func(name string, files map[string]string) error
+
+	// onSkillReferenceRemove removes a reference file from a skill and reloads the registry.
+	onSkillReferenceRemove func(skillName, refPath string) error
+
+	// onSaveSecret stores a secret in the vault (encrypted).
+	onSaveSecret func(name, value string) error
+
+	// onSaveHubURL persists the Hub URL to the config file.
+	onSaveHubURL func(hubURL string) error
 }
 
 // NewOAuthHandlers creates new OAuth handlers.
@@ -93,6 +110,31 @@ func (h *OAuthHandlers) SetHubConfig(cfg *HubConfig) {
 	h.hubConfig = cfg
 }
 
+// SetSkillInstaller sets the callback for writing skills to disk and reloading the registry.
+func (h *OAuthHandlers) SetSkillInstaller(fn func(name, content string) error) {
+	h.onSkillInstall = fn
+}
+
+// SetSkillBundleInstaller sets the callback for writing multi-file skill bundles.
+func (h *OAuthHandlers) SetSkillBundleInstaller(fn func(name string, files map[string]string) error) {
+	h.onSkillBundleInstall = fn
+}
+
+// SetSkillReferenceRemover sets the callback for removing skill reference files.
+func (h *OAuthHandlers) SetSkillReferenceRemover(fn func(skillName, refPath string) error) {
+	h.onSkillReferenceRemove = fn
+}
+
+// SetSecretSaver sets the callback for storing secrets in the vault.
+func (h *OAuthHandlers) SetSecretSaver(fn func(name, value string) error) {
+	h.onSaveSecret = fn
+}
+
+// SetHubURLSaver sets the callback for persisting the Hub URL to config.
+func (h *OAuthHandlers) SetHubURLSaver(fn func(hubURL string) error) {
+	h.onSaveHubURL = fn
+}
+
 // Stop stops the OAuth handlers.
 func (h *OAuthHandlers) Stop() {
 	if h.tokenManager != nil {
@@ -117,6 +159,15 @@ func (h *OAuthHandlers) RegisterRoutes(mux *http.ServeMux, authMiddleware func(h
 	mux.HandleFunc("/api/oauth/hub/start/", authMiddleware(h.handleHubStart))
 	mux.HandleFunc("/api/oauth/hub/status/", authMiddleware(h.handleHubStatus))
 	mux.HandleFunc("/api/oauth/hub/connections", authMiddleware(h.handleHubConnections))
+	mux.HandleFunc("/api/oauth/hub/connections/", authMiddleware(h.handleHubConnectionAction))
+	mux.HandleFunc("/api/oauth/hub/skills", authMiddleware(h.handleHubSkills))
+	mux.HandleFunc("/api/oauth/hub/skills/install", authMiddleware(h.handleHubSkillInstall))
+	mux.HandleFunc("/api/oauth/hub/skills/install-bundle", authMiddleware(h.handleHubInstallBundle))
+	mux.HandleFunc("/api/oauth/hub/skills/install-reference", authMiddleware(h.handleHubInstallReference))
+	mux.HandleFunc("/api/oauth/hub/skills/remove-reference", authMiddleware(h.handleHubRemoveReference))
+	mux.HandleFunc("/api/oauth/hub/connect", authMiddleware(h.handleHubConnect))
+	mux.HandleFunc("/api/oauth/hub/setup", authMiddleware(h.handleHubSetup))
+	mux.HandleFunc("/api/oauth/hub/config", authMiddleware(h.handleHubConfigStatus))
 }
 
 // OAuthProviderInfo contains provider info for the UI.
@@ -575,6 +626,523 @@ func (h *OAuthHandlers) hubRequest(method, path string, body any) (*http.Respons
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	return client.Do(req)
+}
+
+// --- New Hub endpoints (GatorHub UI) ---
+
+// handleHubConnect starts an OAuth connection for a specific service via the Hub.
+func (h *OAuthHandlers) handleHubConnect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeOAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	if h.hubConfig == nil || !h.hubConfig.Enabled {
+		writeOAuthError(w, http.StatusBadRequest, "hub mode not enabled")
+		return
+	}
+
+	var body struct {
+		Provider string   `json:"provider"`
+		Service  string   `json:"service"`
+		Scopes   []string `json:"scopes,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.Provider == "" {
+		body.Provider = "google"
+	}
+	if body.Service == "" {
+		writeOAuthError(w, http.StatusBadRequest, "service is required")
+		return
+	}
+
+	hubResp, err := h.hubRequest("POST", "/api/v1/connect/start", map[string]any{
+		"provider": body.Provider,
+		"service":  body.Service,
+		"scopes":   body.Scopes,
+	})
+	if err != nil {
+		writeOAuthError(w, http.StatusBadGateway, "hub connection failed: "+err.Error())
+		return
+	}
+	defer hubResp.Body.Close()
+
+	respBody, _ := io.ReadAll(hubResp.Body)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(hubResp.StatusCode)
+	w.Write(respBody)
+}
+
+// handleHubSkills lists available skills from the Hub with connection status.
+func (h *OAuthHandlers) handleHubSkills(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeOAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	if h.hubConfig == nil || !h.hubConfig.Enabled {
+		writeOAuthError(w, http.StatusBadRequest, "hub mode not enabled")
+		return
+	}
+
+	hubResp, err := h.hubRequest("GET", "/api/v1/skills", nil)
+	if err != nil {
+		writeOAuthError(w, http.StatusBadGateway, "hub connection failed: "+err.Error())
+		return
+	}
+	defer hubResp.Body.Close()
+
+	respBody, _ := io.ReadAll(hubResp.Body)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(hubResp.StatusCode)
+	w.Write(respBody)
+}
+
+// handleHubSkillInstall downloads a skill from the Hub and installs it locally.
+func (h *OAuthHandlers) handleHubSkillInstall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeOAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	if h.hubConfig == nil || !h.hubConfig.Enabled {
+		writeOAuthError(w, http.StatusBadRequest, "hub mode not enabled")
+		return
+	}
+
+	var body struct {
+		SkillID string `json:"skill_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.SkillID == "" {
+		writeOAuthError(w, http.StatusBadRequest, "skill_id is required")
+		return
+	}
+
+	// Fetch skill content from Hub
+	hubResp, err := h.hubRequest("GET", "/api/v1/skills/"+body.SkillID+"/content", nil)
+	if err != nil {
+		writeOAuthError(w, http.StatusBadGateway, "hub connection failed: "+err.Error())
+		return
+	}
+	defer hubResp.Body.Close()
+
+	if hubResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(hubResp.Body)
+		writeOAuthError(w, hubResp.StatusCode, "hub error: "+string(respBody))
+		return
+	}
+
+	var skillContent struct {
+		ID      string `json:"id"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(hubResp.Body).Decode(&skillContent); err != nil {
+		writeOAuthError(w, http.StatusInternalServerError, "invalid hub response")
+		return
+	}
+
+	// Install the skill using the callback
+	if h.onSkillInstall != nil {
+		if err := h.onSkillInstall(skillContent.ID, skillContent.Content); err != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "failed to install skill: "+err.Error())
+			return
+		}
+	} else {
+		// Fallback: write directly to ./skills/
+		dir := filepath.Join("./skills", skillContent.ID)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "failed to create skill directory: "+err.Error())
+			return
+		}
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skillContent.Content), 0o644); err != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "failed to write skill file: "+err.Error())
+			return
+		}
+	}
+
+	h.logger.Info("hub skill installed", "skill_id", skillContent.ID)
+	writeOAuthJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"message": "Skill " + skillContent.ID + " installed successfully.",
+	})
+}
+
+// handleHubConnectionAction handles DELETE /api/oauth/hub/connections/{id} (disconnect).
+func (h *OAuthHandlers) handleHubConnectionAction(w http.ResponseWriter, r *http.Request) {
+	if h.hubConfig == nil || !h.hubConfig.Enabled {
+		writeOAuthError(w, http.StatusBadRequest, "hub mode not enabled")
+		return
+	}
+
+	connectionID := strings.TrimPrefix(r.URL.Path, "/api/oauth/hub/connections/")
+	if connectionID == "" {
+		writeOAuthError(w, http.StatusBadRequest, "connection_id required")
+		return
+	}
+
+	if r.Method != http.MethodDelete {
+		writeOAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	hubResp, err := h.hubRequest("DELETE", "/api/v1/connections/"+connectionID, nil)
+	if err != nil {
+		writeOAuthError(w, http.StatusBadGateway, "hub connection failed: "+err.Error())
+		return
+	}
+	defer hubResp.Body.Close()
+
+	respBody, _ := io.ReadAll(hubResp.Body)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(hubResp.StatusCode)
+	w.Write(respBody)
+}
+
+// handleHubSetup configures the Hub URL and API key.
+func (h *OAuthHandlers) handleHubSetup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeOAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var body struct {
+		HubURL string `json:"hub_url"`
+		APIKey string `json:"api_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.HubURL == "" || body.APIKey == "" {
+		writeOAuthError(w, http.StatusBadRequest, "hub_url and api_key are required")
+		return
+	}
+
+	body.HubURL = strings.TrimRight(body.HubURL, "/")
+
+	// Validate by calling Hub health endpoint
+	testCfg := &HubConfig{
+		Enabled: true,
+		HubURL:  body.HubURL,
+		APIKey:  body.APIKey,
+	}
+	oldCfg := h.hubConfig
+	h.hubConfig = testCfg
+
+	hubResp, err := h.hubRequest("GET", "/api/v1/health", nil)
+	if err != nil {
+		h.hubConfig = oldCfg
+		writeOAuthError(w, http.StatusBadGateway, "cannot connect to Hub: "+err.Error())
+		return
+	}
+	hubResp.Body.Close()
+
+	if hubResp.StatusCode != http.StatusOK {
+		h.hubConfig = oldCfg
+		writeOAuthError(w, http.StatusBadGateway, "Hub health check failed")
+		return
+	}
+
+	// Save API key to vault (encrypted) if vault callback is available
+	if h.onSaveSecret != nil {
+		if err := h.onSaveSecret("DEVCLAW_HUB_API_KEY", body.APIKey); err != nil {
+			h.hubConfig = oldCfg
+			writeOAuthError(w, http.StatusInternalServerError, "failed to save API key to vault: "+err.Error())
+			return
+		}
+	}
+
+	// Save Hub URL to config
+	if h.onSaveHubURL != nil {
+		if err := h.onSaveHubURL(body.HubURL); err != nil {
+			h.logger.Warn("failed to save Hub URL to config", "error", err)
+		}
+	}
+
+	// Save hub_url to local hub_config.json (current directory) as fallback
+	cfgData, _ := json.MarshalIndent(map[string]string{
+		"hub_url": body.HubURL,
+	}, "", "  ")
+	if err := os.WriteFile("hub_config.json", cfgData, 0o644); err != nil {
+		h.logger.Warn("failed to save hub_config.json", "error", err)
+	}
+
+	// Inject env var for agent skill access
+	os.Setenv("DEVCLAW_HUB_API_KEY", body.APIKey)
+	h.logger.Info("Hub configured via web UI", "hub_url", body.HubURL)
+
+	// Auto-install gator-hub skill on successful Hub setup
+	go h.autoInstallGatorHub()
+
+	writeOAuthJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"message": "Hub configured successfully.",
+	})
+}
+
+// autoInstallGatorHub fetches and installs the gator-hub SKILL.md from the Hub.
+func (h *OAuthHandlers) autoInstallGatorHub() {
+	if h.onSkillInstall == nil {
+		return
+	}
+
+	hubResp, err := h.hubRequest("GET", "/api/v1/skills/gator-hub/content", nil)
+	if err != nil {
+		h.logger.Error("failed to fetch gator-hub from Hub", "error", err)
+		return
+	}
+	defer hubResp.Body.Close()
+
+	if hubResp.StatusCode != http.StatusOK {
+		h.logger.Error("failed to fetch gator-hub from Hub", "status", hubResp.StatusCode)
+		return
+	}
+
+	var content struct {
+		ID      string `json:"id"`
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(hubResp.Body).Decode(&content); err != nil {
+		h.logger.Error("failed to decode gator-hub content", "error", err)
+		return
+	}
+
+	if err := h.onSkillInstall(content.ID, content.Content); err != nil {
+		h.logger.Error("failed to install gator-hub skill", "error", err)
+		return
+	}
+
+	h.logger.Info("gator-hub skill auto-installed on Hub setup")
+}
+
+// handleHubConfigStatus returns the current Hub configuration status.
+func (h *OAuthHandlers) handleHubConfigStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeOAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	configured := h.hubConfig != nil && h.hubConfig.Enabled
+	hubURL := ""
+	connected := false
+
+	if configured {
+		hubURL = h.hubConfig.HubURL
+		// Quick health check
+		hubResp, err := h.hubRequest("GET", "/api/v1/health", nil)
+		if err == nil {
+			hubResp.Body.Close()
+			connected = hubResp.StatusCode == http.StatusOK
+		}
+	}
+
+	writeOAuthJSON(w, http.StatusOK, map[string]any{
+		"configured": configured,
+		"hub_url":    hubURL,
+		"connected":  connected,
+	})
+}
+
+// handleHubInstallBundle downloads the full gator-hub bundle (SKILL.md + references) and installs it.
+func (h *OAuthHandlers) handleHubInstallBundle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeOAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	if h.hubConfig == nil || !h.hubConfig.Enabled {
+		writeOAuthError(w, http.StatusBadRequest, "hub mode not enabled")
+		return
+	}
+
+	var body struct {
+		SkillID string `json:"skill_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.SkillID == "" {
+		body.SkillID = "gator-hub"
+	}
+
+	hubResp, err := h.hubRequest("GET", "/api/v1/skills/"+body.SkillID+"/bundle", nil)
+	if err != nil {
+		writeOAuthError(w, http.StatusBadGateway, "hub connection failed: "+err.Error())
+		return
+	}
+	defer hubResp.Body.Close()
+
+	if hubResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(hubResp.Body)
+		writeOAuthError(w, hubResp.StatusCode, "hub error: "+string(respBody))
+		return
+	}
+
+	var bundle struct {
+		ID      string            `json:"id"`
+		Version string            `json:"version"`
+		Files   map[string]string `json:"files"`
+	}
+	if err := json.NewDecoder(hubResp.Body).Decode(&bundle); err != nil {
+		writeOAuthError(w, http.StatusInternalServerError, "invalid hub response")
+		return
+	}
+
+	if h.onSkillBundleInstall != nil {
+		if err := h.onSkillBundleInstall(bundle.ID, bundle.Files); err != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "failed to install bundle: "+err.Error())
+			return
+		}
+	} else {
+		// Fallback: write files directly
+		for path, content := range bundle.Files {
+			fullPath := filepath.Join("./skills", bundle.ID, path)
+			if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+				writeOAuthError(w, http.StatusInternalServerError, "failed to create directory: "+err.Error())
+				return
+			}
+			if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+				writeOAuthError(w, http.StatusInternalServerError, "failed to write file: "+err.Error())
+				return
+			}
+		}
+	}
+
+	h.logger.Info("hub skill bundle installed", "skill_id", bundle.ID, "files", len(bundle.Files))
+	writeOAuthJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"message": "Bundle " + bundle.ID + " installed successfully.",
+	})
+}
+
+// handleHubInstallReference installs a single service reference into gator-hub/references/.
+func (h *OAuthHandlers) handleHubInstallReference(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeOAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	if h.hubConfig == nil || !h.hubConfig.Enabled {
+		writeOAuthError(w, http.StatusBadRequest, "hub mode not enabled")
+		return
+	}
+
+	var body struct {
+		Provider string `json:"provider"`
+		Service  string `json:"service"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.Service == "" {
+		writeOAuthError(w, http.StatusBadRequest, "service is required")
+		return
+	}
+	if body.Provider == "" {
+		body.Provider = "google"
+	}
+
+	// Reference file name follows the pattern: {provider}-{service}.md
+	refName := body.Provider + "-" + body.Service + ".md"
+	refPath := "references/" + refName
+
+	// Fetch the gator-hub bundle to extract this specific reference
+	hubResp, err := h.hubRequest("GET", "/api/v1/skills/gator-hub/bundle", nil)
+	if err != nil {
+		writeOAuthError(w, http.StatusBadGateway, "hub connection failed: "+err.Error())
+		return
+	}
+	defer hubResp.Body.Close()
+
+	if hubResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(hubResp.Body)
+		writeOAuthError(w, hubResp.StatusCode, "hub error: "+string(respBody))
+		return
+	}
+
+	var bundle struct {
+		ID    string            `json:"id"`
+		Files map[string]string `json:"files"`
+	}
+	if err := json.NewDecoder(hubResp.Body).Decode(&bundle); err != nil {
+		writeOAuthError(w, http.StatusInternalServerError, "invalid hub response")
+		return
+	}
+
+	content, ok := bundle.Files[refPath]
+	if !ok {
+		writeOAuthError(w, http.StatusNotFound, "reference not found: "+refPath)
+		return
+	}
+
+	// Install the reference file
+	if h.onSkillBundleInstall != nil {
+		files := map[string]string{refPath: content}
+		if err := h.onSkillBundleInstall("gator-hub", files); err != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "failed to install reference: "+err.Error())
+			return
+		}
+	} else {
+		fullPath := filepath.Join("./skills", "gator-hub", refPath)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "failed to create directory: "+err.Error())
+			return
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "failed to write file: "+err.Error())
+			return
+		}
+	}
+
+	h.logger.Info("hub service reference installed", "provider", body.Provider, "service", body.Service)
+	writeOAuthJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"message": "Reference " + refName + " installed.",
+	})
+}
+
+// handleHubRemoveReference removes a service reference from gator-hub/references/.
+func (h *OAuthHandlers) handleHubRemoveReference(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeOAuthError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var body struct {
+		Provider string `json:"provider"`
+		Service  string `json:"service"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeOAuthError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.Service == "" {
+		writeOAuthError(w, http.StatusBadRequest, "service is required")
+		return
+	}
+	if body.Provider == "" {
+		body.Provider = "google"
+	}
+
+	refName := body.Provider + "-" + body.Service + ".md"
+	refPath := "references/" + refName
+
+	if h.onSkillReferenceRemove != nil {
+		if err := h.onSkillReferenceRemove("gator-hub", refPath); err != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "failed to remove reference: "+err.Error())
+			return
+		}
+	} else {
+		fullPath := filepath.Join("./skills", "gator-hub", refPath)
+		os.Remove(fullPath)
+	}
+
+	h.logger.Info("hub service reference removed", "provider", body.Provider, "service", body.Service)
+	writeOAuthJSON(w, http.StatusOK, map[string]string{
+		"status":  "ok",
+		"message": "Reference " + refName + " removed.",
+	})
 }
 
 // Helper functions

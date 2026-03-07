@@ -391,7 +391,9 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 	}
 
 	// Compact tool descriptions to save tokens in the tool definitions payload.
-	const maxDescLen = 120
+	// 300 chars preserves enough detail for the LLM to understand tool behavior
+	// while capping excessively long descriptions from plugins/skills.
+	const maxDescLen = 300
 	for i := range tools {
 		if len(tools[i].Function.Description) > maxDescLen {
 			tools[i].Function.Description = tools[i].Function.Description[:maxDescLen-3] + "..."
@@ -514,10 +516,20 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 
 		// ── Proactive context compaction ──
 		// Instead of dropping old messages entirely (which causes amnesia), we
-		// compact the context if it grows too large.
+		// compact the context if it grows too large. Only trigger compaction
+		// when estimated token usage exceeds 60% of context window — avoids
+		// wasting LLM summarization calls on short conversations.
 		if totalTurns > 5 && len(messages) > 15 {
-			a.logger.Debug("checking context size for compaction", "messages_len", len(messages))
-			messages = a.managedCompaction(runCtx, messages)
+			estimatedTokens := a.estimateTokens(messages)
+			compactionThreshold := int(float64(ctxTokens) * 0.6)
+			if estimatedTokens > compactionThreshold {
+				a.logger.Debug("proactive compaction triggered",
+					"messages_len", len(messages),
+					"estimated_tokens", estimatedTokens,
+					"threshold", compactionThreshold,
+				)
+				messages = a.managedCompaction(runCtx, messages)
+			}
 		}
 
 		// Inject reflection nudge periodically so the agent is aware of duration.
@@ -622,9 +634,22 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 
 		// ── No tool calls → final response ──
 		if len(resp.ToolCalls) == 0 {
+			// Check for truncated response (finish_reason="length").
+			// If the response was cut mid-generation by context limit, compact
+			// and retry instead of returning a truncated answer.
+			if resp.FinishReason == "length" && totalTurns > 1 && len(messages) > 10 {
+				a.logger.Warn("response truncated (finish_reason=length), compacting and retrying",
+					"turn", totalTurns,
+					"response_len", len(resp.Content),
+				)
+				messages = a.aggressiveCompaction(runCtx, messages)
+				continue
+			}
+
 			a.logger.Info("agent completed",
 				"total_turns", totalTurns,
 				"response_len", len(resp.Content),
+				"finish_reason", resp.FinishReason,
 				"run_elapsed_ms", time.Since(runStart).Milliseconds(),
 			)
 			return resp.Content, &totalUsage, nil
@@ -743,13 +768,36 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 		}
 
 		// Append each tool result as a message.
+		// Use tool mutation classification for error severity:
+		//   - Mutating tool errors → Warn (user should know)
+		//   - Read-only tool errors → Debug (expected, model retries)
 		for _, result := range results {
 			content := result.Content
-			if result.Error != nil && isRecoverableToolError(content) {
-				a.logger.Debug("recoverable tool error (model should retry)",
-					"tool", result.Name,
-					"error_preview", truncateStr(content, 80),
-				)
+			if result.Error != nil {
+				// Find the matching tool call to check its args for mutation classification.
+				var toolArgs map[string]any
+				for _, tc := range resp.ToolCalls {
+					if tc.ID == result.ToolCallID {
+						toolArgs, _ = parseToolArgs(tc.Function.Arguments)
+						break
+					}
+				}
+				isMutating := IsMutatingToolCall(result.Name, toolArgs)
+				recoverable := isRecoverableToolError(content)
+
+				if isMutating && !recoverable {
+					a.logger.Warn("mutating tool error",
+						"tool", result.Name,
+						"error_preview", truncateStr(content, 120),
+					)
+				} else {
+					a.logger.Debug("tool error (model should retry)",
+						"tool", result.Name,
+						"mutating", isMutating,
+						"recoverable", recoverable,
+						"error_preview", truncateStr(content, 80),
+					)
+				}
 			}
 			messages = append(messages, chatMessage{
 				Role:       "tool",
@@ -838,7 +886,7 @@ func describeToolAction(name string, args map[string]any) string {
 	case "bash", "exec":
 		cmd, _ := args["command"].(string)
 		if cmd == "" {
-			return "💻 Executando comando..."
+			return "💻 Running command..."
 		}
 		if len(cmd) > 60 {
 			cmd = cmd[:60] + "..."
@@ -849,23 +897,23 @@ func describeToolAction(name string, args map[string]any) string {
 	case "read_file":
 		p, _ := args["path"].(string)
 		if p != "" {
-			return "📖 Lendo " + shortPath(p)
+			return "📖 Reading " + shortPath(p)
 		}
-		return "📖 Lendo arquivo..."
+		return "📖 Reading file..."
 
 	case "write_file":
 		p, _ := args["path"].(string)
 		if p != "" {
-			return "✍️ Escrevendo " + shortPath(p)
+			return "✍️ Writing " + shortPath(p)
 		}
-		return "✍️ Escrevendo arquivo..."
+		return "✍️ Writing file..."
 
 	case "edit_file":
 		p, _ := args["path"].(string)
 		if p != "" {
-			return "✏️ Editando " + shortPath(p)
+			return "✏️ Editing " + shortPath(p)
 		}
-		return "✏️ Editando arquivo..."
+		return "✏️ Editing file..."
 
 	case "list_files", "glob_files":
 		p, _ := args["path"].(string)
@@ -873,9 +921,9 @@ func describeToolAction(name string, args map[string]any) string {
 			p, _ = args["pattern"].(string)
 		}
 		if p != "" {
-			return "📂 Listando " + shortPath(p)
+			return "📂 Listing " + shortPath(p)
 		}
-		return "📂 Listando arquivos..."
+		return "📂 Listing files..."
 
 	case "search_files":
 		q, _ := args["query"].(string)
@@ -883,9 +931,9 @@ func describeToolAction(name string, args map[string]any) string {
 			q, _ = args["pattern"].(string)
 		}
 		if q != "" {
-			return "🔎 Buscando: " + q
+			return "🔎 Searching: " + q
 		}
-		return "🔎 Buscando nos arquivos..."
+		return "🔎 Searching files..."
 
 	// ── Web ──
 	case "web_search", "brave-search_execute", "brave-search_run_search":
@@ -894,9 +942,9 @@ func describeToolAction(name string, args map[string]any) string {
 			if len(q) > 60 {
 				q = q[:60] + "..."
 			}
-			return "🔍 Pesquisando: " + q
+			return "🔍 Searching: " + q
 		}
-		return "🔍 Pesquisando na web..."
+		return "🔍 Searching the web..."
 
 	case "web_fetch", "web-fetch_fetch_url":
 		u, _ := args["url"].(string)
@@ -904,24 +952,28 @@ func describeToolAction(name string, args map[string]any) string {
 			if len(u) > 55 {
 				u = u[:55] + "..."
 			}
-			return "🌐 Acessando " + u
+			return "🌐 Fetching " + u
 		}
-		return "🌐 Acessando página..."
+		return "🌐 Fetching page..."
 
 	// ── Memory ──
-	case "memory":
+	case "memory_save":
+		return "💾 Saving to memory..."
+	case "memory_search":
+		q, _ := args["query"].(string)
+		if q != "" {
+			return "🧠 Recalling: " + q
+		}
+		return "🧠 Searching memory..."
+	case "memory_list", "memory_index":
+		return "🧠 Organizing memories..."
+	case "memory": // legacy alias
 		action, _ := args["action"].(string)
 		switch action {
 		case "save":
 			return "💾 Saving to memory..."
 		case "search":
-			q, _ := args["query"].(string)
-			if q != "" {
-				return "🧠 Recalling: " + q
-			}
 			return "🧠 Searching memory..."
-		case "list", "index":
-			return "🧠 Organizing memories..."
 		default:
 			return "🧠 Memory..."
 		}
@@ -937,17 +989,17 @@ func describeToolAction(name string, args map[string]any) string {
 			return "🔗 " + host + ": `" + cmd + "`"
 		}
 		if host != "" {
-			return "🔗 Conectando em " + host + "..."
+			return "🔗 Connecting to " + host + "..."
 		}
-		return "🔗 Conectando via SSH..."
+		return "🔗 Connecting via SSH..."
 
 	case "scp":
 		src, _ := args["source"].(string)
 		dst, _ := args["destination"].(string)
 		if src != "" && dst != "" {
-			return "📤 Transferindo " + shortPath(src) + " → " + shortPath(dst)
+			return "📤 Transferring " + shortPath(src) + " → " + shortPath(dst)
 		}
-		return "📤 Transferindo arquivo..."
+		return "📤 Transferring file..."
 
 	// ── Coding ──
 	case "claude-code_execute":
@@ -956,74 +1008,76 @@ func describeToolAction(name string, args map[string]any) string {
 			if len(p) > 55 {
 				p = p[:55] + "..."
 			}
-			return "🤖 Codificando: " + p
+			return "🤖 Coding: " + p
 		}
-		return "🤖 Executando Claude Code..."
+		return "🤖 Running Claude Code..."
 	case "claude-code_check":
-		return "🤖 Verificando Claude Code..."
+		return "🤖 Checking Claude Code..."
 
 	// ── Images ──
 	case "describe_image":
-		return "👁️ Analisando imagem..."
+		return "👁️ Analyzing image..."
 	case "image-gen_generate_image":
 		p, _ := args["prompt"].(string)
 		if p != "" {
 			if len(p) > 50 {
 				p = p[:50] + "..."
 			}
-			return "🎨 Gerando imagem: " + p
+			return "🎨 Generating image: " + p
 		}
-		return "🎨 Gerando imagem..."
+		return "🎨 Generating image..."
 
 	// ── Audio ──
 	case "transcribe_audio":
-		return "🎤 Transcrevendo áudio..."
+		return "🎤 Transcribing audio..."
 
-	// ── Scheduler dispatcher ──
-	case "scheduler":
-		action, _ := args["action"].(string)
-		switch action {
-		case "add":
-			return "⏰ Criando agendamento..."
-		case "list":
-			return "⏰ Listando agendamentos..."
-		case "remove":
-			return "⏰ Removendo agendamento..."
-		default:
-			return "⏰ Gerenciando agendamentos..."
-		}
+	// ── Scheduler ──
+	case "scheduler_add":
+		return "⏰ Creating schedule..."
+	case "scheduler_list":
+		return "⏰ Listing schedules..."
+	case "scheduler_remove":
+		return "⏰ Removing schedule..."
+	case "scheduler_search":
+		return "⏰ Searching schedules..."
+	case "scheduler": // legacy alias
+		return "⏰ Managing schedules..."
 
-	// ── Vault dispatcher ──
-	case "vault":
-		action, _ := args["action"].(string)
-		switch action {
-		case "save":
-			return "🔐 Salvando no cofre..."
-		case "get":
-			return "🔐 Buscando no cofre..."
-		case "list":
-			return "🔐 Listando cofre..."
-		case "delete":
-			return "🔐 Removendo do cofre..."
-		default:
-			return "🔐 Gerenciando cofre..."
-		}
+	// ── Vault ──
+	case "vault_status":
+		return "🔐 Checking vault..."
+	case "vault_save":
+		return "🔐 Saving to vault..."
+	case "vault_get":
+		return "🔐 Reading from vault..."
+	case "vault_list":
+		return "🔐 Listing vault..."
+	case "vault_delete":
+		return "🔐 Removing from vault..."
+	case "vault": // legacy alias
+		return "🔐 Managing vault..."
 
-	// ── Skills dispatcher ──
-	case "skill_manage":
-		action, _ := args["action"].(string)
-		switch action {
-		case "install":
-			s, _ := args["name"].(string)
-			if s != "" {
-				return "📦 Instalando skill: " + s
-			}
-			return "📦 Instalando skill..."
-		case "list", "search":
-			return "📋 Listando skills..."
-		default:
-			return "📦 Gerenciando skills..."
+	// ── Skills ──
+	case "skill_install":
+		s, _ := args["name"].(string)
+		if s != "" {
+			return "📦 Installing skill: " + s
 		}
+		return "📦 Installing skill..."
+	case "skill_list", "skill_defaults_list":
+		return "📋 Listing skills..."
+	case "skill_init":
+		return "📦 Creating skill..."
+	case "skill_edit", "skill_add_script":
+		return "📦 Editing skill..."
+	case "skill_test":
+		return "📦 Testing skill..."
+	case "skill_remove":
+		return "📦 Removing skill..."
+	case "skill_defaults_install":
+		return "📦 Installing default skills..."
+	case "skill_manage": // legacy alias
+		return "📦 Managing skills..."
 
 	// ── Subagents ──
 	case "spawn_subagent":
@@ -1035,29 +1089,29 @@ func describeToolAction(name string, args map[string]any) string {
 			}
 		}
 		if label != "" {
-			return "🧵 Iniciando subagente: " + label
+			return "🧵 Starting subagent: " + label
 		}
-		return "🧵 Iniciando subagente..."
+		return "🧵 Starting subagent..."
 	case "list_subagents":
-		return "🧵 Verificando subagentes..."
+		return "🧵 Checking subagents..."
 	case "wait_subagent":
-		return "⏳ Aguardando subagente..."
+		return "⏳ Waiting for subagent..."
 	case "stop_subagent":
-		return "🛑 Parando subagente..."
+		return "🛑 Stopping subagent..."
 
 	// ── Project Manager ──
 	case "project-manager_activate":
 		p, _ := args["name"].(string)
 		if p != "" {
-			return "📁 Ativando projeto: " + p
+			return "📁 Activating project: " + p
 		}
-		return "📁 Ativando projeto..."
+		return "📁 Activating project..."
 	case "project-manager_list":
-		return "📁 Listando projetos..."
+		return "📁 Listing projects..."
 	case "project-manager_scan", "project-manager_tree":
-		return "📁 Escaneando projeto..."
+		return "📁 Scanning project..."
 	case "project-manager_register":
-		return "📁 Registrando projeto..."
+		return "📁 Registering project..."
 
 	// ── Calculator / DateTime ──
 	case "calculator_calculate":
@@ -1071,7 +1125,7 @@ func describeToolAction(name string, args map[string]any) string {
 			skillName := strings.TrimSuffix(name, "_execute")
 			skillName = strings.ReplaceAll(skillName, "_", " ")
 			skillName = strings.ReplaceAll(skillName, "-", " ")
-			return "⚡ Executando " + skillName + "..."
+			return "⚡ Running " + skillName + "..."
 		}
 		if strings.Contains(name, "_run_") {
 			parts := strings.SplitN(name, "_run_", 2)
@@ -1093,30 +1147,10 @@ func shortPath(p string) string {
 	return strings.Join(parts[len(parts)-2:], "/")
 }
 
-// isRecoverableToolError checks if a tool error is likely transient or due to
-// incorrect parameters, so the model should retry without surfacing it to the user.
-// Classifies errors that the model can recover from by retrying or adjusting parameters.
+// isRecoverableToolError delegates to the exported IsRecoverableToolError
+// from tool_mutation.go (single source of truth for error classification).
 func isRecoverableToolError(errMsg string) bool {
-	lower := strings.ToLower(errMsg)
-	patterns := []string{
-		"required",       // "path is required", "prompt is required"
-		"missing",        // "missing parameter"
-		"not found",      // "file not found" (model can fix path)
-		"invalid",        // "invalid argument"
-		"parsing",        // "error parsing arguments"
-		"no such file",   // fs errors
-		"does not exist", // resource not found
-		"permission denied",
-		"timed out", // transient timeout
-		"connection refused",
-		"empty", // "command is empty"
-	}
-	for _, p := range patterns {
-		if strings.Contains(lower, p) {
-			return true
-		}
-	}
-	return false
+	return IsRecoverableToolError(errMsg)
 }
 
 // truncateStr truncates a string to n characters for logging.
@@ -1613,7 +1647,7 @@ func (a *AgentRun) maybeMemoryFlush(ctx context.Context, messages []chatMessage,
 	// Build flush prompt
 	flushPrompt := a.cfg.MemoryFlush.Prompt
 	if flushPrompt == "" {
-		flushPrompt = `Session nearing compaction. Review the conversation and write any important facts, decisions, or context to long-term memory using the memory tool (action='save', category='summary'). Save to memory/YYYY-MM-DD.md if needed. If there's nothing worth saving, reply with NO_REPLY.`
+		flushPrompt = `Session nearing compaction. Review the conversation and write any important facts, decisions, or context to long-term memory using memory_save(content='...', category='summary'). Save to memory/YYYY-MM-DD.md if needed. If there's nothing worth saving, reply with NO_REPLY.`
 	}
 
 	sysPrompt := a.cfg.MemoryFlush.SystemPrompt
@@ -1659,11 +1693,13 @@ func (a *AgentRun) maybeMemoryFlush(ctx context.Context, messages []chatMessage,
 }
 
 // estimateTokens provides a rough token estimate for a slice of messages.
-// Uses model-aware chars-per-token ratio for more accurate estimation.
+// Uses model-aware chars-per-token ratio with role-specific weighting:
+// tool results use ~2 chars/token (structured data), others use model ratio.
 func (a *AgentRun) estimateTokens(messages []chatMessage) int {
-	charCount := 0
+	ratio := charsPerToken(a.modelOverride)
+	totalTokens := 0
 	for _, m := range messages {
-		charCount += len(m.Role)
+		charCount := len(m.Role)
 		if s, ok := m.Content.(string); ok {
 			charCount += len(s)
 		} else if m.Content != nil {
@@ -1672,9 +1708,14 @@ func (a *AgentRun) estimateTokens(messages []chatMessage) int {
 		if m.ToolCallID != "" {
 			charCount += len(m.ToolCallID)
 		}
+		// Tool results tokenize at higher density (~2 chars/token).
+		if m.Role == "tool" {
+			totalTokens += int(float64(charCount)/2.0 + 0.5)
+		} else {
+			totalTokens += int(float64(charCount)/ratio + 0.5)
+		}
 	}
-	ratio := charsPerToken(a.modelOverride)
-	return int(float64(charCount)/ratio + 0.5)
+	return totalTokens
 }
 
 // getModelContextWindow returns the context window size for the current model.
@@ -2158,19 +2199,35 @@ func (a *AgentRun) chunkMessagesByMaxTokens(messages []chatMessage, maxTokens in
 }
 
 // estimateMessageTokens estimates token count for a single message.
+// Applies a 1.2x safety margin to compensate for chars/4 underestimation
+// (multi-byte chars, code tokens, special tokens, JSON overhead).
+//
+// Tool results use a higher token density (~2 chars/token vs ~4 for text)
+// because structured data (JSON, code, stack traces) tokenizes less efficiently.
+// Aligned with OpenClaw's TOOL_RESULT_CHARS_PER_TOKEN_ESTIMATE = 2.
 func (a *AgentRun) estimateMessageTokens(m chatMessage) int {
 	content := ""
 	if s, ok := m.Content.(string); ok {
 		content = s
 	}
-	// Rough estimate: ~4 chars per token + overhead for role/tool calls.
-	tokens := len(content) / 4
+
+	var tokens int
+	if m.Role == "tool" {
+		// Tool results: ~2 chars per token (structured data, code, JSON).
+		tokens = len(content) / 2
+	} else {
+		// Regular messages: ~4 chars per token.
+		tokens = len(content) / 4
+	}
+
 	if len(m.ToolCalls) > 0 {
 		tokens += len(m.ToolCalls) * 50 // ~50 tokens per tool call metadata
 	}
 	if tokens < 10 {
 		tokens = 10
 	}
+	// Safety margin: chars/token underestimates for multi-byte and special tokens.
+	tokens = int(float64(tokens) * 1.2)
 	return tokens
 }
 
@@ -2227,9 +2284,16 @@ func (a *AgentRun) summarizeMiddle(ctx context.Context, middle []chatMessage) st
 		role := m.Role
 		content := ""
 		if s, ok := m.Content.(string); ok {
-			// truncate content going into summarizer to avoid inception loops
-			if len(s) > 1000 {
-				content = s[:1000] + "...(truncated)"
+			// Truncate content going into summarizer to avoid inception loops.
+			// Tool results get tighter truncation (500 chars) to reduce token
+			// usage and avoid leaking verbose/untrusted tool output into the
+			// compaction summary (aligned with OpenClaw's stripToolResultDetails).
+			maxLen := 1000
+			if m.Role == "tool" {
+				maxLen = 500
+			}
+			if len(s) > maxLen {
+				content = s[:maxLen] + "...(truncated)"
 			} else {
 				content = s
 			}

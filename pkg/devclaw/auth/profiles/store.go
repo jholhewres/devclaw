@@ -342,14 +342,7 @@ func (s *vaultStore) Delete(id ProfileID) error {
 		return fmt.Errorf("profile %s not found", id)
 	}
 
-	provider := profile.Provider
 	s.profiles.Delete(id)
-
-	// Clean orphaned usage stats and last-good references.
-	delete(s.profiles.UsageStats, string(id))
-	if s.profiles.LastGood[provider] == string(id) {
-		delete(s.profiles.LastGood, provider)
-	}
 
 	if err := s.save(); err != nil {
 		return fmt.Errorf("failed to delete profile %s: %w", id, err)

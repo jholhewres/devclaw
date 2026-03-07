@@ -504,6 +504,27 @@ func (a *Assistant) Start(ctx context.Context) error {
 		}
 		return skill, true
 	})
+	a.promptComposer.SetSkillLister(func() []SkillInfo {
+		metas := a.skillRegistry.List()
+		infos := make([]SkillInfo, 0, len(metas))
+		for _, m := range metas {
+			skill, ok := a.skillRegistry.Get(m.Name)
+			if !ok || !a.skillRegistry.IsEnabled(m.Name) {
+				continue
+			}
+			var toolNames []string
+			for _, t := range skill.Tools() {
+				toolNames = append(toolNames, t.Name)
+			}
+			infos = append(infos, SkillInfo{
+				Name:        m.Name,
+				Description: m.Description,
+				Location:    skill.Location(),
+				Tools:       toolNames,
+			})
+		}
+		return infos
+	})
 
 	// Load built-in skills (embedded in binary).
 	builtinSkills := LoadBuiltinSkills(a.logger.With("component", "builtin-skills"))
@@ -927,11 +948,6 @@ func (a *Assistant) Stop() {
 		}
 	}
 
-	// Stop message queue dedup goroutine.
-	if a.messageQueue != nil {
-		a.messageQueue.Stop()
-	}
-
 	// Close skill database.
 	if a.skillDB != nil {
 		if err := a.skillDB.Close(); err != nil {
@@ -985,11 +1001,6 @@ func (a *Assistant) UpdateLLMClient(cfg *Config) {
 	a.config.Model = cfg.Model
 	a.config.Fallback = cfg.Fallback
 	a.llmClient = NewLLMClient(cfg, a.logger)
-
-	if a.profileMgr != nil {
-		profileCount := len(a.profileMgr.List())
-		a.llmClient.fallback.MaxRetries = ScaledMaxRetries(profileCount)
-	}
 
 	a.logger.Info("LLM client hot-reloaded",
 		"provider", cfg.API.Provider,
@@ -1483,8 +1494,7 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 		} else {
 			logger.Info("message ignored (access denied)",
 				"reason", accessReason,
-				"from_raw", msg.From,
-				"chat_id", msg.ChatID)
+				"from_raw", msg.From)
 		}
 		return
 	}
@@ -1849,7 +1859,10 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	go a.maybeCompactSession(session)
 
 	// ── Step 11: Send reply (skip if block streamer already sent everything) ──
-	if blockStreamer == nil || !blockStreamer.HasSentBlocks() {
+	// Also skip if the response is empty after stripping internal tags (NO_REPLY, HEARTBEAT_OK).
+	// This prevents sending blank messages to the user.
+	cleanedResponse := StripInternalTags(response)
+	if (blockStreamer == nil || !blockStreamer.HasSentBlocks()) && strings.TrimSpace(cleanedResponse) != "" {
 		a.sendReply(msg, response)
 	}
 
@@ -2570,15 +2583,26 @@ func (a *Assistant) initializeSkills() {
 	}
 }
 
-// registerSkillTools iterates all loaded skills and registers their tools
-// in the tool executor so the agent loop can use them.
+// registerSkillTools registers tools only for built-in skills (Location == "").
+// File-based skills use the reference model: they are listed as XML references
+// in the system prompt, and the LLM reads SKILL.md on demand via read_file.
+// This aligns with OpenClaw's approach where skills are purely prompt-based.
 func (a *Assistant) registerSkillTools() {
 	allSkills := a.skillRegistry.List()
 	registered := 0
+	skippedFileBased := 0
 
 	for _, meta := range allSkills {
 		skill, ok := a.skillRegistry.Get(meta.Name)
 		if !ok {
+			continue
+		}
+
+		// Only register tools for built-in skills (no SKILL.md file).
+		// File-based skills use the reference model: the LLM reads SKILL.md
+		// on demand via read_file and follows the instructions there.
+		if skill.Location() != "" {
+			skippedFileBased++
 			continue
 		}
 
@@ -2591,9 +2615,10 @@ func (a *Assistant) registerSkillTools() {
 		registered += len(tools)
 	}
 
-	a.logger.Info("skill tools registered",
-		"skills", len(allSkills),
-		"tools", registered,
+	a.logger.Info("skill tools registered (built-in only)",
+		"total_skills", len(allSkills),
+		"builtin_tools", registered,
+		"file_based_skipped", skippedFileBased,
 	)
 }
 

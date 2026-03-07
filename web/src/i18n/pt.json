@@ -68,7 +68,8 @@
     "newConversation": "Nova conversa",
     "home": "Início",
     "scheduledTasks": "Tarefas agendadas",
-    "seeAllConversations": "Ver todas ({{count}})"
+    "seeAllConversations": "Ver todas ({{count}})",
+    "recent": "Recentes"
   },
   "userMenu": {
     "myAccount": "Minha conta",
@@ -122,7 +123,7 @@
     "browseClawHub": "Explorar skills no ClawHub"
   },
   "channelsPage": {
-    "title": "Conecte um canal para conversar com o GatorClaw",
+    "title": "Conecte um canal para conversar com o DevClaw",
     "subtitle": "Nós cuidamos da instalação e atualizações.",
     "connect": "Conectar",
     "connected": "Conectado",
@@ -136,17 +137,17 @@
   },
   "settingsPage": {
     "title": "Configurações",
-    "tabSystem": "Sistema",
-    "tabCanais": "Canais",
-    "tabDominio": "Domínio e rede",
-    "tabMemoria": "Memória",
-    "tabAcessos": "Acessos e Permissões",
-    "tabSeguranca": "Segurança",
-    "tabDev": "Configurações do desenvolvedor"
+    "tabGeneral": "Geral",
+    "tabAI": "IA & Modelos",
+    "tabAccess": "Acesso & Segurança",
+    "tabData": "Dados & Armazenamento",
+    "tabIntegrations": "Integrações"
   },
   "sidebarSections": {
     "start": "Início",
+    "main": "Principal",
     "manage": "Gerenciar",
+    "system": "Sistema",
     "settings": "Configurações",
     "security": "Segurança"
   },
@@ -447,7 +448,7 @@
   "config": {
     "title": "Configuração",
     "subtitle": "Configurações",
-    "pageTitle": "Ajuste a inteligência que move o seu GatorClaw.",
+    "pageTitle": "Ajuste a inteligência que move o seu DevClaw.",
     "pageDescription": "Essas escolhas definem o que seu agente consegue fazer e como ele conversa com você.",
     "providerModel": "Provedor e modelo de IA principal",
     "providerDesc": "Gerencie o modelo que vai comandar o raciocínio e as respostas do seu agente.",
@@ -663,7 +664,7 @@
     "sshAllowedHosts": "Hosts SSH permitidos",
     "dangerousCommands": "Comandos perigosos",
     "vault": "Cofre",
-    "vaultDesc": "Gerencie suas senhas de ferramentas externas conectadas ao GatorClaw.",
+    "vaultDesc": "Gerencie suas senhas de ferramentas externas conectadas ao DevClaw.",
     "vaultExists": "Vault existe",
     "vaultUnlocked": "Vault desbloqueado",
     "vaultKeys": "Chaves armazenadas",
@@ -678,7 +679,7 @@
     "auditTime": "Horário",
     "noAuditEntries": "Nenhum registro de auditoria",
     "auth": "Autenticação",
-    "authDesc": "Gerencie sua senha principal de acesso ao GatorClaw.",
+    "authDesc": "Gerencie sua senha principal de acesso ao DevClaw.",
     "gatewayAuth": "Auth do Gateway",
     "gatewayAuthHint": "Bearer token para API HTTP",
     "webuiAuth": "Auth da Web UI",
@@ -712,7 +713,7 @@
   },
   "login": {
     "title": "Login",
-    "subtitle": "GatorClaw Admin",
+    "subtitle": "DevClaw Admin",
     "password": "Senha",
     "passwordPlaceholder": "Digite sua senha",
     "login": "Entrar",
@@ -794,11 +795,11 @@
     "modeParanoid": "Super restrito",
     "modeParanoidDesc": "Todas as ações só serão executadas com sua confirmação",
     "recommended": "Recomendado",
-    "completeTitle": "Configurando o GatorClaw",
+    "completeTitle": "Configurando o DevClaw",
     "completeSubtitle": "Configurando as habilidades do agente...",
     "completeFooter": "Só alguns segundos e vai valer a pena.",
     "skillsTitle": "Selecione as habilidades iniciais que deseja dar ao seu agente",
-    "skillsDescription": "Aqui listamos algumas das habilidades mais utilizadas, mas você poderá instalar muitas outras no painel e no chat do GatorClaw.",
+    "skillsDescription": "Aqui listamos algumas das habilidades mais utilizadas, mas você poderá instalar muitas outras no painel e no chat do DevClaw.",
     "skillsInfo": "Escolha as habilidades agora. A conexão com as suas ferramentas será feita após a configuração inicial.",
     "skillsSearch": "Buscar habilidades...",
     "skillsEmpty": "Nenhuma habilidade encontrada.",
@@ -1011,6 +1012,10 @@
     "title": "WhatsApp",
     "subtitle": "Conecte sua conta via QR code",
     "connected": "Conectado",
+    "owner": "Proprietário",
+    "admin": "Administrador",
+    "allowed": "Permitido",
+    "blocked": "Bloqueado",
     "checkingConnection": "Verificando conexão...",
     "waitingQR": "Aguardando QR code...",
     "scanQR": "Escaneie o QR code com seu WhatsApp",
@@ -1067,8 +1072,9 @@
     },
     "users": "Usuários",
     "noUsers": "Nenhum usuário configurado",
-    "level": "Nível",
-    "changeLevel": "Alterar nível",
+    "phoneNumber": "Número do WhatsApp",
+    "permission": "Permissão",
+    "changePermission": "Alterar permissão",
     "levels": {
       "owner": "Proprietário",
       "admin": "Admin",

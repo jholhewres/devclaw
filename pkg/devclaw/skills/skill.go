@@ -31,6 +31,11 @@ type Skill interface {
 	// Execute executa a skill com o input fornecido e retorna o resultado.
 	Execute(ctx context.Context, input string) (string, error)
 
+	// Location retorna o caminho absoluto do SKILL.md para skills baseadas em arquivo.
+	// Retorna "" para skills built-in (que não possuem arquivo SKILL.md).
+	// Usado pelo modelo de referência: a LLM lê o SKILL.md sob demanda via read_file.
+	Location() string
+
 	// Shutdown libera recursos da skill de forma graciosa.
 	Shutdown() error
 }

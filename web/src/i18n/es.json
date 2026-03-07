@@ -66,7 +66,8 @@
     "newConversation": "Nueva conversación",
     "home": "Inicio",
     "scheduledTasks": "Tareas programadas",
-    "seeAllConversations": "Ver todas ({{count}})"
+    "seeAllConversations": "Ver todas ({{count}})",
+    "recent": "Recientes"
   },
   "userMenu": {
     "myAccount": "Mi cuenta",
@@ -120,7 +121,7 @@
     "browseClawHub": "Explorar skills en ClawHub"
   },
   "channelsPage": {
-    "title": "Conecta un canal para conversar con GatorClaw",
+    "title": "Conecta un canal para conversar con DevClaw",
     "subtitle": "Nosotros nos encargamos de la instalación y actualizaciones.",
     "connect": "Conectar",
     "connected": "Conectado",
@@ -134,13 +135,11 @@
   },
   "settingsPage": {
     "title": "Configuración",
-    "tabSystem": "Sistema",
-    "tabCanais": "Canales",
-    "tabDominio": "Dominio y red",
-    "tabMemoria": "Memoria",
-    "tabAcessos": "Accesos y Permisos",
-    "tabSeguranca": "Seguridad",
-    "tabDev": "Configuración del desarrollador"
+    "tabGeneral": "General",
+    "tabAI": "IA & Modelos",
+    "tabAccess": "Acceso & Seguridad",
+    "tabData": "Datos & Almacenamiento",
+    "tabIntegrations": "Integraciones"
   },
   "dashboard": {
     "title": "Estadísticas",
@@ -435,7 +434,7 @@
   "config": {
     "title": "Configuración",
     "subtitle": "Ajustes",
-    "pageTitle": "Ajusta la inteligencia que mueve tu GatorClaw.",
+    "pageTitle": "Ajusta la inteligencia que mueve tu DevClaw.",
     "pageDescription": "Estas opciones definen lo que tu agente puede hacer y cómo conversa contigo.",
     "providerModel": "Proveedor y modelo de IA principal",
     "providerDesc": "Gestiona el modelo que comandará el razonamiento y las respuestas de tu agente.",
@@ -651,7 +650,7 @@
     "sshAllowedHosts": "Hosts SSH permitidos",
     "dangerousCommands": "Comandos peligrosos",
     "vault": "Cofre",
-    "vaultDesc": "Gestione las contraseñas de herramientas externas conectadas a GatorClaw.",
+    "vaultDesc": "Gestione las contraseñas de herramientas externas conectadas a DevClaw.",
     "vaultExists": "Vault existe",
     "vaultUnlocked": "Vault desbloqueado",
     "vaultKeys": "Claves almacenadas",
@@ -666,7 +665,7 @@
     "auditTime": "Hora",
     "noAuditEntries": "Ningún registro de auditoría",
     "auth": "Autenticación",
-    "authDesc": "Gestione su contraseña principal de acceso a GatorClaw.",
+    "authDesc": "Gestione su contraseña principal de acceso a DevClaw.",
     "gatewayAuth": "Auth del Gateway",
     "gatewayAuthHint": "Bearer token para API HTTP",
     "webuiAuth": "Auth de Web UI",
@@ -699,7 +698,7 @@
   },
   "login": {
     "title": "Login",
-    "subtitle": "GatorClaw Admin",
+    "subtitle": "DevClaw Admin",
     "password": "Contraseña",
     "passwordPlaceholder": "Ingresa tu contraseña",
     "login": "Entrar",
@@ -781,11 +780,11 @@
     "modeParanoid": "Super restringido",
     "modeParanoidDesc": "Todas las acciones solo se ejecutarán con tu confirmación",
     "recommended": "Recomendado",
-    "completeTitle": "Configurando GatorClaw",
+    "completeTitle": "Configurando DevClaw",
     "completeSubtitle": "Configurando las habilidades del agente...",
     "completeFooter": "Solo unos segundos y valdrá la pena.",
     "skillsTitle": "Selecciona las habilidades iniciales que deseas dar a tu agente",
-    "skillsDescription": "Aquí listamos algunas de las habilidades más utilizadas, pero podrás instalar muchas otras en el panel y en el chat de GatorClaw.",
+    "skillsDescription": "Aquí listamos algunas de las habilidades más utilizadas, pero podrás instalar muchas otras en el panel y en el chat de DevClaw.",
     "skillsInfo": "Elige las habilidades ahora. La conexión con tus herramientas se hará después de la configuración inicial.",
     "skillsSearch": "Buscar habilidades...",
     "skillsEmpty": "No se encontraron habilidades.",
@@ -994,6 +993,10 @@
     "title": "WhatsApp",
     "subtitle": "Conecta tu cuenta vía QR code",
     "connected": "Conectado",
+    "owner": "Propietario",
+    "admin": "Administrador",
+    "allowed": "Permitido",
+    "blocked": "Bloqueado",
     "checkingConnection": "Verificando conexión...",
     "waitingQR": "Esperando QR code...",
     "scanQR": "Escanea el QR code con tu WhatsApp",
@@ -1011,7 +1014,10 @@
     "tryAgain": "Intentar de nuevo",
     "sseLost": "Conexión SSE perdida. Intenta de nuevo.",
     "statusError": "No se pudo verificar el estado de WhatsApp",
-    "mobileHint": "Para escanear el código QR, recomendamos acceder a esta página desde una computadora."
+    "mobileHint": "Para escanear el código QR, recomendamos acceder a esta página desde una computadora.",
+    "phoneNumber": "Número de WhatsApp",
+    "permission": "Permiso",
+    "changePermission": "Cambiar permiso"
   },
   "devSettingsPage": {
     "apiIa": {

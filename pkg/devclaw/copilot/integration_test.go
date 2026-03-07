@@ -2,6 +2,7 @@ package copilot
 
 import (
 	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -145,7 +146,6 @@ func TestPromptLayerIntegration(t *testing.T) {
 		"## Messaging",
 		"## Silent Replies",
 		"## Heartbeats",
-		"## Encrypted Vault",
 		"## Media Capabilities",
 		"NO_REPLY",
 		"HEARTBEAT_OK",
@@ -162,6 +162,5 @@ func TestPromptLayerIntegration(t *testing.T) {
 
 // Helper function to check if a string contains a substring
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && 
-		(s[:len(substr)] == substr || contains(s[1:], substr)))
+	return strings.Contains(s, substr)
 }

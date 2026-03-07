@@ -98,9 +98,10 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAuthLogout clears the auth cookie. POST only to prevent CSRF via GET.
+// handleAuthLogout clears the auth cookie.
+// Accepts POST (API clients) and GET (browser redirect for reliable cookie clearing).
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	if r.Method != http.MethodPost && r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
@@ -113,6 +114,12 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   -1, // delete
 	})
+
+	// GET requests come from direct browser navigation — redirect to login.
+	if r.Method == http.MethodGet {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

@@ -335,6 +335,8 @@ type Server struct {
 	// mediaAPI provides media upload/download operations (optional).
 	mediaAPI MediaAPI
 
+	// oauthHandlers provides OAuth endpoints (optional).
+	oauthHandlers *OAuthHandlers
 
 	// version is the current binary version.
 	version string
@@ -391,6 +393,10 @@ func (s *Server) SetMediaAPI(api MediaAPI) {
 	s.mediaAPI = api
 }
 
+// SetOAuthHandlers sets the OAuth handlers for OAuth endpoints.
+func (s *Server) SetOAuthHandlers(handlers *OAuthHandlers) {
+	s.oauthHandlers = handlers
+}
 
 // SetAuthToken updates the auth token at runtime (e.g. when changed via the domain settings page).
 func (s *Server) SetAuthToken(token string) {
@@ -420,6 +426,10 @@ func (s *Server) SetUpdateChecker(uc UpdateChecker) { s.updater = uc }
 // OnUpdateRequested registers a callback invoked when the user requests an update.
 func (s *Server) OnUpdateRequested(fn func() error) { s.onUpdateRequested = fn }
 
+// GetOAuthHandlers returns the OAuth handlers (may be nil).
+func (s *Server) GetOAuthHandlers() *OAuthHandlers {
+	return s.oauthHandlers
+}
 
 // Start begins serving the web UI.
 func (s *Server) Start(ctx context.Context) error {
@@ -481,11 +491,18 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Auth Profiles (OAuth/API keys)
 	mux.HandleFunc("/api/auth/providers", s.authMiddleware(s.requireAssistant(s.handleAPIProviders)))
+	mux.HandleFunc("/api/profiles", s.authMiddleware(s.requireAssistant(s.handleAPIProfiles)))
+	mux.HandleFunc("/api/profiles/", s.authMiddleware(s.handleAPIProfileDetail))
 
 	// Media routes (if media service is configured)
 	if s.mediaAPI != nil {
 		mux.HandleFunc("/api/media", s.authMiddleware(s.requireAssistant(s.handleAPIMedia)))
 		mux.HandleFunc("/api/media/", s.authMiddleware(s.requireAssistant(s.handleAPIMediaByID)))
+	}
+
+	// OAuth routes (if OAuth handlers are configured)
+	if s.oauthHandlers != nil {
+		s.oauthHandlers.RegisterRoutes(mux, s.authMiddleware)
 	}
 
 	// ── SPA (React) fallback ──

@@ -181,15 +181,6 @@ func NewMessageQueue(debounceMs, maxPending int, onDrain OnDrainFunc, logger *sl
 	}
 }
 
-// Stop shuts down the message queue and its dedup cache goroutine.
-func (q *MessageQueue) Stop() {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.dedupCache != nil {
-		q.dedupCache.Stop()
-	}
-}
-
 // Enqueue adds a message to the session queue. Returns true if enqueued,
 // false if deduplicated (same content within 5 seconds).
 func (q *MessageQueue) Enqueue(sessionID string, msg *channels.IncomingMessage) bool {

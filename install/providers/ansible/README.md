@@ -36,7 +36,7 @@ http://your-server:8085/setup
 | `devclaw_user` | `devclaw` | System user |
 | `devclaw_home` | `/home/devclaw` | Home directory |
 | `devclaw_port_api` | `8085` | API port |
-| `devclaw_port_web` | `8090` | Web UI port |
+| `devclaw_port_web` | `47716` | Web UI port |
 | `devclaw_env` | `{}` | Environment variables |
 
 ### Example Inventory

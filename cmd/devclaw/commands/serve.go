@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,7 +13,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -190,6 +190,132 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			return nil
 		})
 
+		// Initialize OAuth handlers for OAuth providers (gemini, chatgpt, qwen, minimax, google-*)
+		oauthHandlers, err := webui.NewOAuthHandlers(paths.ResolveDataDir(), logger)
+		if err != nil {
+			logger.Warn("failed to initialize OAuth handlers", "error", err)
+		} else {
+			// Wire up Hub mode if configured (from YAML config)
+			hubConfigured := false
+			if cfg.OAuthHub.Mode == "hub" && cfg.OAuthHub.HubURL != "" {
+				apiKey := cfg.OAuthHub.APIKey
+				if apiKey == "" {
+					envVar := cfg.OAuthHub.APIKeyEnvVar
+					if envVar == "" {
+						envVar = "OAUTH_HUB_API_KEY"
+					}
+					apiKey = os.Getenv(envVar)
+				}
+				if apiKey != "" {
+					oauthHandlers.SetHubConfig(&webui.HubConfig{
+						Enabled: true,
+						HubURL:  cfg.OAuthHub.HubURL,
+						APIKey:  apiKey,
+					})
+					os.Setenv("DEVCLAW_HUB_API_KEY", apiKey)
+					logger.Info("OAuth Hub mode enabled for WebUI", "hub_url", cfg.OAuthHub.HubURL)
+					hubConfigured = true
+				}
+			}
+			// Fallback: load Hub config from hub_config.json (current directory) + vault env var
+			if !hubConfigured {
+				apiKey := os.Getenv("DEVCLAW_HUB_API_KEY") // Set by vault InjectProviderKeys
+				hubURL := ""
+
+				// Read hub_url from local hub_config.json
+				if data, err := os.ReadFile("hub_config.json"); err == nil {
+					var savedHub struct {
+						HubURL string `json:"hub_url"`
+						APIKey string `json:"api_key"`
+					}
+					if json.Unmarshal(data, &savedHub) == nil {
+						hubURL = savedHub.HubURL
+						// Fallback: use api_key from file if not in vault/env
+						if apiKey == "" && savedHub.APIKey != "" {
+							apiKey = savedHub.APIKey
+						}
+					}
+				}
+
+				if hubURL != "" && apiKey != "" {
+					oauthHandlers.SetHubConfig(&webui.HubConfig{
+						Enabled: true,
+						HubURL:  hubURL,
+						APIKey:  apiKey,
+					})
+					os.Setenv("DEVCLAW_HUB_API_KEY", apiKey)
+					logger.Info("OAuth Hub loaded from hub_config.json + vault", "hub_url", hubURL)
+				}
+			}
+			// Wire up skill installer for Hub skill downloads
+			oauthHandlers.SetSkillInstaller(func(name, content string) error {
+				dir := filepath.Join("./skills", name)
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					return fmt.Errorf("failed to create skill directory: %w", err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+					return fmt.Errorf("failed to write skill file: %w", err)
+				}
+				if reg := assistant.SkillRegistry(); reg != nil {
+					_, _ = reg.Reload(context.Background())
+				}
+				return nil
+			})
+
+			// Wire up bundle installer for multi-file skill installs (gator-hub + references)
+			oauthHandlers.SetSkillBundleInstaller(func(name string, files map[string]string) error {
+				for relPath, content := range files {
+					fullPath := filepath.Join("./skills", name, relPath)
+					if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+						return fmt.Errorf("failed to create directory for %s: %w", relPath, err)
+					}
+					if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+						return fmt.Errorf("failed to write %s: %w", relPath, err)
+					}
+				}
+				if reg := assistant.SkillRegistry(); reg != nil {
+					_, _ = reg.Reload(context.Background())
+				}
+				return nil
+			})
+
+			// Wire up reference remover for disconnecting services
+			oauthHandlers.SetSkillReferenceRemover(func(skillName, refPath string) error {
+				fullPath := filepath.Join("./skills", skillName, refPath)
+				if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("failed to remove %s: %w", refPath, err)
+				}
+				if reg := assistant.SkillRegistry(); reg != nil {
+					_, _ = reg.Reload(context.Background())
+				}
+				return nil
+			})
+
+			// Wire up vault-based secret storage for Hub API key
+			if vault != nil && vault.IsUnlocked() {
+				oauthHandlers.SetSecretSaver(func(name, value string) error {
+					if err := vault.Set(name, value); err != nil {
+						return fmt.Errorf("failed to store %s in vault: %w", name, err)
+					}
+					os.Setenv(name, value)
+					return nil
+				})
+			}
+
+			// Wire up Hub URL persistence to YAML config
+			oauthHandlers.SetHubURLSaver(func(hubURL string) error {
+				cfg.OAuthHub.HubURL = hubURL
+				cfg.OAuthHub.Mode = "hub"
+				savePath := configPath
+				if savePath == "" {
+					savePath = "config.yaml"
+				}
+				return copilot.SaveConfigToFile(cfg, savePath)
+			})
+
+			webServer.SetOAuthHandlers(oauthHandlers)
+		}
+
 		// Wire version and auto-update checker
 		webServer.SetVersion(cmd.Root().Version)
 		if cfg.Update.Enabled {
@@ -201,9 +327,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			if cfg.Update.CheckInterval != "" {
 				if parsed, err := time.ParseDuration(cfg.Update.CheckInterval); err == nil {
 					checkInterval = parsed
-				} else {
-					logger.Warn("invalid update check_interval, using default 1h",
-						"value", cfg.Update.CheckInterval, "error", err)
 				}
 			}
 			checker := updater.NewChecker(cmd.Root().Version, assetsURL, checkInterval, logger)
@@ -424,9 +547,13 @@ func reloadProcess() error {
 	// Get the original arguments (skip the program name)
 	args := os.Args[1:]
 
-	// Replace current process with a new instance (never returns on success).
+	// Replace current process with a new instance
 	err = syscall.Exec(executable, append([]string{executable}, args...), os.Environ())
-	return fmt.Errorf("failed to reload process: %w", err)
+	if err != nil {
+		return fmt.Errorf("failed to reload process: %w", err)
+	}
+
+	return nil
 }
 
 // getServerIP returns the first non-loopback IP address of the server.
@@ -471,11 +598,7 @@ func anySliceToStringSlice(items []any) []string {
 
 // wireDomainAdapter connects domain/network config functions to the WebUI adapter.
 func wireDomainAdapter(adapter *webui.AssistantAdapter, cfg *copilot.Config, ws *webui.Server, configPath string) {
-	var domainMu sync.Mutex
-
 	adapter.GetDomainConfigFn = func() webui.DomainConfigInfo {
-		domainMu.Lock()
-		defer domainMu.Unlock()
 		return webui.DomainConfigInfo{
 			WebuiAddress:   cfg.WebUI.Address,
 			WebuiAuthToken: cfg.WebUI.AuthToken != "",
@@ -488,9 +611,6 @@ func wireDomainAdapter(adapter *webui.AssistantAdapter, cfg *copilot.Config, ws 
 	}
 
 	adapter.UpdateDomainConfigFn = func(update webui.DomainConfigUpdate) error {
-		domainMu.Lock()
-		defer domainMu.Unlock()
-
 		if update.WebuiAddress != nil {
 			cfg.WebUI.Address = *update.WebuiAddress
 		}
@@ -663,45 +783,9 @@ func wireMediaAdapter(webServer *webui.Server, assistant *copilot.Assistant, log
 
 // buildWebUIAdapter creates the adapter that bridges the Assistant to the WebUI.
 func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *whatsapp.WhatsApp, configPath string) *webui.AssistantAdapter {
-	// waMgr is set later if WhatsApp implements WhatsAppAccessManager.
-	// Closures capture it by reference so they see the updated value.
-	var waMgr channels.WhatsAppAccessManager
-
 	adapter := &webui.AssistantAdapter{
 		GetConfigMapFn: func() map[string]any {
 			media := cfg.Media.Effective()
-
-			accessMap := map[string]any{
-				"default_policy":  string(cfg.Access.DefaultPolicy),
-				"owners":          cfg.Access.Owners,
-				"admins":          cfg.Access.Admins,
-				"allowed_users":   cfg.Access.AllowedUsers,
-				"blocked_users":   cfg.Access.BlockedUsers,
-				"pending_message": cfg.Access.PendingMessage,
-			}
-			if waMgr != nil {
-				if m, ok := waMgr.GetAccessConfig().(map[string]any); ok {
-					if v, ok := m["owners"].([]string); ok {
-						accessMap["owners"] = v
-					}
-					if v, ok := m["admins"].([]string); ok {
-						accessMap["admins"] = v
-					}
-					if v, ok := m["allowed_users"].([]string); ok {
-						accessMap["allowed_users"] = v
-					}
-					if v, ok := m["blocked_users"].([]string); ok {
-						accessMap["blocked_users"] = v
-					}
-					if v, ok := m["default_policy"].(string); ok && v != "" {
-						accessMap["default_policy"] = v
-					}
-					if v, ok := m["pending_message"].(string); ok && v != "" {
-						accessMap["pending_message"] = v
-					}
-				}
-			}
-
 			return map[string]any{
 				"name":               cfg.Name,
 				"trigger":            cfg.Trigger,
@@ -722,7 +806,14 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 					"transcription_api_key":  media.TranscriptionAPIKey != "",
 					"transcription_language": media.TranscriptionLanguage,
 				},
-				"access": accessMap,
+				"access": map[string]any{
+					"default_policy":  cfg.Access.DefaultPolicy,
+					"owners":          cfg.Access.Owners,
+					"admins":          cfg.Access.Admins,
+					"allowed_users":   cfg.Access.AllowedUsers,
+					"blocked_users":   cfg.Access.BlockedUsers,
+					"pending_message": cfg.Access.PendingMessage,
+				},
 			}
 		},
 		UpdateConfigMapFn: func(updates map[string]any) error {
@@ -820,12 +911,8 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 			// Update access config.
 			if accessRaw, ok := updates["access"]; ok {
 				if accessMap, ok := accessRaw.(map[string]any); ok {
-					defaultPolicy := string(cfg.Access.DefaultPolicy)
-					pendingMsg := cfg.Access.PendingMessage
-
 					if v, ok := accessMap["default_policy"].(string); ok {
 						cfg.Access.DefaultPolicy = copilot.AccessPolicy(v)
-						defaultPolicy = v
 					}
 					if v, ok := accessMap["owners"].([]any); ok {
 						cfg.Access.Owners = anySliceToStringSlice(v)
@@ -841,25 +928,6 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 					}
 					if v, ok := accessMap["pending_message"].(string); ok {
 						cfg.Access.PendingMessage = v
-						pendingMsg = v
-					}
-
-					// Mirror access changes to WhatsApp channel runtime + config.
-					if waMgr != nil {
-						waMgr.ReplaceAccessList(
-							cfg.Access.Owners,
-							cfg.Access.Admins,
-							cfg.Access.AllowedUsers,
-							cfg.Access.BlockedUsers,
-							defaultPolicy,
-							pendingMsg,
-						)
-						cfg.Channels.WhatsApp.Access.Owners = cfg.Access.Owners
-						cfg.Channels.WhatsApp.Access.Admins = cfg.Access.Admins
-						cfg.Channels.WhatsApp.Access.AllowedUsers = cfg.Access.AllowedUsers
-						cfg.Channels.WhatsApp.Access.BlockedUsers = cfg.Access.BlockedUsers
-						cfg.Channels.WhatsApp.Access.DefaultPolicy = defaultPolicy
-						cfg.Channels.WhatsApp.Access.PendingMessage = pendingMsg
 					}
 				}
 			}
@@ -1463,7 +1531,6 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 			slog.Warn("whatsapp channel does not implement WhatsAppAccessManager, access control features disabled")
 			return adapter
 		}
-		waMgr = waManager
 
 		// WhatsApp Access & Groups
 		adapter.GetWhatsAppAccessConfigFn = func() webui.WhatsAppAccessConfig {

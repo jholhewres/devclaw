@@ -237,7 +237,7 @@ kill <pid>
 
 After deployment:
 
-1. Open WebUI at `http://your-server:8090/setup`
+1. Open WebUI at `http://your-server:47716/setup`
 2. Configure API provider and key
 3. Setup channels (WhatsApp, Discord, etc.)
 4. Install skills: `devclaw skill install github`

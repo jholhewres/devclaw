@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
-import { useTranslation } from 'react-i18next'
+import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { cn } from '@/lib/utils';
 import {
   Database,
   Server,
@@ -8,8 +9,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   RefreshCw,
-} from 'lucide-react'
-import { api } from '@/lib/api'
+} from 'lucide-react';
+import { api } from '@/lib/api';
+import { Card } from '@/components/ui/Card';
 import {
   ConfigPage,
   ConfigSection,
@@ -20,49 +22,49 @@ import {
   ConfigActions,
   LoadingSpinner,
   ErrorState,
-} from '@/components/ui/ConfigComponents'
+} from '@/components/ui/ConfigComponents';
 
 interface DatabaseStatus {
-  name: string
-  healthy: boolean
-  latency: number
-  version: string
-  error?: string
-  open_connections: number
-  in_use: number
-  idle: number
-  wait_count: number
-  wait_duration: number
-  max_open_conns: number
+  name: string;
+  healthy: boolean;
+  latency: number;
+  version: string;
+  error?: string;
+  open_connections: number;
+  in_use: number;
+  idle: number;
+  wait_count: number;
+  wait_duration: number;
+  max_open_conns: number;
 }
 
 interface DatabaseConfig {
-  backend: string
+  backend: string;
   sqlite: {
-    path: string
-    journal_mode: string
-    busy_timeout: number
-    foreign_keys: boolean
-  }
+    path: string;
+    journal_mode: string;
+    busy_timeout: number;
+    foreign_keys: boolean;
+  };
   postgresql: {
-    host: string
-    port: number
-    database: string
-    user: string
-    ssl_mode: string
-    max_open_conns: number
-    max_idle_conns: number
-    conn_max_lifetime: string
-    vector_enabled: boolean
-    vector_dimensions: number
-    vector_index_type: string
-  }
+    host: string;
+    port: number;
+    database: string;
+    user: string;
+    ssl_mode: string;
+    max_open_conns: number;
+    max_idle_conns: number;
+    conn_max_lifetime: string;
+    vector_enabled: boolean;
+    vector_dimensions: number;
+    vector_index_type: string;
+  };
 }
 
 const BACKENDS = [
   { value: 'sqlite', label: 'SQLite (Default)' },
   { value: 'postgresql', label: 'PostgreSQL + pgvector' },
-]
+];
 
 const JOURNAL_MODES = [
   { value: 'WAL', label: 'WAL (Recommended)' },
@@ -70,72 +72,88 @@ const JOURNAL_MODES = [
   { value: 'TRUNCATE', label: 'Truncate' },
   { value: 'PERSIST', label: 'Persist' },
   { value: 'MEMORY', label: 'Memory' },
-]
+];
 
 const SSL_MODES = [
   { value: 'disable', label: 'Disable' },
   { value: 'require', label: 'Require' },
   { value: 'verify-ca', label: 'Verify CA' },
   { value: 'verify-full', label: 'Verify Full' },
-]
+];
 
 const INDEX_TYPES = [
   { value: 'hnsw', label: 'HNSW (Recommended)' },
   { value: 'ivfflat', label: 'IVFFlat' },
-]
+];
 
 // Status card component
-function StatusCard({ label, value, subtext, icon: Icon, status }: {
-  label: string
-  value: string | number
-  subtext?: string
-  icon?: React.ElementType
-  status?: 'success' | 'error' | 'neutral'
+function StatusCard({
+  label,
+  value,
+  subtext,
+  icon: Icon,
+  status,
+}: {
+  label: string;
+  value: string | number;
+  subtext?: string;
+  icon?: React.ElementType;
+  status?: 'success' | 'error' | 'neutral';
 }) {
   const statusColors = {
-    success: 'text-[#22c55e]',
-    error: 'text-[#f87171]',
-    neutral: 'text-[#f8fafc]',
-  }
+    success: 'text-success',
+    error: 'text-error',
+    neutral: 'text-text-primary',
+  };
 
   return (
-    <div className="rounded-xl border border-white/10 bg-[#111827] p-4">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-[#64748b] uppercase tracking-wide">{label}</span>
-        {Icon && <Icon className={`h-4 w-4 ${status === 'success' ? 'text-[#22c55e]' : status === 'error' ? 'text-[#f87171]' : 'text-[#64748b]'}`} />}
+    <Card padding="md" className="rounded-xl">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs tracking-wide text-text-muted uppercase">{label}</span>
+        {Icon && (
+          <Icon
+            className={cn(
+              'h-4 w-4',
+              status === 'success' ? 'text-success' : status === 'error' ? 'text-error' : 'text-text-muted'
+            )}
+          />
+        )}
       </div>
-      <p className={`text-lg font-semibold ${status ? statusColors[status] : 'text-[#f8fafc]'}`}>
+      <p
+        className={cn(
+          'text-lg font-semibold',
+          status && statusColors[status],
+          !status && 'text-text-primary'
+        )}
+      >
         {value}
       </p>
-      {subtext && <p className="text-xs text-[#64748b] mt-1">{subtext}</p>}
-    </div>
-  )
+      {subtext && <p className="mt-1 text-xs text-text-muted">{subtext}</p>}
+    </Card>
+  );
 }
 
 export function DatabasePage() {
-  const { t } = useTranslation()
-  const [status, setStatus] = useState<DatabaseStatus | null>(null)
-  const [config, setConfig] = useState<DatabaseConfig | null>(null)
-  const [original, setOriginal] = useState<DatabaseConfig | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<DatabaseStatus | null>(null);
+  const [config, setConfig] = useState<DatabaseConfig | null>(null);
+  const [original, setOriginal] = useState<DatabaseConfig | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
-    loadData()
-  }, [])
+    loadData();
+  }, []);
 
   const loadData = async () => {
-    setLoading(true)
-    setLoadError(null)
+    setLoading(true);
+    setLoadError(null);
     try {
-      const [statusData, configData] = await Promise.all([
-        api.database.status(),
-        api.config.get(),
-      ])
+      const [statusData, configData] = await Promise.all([api.database.status(), api.config.get()]);
 
-      setStatus(statusData)
+      setStatus(statusData);
 
       const dbConfig = (configData as unknown as { database?: DatabaseConfig }).database || {
         backend: 'sqlite',
@@ -158,42 +176,43 @@ export function DatabasePage() {
           vector_dimensions: 1536,
           vector_index_type: 'hnsw',
         },
-      }
-      setConfig(dbConfig)
-      setOriginal(JSON.parse(JSON.stringify(dbConfig)))
+      };
+      setConfig(dbConfig);
+      setOriginal(JSON.parse(JSON.stringify(dbConfig)));
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Failed to load database configuration')
+      setLoadError(err instanceof Error ? err.message : 'Failed to load database configuration');
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }
+  };
 
-  const hasChanges = JSON.stringify(config) !== JSON.stringify(original)
+  const hasChanges = JSON.stringify(config) !== JSON.stringify(original);
 
   const handleSave = async () => {
-    if (!config) return
-    setSaving(true)
-    setMessage(null)
+    if (!config) return;
+    setSaving(true);
+    setMessage(null);
     try {
-      await api.config.update({ database: config })
-      setOriginal(JSON.parse(JSON.stringify(config)))
-      setMessage({ type: 'success', text: t('common.success') })
+      await api.config.update({ database: config });
+      setOriginal(JSON.parse(JSON.stringify(config)));
+      setMessage({ type: 'success', text: t('common.success') });
     } catch {
-      setMessage({ type: 'error', text: t('common.error') })
+      setMessage({ type: 'error', text: t('common.error') });
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   const handleReset = () => {
     if (original) {
-      setConfig(JSON.parse(JSON.stringify(original)))
+      setConfig(JSON.parse(JSON.stringify(original)));
     }
-    setMessage(null)
-  }
+    setMessage(null);
+  };
 
-  if (loading) return <LoadingSpinner />
-  if (loadError || !config) return <ErrorState message={loadError || undefined} onRetry={loadData} />
+  if (loading) return <LoadingSpinner />;
+  if (loadError || !config)
+    return <ErrorState message={loadError || undefined} onRetry={loadData} />;
 
   return (
     <ConfigPage
@@ -205,7 +224,7 @@ export function DatabasePage() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => loadData()}
-            className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-[#111827] px-4 py-3 text-sm font-medium text-[#94a3b8] transition-all hover:border-white/20 hover:text-[#f8fafc]"
+            className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-bg-surface px-4 py-3 text-sm font-medium text-text-secondary transition-all hover:border-border-hover hover:text-text-primary"
           >
             <RefreshCw className="h-4 w-4" />
             {t('database.refresh')}
@@ -229,7 +248,7 @@ export function DatabasePage() {
           title={t('database.statusSection')}
           description={t('database.statusSectionDesc')}
         >
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 -mt-2">
+          <div className="-mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatusCard
               label={t('database.health')}
               value={status.healthy ? t('database.healthy') : t('database.unhealthy')}
@@ -257,9 +276,9 @@ export function DatabasePage() {
             />
           </div>
           {status.error && (
-            <div className="mt-4 flex items-start gap-2 rounded-lg bg-[#ef4444]/5 border border-[#ef4444]/10 p-3">
-              <AlertTriangle className="h-4 w-4 text-[#f87171] flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-[#f87171]">{status.error}</p>
+            <div className="mt-4 flex items-start gap-2 rounded-lg border border-error/10 bg-error-subtle p-3">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-error" />
+              <p className="text-xs text-error">{status.error}</p>
             </div>
           )}
         </ConfigSection>
@@ -274,7 +293,7 @@ export function DatabasePage() {
         <ConfigField label={t('database.backendType')} hint={t('database.backendTypeHint')}>
           <ConfigSelect
             value={config.backend}
-            onChange={(v) => setConfig(prev => prev ? { ...prev, backend: v } : prev)}
+            onChange={(v) => setConfig((prev) => (prev ? { ...prev, backend: v } : prev))}
             options={BACKENDS}
           />
         </ConfigField>
@@ -290,7 +309,11 @@ export function DatabasePage() {
           <ConfigField label={t('database.sqlitePath')}>
             <ConfigInput
               value={config.sqlite.path}
-              onChange={(v) => setConfig(prev => prev ? { ...prev, sqlite: { ...prev.sqlite, path: v } } : prev)}
+              onChange={(v) =>
+                setConfig((prev) =>
+                  prev ? { ...prev, sqlite: { ...prev.sqlite, path: v } } : prev
+                )
+              }
               placeholder="./data/devclaw.db"
             />
           </ConfigField>
@@ -298,7 +321,11 @@ export function DatabasePage() {
           <ConfigField label={t('database.journalMode')}>
             <ConfigSelect
               value={config.sqlite.journal_mode}
-              onChange={(v) => setConfig(prev => prev ? { ...prev, sqlite: { ...prev.sqlite, journal_mode: v } } : prev)}
+              onChange={(v) =>
+                setConfig((prev) =>
+                  prev ? { ...prev, sqlite: { ...prev.sqlite, journal_mode: v } } : prev
+                )
+              }
               options={JOURNAL_MODES}
             />
           </ConfigField>
@@ -307,14 +334,24 @@ export function DatabasePage() {
             <ConfigInput
               type="number"
               value={config.sqlite.busy_timeout}
-              onChange={(v) => setConfig(prev => prev ? { ...prev, sqlite: { ...prev.sqlite, busy_timeout: parseInt(v) || 5000 } } : prev)}
+              onChange={(v) =>
+                setConfig((prev) =>
+                  prev
+                    ? { ...prev, sqlite: { ...prev.sqlite, busy_timeout: parseInt(v) || 5000 } }
+                    : prev
+                )
+              }
               placeholder="5000"
             />
           </ConfigField>
 
           <ConfigToggle
             enabled={config.sqlite.foreign_keys}
-            onChange={(v) => setConfig(prev => prev ? { ...prev, sqlite: { ...prev.sqlite, foreign_keys: v } } : prev)}
+            onChange={(v) =>
+              setConfig((prev) =>
+                prev ? { ...prev, sqlite: { ...prev.sqlite, foreign_keys: v } } : prev
+              )
+            }
             label={t('database.foreignKeys')}
           />
         </ConfigSection>
@@ -327,11 +364,15 @@ export function DatabasePage() {
           title={t('database.postgresqlSection')}
           description={t('database.postgresqlSectionDesc')}
         >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <ConfigField label={t('database.host')}>
               <ConfigInput
                 value={config.postgresql.host}
-                onChange={(v) => setConfig(prev => prev ? { ...prev, postgresql: { ...prev.postgresql, host: v } } : prev)}
+                onChange={(v) =>
+                  setConfig((prev) =>
+                    prev ? { ...prev, postgresql: { ...prev.postgresql, host: v } } : prev
+                  )
+                }
                 placeholder="localhost"
               />
             </ConfigField>
@@ -340,17 +381,27 @@ export function DatabasePage() {
               <ConfigInput
                 type="number"
                 value={config.postgresql.port}
-                onChange={(v) => setConfig(prev => prev ? { ...prev, postgresql: { ...prev.postgresql, port: parseInt(v) || 5432 } } : prev)}
+                onChange={(v) =>
+                  setConfig((prev) =>
+                    prev
+                      ? { ...prev, postgresql: { ...prev.postgresql, port: parseInt(v) || 5432 } }
+                      : prev
+                  )
+                }
                 placeholder="5432"
               />
             </ConfigField>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <ConfigField label={t('database.database')}>
               <ConfigInput
                 value={config.postgresql.database}
-                onChange={(v) => setConfig(prev => prev ? { ...prev, postgresql: { ...prev.postgresql, database: v } } : prev)}
+                onChange={(v) =>
+                  setConfig((prev) =>
+                    prev ? { ...prev, postgresql: { ...prev.postgresql, database: v } } : prev
+                  )
+                }
                 placeholder="devclaw"
               />
             </ConfigField>
@@ -358,7 +409,11 @@ export function DatabasePage() {
             <ConfigField label={t('database.user')}>
               <ConfigInput
                 value={config.postgresql.user}
-                onChange={(v) => setConfig(prev => prev ? { ...prev, postgresql: { ...prev.postgresql, user: v } } : prev)}
+                onChange={(v) =>
+                  setConfig((prev) =>
+                    prev ? { ...prev, postgresql: { ...prev.postgresql, user: v } } : prev
+                  )
+                }
                 placeholder="devclaw"
               />
             </ConfigField>
@@ -367,17 +422,30 @@ export function DatabasePage() {
           <ConfigField label={t('database.sslMode')}>
             <ConfigSelect
               value={config.postgresql.ssl_mode}
-              onChange={(v) => setConfig(prev => prev ? { ...prev, postgresql: { ...prev.postgresql, ssl_mode: v } } : prev)}
+              onChange={(v) =>
+                setConfig((prev) =>
+                  prev ? { ...prev, postgresql: { ...prev.postgresql, ssl_mode: v } } : prev
+                )
+              }
               options={SSL_MODES}
             />
           </ConfigField>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <ConfigField label={t('database.maxOpenConns')}>
               <ConfigInput
                 type="number"
                 value={config.postgresql.max_open_conns}
-                onChange={(v) => setConfig(prev => prev ? { ...prev, postgresql: { ...prev.postgresql, max_open_conns: parseInt(v) || 25 } } : prev)}
+                onChange={(v) =>
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          postgresql: { ...prev.postgresql, max_open_conns: parseInt(v) || 25 },
+                        }
+                      : prev
+                  )
+                }
                 placeholder="25"
               />
             </ConfigField>
@@ -386,7 +454,16 @@ export function DatabasePage() {
               <ConfigInput
                 type="number"
                 value={config.postgresql.max_idle_conns}
-                onChange={(v) => setConfig(prev => prev ? { ...prev, postgresql: { ...prev.postgresql, max_idle_conns: parseInt(v) || 10 } } : prev)}
+                onChange={(v) =>
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          postgresql: { ...prev.postgresql, max_idle_conns: parseInt(v) || 10 },
+                        }
+                      : prev
+                  )
+                }
                 placeholder="10"
               />
             </ConfigField>
@@ -394,7 +471,13 @@ export function DatabasePage() {
             <ConfigField label={t('database.connMaxLifetime')}>
               <ConfigInput
                 value={config.postgresql.conn_max_lifetime}
-                onChange={(v) => setConfig(prev => prev ? { ...prev, postgresql: { ...prev.postgresql, conn_max_lifetime: v } } : prev)}
+                onChange={(v) =>
+                  setConfig((prev) =>
+                    prev
+                      ? { ...prev, postgresql: { ...prev.postgresql, conn_max_lifetime: v } }
+                      : prev
+                  )
+                }
                 placeholder="30m"
               />
             </ConfigField>
@@ -412,25 +495,53 @@ export function DatabasePage() {
         >
           <ConfigToggle
             enabled={config.postgresql.vector_enabled}
-            onChange={(v) => setConfig(prev => prev ? { ...prev, postgresql: { ...prev.postgresql, vector_enabled: v } } : prev)}
+            onChange={(v) =>
+              setConfig((prev) =>
+                prev ? { ...prev, postgresql: { ...prev.postgresql, vector_enabled: v } } : prev
+              )
+            }
             label={t('database.vectorEnabled')}
           />
 
           {config.postgresql.vector_enabled && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <ConfigField label={t('database.vectorDimensions')} hint={t('database.vectorDimensionsHint')}>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <ConfigField
+                label={t('database.vectorDimensions')}
+                hint={t('database.vectorDimensionsHint')}
+              >
                 <ConfigInput
                   type="number"
                   value={config.postgresql.vector_dimensions}
-                  onChange={(v) => setConfig(prev => prev ? { ...prev, postgresql: { ...prev.postgresql, vector_dimensions: parseInt(v) || 1536 } } : prev)}
+                  onChange={(v) =>
+                    setConfig((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            postgresql: {
+                              ...prev.postgresql,
+                              vector_dimensions: parseInt(v) || 1536,
+                            },
+                          }
+                        : prev
+                    )
+                  }
                   placeholder="1536"
                 />
               </ConfigField>
 
-              <ConfigField label={t('database.vectorIndexType')} hint={t('database.vectorIndexTypeHint')}>
+              <ConfigField
+                label={t('database.vectorIndexType')}
+                hint={t('database.vectorIndexTypeHint')}
+              >
                 <ConfigSelect
                   value={config.postgresql.vector_index_type}
-                  onChange={(v) => setConfig(prev => prev ? { ...prev, postgresql: { ...prev.postgresql, vector_index_type: v } } : prev)}
+                  onChange={(v) =>
+                    setConfig((prev) =>
+                      prev
+                        ? { ...prev, postgresql: { ...prev.postgresql, vector_index_type: v } }
+                        : prev
+                    )
+                  }
                   options={INDEX_TYPES}
                 />
               </ConfigField>
@@ -439,5 +550,5 @@ export function DatabasePage() {
         </ConfigSection>
       )}
     </ConfigPage>
-  )
+  );
 }

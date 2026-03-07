@@ -1,6 +1,6 @@
-// Package copilot – scheduler_tools.go implements the scheduler dispatcher tool.
-// Uses dispatcher pattern to consolidate cron_add, cron_list, cron_remove,
-// and reminder_search into a single tool.
+// Package copilot – scheduler_tools.go implements scheduler tools for managing
+// scheduled tasks and reminders: scheduler_add, scheduler_list, scheduler_remove,
+// and scheduler_search.
 package copilot
 
 import (
@@ -11,84 +11,108 @@ import (
 	"github.com/jholhewres/devclaw/pkg/devclaw/scheduler"
 )
 
-// RegisterSchedulerDispatcher registers a single "scheduler" dispatcher tool
-// that replaces cron_add, cron_list, cron_remove, and reminder_search.
+// RegisterSchedulerDispatcher registers individual scheduler tools:
+// scheduler_add, scheduler_list, scheduler_remove, and scheduler_search.
 func RegisterSchedulerDispatcher(executor *ToolExecutor, sched *scheduler.Scheduler, skillDB *SkillDB) {
-	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"action": map[string]any{
-				"type":        "string",
-				"enum":        []string{"add", "list", "remove", "search"},
-				"description": "Action: add (schedule task), list (show jobs), remove (delete job), search (find reminders by keyword)",
-			},
-			"id": map[string]any{
-				"type":        "string",
-				"description": "Job ID (for add/remove)",
-			},
-			"schedule": map[string]any{
-				"type":        "string",
-				"description": "Natural language ('every 5 minutes', 'daily at 9am') or cron/interval format (for add)",
-			},
-			"type": map[string]any{
-				"type":        "string",
-				"description": "'at' = fires ONCE (reminders), 'every' = repeats at interval, 'cron' = cron schedule (for add)",
-				"enum":        []string{"cron", "every", "at"},
-			},
-			"command": map[string]any{
-				"type":        "string",
-				"description": "Prompt/command to execute when job fires (for add)",
-			},
-			"channel": map[string]any{
-				"type":        "string",
-				"description": "Target channel for response (for add)",
-			},
-			"chat_id": map[string]any{
-				"type":        "string",
-				"description": "Target chat/group ID (for add)",
-			},
-			"confirm": map[string]any{
-				"type":        "boolean",
-				"description": "Confirm removal (required for remove action)",
-			},
-			"query": map[string]any{
-				"type":        "string",
-				"description": "Search query for reminders (for search)",
-			},
-			"include_removed": map[string]any{
-				"type":        "boolean",
-				"description": "Include removed reminders in search results (for search)",
-			},
-			"limit": map[string]any{
-				"type":        "integer",
-				"description": "Max results (for search, default: 20)",
-			},
-		},
-		"required": []string{"action"},
-	}
-
+	// scheduler_add — schedule a new task or reminder.
 	executor.Register(
-		MakeToolDefinition("scheduler",
-			"Schedule tasks and reminders. Actions: add (schedule), list (show jobs), remove (delete job), search (find reminders).",
-			schema),
+		MakeToolDefinition("scheduler_add",
+			"Schedule a new task or reminder. Supports natural language schedules ('every 5 minutes', 'daily at 9am'), cron expressions, and one-shot reminders.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Unique job ID",
+					},
+					"schedule": map[string]any{
+						"type":        "string",
+						"description": "Natural language ('every 5 minutes', 'daily at 9am') or cron/interval format",
+					},
+					"type": map[string]any{
+						"type":        "string",
+						"description": "'at' = fires ONCE (reminders), 'every' = repeats at interval, 'cron' = cron schedule",
+						"enum":        []string{"cron", "every", "at"},
+					},
+					"command": map[string]any{
+						"type":        "string",
+						"description": "Prompt/command to execute when job fires",
+					},
+					"channel": map[string]any{
+						"type":        "string",
+						"description": "Target channel for response",
+					},
+					"chat_id": map[string]any{
+						"type":        "string",
+						"description": "Target chat/group ID",
+					},
+				},
+				"required": []string{"id", "schedule", "command"},
+			}),
 		func(ctx context.Context, args map[string]any) (any, error) {
-			action, _ := args["action"].(string)
-			if action == "" {
-				return nil, fmt.Errorf("action is required")
-			}
+			return handleSchedulerAdd(ctx, sched, skillDB, args)
+		},
+	)
 
-			switch action {
-			case "add":
-				return handleSchedulerAdd(ctx, sched, skillDB, args)
-			case "list":
-				return handleSchedulerList(sched)
-			case "remove":
-				return handleSchedulerRemove(sched, skillDB, args)
-			case "search":
-				return handleSchedulerSearch(skillDB, args)
-			default:
-				return nil, fmt.Errorf("unknown action: %s (valid: add, list, remove, search)", action)
-			}
+	// scheduler_list — list all scheduled jobs.
+	executor.Register(
+		MakeToolDefinition("scheduler_list",
+			"List all currently scheduled jobs with their status, schedule, run count, and last execution details.",
+			map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			return handleSchedulerList(sched)
+		},
+	)
+
+	// scheduler_remove — remove a scheduled job by ID.
+	executor.Register(
+		MakeToolDefinition("scheduler_remove",
+			"Remove a scheduled job by its ID. Requires explicit confirmation to prevent accidental deletion.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"id": map[string]any{
+						"type":        "string",
+						"description": "Job ID to remove",
+					},
+					"confirm": map[string]any{
+						"type":        "boolean",
+						"description": "Must be true to confirm removal",
+					},
+				},
+				"required": []string{"id", "confirm"},
+			}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			return handleSchedulerRemove(sched, skillDB, args)
+		},
+	)
+
+	// scheduler_search — search reminders by keyword.
+	executor.Register(
+		MakeToolDefinition("scheduler_search",
+			"Search reminders and scheduled tasks by keyword. Returns matching reminders with their schedule, command, and status.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type":        "string",
+						"description": "Search query for reminders",
+					},
+					"include_removed": map[string]any{
+						"type":        "boolean",
+						"description": "Include removed reminders in search results",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Max results (default: 20)",
+					},
+				},
+			}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			return handleSchedulerSearch(skillDB, args)
 		},
 	)
 }

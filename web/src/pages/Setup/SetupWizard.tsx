@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CheckCircle2, ArrowRight, ArrowLeft, Sparkles, Loader2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { StepIdentity } from './StepIdentity'
 import { StepProvider } from './StepProvider'
 import { StepSecurity } from './StepSecurity'
@@ -88,7 +89,7 @@ export function SetupWizard() {
     }
   }
 
-  /* Post-setup success screen — polling for auto-redirect */
+  /* Post-setup success screen -- polling for auto-redirect */
   if (done) {
     return <SetupComplete hasPassword={!!data.webuiPassword} />
   }
@@ -104,35 +105,33 @@ export function SetupWizard() {
               <button
                 onClick={() => id < step && setStep(id)}
                 disabled={id > step}
-                className={`group flex items-center gap-2 rounded-full px-3 py-1.5 transition-all duration-300 ${
-                  id === step
-                    ? 'bg-[#3b82f6] text-white shadow-lg shadow-blue-500/25'
-                    : id < step
-                      ? 'bg-[#22c55e]/10 text-[#22c55e] cursor-pointer hover:bg-[#22c55e]/20'
-                      : 'bg-[#1e293b]/50 text-[#64748b]'
-                }`}
+                className={cn(
+                  'group flex items-center gap-2 rounded-full px-3 py-1.5 transition-all duration-300',
+                  id === step && 'bg-brand text-white shadow-lg shadow-brand/25',
+                  id < step && 'cursor-pointer bg-success-subtle text-success hover:bg-success/20',
+                  id > step && 'bg-bg-subtle/50 text-text-muted',
+                )}
               >
-                <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
-                  id === step
-                    ? 'bg-white/20'
-                    : id < step
-                      ? 'bg-[#22c55e]/20'
-                      : 'bg-[#1e293b]'
-                }`}>
+                <span className={cn(
+                  'flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold',
+                  id === step && 'bg-white/20',
+                  id < step && 'bg-success/20',
+                  id > step && 'bg-bg-subtle',
+                )}>
                   {id < step ? (
                     <CheckCircle2 className="h-3 w-3" />
                   ) : (
                     id
                   )}
                 </span>
-                <span className="text-xs font-medium hidden sm:block">{label}</span>
+                <span className="hidden text-xs font-medium sm:block">{label}</span>
               </button>
 
-              {/* Connector */}
+              {/* Connector line */}
               {index < STEPS.length - 1 && (
-                <div className="relative mx-1 h-0.5 w-4 sm:w-6 overflow-hidden rounded-full bg-[#1e293b]">
+                <div className="relative mx-1 h-0.5 w-4 overflow-hidden rounded-full bg-bg-subtle sm:w-6">
                   <div
-                    className="absolute inset-y-0 left-0 bg-[#22c55e] transition-all duration-500 ease-out rounded-full"
+                    className="absolute inset-y-0 left-0 rounded-full bg-success transition-all duration-500 ease-out"
                     style={{ width: id < step ? '100%' : '0%' }}
                   />
                 </div>
@@ -151,7 +150,7 @@ export function SetupWizard() {
 
       {/* Error */}
       {error && (
-        <div className="mt-4 rounded-xl border border-[#ef4444]/20 bg-[#ef4444]/10 px-4 py-3 text-sm text-[#f87171]">
+        <div className="mt-4 rounded-xl border border-error/20 bg-error-subtle px-4 py-3 text-sm text-error">
           {error}
         </div>
       )}
@@ -161,25 +160,24 @@ export function SetupWizard() {
         <button
           onClick={prev}
           disabled={step === 1}
-          className="flex cursor-pointer items-center gap-1.5 text-sm text-[#64748b] transition-colors hover:text-[#f8fafc] disabled:pointer-events-none disabled:opacity-0"
+          className="flex cursor-pointer items-center gap-1.5 text-sm text-text-muted transition-colors hover:text-text-primary disabled:pointer-events-none disabled:opacity-0"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           {t('setupPage.back')}
         </button>
 
         <div className="flex items-center gap-4">
-          {/* Step indicator */}
+          {/* Step indicator dots */}
           <div className="flex gap-1.5">
             {STEPS.map(({ id }) => (
               <div
                 key={id}
-                className={`h-1.5 rounded-full transition-all duration-300 ${
-                  id === step
-                    ? 'w-5 bg-[#3b82f6]'
-                    : id < step
-                      ? 'w-1.5 bg-[#22c55e]'
-                      : 'w-1.5 bg-[#1e293b]'
-                }`}
+                className={cn(
+                  'h-1.5 rounded-full transition-all duration-300',
+                  id === step && 'w-5 bg-brand',
+                  id < step && 'w-1.5 bg-success',
+                  id > step && 'w-1.5 bg-bg-subtle',
+                )}
               />
             ))}
           </div>
@@ -187,7 +185,7 @@ export function SetupWizard() {
           {step < 3 ? (
             <button
               onClick={next}
-              className="group flex cursor-pointer items-center gap-2 rounded-xl bg-[#f8fafc] px-5 py-2.5 text-sm font-semibold text-[#0f1419] shadow-lg shadow-white/5 transition-all hover:bg-white"
+              className="group flex cursor-pointer items-center gap-2 rounded-xl bg-text-primary px-5 py-2.5 text-sm font-semibold text-text-inverse shadow-lg transition-all hover:bg-white"
             >
               {t('setupPage.next')}
               <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
@@ -196,7 +194,7 @@ export function SetupWizard() {
             <button
               onClick={handleFinalize}
               disabled={submitting}
-              className="group flex cursor-pointer items-center gap-2 rounded-xl bg-[#22c55e] px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-green-500/25 transition-all hover:bg-[#16a34a] disabled:cursor-wait disabled:opacity-50"
+              className="group flex cursor-pointer items-center gap-2 rounded-xl bg-success px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-success/25 transition-all hover:brightness-110 disabled:cursor-wait disabled:opacity-50"
             >
               {submitting ? (
                 <>
@@ -244,7 +242,7 @@ function SetupComplete({ hasPassword }: { hasPassword: boolean }) {
             return
           }
         } catch {
-          // Server still restarting — keep polling
+          // Server still restarting -- keep polling
         }
       }
     }
@@ -255,22 +253,23 @@ function SetupComplete({ hasPassword }: { hasPassword: boolean }) {
 
   return (
     <div className="flex flex-col items-center gap-4 py-4 text-center">
-      <div className={`flex h-14 w-14 items-center justify-center rounded-full transition-all duration-500 ${
+      <div className={cn(
+        'flex h-14 w-14 items-center justify-center rounded-full transition-all duration-500',
         phase === 'restarting'
-          ? 'bg-[#1e293b]'
-          : 'bg-[#22c55e]/10 ring-1 ring-[#22c55e]/30'
-      }`}>
+          ? 'bg-bg-subtle'
+          : 'bg-success-subtle ring-1 ring-success/30',
+      )}>
         {phase === 'restarting' ? (
-          <Loader2 className="h-7 w-7 animate-spin text-[#64748b]" />
+          <Loader2 className="h-7 w-7 animate-spin text-text-muted" />
         ) : (
-          <CheckCircle2 className="h-7 w-7 text-[#22c55e]" />
+          <CheckCircle2 className="h-7 w-7 text-success" />
         )}
       </div>
       <div>
-        <h2 className="text-lg font-semibold text-[#f8fafc]">
+        <h2 className="text-lg font-semibold text-text-primary">
           {phase === 'restarting' ? t('setupPage.startingUp') : t('setupPage.allSet')}
         </h2>
-        <p className="mt-1.5 text-sm text-[#94a3b8] max-w-sm">
+        <p className="mt-1.5 max-w-sm text-sm text-text-secondary">
           {phase === 'restarting'
             ? t('setupPage.restartingDesc')
             : t('setupPage.redirecting')
@@ -279,16 +278,17 @@ function SetupComplete({ hasPassword }: { hasPassword: boolean }) {
       </div>
 
       {/* Progress bar */}
-      <div className="w-40 h-1 rounded-full bg-[#1e293b] overflow-hidden">
-        <div className={`h-full rounded-full transition-all duration-1000 ${
+      <div className="h-1 w-40 overflow-hidden rounded-full bg-bg-subtle">
+        <div className={cn(
+          'h-full rounded-full transition-all duration-1000',
           phase === 'restarting'
-            ? 'w-2/3 bg-[#3b82f6] animate-pulse'
-            : 'w-full bg-[#22c55e]'
-        }`} />
+            ? 'w-2/3 animate-pulse bg-brand'
+            : 'w-full bg-success',
+        )} />
       </div>
 
       {hasPassword && phase === 'ready' && (
-        <p className="text-xs text-[#64748b]">
+        <p className="text-xs text-text-muted">
           {t('setupPage.usePasswordHint')}
         </p>
       )}

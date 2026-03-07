@@ -31,24 +31,24 @@ export function EndpointSelector({
             onClick={() => onChange(ep.value)}
             className={`w-full cursor-pointer rounded-xl border px-4 py-3 text-left transition-all ${
               value === ep.value
-                ? `border-[${accentColor}]/50 bg-[${accentColor}]/10`
-                : 'border-white/10 bg-[#0c1222] hover:border-white/20 hover:bg-[#111827]'
+                ? ''
+                : 'border-border bg-bg-main hover:border-border-hover hover:bg-bg-surface'
             }`}
             style={value === ep.value ? {
               borderColor: `${accentColor}80`,
               backgroundColor: `${accentColor}15`,
             } : undefined}
           >
-            <span className={`text-sm font-medium ${value === ep.value ? 'text-[#f8fafc]' : 'text-[#94a3b8]'}`}>
+            <span className={`text-sm font-medium ${value === ep.value ? 'text-text-primary' : 'text-text-secondary'}`}>
               {ep.label}
             </span>
             {ep.value && (
-              <p className="mt-0.5 truncate text-xs text-[#64748b] font-mono">
+              <p className="mt-0.5 truncate text-xs text-text-muted font-mono">
                 {ep.value.replace('https://', '').replace('http://', '')}
               </p>
             )}
             {ep.extraModels && ep.extraModels.length > 0 && (
-              <p className="mt-1 text-[10px] text-[#22c55e]">
+              <p className="mt-1 text-[10px] text-success">
                 +{ep.extraModels.length} extra models
               </p>
             )}
@@ -66,19 +66,19 @@ export function EndpointSelector({
           onClick={() => onChange(ep.value)}
           className={`cursor-pointer rounded-xl border px-3 py-2.5 text-left transition-all ${
             value === ep.value
-              ? `border-[${accentColor}]/50 bg-[${accentColor}]/10`
-              : 'border-white/10 bg-[#0c1222] hover:border-white/20 hover:bg-[#111827]'
+              ? ''
+              : 'border-border bg-bg-main hover:border-border-hover hover:bg-bg-surface'
           }`}
           style={value === ep.value ? {
             borderColor: `${accentColor}80`,
             backgroundColor: `${accentColor}15`,
           } : undefined}
         >
-          <span className={`text-xs font-medium ${value === ep.value ? 'text-[#f8fafc]' : 'text-[#94a3b8]'}`}>
+          <span className={`text-xs font-medium ${value === ep.value ? 'text-text-primary' : 'text-text-secondary'}`}>
             {ep.label}
           </span>
           {ep.value && (
-            <p className="mt-0.5 truncate text-[10px] text-[#64748b] font-mono">
+            <p className="mt-0.5 truncate text-[10px] text-text-muted font-mono">
               {ep.value.replace('https://', '').replace('http://', '')}
             </p>
           )}

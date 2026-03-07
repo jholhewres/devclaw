@@ -7,7 +7,7 @@
  *   pm2 startup  # follow the printed command
  *
  * Environment Variables:
- *   PORT              - Server port (default: 8090)
+ *   PORT              - Server port (default: 47716)
  *   DEVCLAW_STATE_DIR - State directory (default: /opt/devclaw)
  *   NODE_ENV          - Environment (production/development)
  */
@@ -16,7 +16,7 @@ const path = require('path');
 
 // Allow customization via environment
 const installDir = process.env.DEVCLAW_INSTALL_DIR || '/opt/devclaw';
-const port = process.env.PORT || '8090';
+const port = process.env.PORT || '47716';
 
 module.exports = {
   apps: [{

@@ -171,6 +171,7 @@ type ToolHandlerFunc func(ctx context.Context, args map[string]any) (any, error)
 type registeredTool struct {
 	Definition ToolDefinition
 	Handler    ToolHandlerFunc
+	Hidden     bool // If true, the tool is callable but not sent to the LLM schema.
 }
 
 // ToolResult holds the output of a single tool execution.
@@ -601,6 +602,24 @@ func (e *ToolExecutor) Register(def ToolDefinition, handler ToolHandlerFunc) {
 	e.logger.Debug("tool registered", "name", name)
 }
 
+// RegisterHidden registers a tool that is callable but excluded from the LLM
+// tool schema. Used for legacy/deprecated aliases that should still work if
+// invoked but shouldn't consume slots in the tool list sent to the model.
+func (e *ToolExecutor) RegisterHidden(def ToolDefinition, handler ToolHandlerFunc) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	name := def.Function.Name
+	e.tools[name] = &registeredTool{
+		Definition: def,
+		Handler:    handler,
+		Hidden:     true,
+	}
+	e.toolDefsDirty = true
+
+	e.logger.Debug("hidden tool registered", "name", name)
+}
+
 // SetVault sets the vault reader for skill setup checking.
 func (e *ToolExecutor) SetVault(vault skills.VaultReader) {
 	e.mu.Lock()
@@ -611,8 +630,15 @@ func (e *ToolExecutor) SetVault(vault skills.VaultReader) {
 // RegisterSkillTools registers all tools exposed by a skill.
 // Tool names are prefixed with the skill name to avoid collisions.
 // Names are sanitized to match OpenAI's pattern: ^[a-zA-Z0-9_-]+$
+//
+// When the reference model is active (skill has Location != ""), the generic
+// "execute" tool is registered as hidden — the LLM should read SKILL.md via
+// read_file instead of calling the execute tool (which returns "instructions only").
+// Script-specific tools (run_*) remain visible.
 func (e *ToolExecutor) RegisterSkillTools(skill skills.Skill) {
 	meta := skill.Metadata()
+	hasLocation := skill.Location() != ""
+
 	for _, tool := range skill.Tools() {
 		// Build the full tool name: skill_name_tool_name
 		// Use underscore separator (dots are rejected by OpenAI).
@@ -621,7 +647,14 @@ func (e *ToolExecutor) RegisterSkillTools(skill skills.Skill) {
 		def := SkillToolToDefinition(fullName, tool)
 		handler := makeSkillToolHandler(skill, tool)
 
-		e.Register(def, handler)
+		// Hide the generic "execute" tool for file-based skills when the
+		// reference model is available. The LLM reads SKILL.md on demand
+		// instead of calling execute (which just returns "instructions only").
+		if hasLocation && tool.Name == "execute" && tool.Handler == nil {
+			e.RegisterHidden(def, handler)
+		} else {
+			e.Register(def, handler)
+		}
 	}
 }
 
@@ -749,6 +782,9 @@ func (e *ToolExecutor) Tools() []ToolDefinition {
 
 	defs := make([]ToolDefinition, 0, len(e.tools))
 	for _, t := range e.tools {
+		if t.Hidden {
+			continue // Hidden tools are callable but not sent to the LLM.
+		}
 		defs = append(defs, t.Definition)
 	}
 	e.toolDefsCache = defs
@@ -776,6 +812,18 @@ func (e *ToolExecutor) HasTool(name string) bool {
 	return ok
 }
 
+// executeByName looks up a tool by name (with lock) and runs its handler.
+// Used by legacy alias dispatchers to avoid direct unlocked map access.
+func (e *ToolExecutor) executeByName(ctx context.Context, name string, args map[string]any) (any, error) {
+	e.mu.RLock()
+	t, ok := e.tools[name]
+	e.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("tool %q not registered", name)
+	}
+	return t.Handler(ctx, args)
+}
+
 // findToolCaseInsensitive finds a registered tool by case-insensitive name match.
 // Returns the canonical name if found, empty string otherwise.
 func (e *ToolExecutor) findToolCaseInsensitive(name string) string {
@@ -797,10 +845,10 @@ func (e *ToolExecutor) findToolCaseInsensitive(name string) string {
 func (e *ToolExecutor) Execute(ctx context.Context, calls []ToolCall) []ToolResult {
 	// Normalize and filter tool calls.
 	valid := make([]ToolCall, 0, len(calls))
-	for i, c := range calls {
-		// Auto-generate ID if missing — use index for uniqueness within the batch.
+	for _, c := range calls {
+		// Auto-generate ID if missing.
 		if c.ID == "" && c.Function.Name != "" {
-			c.ID = fmt.Sprintf("call_%d_%d", time.Now().UnixMilli(), i)
+			c.ID = fmt.Sprintf("call_%d", len(valid))
 		}
 		// Trim whitespace from tool name.
 		c.Function.Name = strings.TrimSpace(c.Function.Name)

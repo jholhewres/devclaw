@@ -1,5 +1,5 @@
-// Package copilot – vault_tools.go implements the vault dispatcher tool.
-// Uses dispatcher pattern to consolidate 5 vault tools into 1.
+// Package copilot – vault_tools.go implements individual vault tools.
+// Each tool has a focused schema with only the parameters it needs.
 package copilot
 
 import (
@@ -8,54 +8,96 @@ import (
 	"strings"
 )
 
-// RegisterVaultDispatcher registers a single "vault" dispatcher tool that
-// replaces the individual vault_status, vault_save, vault_get, vault_list,
-// vault_delete tools.
-func RegisterVaultDispatcher(executor *ToolExecutor, vault *Vault) {
-	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"action": map[string]any{
-				"type":        "string",
-				"enum":        []string{"status", "save", "get", "list", "delete"},
-				"description": "Action: status (check vault state), save (store secret), get (retrieve), list (show names), delete (remove)",
-			},
-			"name": map[string]any{
-				"type":        "string",
-				"description": "Secret name/key (for save/get/delete)",
-			},
-			"value": map[string]any{
-				"type":        "string",
-				"description": "Secret value (for save only)",
-			},
-		},
-		"required": []string{"action"},
-	}
+// RegisterVaultTools registers individual vault tools.
+// Replaces the old dispatcher pattern with focused tools:
+// vault_status, vault_save, vault_get, vault_list, vault_delete.
+func RegisterVaultTools(executor *ToolExecutor, vault *Vault) {
 
+	// ── vault_status ──
 	executor.Register(
-		MakeToolDefinition("vault",
-			"Manage encrypted secrets vault (AES-256-GCM). Actions: status, save, get, list, delete. Always check status first.",
-			schema),
-		func(_ context.Context, args map[string]any) (any, error) {
-			action, _ := args["action"].(string)
-			if action == "" {
-				return nil, fmt.Errorf("action is required")
-			}
+		MakeToolDefinition("vault_status",
+			"Check the encrypted vault state: whether it exists, is locked/unlocked, and how many secrets are stored.",
+			map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			}),
+		func(_ context.Context, _ map[string]any) (any, error) {
+			return handleVaultStatus(vault)
+		},
+	)
 
-			switch action {
-			case "status":
-				return handleVaultStatus(vault)
-			case "save":
-				return handleVaultSave(vault, args)
-			case "get":
-				return handleVaultGet(vault, args)
-			case "list":
-				return handleVaultList(vault)
-			case "delete":
-				return handleVaultDelete(vault, args)
-			default:
-				return nil, fmt.Errorf("unknown action: %s (valid: status, save, get, list, delete)", action)
-			}
+	// ── vault_save ──
+	executor.Register(
+		MakeToolDefinition("vault_save",
+			"Store a secret (API key, token, password) in the encrypted vault (AES-256-GCM + Argon2id). "+
+				"Never store secrets in plain text files — always use this tool.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Secret name/key (e.g. OPENAI_API_KEY, SLACK_BOT_TOKEN)",
+					},
+					"value": map[string]any{
+						"type":        "string",
+						"description": "Secret value to store",
+					},
+				},
+				"required": []string{"name", "value"},
+			}),
+		func(_ context.Context, args map[string]any) (any, error) {
+			return handleVaultSave(vault, args)
+		},
+	)
+
+	// ── vault_get ──
+	executor.Register(
+		MakeToolDefinition("vault_get",
+			"Retrieve a secret value from the encrypted vault by name.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Secret name/key to retrieve",
+					},
+				},
+				"required": []string{"name"},
+			}),
+		func(_ context.Context, args map[string]any) (any, error) {
+			return handleVaultGet(vault, args)
+		},
+	)
+
+	// ── vault_list ──
+	executor.Register(
+		MakeToolDefinition("vault_list",
+			"List all secret names stored in the encrypted vault (values are not shown).",
+			map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			}),
+		func(_ context.Context, _ map[string]any) (any, error) {
+			return handleVaultList(vault)
+		},
+	)
+
+	// ── vault_delete ──
+	executor.Register(
+		MakeToolDefinition("vault_delete",
+			"Remove a secret from the encrypted vault by name.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Secret name/key to delete",
+					},
+				},
+				"required": []string{"name"},
+			}),
+		func(_ context.Context, args map[string]any) (any, error) {
+			return handleVaultDelete(vault, args)
 		},
 	)
 }
@@ -107,7 +149,7 @@ func handleVaultSave(vault *Vault, args map[string]any) (any, error) {
 	name, _ := args["name"].(string)
 	value, _ := args["value"].(string)
 	if name == "" || value == "" {
-		return nil, fmt.Errorf("name and value are required for save action")
+		return nil, fmt.Errorf("name and value are required")
 	}
 	if !vault.IsUnlocked() {
 		return nil, fmt.Errorf("vault is locked — set DEVCLAW_VAULT_PASSWORD or run 'devclaw vault unlock'")
@@ -124,7 +166,7 @@ func handleVaultGet(vault *Vault, args map[string]any) (any, error) {
 	}
 	name, _ := args["name"].(string)
 	if name == "" {
-		return nil, fmt.Errorf("name is required for get action")
+		return nil, fmt.Errorf("name is required")
 	}
 	val, err := vault.Get(name)
 	if err != nil {
@@ -161,7 +203,7 @@ func handleVaultDelete(vault *Vault, args map[string]any) (any, error) {
 	}
 	name, _ := args["name"].(string)
 	if name == "" {
-		return nil, fmt.Errorf("name is required for delete action")
+		return nil, fmt.Errorf("name is required")
 	}
 	if err := vault.Delete(name); err != nil {
 		return nil, fmt.Errorf("failed to delete from vault: %w", err)

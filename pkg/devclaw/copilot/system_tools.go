@@ -87,8 +87,11 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 	}
 
 	if vault != nil {
-		RegisterVaultDispatcher(executor, vault)
+		RegisterVaultTools(executor, vault)
 	}
+
+	// Register legacy aliases for backward compatibility (deprecated, remove after one release cycle).
+	RegisterLegacyAliases(executor)
 
 	registerSecurityAuditTool(executor, SecurityAuditToolConfig{
 		DataDir:       dataDir,
@@ -1586,7 +1589,7 @@ func (c *osExecCmd) CombinedOutput() ([]byte, error) {
 
 // registerCronTools, registerVaultTools, and RegisterSessionTools have been
 // replaced by RegisterSchedulerDispatcher (scheduler_tools.go),
-// RegisterVaultDispatcher (vault_tools.go), and RegisterSessionsDispatcher
+// RegisterVaultTools (vault_tools.go), and RegisterSessionsDispatcher
 // (session_tools.go) respectively.
 
 // ---------- Capabilities Discovery Tool ----------
@@ -1651,7 +1654,7 @@ func registerCapabilitiesTool(executor *ToolExecutor) {
 			}
 
 			if filter == "skills" || filter == "all" {
-				sb.WriteString("**Skills**: Use skill_manage (action=list) to discover available skills.\n\n")
+				sb.WriteString("**Skills**: Use skill_manage (action=list) to see installed skills.\n\n")
 			}
 
 			sb.WriteString(fmt.Sprintf("Total: %d tools\n", len(executor.Tools())))

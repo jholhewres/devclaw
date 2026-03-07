@@ -116,12 +116,6 @@ type ToolLoopDetector struct {
 	destructiveStreak     int    // consecutive destructive tool calls
 	lastDestructiveTool   string // last destructive tool called
 	destructiveBatchCount int    // total destructive calls in session
-
-	// Semantic loop tracking: detects when the same tool is called with
-	// different arguments but no real progress (e.g. prompt-only skills).
-	sameToolCount    int    // consecutive calls to the same tool name
-	lastToolName     string // last tool name called
-	noActionCount    int    // consecutive tool results that are instruction-only
 }
 
 // NewToolLoopDetector creates a new detector with the given config.
@@ -165,19 +159,8 @@ func (d *ToolLoopDetector) RecordToolOutcome(output string) {
 	outputChanged := h != d.lastOutputHash && output != ""
 	hasProgressIndicators := detectProgressIndicators(output)
 
-	// Track instruction-only outputs separately — these should never
-	// count as progress even if the hash changed (different instruction
-	// text is still not actionable).
-	isNoAction := detectNoActionOutput(output)
-	if isNoAction {
-		d.noActionCount++
-	} else {
-		d.noActionCount = 0
-	}
-
-	// Progress is determined by: output changed OR contains success indicators.
-	// Instruction-only outputs never count as progress regardless of hash.
-	madeProgress := !isNoAction && (outputChanged || hasProgressIndicators)
+	// Progress is determined by: output changed OR contains success indicators
+	madeProgress := outputChanged || hasProgressIndicators
 
 	if !madeProgress {
 		d.noProgressCount++
@@ -236,48 +219,10 @@ func extractErrorMessage(output string) string {
 	return ""
 }
 
-// noActionPatterns are phrases that indicate a tool returned instructions
-// or guidance rather than performing an actual action. When these are
-// detected, the output should NOT count as progress even if it also
-// contains success-like words (e.g. "successfully installed" in an example).
-var noActionPatterns = []string{
-	"instructions only",
-	"provides instructions",
-	"setup_required",
-	"needs configuration",
-	"use the system prompt",
-	"no executable scripts",
-	"requires additional setup",
-	"skill notice:",
-	"prompt-only skill",
-}
-
-// detectNoActionOutput returns true if the output is instruction-only text
-// that should not count as progress.
-func detectNoActionOutput(output string) bool {
-	if output == "" {
-		return false
-	}
-	lower := strings.ToLower(output)
-	for _, pattern := range noActionPatterns {
-		if strings.Contains(lower, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
 // detectProgressIndicators analyzes output for signs of actual progress.
 // Returns true if output contains indicators of successful work being done.
-// Returns false if the output is instruction-only text (no real action taken).
 func detectProgressIndicators(output string) bool {
 	if output == "" {
-		return false
-	}
-
-	// Instruction-only outputs are never progress, even if they contain
-	// success-like words in examples or documentation.
-	if detectNoActionOutput(output) {
 		return false
 	}
 
@@ -347,72 +292,6 @@ func (d *ToolLoopDetector) RecordAndCheck(toolName string, args map[string]any) 
 				d.sameErrorCount, truncateStr(d.lastErrorMsg, 100)),
 			Streak:  d.sameErrorCount,
 			Pattern: "strategy_loop",
-		}
-	}
-
-	// 1c. Semantic loop detection: same tool called with different args
-	// but returning instruction-only outputs (no real action taken).
-	// This catches prompt-only skill loops where the agent keeps trying
-	// different arguments but the skill just returns instructions each time.
-	if toolName == d.lastToolName {
-		d.sameToolCount++
-	} else {
-		d.sameToolCount = 1
-		d.lastToolName = toolName
-	}
-
-	if d.noActionCount >= 3 {
-		d.logger.Warn("instruction-only loop detected",
-			"tool", toolName, "no_action_count", d.noActionCount,
-			"same_tool_count", d.sameToolCount)
-		severity := LoopWarning
-		msg := fmt.Sprintf(
-			"INSTRUCTION LOOP DETECTED: The last %d tool calls returned instructions/guidance only — no actual action was performed. "+
-				"This skill has no executable scripts. STOP calling this tool. "+
-				"Either follow the instructions using other tools (bash, file operations) or inform the user that this skill requires setup.",
-			d.noActionCount)
-		if d.noActionCount >= 5 {
-			severity = LoopCritical
-			msg = fmt.Sprintf(
-				"CRITICAL: %d consecutive instruction-only results. You are stuck in a loop calling a prompt-only skill. "+
-					"STOP IMMEDIATELY. Provide a final response to the user explaining the situation.",
-				d.noActionCount)
-		}
-		if d.noActionCount >= 8 {
-			d.logger.Error("instruction loop circuit breaker",
-				"tool", toolName, "no_action_count", d.noActionCount)
-			return LoopDetectionResult{
-				Severity: LoopBreaker,
-				Message: fmt.Sprintf(
-					"CIRCUIT BREAKER: %d consecutive instruction-only results. "+
-						"This run is being terminated to prevent infinite loop.",
-					d.noActionCount),
-				Streak:  d.noActionCount,
-				Pattern: "instruction_loop",
-			}
-		}
-		return LoopDetectionResult{
-			Severity: severity,
-			Message:  msg,
-			Streak:   d.noActionCount,
-			Pattern:  "instruction_loop",
-		}
-	}
-
-	// 1d. Same-tool variant loop: same tool called many times with different
-	// args but no progress (catches cycling through different skill actions).
-	if d.sameToolCount >= 6 && d.noProgressCount >= 4 {
-		d.logger.Warn("same-tool variant loop detected",
-			"tool", toolName, "same_tool_count", d.sameToolCount,
-			"no_progress_count", d.noProgressCount)
-		return LoopDetectionResult{
-			Severity: LoopCritical,
-			Message: fmt.Sprintf(
-				"VARIANT LOOP DETECTED: You have called '%s' %d times with different arguments but no progress. "+
-					"STOP and try a completely different approach or ask the user for help.",
-				toolName, d.sameToolCount),
-			Streak:  d.sameToolCount,
-			Pattern: "variant_loop",
 		}
 	}
 
@@ -535,9 +414,6 @@ func (d *ToolLoopDetector) Reset() {
 	d.lastErrorMsg = ""
 	d.sameErrorCount = 0
 	d.warningBucket = make(map[string]int)
-	d.sameToolCount = 0
-	d.lastToolName = ""
-	d.noActionCount = 0
 }
 
 // isKnownNoProgressCall checks if a tool call matches known poll patterns.

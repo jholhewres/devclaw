@@ -18,6 +18,10 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { DomainConfig } from '@/lib/api'
+import { cn } from '@/lib/utils'
+import {
+  LoadingSpinner,
+} from '@/components/ui/ConfigComponents'
 
 /**
  * Domain and network configuration page.
@@ -96,40 +100,35 @@ export function Domain() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-        <div className="h-10 w-10 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
-      </div>
-    )
-  }
+  if (loading) return <LoadingSpinner />
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-[#0c1222]">
+    <div className="flex flex-1 flex-col overflow-hidden bg-bg-main">
       <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#475569]">Rede</p>
-            <h1 className="mt-1 text-2xl font-bold text-[#f8fafc] tracking-tight">Domínio & Acesso</h1>
+            <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-text-muted">{t('domain.subtitle')}</p>
+            <h1 className="mt-1 text-2xl font-bold text-text-primary tracking-tight">{t('domain.title')}</h1>
           </div>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#3b82f6] px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-[#2563eb] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex cursor-pointer items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {saving ? 'Salvando...' : 'Salvar'}
+            {saving ? t('common.saving') : t('common.save')}
           </button>
         </div>
 
         {/* Toast */}
         {message && (
-          <div className={`mt-5 flex items-center gap-2.5 rounded-xl px-4 py-3 text-sm border ${
+          <div className={cn(
+            'mt-5 flex items-center gap-2.5 rounded-xl px-4 py-3 text-sm border',
             message.type === 'success'
-              ? 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/20'
-              : 'bg-[#ef4444]/10 text-[#f87171] border-[#ef4444]/20'
-          }`}>
+              ? 'bg-success-subtle text-success border-success/20'
+              : 'bg-error-subtle text-error border-error/20'
+          )}>
             {message.type === 'success' ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
             {message.text}
           </div>
@@ -159,26 +158,26 @@ export function Domain() {
           </div>
         )}
 
-        {/* ── WebUI ── */}
+        {/* -- WebUI -- */}
         <Card className="mt-8">
           <CardHeader icon={Globe} title="Web UI" />
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <Field label="Porta">
+            <Field label={t('domain.port')}>
               <Input value={webuiAddress} onChange={setWebuiAddress} placeholder=":8090" />
             </Field>
-            <Field label="Senha">
+            <Field label={t('domain.password')}>
               <PasswordInput
                 value={webuiToken}
                 onChange={setWebuiToken}
                 show={showWebuiToken}
                 onToggle={() => setShowWebuiToken(!showWebuiToken)}
-                placeholder={config?.webui_auth_configured ? '••••••••' : 'Sem senha'}
+                placeholder={config?.webui_auth_configured ? '--------' : t('domain.noPassword')}
               />
             </Field>
           </div>
         </Card>
 
-        {/* ── Gateway ── */}
+        {/* -- Gateway -- */}
         <Card className="mt-4">
           <div className="flex items-center justify-between">
             <CardHeader icon={Server} title="Gateway API" />
@@ -188,7 +187,7 @@ export function Domain() {
           {gatewayEnabled && (
             <div className="mt-5 space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Porta">
+                <Field label={t('domain.port')}>
                   <Input value={gatewayAddress} onChange={setGatewayAddress} placeholder=":8085" />
                 </Field>
                 <Field label="Auth Token">
@@ -197,7 +196,7 @@ export function Domain() {
                     onChange={setGatewayToken}
                     show={showGatewayToken}
                     onToggle={() => setShowGatewayToken(!showGatewayToken)}
-                    placeholder={config?.gateway_auth_configured ? '••••••••' : 'Sem token'}
+                    placeholder={config?.gateway_auth_configured ? '--------' : t('domain.noToken')}
                   />
                 </Field>
               </div>
@@ -208,12 +207,12 @@ export function Domain() {
                   {corsOrigins.map((origin) => (
                     <span
                       key={origin}
-                      className="group flex items-center gap-1.5 rounded-lg bg-[#1e293b] px-2.5 py-1.5 text-xs font-mono text-[#f8fafc]"
+                      className="group flex items-center gap-1.5 rounded-lg bg-bg-subtle px-2.5 py-1.5 text-xs font-mono text-text-primary"
                     >
                       {origin}
                       <button
                         onClick={() => setCorsOrigins(corsOrigins.filter((o) => o !== origin))}
-                        className="cursor-pointer text-[#64748b] transition-colors hover:text-[#f87171]"
+                        className="cursor-pointer text-text-muted transition-colors hover:text-error"
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -224,8 +223,8 @@ export function Domain() {
                     onChange={(e) => setNewCors(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && addCorsOrigin()}
                     onBlur={addCorsOrigin}
-                    placeholder="+ adicionar origem"
-                    className="min-w-[140px] flex-1 rounded-lg bg-transparent px-2 py-1.5 text-xs text-[#94a3b8] outline-none placeholder:text-[#475569]"
+                    placeholder={t('domain.addOrigin')}
+                    className="min-w-[140px] flex-1 rounded-lg bg-transparent px-2 py-1.5 text-xs text-text-secondary outline-none placeholder:text-text-muted"
                   />
                 </div>
               </Field>
@@ -233,7 +232,7 @@ export function Domain() {
           )}
         </Card>
 
-        {/* ── Tailscale ── */}
+        {/* -- Tailscale -- */}
         <Card className="mt-4 mb-10">
           <div className="flex items-center justify-between">
             <CardHeader icon={Network} title="Tailscale" />
@@ -244,19 +243,19 @@ export function Domain() {
             <div className="mt-5 space-y-3">
               <ToggleRow
                 label="Serve"
-                description="HTTPS dentro da sua Tailnet"
+                description={t('domain.serveDesc')}
                 value={tailscaleServe}
                 onChange={setTailscaleServe}
               />
               <ToggleRow
                 label="Funnel"
-                description="HTTPS público na internet"
+                description={t('domain.funnelDesc')}
                 value={tailscaleFunnel}
                 onChange={setTailscaleFunnel}
               />
 
               <div className="pt-1">
-                <Field label="Porta local">
+                <Field label={t('domain.localPort')}>
                   <Input
                     value={String(tailscalePort)}
                     onChange={(v) => setTailscalePort(parseInt(v) || 8085)}
@@ -267,16 +266,16 @@ export function Domain() {
               </div>
 
               {config?.tailscale_hostname && (
-                <div className="flex items-center gap-3 rounded-xl bg-[#22c55e]/10 px-4 py-3 border border-[#22c55e]/20">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-[#22c55e]" />
+                <div className="flex items-center gap-3 rounded-xl bg-success-subtle px-4 py-3 border border-success/20">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-[#f8fafc] truncate">{config.tailscale_hostname}</p>
+                    <p className="text-sm font-medium text-text-primary truncate">{config.tailscale_hostname}</p>
                     {config.tailscale_url && (
                       <a
                         href={config.tailscale_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-xs text-[#64748b] hover:text-[#f8fafc] transition-colors"
+                        className="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors"
                       >
                         {config.tailscale_url}
                         <ArrowUpRight className="h-3 w-3" />
@@ -293,11 +292,11 @@ export function Domain() {
   )
 }
 
-/* ── Components ── */
+/* -- Components -- */
 
 function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`rounded-2xl border border-white/10 bg-[#111827] p-5 ${className}`}>
+    <div className={cn('rounded-2xl border border-border bg-bg-surface p-5', className)}>
       {children}
     </div>
   )
@@ -306,10 +305,10 @@ function Card({ children, className = '' }: { children: React.ReactNode; classNa
 function CardHeader({ icon: Icon, title }: { icon: React.FC<{ className?: string }>; title: string }) {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#1e293b]">
-        <Icon className="h-4 w-4 text-[#64748b]" />
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-bg-subtle">
+        <Icon className="h-4 w-4 text-text-muted" />
       </div>
-      <h2 className="text-sm font-semibold text-[#f8fafc]">{title}</h2>
+      <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
     </div>
   )
 }
@@ -317,7 +316,7 @@ function CardHeader({ icon: Icon, title }: { icon: React.FC<{ className?: string
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">{label}</label>
+      <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-text-muted">{label}</label>
       {children}
     </div>
   )
@@ -340,7 +339,7 @@ function Input({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="flex h-10 w-full rounded-lg border border-white/10 bg-[#0c1222] px-3 text-sm text-[#f8fafc] placeholder:text-[#475569] outline-none transition-all hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20"
+      className="flex h-10 w-full rounded-lg border border-border bg-bg-main px-3 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
     />
   )
 }
@@ -365,12 +364,12 @@ function PasswordInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="flex h-10 w-full rounded-lg border border-white/10 bg-[#0c1222] px-3 pr-9 text-sm text-[#f8fafc] placeholder:text-[#475569] outline-none transition-all hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20"
+        className="flex h-10 w-full rounded-lg border border-border bg-bg-main px-3 pr-9 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
       />
       <button
         type="button"
         onClick={onToggle}
-        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#64748b] hover:text-[#f8fafc] transition-colors"
+        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
       >
         {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
       </button>
@@ -385,14 +384,16 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
       role="switch"
       aria-checked={value}
       onClick={() => onChange(!value)}
-      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors ${
-        value ? 'bg-[#3b82f6]' : 'bg-[#1e293b]'
-      }`}
+      className={cn(
+        'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors',
+        value ? 'bg-brand' : 'bg-bg-subtle'
+      )}
     >
       <span
-        className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+        className={cn(
+          'inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform',
           value ? 'translate-x-5' : 'translate-x-0.5'
-        }`}
+        )}
       />
     </button>
   )
@@ -410,10 +411,10 @@ function ToggleRow({
   onChange: (v: boolean) => void
 }) {
   return (
-    <div className="flex items-center justify-between rounded-xl bg-[#0c1222] px-4 py-3 border border-white/5">
+    <div className="flex items-center justify-between rounded-xl bg-bg-main px-4 py-3 border border-border">
       <div>
-        <span className="text-sm font-medium text-[#f8fafc]">{label}</span>
-        <p className="text-[11px] text-[#64748b]">{description}</p>
+        <span className="text-sm font-medium text-text-primary">{label}</span>
+        <p className="text-[11px] text-text-muted">{description}</p>
       </div>
       <Toggle value={value} onChange={onChange} />
     </div>
@@ -431,24 +432,27 @@ function Endpoint({
   active: boolean
   secure: boolean
 }) {
+  const { t } = useTranslation()
+
   return (
-    <div className={`rounded-xl px-3.5 py-2.5 border transition-colors ${
+    <div className={cn(
+      'rounded-xl px-3.5 py-2.5 border transition-colors',
       active
-        ? 'bg-[#111827] border-white/10'
-        : 'bg-[#111827] border-white/5'
-    }`}>
+        ? 'bg-bg-surface border-border'
+        : 'bg-bg-surface border-border'
+    )}>
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-[#64748b]">{label}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">{label}</span>
         <div className="flex items-center gap-1">
           {active ? (
-            <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-success" />
           ) : (
-            <span className="h-1.5 w-1.5 rounded-full bg-[#475569]" />
+            <span className="h-1.5 w-1.5 rounded-full bg-text-muted" />
           )}
           {active && (secure ? (
-            <Lock className="h-3 w-3 text-[#64748b]" />
+            <Lock className="h-3 w-3 text-text-muted" />
           ) : (
-            <Unlock className="h-3 w-3 text-[#f59e0b]" />
+            <Unlock className="h-3 w-3 text-warning" />
           ))}
         </div>
       </div>
@@ -457,13 +461,13 @@ function Endpoint({
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-1 flex items-center gap-1 text-[11px] font-mono text-[#64748b] hover:text-[#f8fafc] transition-colors truncate"
+          className="mt-1 flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text-primary transition-colors truncate"
         >
           {url.replace(/^https?:\/\//, '')}
           <ExternalLink className="h-2.5 w-2.5 shrink-0" />
         </a>
       ) : (
-        <p className="mt-1 text-[11px] text-[#475569]">{active ? 'Ativo' : 'Off'}</p>
+        <p className="mt-1 text-[11px] text-text-muted">{active ? t('common.enabled') : 'Off'}</p>
       )}
     </div>
   )

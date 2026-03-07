@@ -1,0 +1,66 @@
+import { cn } from '@/lib/utils';
+
+type Status = 'online' | 'offline' | 'error' | 'warning';
+
+const statusColors: Record<Status, { dot: string; pulse: string }> = {
+  online: {
+    dot: 'bg-success',
+    pulse: 'bg-success/40',
+  },
+  offline: {
+    dot: 'bg-text-muted',
+    pulse: 'bg-text-muted/40',
+  },
+  error: {
+    dot: 'bg-error',
+    pulse: 'bg-error/40',
+  },
+  warning: {
+    dot: 'bg-warning',
+    pulse: 'bg-warning/40',
+  },
+};
+
+interface StatusDotProps {
+  status: Status;
+  label?: string;
+  pulse?: boolean;
+  className?: string;
+}
+
+export function StatusDot({
+  status,
+  label,
+  pulse = false,
+  className,
+}: StatusDotProps) {
+  const colors = statusColors[status];
+
+  return (
+    <span
+      className={cn('inline-flex items-center gap-2', className)}
+    >
+      <span className="relative flex h-2.5 w-2.5">
+        {pulse && (
+          <span
+            className={cn(
+              'absolute inset-0 rounded-full',
+              'animate-ping',
+              colors.pulse
+            )}
+          />
+        )}
+        <span
+          className={cn(
+            'relative inline-flex h-2.5 w-2.5 rounded-full',
+            colors.dot
+          )}
+        />
+      </span>
+
+      {label && (
+        <span className="text-sm text-text-secondary">{label}</span>
+      )}
+    </span>
+  );
+}

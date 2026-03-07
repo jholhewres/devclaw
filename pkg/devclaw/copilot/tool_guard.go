@@ -118,14 +118,35 @@ func DefaultToolGuardConfig() ToolGuardConfig {
 			"list_files":   "user",
 			"search_files": "user",
 			"glob_files":   "user",
-			// Dispatchers (consolidated tools).
-			"skill_manage": "user", // action-level checks within handler
-			"scheduler":    "user", // action-level checks within handler
-			"vault":        "user", // action-level checks within handler
-			"sessions":     "user",  // action-level checks within handler
-			"daemon":       "owner",
+			// Skill management (write actions require admin via withAdminCheck).
+			"skill_init":             "user",
+			"skill_edit":             "user",
+			"skill_add_script":       "user",
+			"skill_list":             "user",
+			"skill_test":             "user",
+			"skill_install":          "user",
+			"skill_defaults_list":    "user",
+			"skill_defaults_install": "user",
+			"skill_remove":           "user",
+			// Scheduler.
+			"scheduler_add":    "user",
+			"scheduler_list":   "user",
+			"scheduler_remove": "user",
+			"scheduler_search": "user",
+			// Vault.
+			"vault_status": "user",
+			"vault_save":   "user",
+			"vault_get":    "user",
+			"vault_list":   "user",
+			"vault_delete": "user",
+			// Sessions.
+			"sessions": "user",
+			"daemon":   "owner",
 			// Memory.
-			"memory": "user",
+			"memory_save":   "user",
+			"memory_search": "user",
+			"memory_list":   "user",
+			"memory_index":  "user",
 			// Web.
 			"web_search": "user",
 			"web_fetch":  "user",
@@ -140,14 +161,14 @@ func DefaultToolGuardConfig() ToolGuardConfig {
 // ToolGroups maps group names to tool name lists.
 // Allows policy management at a higher level than individual tools.
 var ToolGroups = map[string][]string{
-	"group:memory":    {"memory"},
+	"group:memory":    {"memory_save", "memory_search", "memory_list", "memory_index"},
 	"group:web":       {"web_search", "web_fetch"},
 	"group:fs":        {"read_file", "write_file", "edit_file", "list_files", "search_files", "glob_files"},
 	"group:runtime":   {"bash", "exec", "ssh", "scp", "set_env"},
 	"group:subagents": {"spawn_subagent", "list_subagents", "wait_subagent", "stop_subagent"},
-	"group:skills":    {"skill_manage"},
-	"group:scheduler": {"scheduler"},
-	"group:vault":     {"vault"},
+	"group:skills":    {"skill_init", "skill_edit", "skill_add_script", "skill_list", "skill_test", "skill_install", "skill_defaults_list", "skill_defaults_install", "skill_remove"},
+	"group:scheduler": {"scheduler_add", "scheduler_list", "scheduler_remove", "scheduler_search"},
+	"group:vault":     {"vault_status", "vault_save", "vault_get", "vault_list", "vault_delete"},
 	"group:sessions":  {"sessions"},
 	"group:daemon":    {"daemon"},
 	"group:media":     {"describe_image", "transcribe_audio", "image-gen_generate_image"},

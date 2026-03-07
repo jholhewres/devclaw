@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ArrowUp, Square } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -17,10 +18,11 @@ export function ChatInput({
   onAbort,
   isStreaming = false,
   disabled = false,
-  placeholder = 'Enviar mensagem...',
-  rows = 3,
+  placeholder = 'Ask something or describe a task...',
+  rows = 1,
   autoFocus = false,
 }: ChatInputProps) {
+  const { t } = useTranslation()
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -54,35 +56,49 @@ export function ChatInput({
   const canSend = value.trim().length > 0 && !disabled && !isStreaming
 
   return (
-    <div className="bg-[#111827] rounded-xl border border-white/10 transition-all focus-within:border-white/20">
+    <div
+      className={cn(
+        'rounded-2xl border bg-bg-surface shadow-sm transition-all',
+        'focus-within:border-border-hover focus-within:shadow-md',
+        'border-border'
+      )}
+    >
       {/* Textarea */}
       <textarea
         ref={textareaRef}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={disabled ? 'Aguarde a resposta...' : placeholder}
+        placeholder={disabled ? t('common.loading') : placeholder}
         disabled={disabled}
         rows={rows}
         autoFocus={autoFocus}
-        className="w-full px-4 pt-3 pb-1.5 text-[15px] text-[#f8fafc] placeholder:text-[#475569] bg-transparent resize-none border-none outline-none focus:ring-0 disabled:opacity-50"
+        className={cn(
+          'w-full resize-none border-none bg-transparent px-4 pt-3.5 pb-2 text-[15px] text-text-primary',
+          'placeholder:text-text-muted outline-none focus:ring-0',
+          'disabled:opacity-50'
+        )}
         style={{ boxShadow: 'none' }}
       />
 
       {/* Action bar */}
-      <div className="flex items-center justify-between px-3 pb-2.5">
+      <div className="flex items-center justify-between px-3 pb-3">
         {/* Left side - hint */}
-        <span className="text-[11px] text-[#475569]">
-          Enter para enviar, Shift+Enter para nova linha
+        <span className="text-[11px] text-text-muted">
+          {t('chatPage.enterToSend')}
         </span>
 
         {/* Right side - send/stop */}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           {isStreaming ? (
             <button
               onClick={() => onAbort?.()}
-              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg bg-[#ef4444] text-white transition-all hover:bg-[#dc2626]"
-              aria-label="Parar geração"
+              className={cn(
+                'flex h-8 w-8 cursor-pointer items-center justify-center rounded-full',
+                'bg-error text-white transition-all hover:bg-red-600',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50'
+              )}
+              aria-label="Stop generation"
             >
               <Square className="h-3.5 w-3.5" fill="currentColor" />
             </button>
@@ -91,14 +107,15 @@ export function ChatInput({
               onClick={handleSend}
               disabled={!canSend}
               className={cn(
-                'flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg transition-all',
+                'flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-all',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50',
                 canSend
-                  ? 'bg-[#3b82f6] text-white hover:bg-[#2563eb]'
-                  : 'bg-white/10 text-white/30 cursor-not-allowed',
+                  ? 'bg-brand text-white hover:bg-brand-hover'
+                  : 'bg-bg-subtle text-text-muted cursor-not-allowed'
               )}
-              aria-label="Enviar mensagem"
+              aria-label="Send message"
             >
-              <ArrowUp className="h-3.5 w-3.5" />
+              <ArrowUp className="h-4 w-4" />
             </button>
           )}
         </div>

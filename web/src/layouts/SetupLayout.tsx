@@ -1,18 +1,22 @@
 import { Outlet } from 'react-router-dom'
-import { Bot } from 'lucide-react'
+import { Logo } from '@/components/Logo'
 
 /**
- * Setup wizard layout — refined dark design.
+ * Setup wizard layout — dark-first design with animated gradient background.
  */
 export function SetupLayout() {
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#0a0f1a] p-6">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-bg-main p-6">
       {/* Background effects */}
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#1e293b]/20 via-transparent to-transparent" />
-        <div className="absolute -left-40 -top-40 h-[600px] w-[600px] rounded-full bg-[#3b82f6]/5 blur-[120px]" />
-        <div className="absolute -bottom-40 -right-40 h-[600px] w-[600px] rounded-full bg-[#3b82f6]/3 blur-[120px]" />
-        {/* Grid pattern */}
+        {/* Radial gradient overlay */}
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-bg-subtle/20 via-transparent to-transparent" />
+
+        {/* Animated glow orbs */}
+        <div className="absolute -left-40 -top-40 h-[600px] w-[600px] animate-pulse-subtle rounded-full bg-brand/5 blur-[120px]" />
+        <div className="absolute -bottom-40 -right-40 h-[600px] w-[600px] animate-pulse-subtle rounded-full bg-brand/[0.03] blur-[120px] [animation-delay:1s]" />
+
+        {/* Subtle grid pattern */}
         <div
           className="absolute inset-0 opacity-[0.02]"
           style={{
@@ -26,22 +30,16 @@ export function SetupLayout() {
         {/* Logo */}
         <div className="mb-6 text-center">
           <div className="inline-flex items-center justify-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-[#3b82f6] to-[#2563eb] shadow-lg shadow-blue-500/25">
-              <Bot className="h-6 w-6 text-white" />
-            </div>
+            <Logo className="h-10" />
           </div>
-          <h1 className="mt-3 text-xl font-bold text-[#f8fafc] tracking-tight">
-            Dev<span className="text-[#64748b]">Claw</span>
-          </h1>
-          <p className="mt-1 text-sm text-[#64748b]">Configure seu agente de IA</p>
         </div>
 
         {/* Card */}
-        <div className="rounded-2xl border border-white/[0.08] bg-[#0f1419]/90 backdrop-blur-xl p-6 shadow-2xl shadow-black/50">
+        <div className="animate-fade-in-up rounded-2xl border border-border bg-bg-surface/90 p-6 shadow-lg backdrop-blur-xl">
           <Outlet />
         </div>
 
-        <p className="mt-5 text-center text-xs text-[#475569]">
+        <p className="mt-5 text-center text-xs text-text-muted">
           DevClaw &mdash; AI Agent for Tech Teams
         </p>
       </div>

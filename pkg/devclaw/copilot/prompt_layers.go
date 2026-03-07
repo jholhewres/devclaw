@@ -10,6 +10,7 @@ package copilot
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,6 +22,13 @@ import (
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
 )
+
+// xmlEscape escapes a string for safe embedding inside XML content nodes.
+func xmlEscape(s string) string {
+	var b strings.Builder
+	xml.EscapeText(&b, []byte(s))
+	return b.String()
+}
 
 // PromptLayer defines the priority of a prompt layer.
 // Lower values = higher priority (never trimmed first on budget cuts).
@@ -109,9 +117,11 @@ type PromptComposer struct {
 }
 
 // SkillInfo holds basic skill information for the Skill Discovery XML.
+// Used by the reference model: skills listed as XML references, LLM reads SKILL.md on demand.
 type SkillInfo struct {
 	Name        string
 	Description string
+	Location    string   // Absolute path to SKILL.md ("" for built-in skills)
 	Tools       []string
 }
 
@@ -311,7 +321,8 @@ func stripPromptSection(text, header string) string {
 	rest := text[idx+len(header):]
 	endIdx := strings.Index(rest, "\n## ")
 	if endIdx >= 0 {
-		return text[:idx] + rest[endIdx:]
+		// Keep the newline before the next section header.
+		return text[:idx] + rest[endIdx+1:]
 	}
 	// Section extends to end of text.
 	return strings.TrimRight(text[:idx], "\n")
@@ -543,12 +554,7 @@ func (p *PromptComposer) buildCoreLayer() string {
 	b.WriteString("If a task is more complex or takes longer, spawn a sub-agent using `spawn_subagent`. Completion is push-based: it will auto-announce when done.\n")
 	b.WriteString("Do NOT poll in a loop. Check status on-demand only (for intervention, debugging, or when explicitly asked).\n\n")
 
-	// ## Memory Recall - NEW: explicit hint to search memory before answering
-	b.WriteString("## Memory Recall\n\n")
-	b.WriteString("Before answering questions about prior work, decisions, dates, people, preferences, or todos:\n")
-	b.WriteString("1. First search memory: memory(action='search', query='your search terms')\n")
-	b.WriteString("2. Then use the results to inform your response\n")
-	b.WriteString("This helps you recall relevant context from previous conversations.\n\n")
+	// Note: Memory Recall instructions are in buildMemoryLayer() to avoid duplication.
 
 	// ## Tool Call Style - matches exactly
 	b.WriteString("## Tool Call Style\n\n")
@@ -581,9 +587,7 @@ func (p *PromptComposer) buildCoreLayer() string {
 	b.WriteString("Your working directory is: ./workspace/\n")
 	b.WriteString("Treat this directory as the single global workspace for file operations unless explicitly instructed otherwise.\n\n")
 
-	// ## Workspace Files (injected) - note about bootstrap files
-	b.WriteString("## Workspace Files (injected)\n\n")
-	b.WriteString("These user-editable files are loaded by DevClaw and included below in Project Context.\n\n")
+	// Note: Workspace Files header is in buildBootstrapLayer() to avoid duplication.
 
 	// ## Reply Tags - matches exactly
 	b.WriteString("## Reply Tags\n\n")
@@ -629,29 +633,10 @@ func (p *PromptComposer) buildCoreLayer() string {
 
 // buildSafetyLayer creates additional safety and capability sections.
 // Note: Core safety is in buildCoreLayer to match structure.
-// This layer contains DevClaw-specific additions (Vault, Media).
+// This layer contains DevClaw-specific additions (Media).
+// Vault instructions are in the individual vault tool descriptions (vault_save, vault_get, etc.).
 func (p *PromptComposer) buildSafetyLayer() string {
-	return `## Encrypted Vault
-
-You have access to an encrypted vault (AES-256-GCM + Argon2id) for securely storing secrets.
-
-**Vault Tool** (single dispatcher — use the "vault" tool with an "action" parameter):
-- **action=status** — Check vault state (locked/unlocked, secret count). ALWAYS call this FIRST before other vault operations.
-- **action=list** — List all stored secret names (values never shown).
-- **action=get** — Retrieve a secret by name. Args: {"action": "get", "name": "KEY_NAME"}
-- **action=save** — Store a secret securely. Args: {"action": "save", "name": "KEY_NAME", "value": "secret_value"}
-- **action=delete** — Remove a secret permanently. Args: {"action": "delete", "name": "KEY_NAME"}
-
-**CRITICAL Rules:**
-- ALWAYS call vault with action=status FIRST before attempting to save or retrieve secrets.
-- If status shows "locked": ask the user to unlock the vault (via DEVCLAW_VAULT_PASSWORD env var or 'devclaw vault unlock').
-- When the user provides an API key, token, or password: ALWAYS save it with vault action=save immediately (if vault is unlocked).
-- NEVER store secrets in .env files, config files, or any plain text file. The vault is the ONLY secure storage.
-- NEVER echo/print secret values back to the user — only confirm that storage was successful.
-- To use a stored secret in scripts/API calls: retrieve it with vault action=get at runtime.
-- Use vault action=list to check what's already stored before asking the user for credentials.
-
-## Media Capabilities
+	return `## Media Capabilities
 
 You can receive and process media from users:
 
@@ -767,14 +752,26 @@ func (p *PromptComposer) buildBootstrapLayer() string {
 		b.WriteString(fmt.Sprintf("### %s\n\n%s\n\n", f.path, f.content))
 	}
 
-	// Apply bootstrapMaxChars limit.
+	// Apply bootstrapMaxChars limit with per-file budget analysis.
 	result := b.String()
 	maxChars := p.config.TokenBudget.BootstrapMaxChars
 	if maxChars <= 0 {
 		maxChars = 20000 // default 20K chars (~5K tokens)
 	}
 	if len(result) > maxChars {
-		result = result[:maxChars] + "\n\n... [bootstrap truncated at limit]"
+		// Build a warning that tells the LLM which files were truncated
+		// and how much of the budget each consumes (aligned with OpenClaw's
+		// analyzeBootstrapBudget pattern).
+		var warning strings.Builder
+		warning.WriteString("\n\n⚠️ Bootstrap files truncated (")
+		warning.WriteString(fmt.Sprintf("%d/%d chars used):\n", len(result), maxChars))
+		for _, f := range files {
+			pct := float64(len(f.content)) / float64(len(result)) * 100
+			warning.WriteString(fmt.Sprintf("  - %s: %d chars (%.0f%%)\n", f.path, len(f.content), pct))
+		}
+		warning.WriteString("Consider reducing file sizes or increasing bootstrap_max_chars in config.")
+
+		result = result[:maxChars] + warning.String()
 	}
 
 	return result
@@ -842,22 +839,130 @@ func (p *PromptComposer) loadBootstrapFileCached(filename string, searchDirs []s
 	return text
 }
 
-// skillsMaxTokenBudget is the maximum approximate token budget for the skills
-// layer. Each ~4 chars ≈ 1 token. When skills exceed this budget, the largest
-// skills are truncated and a note is appended. This prevents prompt bloat from
-// verbose skill system prompts consuming the entire context window.
-const skillsMaxTokenBudget = 4000
+// compactSkillPath replaces the user's home directory prefix with ~
+// to reduce system prompt token usage (~400-600 tokens saved across all skills).
+// Models understand ~ expansion, and the read tool resolves ~ to home.
+func compactSkillPath(p string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p
+	}
+	prefix := home
+	if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	if strings.HasPrefix(p, prefix) {
+		return "~/" + p[len(prefix):]
+	}
+	return p
+}
 
-// buildSkillsLayer creates instructions from active skills.
-// Applies a token budget guard: if the total skills text exceeds
-// skillsMaxTokenBudget tokens, larger skills are truncated.
+// buildSkillsLayer creates the skills reference list for the system prompt.
+//
+// Reference model (OpenClaw pattern): skills are listed as compact XML references
+// containing only name, description, location, and tool names. The LLM reads
+// the full SKILL.md on demand via read_file when it needs to follow a skill.
+// This avoids injecting entire skill bodies into the prompt, preventing truncation
+// and context budget exhaustion.
+//
+// Falls back to the legacy injection model when skillLister is nil.
 func (p *PromptComposer) buildSkillsLayer(session *Session) string {
+	// Reference model: use skillLister to list all available skills.
+	if p.skillLister != nil {
+		return p.buildSkillsLayerReference()
+	}
+
+	// Legacy fallback: inject active skill prompts directly.
+	return p.buildSkillsLayerLegacy(session)
+}
+
+// buildSkillsLayerReference builds the skills section using the reference model.
+// Skills are listed as XML entries with name + description + location. The LLM
+// reads SKILL.md on demand via read_file. Never truncates skill instructions.
+func (p *PromptComposer) buildSkillsLayerReference() string {
+	allSkills := p.skillLister()
+	if len(allSkills) == 0 {
+		return ""
+	}
+
+	// Apply limits from config (aligned with OpenClaw defaults: 150 skills, 30k chars).
+	maxSkills := 150
+	maxChars := 30000
+	if p.config != nil {
+		eff := p.config.Skills.Limits.Effective()
+		if eff.MaxSkillsInPrompt > 0 {
+			maxSkills = eff.MaxSkillsInPrompt
+		}
+		if eff.MaxSkillsPromptChars > 0 {
+			maxChars = eff.MaxSkillsPromptChars
+		}
+	}
+
+	// Cap number of skills.
+	skills := allSkills
+	if len(skills) > maxSkills {
+		skills = skills[:maxSkills]
+	}
+
+	var b strings.Builder
+
+	// Instruction header (OpenClaw pattern).
+	b.WriteString("## Skills (mandatory)\n\n")
+	b.WriteString("Before replying: scan <available_skills> <description> entries.\n")
+	b.WriteString("- If exactly one skill clearly applies: read its SKILL.md at <location> with read_file, then follow it.\n")
+	b.WriteString("- If multiple could apply: choose the most specific one, then read/follow it.\n")
+	b.WriteString("- If none clearly apply: do not read any SKILL.md.\n")
+	b.WriteString("Constraints: never read more than one skill up front; only read after selecting.\n\n")
+
+	// Build XML reference list.
+	b.WriteString("<available_skills>\n")
+	totalChars := 0
+	included := 0
+	for _, skill := range skills {
+		// Build the entry.
+		var entry strings.Builder
+		entry.WriteString("  <skill>\n")
+		entry.WriteString(fmt.Sprintf("    <name>%s</name>\n", xmlEscape(skill.Name)))
+		entry.WriteString(fmt.Sprintf("    <description>%s</description>\n", xmlEscape(skill.Description)))
+		if skill.Location != "" {
+			entry.WriteString(fmt.Sprintf("    <location>%s</location>\n", xmlEscape(compactSkillPath(skill.Location))))
+		}
+		if len(skill.Tools) > 0 {
+			entry.WriteString(fmt.Sprintf("    <tools>%s</tools>\n", xmlEscape(strings.Join(skill.Tools, ", "))))
+		}
+		entry.WriteString("  </skill>\n")
+
+		entryStr := entry.String()
+
+		// Check character budget.
+		if totalChars+len(entryStr) > maxChars {
+			break
+		}
+		b.WriteString(entryStr)
+		totalChars += len(entryStr)
+		included++
+	}
+	b.WriteString("</available_skills>\n")
+
+	if included < len(allSkills) {
+		b.WriteString(fmt.Sprintf("\n_%d of %d skills shown (budget limit)._\n", included, len(allSkills)))
+	}
+
+	return b.String()
+}
+
+// skillsMaxTokenBudget is the maximum approximate token budget for the legacy
+// skills layer. Each ~4 chars ≈ 1 token.
+const skillsMaxTokenBudget = 8000
+
+// buildSkillsLayerLegacy is the old injection model (kept as fallback).
+// Injects full skill SystemPrompt() bodies into the prompt with truncation.
+func (p *PromptComposer) buildSkillsLayerLegacy(session *Session) string {
 	activeSkills := session.GetActiveSkills()
 	if len(activeSkills) == 0 {
 		return ""
 	}
 
-	// Collect skill prompts with their sizes.
 	type skillEntry struct {
 		name   string
 		prompt string
@@ -873,7 +978,6 @@ func (p *PromptComposer) buildSkillsLayer(session *Session) string {
 				sp = skill.SystemPrompt()
 			}
 		}
-		// Strip dangerous XML tags from skill content to prevent prompt injection.
 		if sp != "" {
 			sp = StripDangerousTags(sp)
 		}
@@ -882,13 +986,11 @@ func (p *PromptComposer) buildSkillsLayer(session *Session) string {
 		totalChars += entry.chars
 	}
 
-	// Budget check: ~4 chars per token.
 	budgetChars := skillsMaxTokenBudget * 4
 	truncated := false
 
 	if totalChars > budgetChars {
 		truncated = true
-		// Sort by size descending to truncate the largest first.
 		sort.Slice(entries, func(i, j int) bool {
 			return entries[i].chars > entries[j].chars
 		})
@@ -916,36 +1018,13 @@ func (p *PromptComposer) buildSkillsLayer(session *Session) string {
 
 	var b strings.Builder
 	b.WriteString("## Skills\n\n")
-	b.WriteString("Before replying: scan the skill descriptions.\n")
-	b.WriteString("- If exactly one skill clearly applies: read its SKILL.md and follow it.\n")
-	b.WriteString("- If multiple could apply: choose the most specific one.\n")
-	b.WriteString("- If none clearly apply: do not read any SKILL.md.\n\n")
-
-	// Compact XML format for many skills: saves ~60% tokens vs full prompts.
-	// Triggered when truncation is needed or when there are many skills.
-	const compactThreshold = 15
-	if truncated || len(entries) > compactThreshold {
-		b.WriteString("<skills>\n")
-		for _, entry := range entries {
-			desc := entry.prompt
-			if len(desc) > 200 {
-				desc = desc[:200] + "..."
-			}
-			// Strip newlines for compact one-line format.
-			desc = strings.ReplaceAll(desc, "\n", " ")
-			desc = strings.Join(strings.Fields(desc), " ")
-			b.WriteString(fmt.Sprintf("  <skill name=%q>%s</skill>\n", entry.name, desc))
-		}
-		b.WriteString("</skills>\n")
-	} else {
-		for _, entry := range entries {
-			b.WriteString(fmt.Sprintf("### %s\n", entry.name))
-			if entry.prompt != "" {
-				b.WriteString(entry.prompt)
-				b.WriteString("\n")
-			}
+	for _, entry := range entries {
+		b.WriteString(fmt.Sprintf("### %s\n", entry.name))
+		if entry.prompt != "" {
+			b.WriteString(entry.prompt)
 			b.WriteString("\n")
 		}
+		b.WriteString("\n")
 	}
 
 	if truncated {
@@ -988,7 +1067,7 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 				memTexts = append(memTexts, fmt.Sprintf("[%s] %s", r.FileID, text))
 			}
 			// Wrap with untrusted-data boundary from memory_hardening.go.
-			parts = append(parts, "## Memory Recall\n\nBefore answering anything about prior work, decisions, dates, people, preferences, or todos: run memory(action=\"search\", query=\"...\") to recall relevant information.\n\n"+WrapMemoriesForPrompt(memTexts))
+			parts = append(parts, "## Memory Recall\n\nBefore answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search(query=\"...\") to recall relevant information.\n\n"+WrapMemoriesForPrompt(memTexts))
 		}
 	}
 

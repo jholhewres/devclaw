@@ -1,5 +1,5 @@
-// Package copilot – skill_db_tools.go registers a unified tool that allows the agent
-// to use the skill database for storing and retrieving structured data.
+// Package copilot – skill_db_tools.go registers individual skill database tools
+// that allow the agent to store and retrieve structured data.
 package copilot
 
 import (
@@ -7,24 +7,18 @@ import (
 	"fmt"
 )
 
-// RegisterSkillDBTools registers the unified skill database tool in the executor.
-// This tool uses an "action" parameter to determine which operation to perform,
-// reducing the number of tools from 8 separate tools to 1 unified tool.
+// RegisterSkillDBTools registers the skill database tools in the executor.
+// Each database operation is registered as its own tool with a focused schema.
 func RegisterSkillDBTools(executor *ToolExecutor, skillDB *SkillDB) {
 	if skillDB == nil {
 		return
 	}
 
-	// skill_db - unified database tool for skills
+	// skill_db_query - query records from a skill table
 	executor.Register(
-		MakeToolDefinition("skill_db", "Database operations for skills to store structured data. Use action='query' to LIST data, action='insert' to ADD data.", map[string]any{
+		MakeToolDefinition("skill_db_query", "Query records from a skill database table. Returns matching rows with optional filtering, sorting, and pagination.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"action": map[string]any{
-					"type":        "string",
-					"description": "Operation to perform: 'query' (list records), 'insert' (add record), 'update' (modify record), 'delete' (remove record), 'create_table' (new table), 'list_tables' (show tables), 'describe' (table structure), 'drop_table' (remove table)",
-					"enum":        []string{"query", "insert", "update", "delete", "create_table", "list_tables", "describe", "drop_table"},
-				},
 				"skill_name": map[string]any{
 					"type":        "string",
 					"description": "Name of the skill (lowercase, numbers, underscores only). Use underscore version: 'oss_ideas' not 'oss-ideas'",
@@ -32,15 +26,6 @@ func RegisterSkillDBTools(executor *ToolExecutor, skillDB *SkillDB) {
 				"table_name": map[string]any{
 					"type":        "string",
 					"description": "Name of the table (lowercase, numbers, underscores only)",
-				},
-				"data": map[string]any{
-					"type":        "object",
-					"description": "Record data for insert/update. Keys must match column names.",
-					"additionalProperties": map[string]any{},
-				},
-				"row_id": map[string]any{
-					"type":        "string",
-					"description": "ID of the record to update or delete",
 				},
 				"where": map[string]any{
 					"type":        "object",
@@ -64,50 +49,186 @@ func RegisterSkillDBTools(executor *ToolExecutor, skillDB *SkillDB) {
 					"description": "Sort direction: 'ASC' or 'DESC' (default: DESC)",
 					"enum":        []string{"ASC", "DESC"},
 				},
+			},
+			"required": []string{"skill_name", "table_name"},
+		}),
+		func(_ context.Context, args map[string]any) (any, error) {
+			return handleSkillDBQuery(skillDB, args)
+		},
+	)
+
+	// skill_db_insert - insert a record into a skill table
+	executor.Register(
+		MakeToolDefinition("skill_db_insert", "Insert a new record into a skill database table. Returns the generated record ID.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"skill_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the skill (lowercase, numbers, underscores only). Use underscore version: 'oss_ideas' not 'oss-ideas'",
+				},
+				"table_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the table (lowercase, numbers, underscores only)",
+				},
+				"data": map[string]any{
+					"type":        "object",
+					"description": "Record data to insert. Keys must match column names.",
+					"additionalProperties": map[string]any{},
+				},
+			},
+			"required": []string{"skill_name", "table_name", "data"},
+		}),
+		func(_ context.Context, args map[string]any) (any, error) {
+			return handleSkillDBInsert(skillDB, args)
+		},
+	)
+
+	// skill_db_update - update an existing record in a skill table
+	executor.Register(
+		MakeToolDefinition("skill_db_update", "Update an existing record in a skill database table by row ID.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"skill_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the skill (lowercase, numbers, underscores only). Use underscore version: 'oss_ideas' not 'oss-ideas'",
+				},
+				"table_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the table (lowercase, numbers, underscores only)",
+				},
+				"row_id": map[string]any{
+					"type":        "string",
+					"description": "ID of the record to update",
+				},
+				"data": map[string]any{
+					"type":        "object",
+					"description": "Fields to update. Keys must match column names.",
+					"additionalProperties": map[string]any{},
+				},
+			},
+			"required": []string{"skill_name", "table_name", "row_id", "data"},
+		}),
+		func(_ context.Context, args map[string]any) (any, error) {
+			return handleSkillDBUpdate(skillDB, args)
+		},
+	)
+
+	// skill_db_delete - delete a record from a skill table
+	executor.Register(
+		MakeToolDefinition("skill_db_delete", "Delete a record from a skill database table by row ID.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"skill_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the skill (lowercase, numbers, underscores only). Use underscore version: 'oss_ideas' not 'oss-ideas'",
+				},
+				"table_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the table (lowercase, numbers, underscores only)",
+				},
+				"row_id": map[string]any{
+					"type":        "string",
+					"description": "ID of the record to delete",
+				},
+			},
+			"required": []string{"skill_name", "table_name", "row_id"},
+		}),
+		func(_ context.Context, args map[string]any) (any, error) {
+			return handleSkillDBDelete(skillDB, args)
+		},
+	)
+
+	// skill_db_create_table - create a new table for a skill
+	executor.Register(
+		MakeToolDefinition("skill_db_create_table", "Create a new database table for a skill with custom column definitions.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"skill_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the skill (lowercase, numbers, underscores only). Use underscore version: 'oss_ideas' not 'oss-ideas'",
+				},
+				"table_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the table (lowercase, numbers, underscores only)",
+				},
 				"display_name": map[string]any{
 					"type":        "string",
-					"description": "Human-readable table name (for create_table)",
+					"description": "Human-readable table name",
 				},
 				"description": map[string]any{
 					"type":        "string",
-					"description": "Table description (for create_table)",
+					"description": "Table description",
 				},
 				"columns": map[string]any{
 					"type":        "object",
-					"description": "Column definitions for create_table. Keys are column names, values are SQL types like 'TEXT NOT NULL', 'INTEGER'",
+					"description": "Column definitions. Keys are column names, values are SQL types like 'TEXT NOT NULL', 'INTEGER'",
 					"additionalProperties": map[string]any{
 						"type": "string",
 					},
 				},
 			},
-			"required": []string{"action"},
+			"required": []string{"skill_name", "table_name", "columns"},
 		}),
 		func(_ context.Context, args map[string]any) (any, error) {
-			action, _ := args["action"].(string)
-			if action == "" {
-				return nil, fmt.Errorf("action is required")
-			}
+			return handleSkillDBCreateTable(skillDB, args)
+		},
+	)
 
-			switch action {
-			case "query":
-				return handleSkillDBQuery(skillDB, args)
-			case "insert":
-				return handleSkillDBInsert(skillDB, args)
-			case "update":
-				return handleSkillDBUpdate(skillDB, args)
-			case "delete":
-				return handleSkillDBDelete(skillDB, args)
-			case "create_table":
-				return handleSkillDBCreateTable(skillDB, args)
-			case "list_tables":
-				return handleSkillDBListTables(skillDB, args)
-			case "describe":
-				return handleSkillDBDescribe(skillDB, args)
-			case "drop_table":
-				return handleSkillDBDropTable(skillDB, args)
-			default:
-				return nil, fmt.Errorf("unknown action: %s", action)
-			}
+	// skill_db_list_tables - list all tables for a skill (or all skills)
+	executor.Register(
+		MakeToolDefinition("skill_db_list_tables", "List all database tables, optionally filtered by skill name.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"skill_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the skill to filter by. If omitted, lists tables for all skills.",
+				},
+			},
+		}),
+		func(_ context.Context, args map[string]any) (any, error) {
+			return handleSkillDBListTables(skillDB, args)
+		},
+	)
+
+	// skill_db_describe - describe the structure of a skill table
+	executor.Register(
+		MakeToolDefinition("skill_db_describe", "Describe the structure of a skill database table, including column names and types.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"skill_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the skill (lowercase, numbers, underscores only). Use underscore version: 'oss_ideas' not 'oss-ideas'",
+				},
+				"table_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the table (lowercase, numbers, underscores only)",
+				},
+			},
+			"required": []string{"skill_name", "table_name"},
+		}),
+		func(_ context.Context, args map[string]any) (any, error) {
+			return handleSkillDBDescribe(skillDB, args)
+		},
+	)
+
+	// skill_db_drop_table - drop (permanently delete) a skill table
+	executor.Register(
+		MakeToolDefinition("skill_db_drop_table", "Permanently drop a skill database table and all its data.", map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"skill_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the skill (lowercase, numbers, underscores only). Use underscore version: 'oss_ideas' not 'oss-ideas'",
+				},
+				"table_name": map[string]any{
+					"type":        "string",
+					"description": "Name of the table (lowercase, numbers, underscores only)",
+				},
+			},
+			"required": []string{"skill_name", "table_name"},
+		}),
+		func(_ context.Context, args map[string]any) (any, error) {
+			return handleSkillDBDropTable(skillDB, args)
 		},
 	)
 }

@@ -5,7 +5,7 @@ DevClaw is an open-source AI agent platform written in Go. You are operating as 
 ## Available Channels
 - **WhatsApp**: Messages via chat (media saved to `./data/media/whatsapp/`)
 - **Telegram**: Messages via bot
-- **Web UI**: Interface at `http://localhost:8090`
+- **Web UI**: Interface at `http://localhost:47716`
 - **CLI**: Command line interface
 
 ## Core Capabilities

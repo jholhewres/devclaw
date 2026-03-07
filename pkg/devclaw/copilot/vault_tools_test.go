@@ -9,57 +9,59 @@ import (
 	"testing"
 )
 
-// TestVaultDispatcherWithNilVault verifies that the vault dispatcher gracefully handles nil vault.
-func TestVaultDispatcherWithNilVault(t *testing.T) {
+// TestVaultToolsWithNilVault verifies that vault tools gracefully handle nil vault.
+func TestVaultToolsWithNilVault(t *testing.T) {
 	executor := NewToolExecutor(slog.Default())
 
-	// Register vault dispatcher with nil vault
-	RegisterVaultDispatcher(executor, nil)
-
-	tool, ok := executor.tools["vault"]
-	if !ok {
-		t.Fatal("vault tool not registered")
-	}
+	// Register vault tools with nil vault
+	RegisterVaultTools(executor, nil)
 
 	t.Run("status with nil vault", func(t *testing.T) {
-		result, err := tool.Handler(context.Background(), map[string]any{
-			"action": "status",
-		})
+		tool, ok := executor.tools["vault_status"]
+		if !ok {
+			t.Fatal("vault_status tool not registered")
+		}
+
+		result, err := tool.Handler(context.Background(), map[string]any{})
 		if err != nil {
-			t.Fatalf("vault status should not error with nil vault: %v", err)
+			t.Fatalf("vault_status should not error with nil vault: %v", err)
 		}
 
 		status, ok := result.(map[string]any)
 		if !ok {
-			t.Fatal("vault status should return map[string]any")
+			t.Fatal("vault_status should return map[string]any")
 		}
 
 		if status["available"].(bool) {
-			t.Error("vault status should show available=false with nil vault")
+			t.Error("vault_status should show available=false with nil vault")
 		}
 		if status["exists"].(bool) {
-			t.Error("vault status should show exists=false with nil vault")
+			t.Error("vault_status should show exists=false with nil vault")
 		}
 		if !status["locked"].(bool) {
-			t.Error("vault status should show locked=true with nil vault")
+			t.Error("vault_status should show locked=true with nil vault")
 		}
 
 		// Verify unlock_methods is present
 		methods, ok := status["unlock_methods"].([]string)
 		if !ok || len(methods) == 0 {
-			t.Error("vault status should include unlock_methods")
+			t.Error("vault_status should include unlock_methods")
 		}
 	})
 
 	t.Run("save with nil vault", func(t *testing.T) {
+		tool, ok := executor.tools["vault_save"]
+		if !ok {
+			t.Fatal("vault_save tool not registered")
+		}
+
 		_, err := tool.Handler(context.Background(), map[string]any{
-			"action": "save",
-			"name":   "TEST_KEY",
-			"value":  "test_value",
+			"name":  "TEST_KEY",
+			"value": "test_value",
 		})
 
 		if err == nil {
-			t.Error("vault save should error with nil vault")
+			t.Error("vault_save should error with nil vault")
 		}
 
 		if err != nil && !strings.Contains(err.Error(), "vault not available") {
@@ -68,40 +70,51 @@ func TestVaultDispatcherWithNilVault(t *testing.T) {
 	})
 
 	t.Run("get with nil vault", func(t *testing.T) {
+		tool, ok := executor.tools["vault_get"]
+		if !ok {
+			t.Fatal("vault_get tool not registered")
+		}
+
 		_, err := tool.Handler(context.Background(), map[string]any{
-			"action": "get",
-			"name":   "TEST_KEY",
+			"name": "TEST_KEY",
 		})
 
 		if err == nil {
-			t.Error("vault get should error with nil vault")
+			t.Error("vault_get should error with nil vault")
 		}
 	})
 
 	t.Run("list with nil vault", func(t *testing.T) {
-		_, err := tool.Handler(context.Background(), map[string]any{
-			"action": "list",
-		})
+		tool, ok := executor.tools["vault_list"]
+		if !ok {
+			t.Fatal("vault_list tool not registered")
+		}
+
+		_, err := tool.Handler(context.Background(), map[string]any{})
 
 		if err == nil {
-			t.Error("vault list should error with nil vault")
+			t.Error("vault_list should error with nil vault")
 		}
 	})
 
 	t.Run("delete with nil vault", func(t *testing.T) {
+		tool, ok := executor.tools["vault_delete"]
+		if !ok {
+			t.Fatal("vault_delete tool not registered")
+		}
+
 		_, err := tool.Handler(context.Background(), map[string]any{
-			"action": "delete",
-			"name":   "TEST_KEY",
+			"name": "TEST_KEY",
 		})
 
 		if err == nil {
-			t.Error("vault delete should error with nil vault")
+			t.Error("vault_delete should error with nil vault")
 		}
 	})
 }
 
-// TestVaultDispatcherWithLockedVault verifies that the vault dispatcher gracefully handles locked vault.
-func TestVaultDispatcherWithLockedVault(t *testing.T) {
+// TestVaultToolsWithLockedVault verifies that vault tools gracefully handle locked vault.
+func TestVaultToolsWithLockedVault(t *testing.T) {
 	tmpDir := t.TempDir()
 	vaultPath := filepath.Join(tmpDir, "test.vault")
 
@@ -114,39 +127,36 @@ func TestVaultDispatcherWithLockedVault(t *testing.T) {
 	vault.Lock()
 
 	executor := NewToolExecutor(slog.Default())
-	RegisterVaultDispatcher(executor, vault)
-
-	tool := executor.tools["vault"]
+	RegisterVaultTools(executor, vault)
 
 	t.Run("status with locked vault", func(t *testing.T) {
-		result, err := tool.Handler(context.Background(), map[string]any{
-			"action": "status",
-		})
+		tool := executor.tools["vault_status"]
+		result, err := tool.Handler(context.Background(), map[string]any{})
 		if err != nil {
-			t.Fatalf("vault status should not error: %v", err)
+			t.Fatalf("vault_status should not error: %v", err)
 		}
 
 		status := result.(map[string]any)
 		if status["available"].(bool) {
-			t.Error("vault status should show available=false when locked")
+			t.Error("vault_status should show available=false when locked")
 		}
 		if !status["exists"].(bool) {
-			t.Error("vault status should show exists=true")
+			t.Error("vault_status should show exists=true")
 		}
 		if !status["locked"].(bool) {
-			t.Error("vault status should show locked=true")
+			t.Error("vault_status should show locked=true")
 		}
 	})
 
 	t.Run("save with locked vault", func(t *testing.T) {
+		tool := executor.tools["vault_save"]
 		_, err := tool.Handler(context.Background(), map[string]any{
-			"action": "save",
-			"name":   "TEST_KEY",
-			"value":  "test_value",
+			"name":  "TEST_KEY",
+			"value": "test_value",
 		})
 
 		if err == nil {
-			t.Error("vault save should error with locked vault")
+			t.Error("vault_save should error with locked vault")
 		}
 
 		if err != nil && !strings.Contains(err.Error(), "vault is locked") {
@@ -160,40 +170,39 @@ func TestVaultDispatcherWithLockedVault(t *testing.T) {
 	})
 
 	t.Run("get with locked vault", func(t *testing.T) {
+		tool := executor.tools["vault_get"]
 		_, err := tool.Handler(context.Background(), map[string]any{
-			"action": "get",
-			"name":   "TEST_KEY",
+			"name": "TEST_KEY",
 		})
 
 		if err == nil {
-			t.Error("vault get should error with locked vault")
+			t.Error("vault_get should error with locked vault")
 		}
 	})
 
 	t.Run("list with locked vault", func(t *testing.T) {
-		_, err := tool.Handler(context.Background(), map[string]any{
-			"action": "list",
-		})
+		tool := executor.tools["vault_list"]
+		_, err := tool.Handler(context.Background(), map[string]any{})
 
 		if err == nil {
-			t.Error("vault list should error with locked vault")
+			t.Error("vault_list should error with locked vault")
 		}
 	})
 
 	t.Run("delete with locked vault", func(t *testing.T) {
+		tool := executor.tools["vault_delete"]
 		_, err := tool.Handler(context.Background(), map[string]any{
-			"action": "delete",
-			"name":   "TEST_KEY",
+			"name": "TEST_KEY",
 		})
 
 		if err == nil {
-			t.Error("vault delete should error with locked vault")
+			t.Error("vault_delete should error with locked vault")
 		}
 	})
 }
 
-// TestVaultDispatcherWithUnlockedVault verifies that the vault dispatcher works when unlocked.
-func TestVaultDispatcherWithUnlockedVault(t *testing.T) {
+// TestVaultToolsWithUnlockedVault verifies that vault tools work when unlocked.
+func TestVaultToolsWithUnlockedVault(t *testing.T) {
 	tmpDir := t.TempDir()
 	vaultPath := filepath.Join(tmpDir, "test.vault")
 
@@ -207,39 +216,36 @@ func TestVaultDispatcherWithUnlockedVault(t *testing.T) {
 	}
 
 	executor := NewToolExecutor(slog.Default())
-	RegisterVaultDispatcher(executor, vault)
-
-	tool := executor.tools["vault"]
+	RegisterVaultTools(executor, vault)
 
 	t.Run("status with unlocked vault", func(t *testing.T) {
-		result, err := tool.Handler(context.Background(), map[string]any{
-			"action": "status",
-		})
+		tool := executor.tools["vault_status"]
+		result, err := tool.Handler(context.Background(), map[string]any{})
 		if err != nil {
-			t.Fatalf("vault status should not error: %v", err)
+			t.Fatalf("vault_status should not error: %v", err)
 		}
 
 		status := result.(map[string]any)
 		if !status["available"].(bool) {
-			t.Error("vault status should show available=true when unlocked")
+			t.Error("vault_status should show available=true when unlocked")
 		}
 		if !status["exists"].(bool) {
-			t.Error("vault status should show exists=true")
+			t.Error("vault_status should show exists=true")
 		}
 		if status["locked"].(bool) {
-			t.Error("vault status should show locked=false when unlocked")
+			t.Error("vault_status should show locked=false when unlocked")
 		}
 	})
 
 	t.Run("save and get", func(t *testing.T) {
 		// Save
-		result, err := tool.Handler(context.Background(), map[string]any{
-			"action": "save",
-			"name":   "MY_API_KEY",
-			"value":  "sk-test12345",
+		saveTool := executor.tools["vault_save"]
+		result, err := saveTool.Handler(context.Background(), map[string]any{
+			"name":  "MY_API_KEY",
+			"value": "sk-test12345",
 		})
 		if err != nil {
-			t.Fatalf("vault save should succeed when unlocked: %v", err)
+			t.Fatalf("vault_save should succeed when unlocked: %v", err)
 		}
 
 		if !strings.Contains(result.(string), "saved") {
@@ -247,12 +253,12 @@ func TestVaultDispatcherWithUnlockedVault(t *testing.T) {
 		}
 
 		// Get
-		val, err := tool.Handler(context.Background(), map[string]any{
-			"action": "get",
-			"name":   "MY_API_KEY",
+		getTool := executor.tools["vault_get"]
+		val, err := getTool.Handler(context.Background(), map[string]any{
+			"name": "MY_API_KEY",
 		})
 		if err != nil {
-			t.Fatalf("vault get should succeed: %v", err)
+			t.Fatalf("vault_get should succeed: %v", err)
 		}
 
 		if val != "sk-test12345" {
@@ -261,32 +267,31 @@ func TestVaultDispatcherWithUnlockedVault(t *testing.T) {
 	})
 
 	t.Run("list shows secrets", func(t *testing.T) {
-		result, err := tool.Handler(context.Background(), map[string]any{
-			"action": "list",
-		})
+		listTool := executor.tools["vault_list"]
+		result, err := listTool.Handler(context.Background(), map[string]any{})
 		if err != nil {
-			t.Fatalf("vault list should succeed: %v", err)
+			t.Fatalf("vault_list should succeed: %v", err)
 		}
 
 		if !strings.Contains(result.(string), "MY_API_KEY") {
-			t.Errorf("vault list should include MY_API_KEY, got: %v", result)
+			t.Errorf("vault_list should include MY_API_KEY, got: %v", result)
 		}
 	})
 
 	t.Run("delete removes secret", func(t *testing.T) {
 		// Delete
-		_, err := tool.Handler(context.Background(), map[string]any{
-			"action": "delete",
-			"name":   "MY_API_KEY",
+		deleteTool := executor.tools["vault_delete"]
+		_, err := deleteTool.Handler(context.Background(), map[string]any{
+			"name": "MY_API_KEY",
 		})
 		if err != nil {
-			t.Fatalf("vault delete should succeed: %v", err)
+			t.Fatalf("vault_delete should succeed: %v", err)
 		}
 
 		// Verify it's gone
-		result, _ := tool.Handler(context.Background(), map[string]any{
-			"action": "get",
-			"name":   "MY_API_KEY",
+		getTool := executor.tools["vault_get"]
+		result, _ := getTool.Handler(context.Background(), map[string]any{
+			"name": "MY_API_KEY",
 		})
 
 		if !strings.Contains(result.(string), "not found") {
@@ -295,7 +300,7 @@ func TestVaultDispatcherWithUnlockedVault(t *testing.T) {
 	})
 }
 
-// TestVaultStatusJSONStructure verifies that vault status returns properly structured JSON.
+// TestVaultStatusJSONStructure verifies that vault_status returns properly structured JSON.
 func TestVaultStatusJSONStructure(t *testing.T) {
 	tmpDir := t.TempDir()
 	vaultPath := filepath.Join(tmpDir, "test.vault")
@@ -306,14 +311,12 @@ func TestVaultStatusJSONStructure(t *testing.T) {
 	vault.Set("test_key", "test_value")
 
 	executor := NewToolExecutor(slog.Default())
-	RegisterVaultDispatcher(executor, vault)
+	RegisterVaultTools(executor, vault)
 
-	tool := executor.tools["vault"]
-	result, err := tool.Handler(context.Background(), map[string]any{
-		"action": "status",
-	})
+	tool := executor.tools["vault_status"]
+	result, err := tool.Handler(context.Background(), map[string]any{})
 	if err != nil {
-		t.Fatalf("vault status failed: %v", err)
+		t.Fatalf("vault_status failed: %v", err)
 	}
 
 	status := result.(map[string]any)
@@ -322,7 +325,7 @@ func TestVaultStatusJSONStructure(t *testing.T) {
 	requiredFields := []string{"available", "exists", "locked", "secret_count", "path", "message"}
 	for _, field := range requiredFields {
 		if _, ok := status[field]; !ok {
-			t.Errorf("vault status missing field: %s", field)
+			t.Errorf("vault_status missing field: %s", field)
 		}
 	}
 
@@ -349,12 +352,12 @@ func TestVaultStatusJSONStructure(t *testing.T) {
 	// Test JSON serialization
 	jsonBytes, err := json.Marshal(status)
 	if err != nil {
-		t.Errorf("vault status result should be JSON serializable: %v", err)
+		t.Errorf("vault_status result should be JSON serializable: %v", err)
 	}
 
 	var decoded map[string]any
 	if err := json.Unmarshal(jsonBytes, &decoded); err != nil {
-		t.Errorf("vault status JSON should be decodable: %v", err)
+		t.Errorf("vault_status JSON should be decodable: %v", err)
 	}
 }
 
@@ -367,14 +370,12 @@ func TestVaultStatusWithNonExistentVault(t *testing.T) {
 	vault := NewVault(vaultPath)
 
 	executor := NewToolExecutor(slog.Default())
-	RegisterVaultDispatcher(executor, vault)
+	RegisterVaultTools(executor, vault)
 
-	tool := executor.tools["vault"]
-	result, err := tool.Handler(context.Background(), map[string]any{
-		"action": "status",
-	})
+	tool := executor.tools["vault_status"]
+	result, err := tool.Handler(context.Background(), map[string]any{})
 	if err != nil {
-		t.Fatalf("vault status should not error: %v", err)
+		t.Fatalf("vault_status should not error: %v", err)
 	}
 
 	status := result.(map[string]any)

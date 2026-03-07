@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Lock, ArrowRight, Loader2, Bot } from 'lucide-react'
+import { Lock, ArrowRight, Loader2, Eye, EyeOff } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
+import { Logo } from '@/components/Logo'
+import { cn } from '@/lib/utils'
 
 export function Login() {
   const { t } = useTranslation()
@@ -10,6 +12,7 @@ export function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -52,41 +55,71 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0c1222] flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
+    <div className="relative flex min-h-screen items-center justify-center bg-bg-main p-4">
+      {/* Subtle radial gradient backdrop */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(ellipse 60% 50% at 50% 40%, rgba(0,129,242,0.06) 0%, transparent 70%)',
+        }}
+      />
+
+      <div className="relative z-10 w-full max-w-sm">
         {/* Logo */}
-        <div className="text-center mb-8">
-          <div className="inline-flex h-14 w-14 items-center justify-center rounded-xl bg-[#3b82f6] shadow-lg shadow-blue-500/20">
-            <Bot className="h-7 w-7 text-white" />
-          </div>
-          <h1 className="mt-4 text-2xl font-bold text-[#f8fafc]">
-            Dev<span className="text-[#64748b]">Claw</span>
-          </h1>
-          <p className="mt-1 text-sm text-[#64748b]">{t('login.subtitle')}</p>
+        <div className="mb-8 flex flex-col items-center gap-4">
+          <Logo size="lg" />
+          <p className="text-sm text-text-muted">{t('login.subtitle')}</p>
         </div>
 
         {/* Card */}
-        <div className="bg-[#111827] rounded-2xl border border-white/10 p-6">
+        <div className="rounded-2xl border border-border bg-bg-surface p-6 shadow-lg">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label htmlFor="password" className="flex items-center gap-2 mb-2 text-xs font-semibold text-[#64748b] uppercase tracking-wider">
+              <label
+                htmlFor="password"
+                className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted"
+              >
                 <Lock className="h-3.5 w-3.5" />
                 {t('login.password')}
               </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setError('') }}
-                placeholder={t('login.passwordPlaceholder')}
-                autoComplete="current-password"
-                autoFocus
-                className="w-full rounded-xl border border-white/10 bg-[#1e293b] px-4 py-3 text-sm text-[#f8fafc] placeholder:text-[#475569] outline-none transition-all focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20"
-              />
+              <div className="relative">
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value)
+                    setError('')
+                  }}
+                  placeholder={t('login.passwordPlaceholder')}
+                  autoComplete="current-password"
+                  autoFocus
+                  className={cn(
+                    'w-full rounded-xl border bg-bg-subtle px-4 py-3 pr-11 text-sm text-text-primary',
+                    'placeholder:text-text-muted outline-none transition-all',
+                    'focus:border-brand focus:ring-1 focus:ring-brand/30',
+                    error ? 'border-error/50' : 'border-border'
+                  )}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted transition-colors hover:text-text-primary"
+                  tabIndex={-1}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
             </div>
 
             {error && (
-              <div className="rounded-xl px-4 py-3 text-sm text-[#f87171] bg-red-500/10 border border-red-500/20">
+              <div className="rounded-xl border border-error/20 bg-error-subtle px-4 py-3 text-sm text-error">
                 {error}
               </div>
             )}
@@ -94,7 +127,11 @@ export function Login() {
             <button
               type="submit"
               disabled={loading || !password}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#3b82f6] px-4 py-3 text-sm font-semibold text-white transition-all hover:bg-[#2563eb] disabled:cursor-not-allowed disabled:opacity-50"
+              className={cn(
+                'flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white transition-all',
+                'bg-brand hover:bg-brand-hover',
+                'disabled:cursor-not-allowed disabled:opacity-50'
+              )}
             >
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -109,7 +146,7 @@ export function Login() {
         </div>
 
         {/* Footer */}
-        <p className="mt-6 text-center text-xs text-[#475569]">
+        <p className="mt-6 text-center text-xs text-text-muted">
           DevClaw v1.6.0
         </p>
       </div>

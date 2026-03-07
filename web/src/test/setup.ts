@@ -1,5 +1,5 @@
-import '@testing-library/jest-dom'
-import { vi } from 'vitest'
+import '@testing-library/jest-dom';
+import { vi } from 'vitest';
 
 // Mock localStorage
 const localStorageMock = {
@@ -7,8 +7,8 @@ const localStorageMock = {
   setItem: vi.fn(),
   removeItem: vi.fn(),
   clear: vi.fn(),
-}
-Object.defineProperty(window, 'localStorage', { value: localStorageMock })
+};
+Object.defineProperty(window, 'localStorage', { value: localStorageMock });
 
 // Mock matchMedia
 Object.defineProperty(window, 'matchMedia', {
@@ -23,25 +23,25 @@ Object.defineProperty(window, 'matchMedia', {
     removeEventListener: vi.fn(),
     dispatchEvent: vi.fn(),
   })),
-})
+});
 
 // Mock ResizeObserver
 class ResizeObserverMock {
-  observe = vi.fn()
-  unobserve = vi.fn()
-  disconnect = vi.fn()
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
 }
-Object.defineProperty(window, 'ResizeObserver', { value: ResizeObserverMock })
+Object.defineProperty(window, 'ResizeObserver', { value: ResizeObserverMock });
 
 // Mock IntersectionObserver
 class IntersectionObserverMock {
-  observe = vi.fn()
-  unobserve = vi.fn()
-  disconnect = vi.fn()
-  root = null
-  rootMargin = ''
-  thresholds = []
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+  root = null;
+  rootMargin = '';
+  thresholds = [];
 }
 Object.defineProperty(window, 'IntersectionObserver', {
   value: IntersectionObserverMock,
-})
+});

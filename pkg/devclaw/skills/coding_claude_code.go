@@ -232,6 +232,8 @@ func (s *claudeCodeSkill) Execute(ctx context.Context, input string) (string, er
 	return fmt.Sprintf("%v", result), nil
 }
 
+func (s *claudeCodeSkill) Location() string { return "" }
+
 func (s *claudeCodeSkill) Shutdown() error { return nil }
 
 // ── Handlers ──

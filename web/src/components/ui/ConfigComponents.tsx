@@ -1,46 +1,55 @@
-import { useState, type ReactNode } from 'react'
-import { ChevronDown, ChevronUp, Save, RotateCcw, Loader2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { useState, type ReactNode } from 'react';
+import { ChevronDown, ChevronUp, Save, RotateCcw, Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 // ============================================
 // Config Page Wrapper
 // ============================================
 
 interface ConfigPageProps {
-  title: string
-  subtitle?: string
-  description?: string
-  children: ReactNode
-  actions?: ReactNode
-  message?: { type: 'success' | 'error'; text: string } | null
+  title: string;
+  subtitle?: string;
+  description?: string;
+  children: ReactNode;
+  actions?: ReactNode;
+  message?: { type: 'success' | 'error'; text: string } | null;
 }
 
-export function ConfigPage({ title, subtitle, description, children, actions, message }: ConfigPageProps) {
+export function ConfigPage({
+  title,
+  subtitle,
+  description,
+  children,
+  actions,
+  message,
+}: ConfigPageProps) {
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-[#0c1222]">
+    <div className="flex flex-1 flex-col overflow-hidden bg-bg-main">
       <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>
             {subtitle && (
-              <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#475569]">{subtitle}</p>
+              <p className="text-[11px] font-bold tracking-[0.15em] text-text-muted uppercase">
+                {subtitle}
+              </p>
             )}
-            <h1 className="mt-1 text-2xl font-bold text-[#f8fafc] tracking-tight">{title}</h1>
-            {description && (
-              <p className="mt-2 text-base text-[#64748b]">{description}</p>
-            )}
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-text-primary">{title}</h1>
+            {description && <p className="mt-2 text-base text-text-muted">{description}</p>}
           </div>
           {actions && <div className="flex items-center gap-3">{actions}</div>}
         </div>
 
         {/* Message */}
         {message && (
-          <div className={cn(
-            'mt-6 rounded-xl px-5 py-4 text-sm border',
-            message.type === 'success'
-              ? 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/20'
-              : 'bg-[#ef4444]/10 text-[#f87171] border-[#ef4444]/20'
-          )}>
+          <div
+            className={cn(
+              'mt-6 rounded-xl border px-5 py-4 text-sm',
+              message.type === 'success'
+                ? 'border-success/20 bg-success-subtle text-success'
+                : 'border-error/20 bg-error-subtle text-error'
+            )}
+          >
             {message.text}
           </div>
         )}
@@ -49,7 +58,7 @@ export function ConfigPage({ title, subtitle, description, children, actions, me
         <div className="mt-10">{children}</div>
       </div>
     </div>
-  )
+  );
 }
 
 // ============================================
@@ -57,14 +66,14 @@ export function ConfigPage({ title, subtitle, description, children, actions, me
 // ============================================
 
 interface ConfigSectionProps {
-  icon?: React.ElementType
-  title: string
-  description?: string
-  children: ReactNode
-  collapsible?: boolean
-  defaultCollapsed?: boolean
-  className?: string
-  iconColor?: string
+  icon?: React.ElementType;
+  title: string;
+  description?: string;
+  children: ReactNode;
+  collapsible?: boolean;
+  defaultCollapsed?: boolean;
+  className?: string;
+  iconColor?: string;
 }
 
 export function ConfigSection({
@@ -77,59 +86,59 @@ export function ConfigSection({
   className,
   iconColor,
 }: ConfigSectionProps) {
-  const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed)
+  const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
 
   const content = (
-    <div className={cn('space-y-5 rounded-2xl border border-white/10 bg-[#111827] p-6', className)}>
+    <div className={cn('space-y-5 rounded-2xl border border-border bg-bg-surface p-6', className)}>
       {children}
     </div>
-  )
+  );
 
   if (collapsible) {
     return (
       <section className="mb-10">
         <button
           onClick={() => setIsCollapsed(!isCollapsed)}
-          className="flex items-center gap-3 mb-6 w-full text-left group"
+          className="group mb-6 flex w-full items-center gap-3 text-left"
         >
           {Icon && (
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[#111827] group-hover:border-white/20 transition-colors">
-              <Icon className="h-5 w-5 text-[#64748b]" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-bg-surface transition-colors group-hover:border-border-hover">
+              <Icon className="h-5 w-5 text-text-muted" />
             </div>
           )}
           <div className="flex-1">
-            <h2 className="text-lg font-semibold text-[#f8fafc]">{title}</h2>
-            {description && <p className="text-sm text-[#64748b]">{description}</p>}
+            <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
+            {description && <p className="text-sm text-text-muted">{description}</p>}
           </div>
           {isCollapsed ? (
-            <ChevronDown className="h-5 w-5 text-[#64748b] group-hover:text-[#f8fafc] transition-colors" />
+            <ChevronDown className="h-5 w-5 text-text-muted transition-colors group-hover:text-text-primary" />
           ) : (
-            <ChevronUp className="h-5 w-5 text-[#64748b] group-hover:text-[#f8fafc] transition-colors" />
+            <ChevronUp className="h-5 w-5 text-text-muted transition-colors group-hover:text-text-primary" />
           )}
         </button>
         {!isCollapsed && content}
       </section>
-    )
+    );
   }
 
   return (
     <section className="mb-10">
       {(Icon || title) && (
-        <div className="flex items-center gap-3 mb-6">
+        <div className="mb-6 flex items-center gap-3">
           {Icon && (
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-[#111827]">
-              <Icon className="h-5 w-5" style={{ color: iconColor || '#64748b' }} />
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-bg-surface">
+              <Icon className="h-5 w-5" style={{ color: iconColor || undefined }} />
             </div>
           )}
           <div>
-            <h2 className="text-lg font-semibold text-[#f8fafc]">{title}</h2>
-            {description && <p className="text-sm text-[#64748b]">{description}</p>}
+            <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
+            {description && <p className="text-sm text-text-muted">{description}</p>}
           </div>
         </div>
       )}
       {content}
     </section>
-  )
+  );
 }
 
 // ============================================
@@ -137,22 +146,22 @@ export function ConfigSection({
 // ============================================
 
 interface ConfigFieldProps {
-  label: string
-  hint?: string
-  children: ReactNode
-  className?: string
+  label: string;
+  hint?: string;
+  children: ReactNode;
+  className?: string;
 }
 
 export function ConfigField({ label, hint, children, className }: ConfigFieldProps) {
   return (
     <div className={cn('space-y-2', className)}>
-      <label className="block text-xs font-semibold uppercase tracking-wider text-[#64748b]">
+      <label className="block text-xs font-semibold tracking-wider text-text-muted uppercase">
         {label}
       </label>
       {children}
-      {hint && <p className="text-xs text-[#475569]">{hint}</p>}
+      {hint && <p className="text-xs text-text-muted">{hint}</p>}
     </div>
-  )
+  );
 }
 
 // ============================================
@@ -160,12 +169,12 @@ export function ConfigField({ label, hint, children, className }: ConfigFieldPro
 // ============================================
 
 interface ConfigInputProps {
-  value: string | number
-  onChange: (value: string) => void
-  placeholder?: string
-  type?: 'text' | 'password' | 'number' | 'email' | 'url' | 'time'
-  disabled?: boolean
-  className?: string
+  value: string | number;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  type?: 'text' | 'password' | 'number' | 'email' | 'url' | 'time';
+  disabled?: boolean;
+  className?: string;
 }
 
 export function ConfigInput({
@@ -184,12 +193,12 @@ export function ConfigInput({
       placeholder={placeholder}
       disabled={disabled}
       className={cn(
-        'h-11 w-full rounded-xl border border-white/10 bg-[#111827] px-4 text-sm text-[#f8fafc] outline-none transition-all placeholder:text-[#475569] hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20',
-        disabled && 'opacity-50 cursor-not-allowed',
+        'h-11 w-full rounded-xl border border-border bg-bg-surface px-4 text-sm text-text-primary transition-all outline-none placeholder:text-text-muted hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20',
+        disabled && 'cursor-not-allowed opacity-50',
         className
       )}
     />
-  )
+  );
 }
 
 // ============================================
@@ -197,12 +206,12 @@ export function ConfigInput({
 // ============================================
 
 interface ConfigTextareaProps {
-  value: string
-  onChange: (value: string) => void
-  placeholder?: string
-  rows?: number
-  disabled?: boolean
-  className?: string
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  rows?: number;
+  disabled?: boolean;
+  className?: string;
 }
 
 export function ConfigTextarea({
@@ -221,12 +230,12 @@ export function ConfigTextarea({
       rows={rows}
       disabled={disabled}
       className={cn(
-        'w-full rounded-xl border border-white/10 bg-[#111827] px-4 py-3 text-sm text-[#f8fafc] outline-none transition-all placeholder:text-[#475569] hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20 resize-none',
-        disabled && 'opacity-50 cursor-not-allowed',
+        'w-full resize-none rounded-xl border border-border bg-bg-surface px-4 py-3 text-sm text-text-primary transition-all outline-none placeholder:text-text-muted hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20',
+        disabled && 'cursor-not-allowed opacity-50',
         className
       )}
     />
-  )
+  );
 }
 
 // ============================================
@@ -234,17 +243,17 @@ export function ConfigTextarea({
 // ============================================
 
 interface SelectOption {
-  value: string
-  label: string
+  value: string;
+  label: string;
 }
 
 interface ConfigSelectProps {
-  value: string
-  onChange: (value: string) => void
-  options: SelectOption[]
-  placeholder?: string
-  disabled?: boolean
-  className?: string
+  value: string;
+  onChange: (value: string) => void;
+  options: SelectOption[];
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
 }
 
 export function ConfigSelect({
@@ -261,8 +270,8 @@ export function ConfigSelect({
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       className={cn(
-        'h-11 w-full cursor-pointer appearance-none rounded-xl border border-white/10 bg-[#111827] px-4 pr-10 text-sm text-[#f8fafc] outline-none transition-all hover:border-white/20 focus:border-[#3b82f6]/50 focus:ring-1 focus:ring-[#3b82f6]/20',
-        disabled && 'opacity-50 cursor-not-allowed',
+        'h-11 w-full cursor-pointer appearance-none rounded-xl border border-border bg-bg-surface px-4 pr-10 text-sm text-text-primary transition-all outline-none hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20',
+        disabled && 'cursor-not-allowed opacity-50',
         className
       )}
       style={{
@@ -282,7 +291,7 @@ export function ConfigSelect({
         </option>
       ))}
     </select>
-  )
+  );
 }
 
 // ============================================
@@ -290,11 +299,11 @@ export function ConfigSelect({
 // ============================================
 
 interface ConfigToggleProps {
-  enabled: boolean
-  onChange: (value: boolean) => void
-  label: string
-  description?: string
-  disabled?: boolean
+  enabled: boolean;
+  onChange: (value: boolean) => void;
+  label: string;
+  description?: string;
+  disabled?: boolean;
 }
 
 export function ConfigToggle({
@@ -310,15 +319,15 @@ export function ConfigToggle({
       onClick={() => !disabled && onChange(!enabled)}
       disabled={disabled}
       className={cn(
-        'flex items-start gap-3 group',
+        'group flex items-start gap-3',
         !disabled && 'cursor-pointer',
-        disabled && 'opacity-50 cursor-not-allowed'
+        disabled && 'cursor-not-allowed opacity-50'
       )}
     >
       <div
         className={cn(
-          'relative h-6 w-11 rounded-full transition-colors flex-shrink-0 mt-0.5',
-          enabled ? 'bg-[#3b82f6]' : 'bg-[#1e293b]'
+          'relative mt-0.5 h-6 w-11 flex-shrink-0 rounded-full transition-colors',
+          enabled ? 'bg-brand' : 'bg-bg-subtle'
         )}
       >
         <div
@@ -329,15 +338,13 @@ export function ConfigToggle({
         />
       </div>
       <div className="flex flex-col items-start">
-        <span className="text-sm text-[#94a3b8] group-hover:text-[#f8fafc] transition-colors">
+        <span className="text-sm text-text-secondary transition-colors group-hover:text-text-primary">
           {label}
         </span>
-        {description && (
-          <span className="text-xs text-[#475569] mt-0.5">{description}</span>
-        )}
+        {description && <span className="mt-0.5 text-xs text-text-muted">{description}</span>}
       </div>
     </button>
-  )
+  );
 }
 
 // ============================================
@@ -345,12 +352,12 @@ export function ConfigToggle({
 // ============================================
 
 interface ConfigTagListProps {
-  tags: string[]
-  onAdd?: (tag: string) => void
-  onRemove?: (tag: string) => void
-  addPlaceholder?: string
-  readOnly?: boolean
-  emptyMessage?: string
+  tags: string[];
+  onAdd?: (tag: string) => void;
+  onRemove?: (tag: string) => void;
+  addPlaceholder?: string;
+  readOnly?: boolean;
+  emptyMessage?: string;
 }
 
 export function ConfigTagList({
@@ -361,42 +368,47 @@ export function ConfigTagList({
   readOnly = false,
   emptyMessage = 'No items',
 }: ConfigTagListProps) {
-  const [inputValue, setInputValue] = useState('')
+  const [inputValue, setInputValue] = useState('');
 
   const handleAdd = () => {
     if (inputValue.trim() && onAdd) {
-      onAdd(inputValue.trim())
-      setInputValue('')
+      onAdd(inputValue.trim());
+      setInputValue('');
     }
-  }
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      e.preventDefault()
-      handleAdd()
+      e.preventDefault();
+      handleAdd();
     }
-  }
+  };
 
   return (
     <div className="space-y-3">
       {/* Tags */}
       <div className="flex flex-wrap gap-2">
         {tags.length === 0 && !readOnly && (
-          <span className="text-sm text-[#475569] italic">{emptyMessage}</span>
+          <span className="text-sm text-text-muted italic">{emptyMessage}</span>
         )}
         {tags.map((tag) => (
           <span
             key={tag}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1e293b] text-sm text-[#94a3b8] group"
+            className="group inline-flex items-center gap-1.5 rounded-lg bg-bg-subtle px-3 py-1.5 text-sm text-text-secondary"
           >
             {tag}
             {!readOnly && onRemove && (
               <button
                 onClick={() => onRemove(tag)}
-                className="text-[#64748b] hover:text-[#f87171] transition-colors"
+                className="text-text-muted transition-colors hover:text-error"
               >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
               </button>
             )}
@@ -413,19 +425,19 @@ export function ConfigTagList({
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={addPlaceholder}
-            className="flex-1 h-10 rounded-lg border border-white/10 bg-[#111827] px-3 text-sm text-[#f8fafc] outline-none transition-all placeholder:text-[#475569] hover:border-white/20 focus:border-[#3b82f6]/50"
+            className="h-10 flex-1 rounded-lg border border-border bg-bg-surface px-3 text-sm text-text-primary transition-all outline-none placeholder:text-text-muted hover:border-border-hover focus:border-brand/50"
           />
           <button
             onClick={handleAdd}
             disabled={!inputValue.trim()}
-            className="px-4 h-10 rounded-lg bg-[#3b82f6] text-sm font-medium text-white hover:bg-[#2563eb] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="h-10 rounded-lg bg-brand px-4 text-sm font-medium text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             Add
           </button>
         </div>
       )}
     </div>
-  )
+  );
 }
 
 // ============================================
@@ -433,13 +445,13 @@ export function ConfigTagList({
 // ============================================
 
 interface ConfigActionsProps {
-  onSave: () => void
-  onReset?: () => void
-  saving?: boolean
-  hasChanges?: boolean
-  saveLabel?: string
-  savingLabel?: string
-  resetLabel?: string
+  onSave: () => void;
+  onReset?: () => void;
+  saving?: boolean;
+  hasChanges?: boolean;
+  saveLabel?: string;
+  savingLabel?: string;
+  resetLabel?: string;
 }
 
 export function ConfigActions({
@@ -457,7 +469,7 @@ export function ConfigActions({
         <button
           onClick={onReset}
           disabled={saving}
-          className="flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-[#111827] px-5 py-3 text-sm font-medium text-[#94a3b8] transition-all hover:border-white/20 hover:text-[#f8fafc] disabled:opacity-50"
+          className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-bg-surface px-5 py-3 text-sm font-medium text-text-secondary transition-all hover:border-border-hover hover:text-text-primary disabled:opacity-50"
         >
           <RotateCcw className="h-4 w-4" />
           {resetLabel}
@@ -466,7 +478,7 @@ export function ConfigActions({
       <button
         onClick={onSave}
         disabled={!hasChanges || saving}
-        className="flex cursor-pointer items-center gap-2 rounded-xl bg-[#3b82f6] px-5 py-3 text-sm font-semibold text-white transition-all hover:bg-[#2563eb] disabled:opacity-50 disabled:cursor-not-allowed"
+        className="flex cursor-pointer items-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-semibold text-white transition-all hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
       >
         {saving ? (
           <>
@@ -481,7 +493,7 @@ export function ConfigActions({
         )}
       </button>
     </div>
-  )
+  );
 }
 
 // ============================================
@@ -489,59 +501,67 @@ export function ConfigActions({
 // ============================================
 
 interface ConfigCardProps {
-  title: string
-  subtitle?: string
-  icon?: React.ElementType
-  iconColor?: string
-  status?: 'success' | 'error' | 'warning' | 'neutral'
-  actions?: ReactNode
-  children?: ReactNode
-  className?: string
+  title: string;
+  subtitle?: string;
+  icon?: React.ElementType;
+  iconColor?: string;
+  status?: 'success' | 'error' | 'warning' | 'neutral';
+  actions?: ReactNode;
+  children?: ReactNode;
+  className?: string;
 }
 
 export function ConfigCard({
   title,
   subtitle,
   icon: Icon,
-  iconColor = '#64748b',
+  iconColor,
   status = 'neutral',
   actions,
   children,
   className,
 }: ConfigCardProps) {
   const statusColors = {
-    success: 'bg-[#22c55e]/10',
-    error: 'bg-[#ef4444]/10',
-    warning: 'bg-[#f59e0b]/10',
-    neutral: 'bg-[#1e293b]',
-  }
+    success: 'bg-success-subtle',
+    error: 'bg-error-subtle',
+    warning: 'bg-warning-subtle',
+    neutral: 'bg-bg-subtle',
+  };
 
   const iconColors = {
-    success: 'text-[#22c55e]',
-    error: 'text-[#f87171]',
-    warning: 'text-[#f59e0b]',
-    neutral: 'text-[#64748b]',
-  }
+    success: 'text-success',
+    error: 'text-error',
+    warning: 'text-warning',
+    neutral: 'text-text-muted',
+  };
 
   return (
-    <div className={cn('rounded-2xl border border-white/10 bg-[#111827] p-6', className)}>
+    <div className={cn('rounded-2xl border border-border bg-bg-surface p-6', className)}>
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           {Icon && (
-            <div className={cn('flex h-10 w-10 items-center justify-center rounded-xl', statusColors[status])}>
-              <Icon className={cn('h-5 w-5', iconColors[status])} style={{ color: status === 'neutral' ? iconColor : undefined }} />
+            <div
+              className={cn(
+                'flex h-10 w-10 items-center justify-center rounded-xl',
+                statusColors[status]
+              )}
+            >
+              <Icon
+                className={cn('h-5 w-5', iconColors[status])}
+                style={{ color: status === 'neutral' ? iconColor : undefined }}
+              />
             </div>
           )}
           <div>
-            <h3 className="text-base font-semibold text-[#f8fafc]">{title}</h3>
-            {subtitle && <p className="text-sm text-[#64748b]">{subtitle}</p>}
+            <h3 className="text-base font-semibold text-text-primary">{title}</h3>
+            {subtitle && <p className="text-sm text-text-muted">{subtitle}</p>}
           </div>
         </div>
         {actions && <div className="flex items-center gap-2">{actions}</div>}
       </div>
-      {children && <div className="mt-4 pt-4 border-t border-white/5">{children}</div>}
+      {children && <div className="mt-4 border-t border-border pt-4">{children}</div>}
     </div>
-  )
+  );
 }
 
 // ============================================
@@ -549,21 +569,26 @@ export function ConfigCard({
 // ============================================
 
 interface ConfigEmptyStateProps {
-  icon?: React.ElementType
-  title: string
-  description?: string
-  action?: ReactNode
+  icon?: React.ElementType;
+  title: string;
+  description?: string;
+  action?: ReactNode;
 }
 
-export function ConfigEmptyState({ icon: Icon, title, description, action }: ConfigEmptyStateProps) {
+export function ConfigEmptyState({
+  icon: Icon,
+  title,
+  description,
+  action,
+}: ConfigEmptyStateProps) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#111827] p-8 text-center">
-      {Icon && <Icon className="h-12 w-12 text-[#475569] mx-auto mb-4" />}
-      <p className="text-sm text-[#64748b]">{title}</p>
-      {description && <p className="text-xs text-[#475569] mt-2">{description}</p>}
+    <div className="rounded-2xl border border-border bg-bg-surface p-8 text-center">
+      {Icon && <Icon className="mx-auto mb-4 h-12 w-12 text-text-muted" />}
+      <p className="text-sm text-text-muted">{title}</p>
+      {description && <p className="mt-2 text-xs text-text-muted">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
-  )
+  );
 }
 
 // ============================================
@@ -571,21 +596,21 @@ export function ConfigEmptyState({ icon: Icon, title, description, action }: Con
 // ============================================
 
 interface ConfigInfoBoxProps {
-  title?: string
-  items: string[]
+  title?: string;
+  items: string[];
 }
 
 export function ConfigInfoBox({ title, items }: ConfigInfoBoxProps) {
   return (
-    <div className="rounded-2xl border border-white/5 bg-[#111827]/50 p-6 mb-10">
-      {title && <h3 className="text-sm font-semibold text-[#64748b] mb-3">{title}</h3>}
-      <ul className="space-y-2 text-xs text-[#475569]">
+    <div className="mb-10 rounded-2xl border border-border bg-bg-surface/50 p-6">
+      {title && <h3 className="mb-3 text-sm font-semibold text-text-muted">{title}</h3>}
+      <ul className="space-y-2 text-xs text-text-muted">
         {items.map((item, index) => (
           <li key={index}>• {item}</li>
         ))}
       </ul>
     </div>
-  )
+  );
 }
 
 // ============================================
@@ -594,10 +619,10 @@ export function ConfigInfoBox({ title, items }: ConfigInfoBoxProps) {
 
 export function LoadingSpinner() {
   return (
-    <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-      <div className="h-10 w-10 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
+    <div className="flex flex-1 items-center justify-center bg-bg-main">
+      <div className="h-10 w-10 animate-spin rounded-full border-4 border-bg-subtle border-t-brand" />
     </div>
-  )
+  );
 }
 
 // ============================================
@@ -605,23 +630,23 @@ export function LoadingSpinner() {
 // ============================================
 
 interface ErrorStateProps {
-  message?: string
-  onRetry?: () => void
-  retryLabel?: string
+  message?: string;
+  onRetry?: () => void;
+  retryLabel?: string;
 }
 
 export function ErrorState({ message = 'Error', onRetry, retryLabel = 'Retry' }: ErrorStateProps) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center bg-[#0c1222]">
-      <p className="text-sm text-[#f87171]">{message}</p>
+    <div className="flex flex-1 flex-col items-center justify-center bg-bg-main">
+      <p className="text-sm text-error">{message}</p>
       {onRetry && (
         <button
           onClick={onRetry}
-          className="mt-3 text-xs text-[#64748b] hover:text-[#f8fafc] transition-colors cursor-pointer"
+          className="mt-3 cursor-pointer text-xs text-text-muted transition-colors hover:text-text-primary"
         >
           {retryLabel}
         </button>
       )}
     </div>
-  )
+  );
 }

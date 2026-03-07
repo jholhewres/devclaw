@@ -352,6 +352,12 @@ func MatchesPattern(toolName, pattern string) bool {
 // Used for grouping tools in the system prompt and list_capabilities output.
 func InferToolCategory(name string) string {
 	switch {
+	// Skills management (must precede Filesystem — skill_edit would match "edit",
+	// skill_test would match "test", skill_db_* would match "read"/"write")
+	case strings.HasPrefix(name, "skill_") || name == "skill_manage" ||
+		strings.HasSuffix(name, "_skill"):
+		return "Skills"
+
 	// Filesystem operations
 	case strings.Contains(name, "read") ||
 		strings.Contains(name, "write") ||
@@ -379,7 +385,7 @@ func InferToolCategory(name string) string {
 		return "Memory"
 
 	// Scheduling
-	case name == "scheduler" || strings.HasPrefix(name, "cron_"):
+	case strings.HasPrefix(name, "scheduler_") || name == "scheduler" || strings.HasPrefix(name, "cron_"):
 		return "Scheduling"
 
 	// Vault/secrets
@@ -422,11 +428,6 @@ func InferToolCategory(name string) string {
 	// Daemon management
 	case name == "daemon":
 		return "Daemon"
-
-	// Skills management
-	case name == "skill_manage" || strings.HasSuffix(name, "_skill") ||
-		strings.Contains(name, "skill"):
-		return "Skills"
 
 	// Media
 	case strings.Contains(name, "image") ||

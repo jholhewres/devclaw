@@ -118,9 +118,10 @@ func ApplyTranscriptPolicy(messages []chatMessage, policy TranscriptPolicy) []ch
 	}
 
 	// 6. Repair tool use/result pairing.
-	if policy.RequireToolResultsAfterToolUse {
-		result = RepairToolUseResultPairing(result)
-	}
+	// Always applied regardless of policy — orphaned tool_use/tool_result
+	// pairs cause API rejections on ALL providers, not just Anthropic.
+	// Aligned with OpenClaw which sets repairToolUseResultPairing=true universally.
+	result = RepairToolUseResultPairing(result)
 
 	return result
 }

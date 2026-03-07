@@ -43,7 +43,6 @@ func CatalogSkills() []CatalogEntry {
 	catalogOnce.Do(func() {
 		var cf catalogFile
 		if err := yaml.Unmarshal(catalogYAML, &cf); err != nil {
-			catalogEntries = []CatalogEntry{}
 			return
 		}
 

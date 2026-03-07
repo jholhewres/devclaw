@@ -70,6 +70,7 @@ Agent Loop (agent.go) — LLM → tool execution cycle (max 25 turns)
 - React 18+ TypeScript, Vite, Tailwind CSS
 - SSE for streaming: `createPOSTSSEConnection` (POST) or `createSSEConnection` (GET)
 - API calls through `web/src/lib/api.ts`
+- **See [web/README.md](web/README.md) for guidelines details of frontend**
 
 ### Git Commits
 

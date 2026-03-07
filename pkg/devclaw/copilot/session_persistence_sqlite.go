@@ -144,7 +144,6 @@ func (p *SQLiteSessionPersistence) ListSessionsMeta() ([]SessionMeta, error) {
 			msgCount                                            int
 		)
 		if err := rows.Scan(&id, &channel, &chatID, &updatedAt, &msgCount, &firstMsg, &createdAt); err != nil {
-			p.logger.Warn("list sessions meta: scan row failed", "error", err)
 			continue
 		}
 		title := firstMsg
@@ -267,23 +266,13 @@ func (p *SQLiteSessionPersistence) SaveMeta(sessionID, channel, chatID string, c
 }
 
 // DeleteSession removes all data for a session (entries, facts, meta).
-// Returns an error if the session was not found in any table.
 func (p *SQLiteSessionPersistence) DeleteSession(sessionID string) error {
-	var totalAffected int64
 	for _, table := range []string{"session_entries", "session_facts", "session_meta"} {
-		res, err := p.db.Exec(
+		if _, err := p.db.Exec(
 			fmt.Sprintf("DELETE FROM %s WHERE session_id = ?", table), sessionID,
-		)
-		if err != nil {
+		); err != nil {
 			p.logger.Warn("failed to delete from table", "table", table, "session", sessionID, "err", err)
-			continue
 		}
-		if n, err := res.RowsAffected(); err == nil {
-			totalAffected += n
-		}
-	}
-	if totalAffected == 0 {
-		return fmt.Errorf("session %s not found in persistence", sessionID)
 	}
 	return nil
 }

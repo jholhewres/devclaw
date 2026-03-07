@@ -267,21 +267,18 @@ func (dm *DaemonManager) List() []Daemon {
 func (dm *DaemonManager) WriteToDaemon(label, input string) error {
 	dm.mu.RLock()
 	d, ok := dm.daemons[label]
-	if !ok {
-		dm.mu.RUnlock()
-		return fmt.Errorf("daemon %q not found", label)
-	}
-	status := d.Status
-	stdin := d.stdin
 	dm.mu.RUnlock()
 
-	if status != "running" {
-		return fmt.Errorf("daemon %q is not running (status: %s)", label, status)
+	if !ok {
+		return fmt.Errorf("daemon %q not found", label)
 	}
-	if stdin == nil {
+	if d.Status != "running" {
+		return fmt.Errorf("daemon %q is not running (status: %s)", label, d.Status)
+	}
+	if d.stdin == nil {
 		return fmt.Errorf("daemon %q has no stdin pipe", label)
 	}
-	if _, err := fmt.Fprintln(stdin, input); err != nil {
+	if _, err := fmt.Fprintln(d.stdin, input); err != nil {
 		return fmt.Errorf("write to %q stdin: %w", label, err)
 	}
 	return nil
@@ -307,27 +304,25 @@ func (dm *DaemonManager) ClearDaemon(label string) error {
 func (dm *DaemonManager) PollDaemon(label string) (string, error) {
 	dm.mu.RLock()
 	d, ok := dm.daemons[label]
+	dm.mu.RUnlock()
+
 	if !ok {
-		dm.mu.RUnlock()
 		return "", fmt.Errorf("daemon %q not found", label)
 	}
-	status := d.Status
-	pid := d.PID
-	exitCode := d.ExitCode
-	dm.mu.RUnlock()
 
 	count := atomic.AddInt64(&d.pollCount, 1)
 	lines := d.ringBuffer.Lines()
 
+	// Show last 30 lines as "recent" output.
 	const recentLines = 30
 	if len(lines) > recentLines {
 		lines = lines[len(lines)-recentLines:]
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("[%s] PID=%d", status, pid))
-	if status != "running" {
-		sb.WriteString(fmt.Sprintf(" exit_code=%d", exitCode))
+	sb.WriteString(fmt.Sprintf("[%s] PID=%d", d.Status, d.PID))
+	if d.Status != "running" {
+		sb.WriteString(fmt.Sprintf(" exit_code=%d", d.ExitCode))
 	}
 	sb.WriteString("\n--- recent output ---\n")
 	if len(lines) > 0 {
@@ -335,7 +330,7 @@ func (dm *DaemonManager) PollDaemon(label string) (string, error) {
 	} else {
 		sb.WriteString("(no output yet)")
 	}
-	if status == "running" {
+	if d.Status == "running" {
 		backoff := daemonPollBackoff(int(count))
 		sb.WriteString(fmt.Sprintf("\n\nNext poll in ~%s", backoff.Round(time.Second)))
 	}

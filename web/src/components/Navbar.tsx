@@ -1,26 +1,27 @@
 import { useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { Settings, LogOut, ChevronDown, Terminal } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
+import { useAppStore } from '@/stores/app'
+import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 
-interface NavbarProps {
-  sidebarCompact: boolean
-}
-
-export function Navbar({ sidebarCompact }: NavbarProps) {
+export function Navbar() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  // Close dropdown when clicking outside
+  /* Close dropdown on outside click */
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setIsUserMenuOpen(false)
       }
     }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
   }, [])
 
   const handleLogout = () => {
@@ -31,74 +32,71 @@ export function Navbar({ sidebarCompact }: NavbarProps) {
   return (
     <header
       className={cn(
-        'fixed right-0 top-0 z-30 h-16 bg-[#111827] border-b transition-all duration-300',
-        sidebarCompact ? 'lg:left-20' : 'lg:left-64'
+        'fixed right-0 top-0 z-30 flex h-14 items-center border-b border-border bg-bg-surface/80 backdrop-blur-md transition-all duration-200',
+        sidebarCollapsed ? 'lg:left-[72px]' : 'lg:left-64',
       )}
-      style={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}
     >
-      <div className="h-full px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-end h-full gap-4">
-          {/* User Dropdown */}
-          <div className="relative" ref={dropdownRef}>
-            <button
-              onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-              className="flex items-center gap-2 hover:bg-white/5 rounded-lg px-2 py-1.5 transition-all"
-            >
-              <div className="w-9 h-9 rounded-lg bg-[#3b82f6] flex items-center justify-center text-white">
-                <Terminal className="h-4 w-4" />
-              </div>
-              <div className="text-left hidden md:block">
-                <div className="text-sm font-medium text-[#f8fafc]">DevClaw</div>
-              </div>
-              <ChevronDown
-                className={cn('w-4 h-4 text-[#64748b] transition-transform duration-200', isUserMenuOpen && 'rotate-180')}
-              />
-            </button>
+      <div className="flex w-full items-center justify-end gap-2 px-4 sm:px-6">
+        {/* Language switcher */}
+        <LanguageSwitcher />
 
-              {/* Dropdown Menu */}
-              {isUserMenuOpen && (
-                <div
-                  className="absolute right-0 mt-2 w-56 rounded-xl shadow-xl overflow-hidden animate-fade-in border"
-                  style={{
-                    background: '#1e293b',
-                    borderColor: 'rgba(255, 255, 255, 0.1)',
-                  }}
-                >
-                  {/* User Info */}
-                  <div className="px-4 py-3 border-b bg-[#111827]" style={{ borderColor: 'rgba(255, 255, 255, 0.08)' }}>
-                    <p className="text-sm font-medium text-[#f8fafc]">DevClaw</p>
-                    <p className="text-xs text-[#64748b]">v1.6.0</p>
-                  </div>
-
-                  {/* Menu Items */}
-                  <div className="py-1">
-                    <button
-                      onClick={() => {
-                        navigate('/system')
-                        setIsUserMenuOpen(false)
-                      }}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc] transition-colors w-full"
-                    >
-                      <Settings className="w-5 h-5" />
-                      <span>Sistema</span>
-                    </button>
-                  </div>
-
-                  {/* Logout */}
-                  <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                    <button
-                      onClick={handleLogout}
-                      className="flex items-center gap-3 px-4 py-2.5 text-sm text-[#94a3b8] hover:bg-white/5 hover:text-[#f8fafc] transition-colors w-full"
-                    >
-                      <LogOut className="w-5 h-5" />
-                      <span>Sair</span>
-                    </button>
-                  </div>
-                </div>
-              )}
+        {/* User dropdown */}
+        <div className="relative" ref={dropdownRef}>
+          <button
+            onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+            className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-bg-hover"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-white">
+              <Terminal className="h-4 w-4" />
             </div>
-          </div>
+            <span className="hidden text-sm font-medium text-text-primary md:inline">
+              DevClaw
+            </span>
+            <ChevronDown
+              className={cn(
+                'h-4 w-4 text-text-muted transition-transform duration-200',
+                isUserMenuOpen && 'rotate-180',
+              )}
+            />
+          </button>
+
+          {/* Dropdown menu */}
+          {isUserMenuOpen && (
+            <div className="absolute right-0 mt-2 w-52 overflow-hidden rounded-xl border border-border bg-bg-elevated shadow-xl">
+              {/* User info header */}
+              <div className="border-b border-border bg-bg-surface px-4 py-3">
+                <p className="text-sm font-medium text-text-primary">DevClaw</p>
+                <p className="text-xs text-text-muted">v1.6.0</p>
+              </div>
+
+              {/* Menu items */}
+              <div className="py-1">
+                <button
+                  onClick={() => {
+                    navigate('/system')
+                    setIsUserMenuOpen(false)
+                  }}
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+                >
+                  <Settings className="h-4 w-4" />
+                  <span>{t('sidebar.system')}</span>
+                </button>
+              </div>
+
+              {/* Logout */}
+              <div className="border-t border-border">
+                <button
+                  onClick={handleLogout}
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span>{t('userMenu.logout')}</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
+      </div>
     </header>
   )
 }

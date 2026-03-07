@@ -109,12 +109,15 @@ type SubagentConfig struct {
 // Note: spawn tools (spawn_subagent, list_subagents, wait_subagent, stop_subagent)
 // are intentionally omitted — they are managed by depth-based logic in createChildExecutor.
 var DefaultSubagentDeniedTools = []string{
-	// Memory tool (subagents should not pollute parent's memory).
-	"memory",
-	// Scheduler dispatcher (subagents should not create/remove jobs).
-	"scheduler",
-	// Skill management dispatcher (subagents should not install/remove skills).
-	"skill_manage",
+	// Memory tools (subagents should not pollute parent's memory).
+	"memory_save", "memory_search", "memory_list", "memory_index",
+	// Scheduler tools (subagents should not create/remove jobs).
+	"scheduler_add", "scheduler_list", "scheduler_remove", "scheduler_search",
+	// Skill management tools (subagents should not install/remove skills).
+	"skill_init", "skill_edit", "skill_add_script", "skill_list",
+	"skill_test", "skill_install", "skill_defaults_list", "skill_defaults_install", "skill_remove",
+	// Legacy aliases (deprecated, kept for backward compatibility).
+	"memory", "scheduler", "skill_manage",
 }
 
 // DefaultSubagentConfig returns safe defaults.

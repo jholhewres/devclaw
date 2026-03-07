@@ -11,11 +11,15 @@ import {
   MessageCircle,
   ArrowRight,
   Clock,
-  Check,
-  X,
 } from 'lucide-react'
 import { api, type ChannelHealth } from '@/lib/api'
 import { timeAgo, cn } from '@/lib/utils'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { StatusDot } from '@/components/ui/StatusDot'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { LoadingSpinner } from '@/components/ui/ConfigComponents'
 
 /**
  * Channel management page.
@@ -39,22 +43,15 @@ export function Channels() {
   const otherChannels = channels.filter((ch) => ch.name !== 'whatsapp')
 
   if (loading) {
-    return (
-      <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-        <div className="h-8 w-8 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
-      </div>
-    )
+    return <LoadingSpinner />
   }
 
   return (
     <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
-      <div>
-        <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#475569]">{t('channels.subtitle')}</p>
-        <h1 className="mt-1 text-2xl font-bold text-[#f8fafc] tracking-tight">{t('channels.title')}</h1>
-        <p className="mt-2 text-sm text-[#64748b]">
-          Conecte canais de comunicação para enviar e receber mensagens
-        </p>
-      </div>
+      <PageHeader
+        title={t('channels.title')}
+        description={t('channelsPage.subtitle')}
+      />
 
       {channels.length === 0 ? (
         <EmptyChannels />
@@ -68,41 +65,46 @@ export function Channels() {
   )
 }
 
-/* ── WhatsApp Card ── */
+/* -- WhatsApp Card -- */
 
 function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavigate: () => void }) {
+  const { t } = useTranslation()
   const connected = channel.connected
   const hasLastMsg = channel.last_msg_at && channel.last_msg_at !== '0001-01-01T00:00:00Z'
 
   return (
-    <div className={cn(
-      'rounded-2xl p-6 border transition-all',
-      connected
-        ? 'bg-[#111827] border-[#22c55e]/20'
-        : 'bg-[#111827] border-white/10'
-    )}>
+    <Card
+      padding="lg"
+      className={cn(
+        'rounded-2xl transition-all',
+        connected ? 'border-success/20' : ''
+      )}
+    >
       <div className="flex items-start gap-4">
         {/* Icon */}
         <div className={cn(
           'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl transition-colors',
-          connected ? 'bg-[#22c55e]/10' : 'bg-[#1e293b]'
+          connected ? 'bg-success-subtle' : 'bg-bg-subtle'
         )}>
-          <WhatsAppIcon className={cn('h-6 w-6', connected ? 'text-[#22c55e]' : 'text-[#64748b]')} />
+          <WhatsAppIcon className={cn('h-6 w-6', connected ? 'text-success' : 'text-text-muted')} />
         </div>
 
         {/* Content */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
-            <h3 className="text-base font-semibold text-[#f8fafc]">WhatsApp</h3>
-            <StatusBadge connected={connected} />
+            <h3 className="text-base font-semibold text-text-primary">WhatsApp</h3>
+            <StatusDot
+              status={connected ? 'online' : 'offline'}
+              label={connected ? t('common.online') : t('common.offline')}
+            />
           </div>
 
-          <p className="mt-1 text-sm text-[#64748b]">
+          <p className="mt-1 text-sm text-text-muted">
             {connected
               ? hasLastMsg
-                ? `Última mensagem ${timeAgo(channel.last_msg_at)}`
-                : 'Conectado — aguardando mensagens'
-              : 'Escaneie o QR code para conectar'}
+                ? `${t('channelsPage.manage')} - ${timeAgo(channel.last_msg_at)}`
+                : t('common.connected')
+              : t('channelsPage.connect')}
           </p>
 
           {/* Actions */}
@@ -110,126 +112,128 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
             <button
               onClick={onNavigate}
               className={cn(
-                'flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all',
+                'flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer',
                 connected
-                  ? 'bg-[#1e293b] text-[#94a3b8] border border-white/10 hover:bg-[#334155] hover:text-[#f8fafc]'
-                  : 'bg-[#3b82f6] text-white hover:bg-[#2563eb]'
+                  ? 'bg-bg-subtle text-text-secondary border border-border hover:bg-bg-hover hover:text-text-primary'
+                  : 'bg-brand text-white hover:bg-brand-hover'
               )}
             >
               {connected ? (
                 <>
                   <Smartphone className="h-4 w-4" />
-                  Gerenciar
+                  {t('channelsPage.manage')}
                 </>
               ) : (
                 <>
                   <QrCode className="h-4 w-4" />
-                  Conectar via QR
+                  {t('channelsPage.connect')}
                   <ArrowRight className="h-4 w-4" />
                 </>
               )}
             </button>
 
             {channel.error_count > 0 && (
-              <span className="flex items-center gap-1.5 rounded-lg bg-[#f59e0b]/10 border border-[#f59e0b]/20 px-3 py-2 text-xs font-medium text-[#f59e0b]">
+              <Badge variant="warning" className="flex items-center gap-1.5 px-3 py-2">
                 <AlertTriangle className="h-3.5 w-3.5" />
-                {channel.error_count} {channel.error_count === 1 ? 'erro' : 'erros'}
-              </span>
+                {channel.error_count} {channel.error_count === 1 ? 'error' : 'errors'}
+              </Badge>
             )}
           </div>
         </div>
       </div>
-    </div>
+    </Card>
   )
 }
 
-/* ── Generic Channel Card ── */
+/* -- Generic Channel Card -- */
 
 function ChannelCard({ channel }: { channel: ChannelHealth }) {
+  const { t } = useTranslation()
   const connected = channel.connected
   const hasLastMsg = channel.last_msg_at && channel.last_msg_at !== '0001-01-01T00:00:00Z'
 
-  const channelConfig: Record<string, { name: string; color: string }> = {
-    discord: { name: 'Discord', color: '#5865F2' },
-    telegram: { name: 'Telegram', color: '#0088cc' },
-    slack: { name: 'Slack', color: '#4A154B' },
+  const channelConfig: Record<string, { name: string }> = {
+    discord: { name: 'Discord' },
+    telegram: { name: 'Telegram' },
+    slack: { name: 'Slack' },
   }
 
-  const config = channelConfig[channel.name] || { name: channel.name, color: '#64748b' }
+  const config = channelConfig[channel.name] || { name: channel.name }
 
   return (
-    <div className={cn(
-      'rounded-xl p-5 border transition-all',
-      connected
-        ? 'bg-[#111827] border-white/10'
-        : 'bg-[#111827]/50 border-white/5'
-    )}>
+    <Card
+      padding="md"
+      className={cn(
+        'rounded-xl transition-all',
+        !connected && 'opacity-60'
+      )}
+    >
       <div className="flex items-center gap-4">
         {/* Icon */}
         <div className={cn(
           'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors',
-          connected ? 'bg-[#1e293b]' : 'bg-[#1e293b]/50'
+          connected ? 'bg-bg-subtle' : 'bg-bg-subtle/50'
         )}>
           {connected ? (
-            <Wifi className="h-5 w-5 text-[#22c55e]" />
+            <Wifi className="h-5 w-5 text-success" />
           ) : (
-            <WifiOff className="h-5 w-5 text-[#475569]" />
+            <WifiOff className="h-5 w-5 text-text-muted" />
           )}
         </div>
 
         {/* Content */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
-            <h3 className="text-sm font-semibold text-[#f8fafc]">{config.name}</h3>
-            <StatusBadge connected={connected} small />
+            <h3 className="text-sm font-semibold text-text-primary">{config.name}</h3>
+            <StatusDot
+              status={connected ? 'online' : 'offline'}
+              label={connected ? t('common.online') : t('common.offline')}
+            />
           </div>
-          <p className="mt-0.5 text-xs text-[#64748b]">
+          <p className="mt-0.5 text-xs text-text-muted">
             {connected
               ? hasLastMsg
-                ? `Última mensagem ${timeAgo(channel.last_msg_at)}`
-                : 'Conectado'
-              : 'Desconectado'}
+                ? timeAgo(channel.last_msg_at)
+                : t('common.connected')
+              : t('common.disconnected')}
           </p>
         </div>
 
         {/* Status indicators */}
         <div className="flex items-center gap-3">
           {channel.error_count > 0 && (
-            <span className="flex items-center gap-1 text-xs text-[#f59e0b]">
+            <span className="flex items-center gap-1 text-xs text-warning">
               <AlertTriangle className="h-3.5 w-3.5" />
               {channel.error_count}
             </span>
           )}
           {hasLastMsg && (
-            <span className="flex items-center gap-1.5 text-xs text-[#475569]">
+            <span className="flex items-center gap-1.5 text-xs text-text-muted">
               <Clock className="h-3.5 w-3.5" />
               {timeAgo(channel.last_msg_at)}
             </span>
           )}
         </div>
       </div>
-    </div>
+    </Card>
   )
 }
 
-/* ── Empty State ── */
+/* -- Empty State -- */
 
 function EmptyChannels() {
+  const { t } = useTranslation()
   return (
-    <div className="mt-8 rounded-2xl border border-white/10 bg-[#111827] p-8">
-      <div className="flex flex-col items-center text-center">
-        <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-[#1e293b]">
-          <Radio className="h-7 w-7 text-[#64748b]" />
-        </div>
-        <h3 className="mt-4 text-base font-semibold text-[#f8fafc]">Nenhum canal configurado</h3>
-        <p className="mt-2 max-w-md text-sm text-[#64748b]">
-          Canais permitem que o DevClaw envie e receba mensagens via WhatsApp, Discord, Telegram e Slack.
-        </p>
-      </div>
+    <Card padding="lg" className="mt-8 rounded-2xl">
+      <EmptyState
+        icon={<Radio className="h-6 w-6" />}
+        title={t('channelsPage.title')}
+        description={t('channelsPage.subtitle')}
+      />
 
-      <div className="mt-6 mx-auto max-w-md rounded-xl bg-[#0c1222] border border-white/10 p-4">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-[#475569]">Exemplo em config.yaml</p>
-        <pre className="mt-3 overflow-x-auto font-mono text-xs leading-relaxed text-[#94a3b8]">
+      <div className="mt-6 mx-auto max-w-md rounded-xl bg-bg-main border border-border p-4">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">config.yaml</p>
+        <pre className="mt-3 overflow-x-auto font-mono text-xs leading-relaxed text-text-secondary">
 {`channels:
   whatsapp:
     enabled: true
@@ -240,42 +244,17 @@ function EmptyChannels() {
         </pre>
       </div>
 
-      <div className="mt-5 flex items-center justify-center gap-6 text-xs text-[#475569]">
+      <div className="mt-5 flex items-center justify-center gap-6 text-xs text-text-muted">
         <span className="flex items-center gap-2">
           <MessageCircle className="h-3.5 w-3.5" />
           WhatsApp, Discord, Telegram, Slack
         </span>
-        <span className="h-3 w-px bg-white/10" />
-        <span>Tokens são armazenados no vault</span>
       </div>
-    </div>
+    </Card>
   )
 }
 
-/* ── Status Badge ── */
-
-function StatusBadge({ connected, small = false }: { connected: boolean; small?: boolean }) {
-  return (
-    <span className={cn(
-      'inline-flex items-center gap-1.5 rounded-full font-medium transition-colors',
-      small
-        ? 'px-2 py-0.5 text-[10px]'
-        : 'px-2.5 py-1 text-[11px]',
-      connected
-        ? 'bg-[#22c55e]/10 text-[#22c55e]'
-        : 'bg-[#475569]/20 text-[#64748b]'
-    )}>
-      {connected ? (
-        <Check className={cn('shrink-0', small ? 'h-3 w-3' : 'h-3.5 w-3.5')} />
-      ) : (
-        <X className={cn('shrink-0', small ? 'h-3 w-3' : 'h-3.5 w-3.5')} />
-      )}
-      {connected ? 'Online' : 'Offline'}
-    </span>
-  )
-}
-
-/* ── WhatsApp Icon ── */
+/* -- WhatsApp Icon -- */
 
 function WhatsAppIcon({ className }: { className?: string }) {
   return (

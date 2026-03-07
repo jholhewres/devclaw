@@ -1,5 +1,6 @@
-// Package copilot – memory_tools.go implements the memory dispatcher tool.
-// Uses dispatcher pattern to reduce tool count while maintaining functionality.
+// Package copilot – memory_tools.go implements individual memory tools.
+// Each tool has a focused schema with only the parameters it needs,
+// eliminating the ambiguity of the dispatcher pattern.
 package copilot
 
 import (
@@ -12,78 +13,101 @@ import (
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
 )
 
-// MemoryDispatcherConfig holds configuration for the memory dispatcher tool.
+// MemoryDispatcherConfig holds configuration for memory tools.
 type MemoryDispatcherConfig struct {
 	Store       *memory.FileStore
 	SQLiteStore *memory.SQLiteStore
 	Config      MemoryConfig
 }
 
-// RegisterMemoryTools registers the memory dispatcher tool.
-// Uses a single tool with action parameter instead of multiple tools.
+// RegisterMemoryTools registers individual memory tools.
+// Replaces the old dispatcher pattern with focused tools:
+// memory_save, memory_search, memory_list, memory_index.
 func RegisterMemoryTools(executor *ToolExecutor, cfg MemoryDispatcherConfig) {
 	store := cfg.Store
 	sqliteStore := cfg.SQLiteStore
 	memCfg := cfg.Config
 
-	// Build description based on available features
-	desc := "Manage long-term memory with actions: save, search, list, index. " +
-		"Use action='save' to remember facts/preferences, action='search' to find relevant memories, " +
-		"action='list' to see recent entries, action='index' to rebuild search index."
-	if sqliteStore != nil {
-		desc += " Supports semantic search (vector + keyword hybrid)."
-	}
-
-	// Define schema with all possible parameters
-	schema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"action": map[string]any{
-				"type":        "string",
-				"enum":        []string{"save", "search", "list", "index"},
-				"description": "Action to perform: save, search, list, index",
-			},
-			"content": map[string]any{
-				"type":        "string",
-				"description": "Content to save (for action='save')",
-			},
-			"category": map[string]any{
-				"type":        "string",
-				"description": "Category for saved content: 'fact', 'preference', 'event', 'summary' (for action='save')",
-				"enum":        []string{"fact", "preference", "event", "summary"},
-			},
-			"query": map[string]any{
-				"type":        "string",
-				"description": "Search query (for action='search')",
-			},
-			"limit": map[string]any{
-				"type":        "integer",
-				"description": "Maximum results to return (for action='search' or 'list')",
-			},
-		},
-		"required": []string{"action"},
-	}
-
+	// ── memory_save ──
 	executor.Register(
-		MakeToolDefinition("memory", desc, schema),
+		MakeToolDefinition("memory_save",
+			"Save a fact, preference, event, or summary to long-term memory. "+
+				"Use this to remember important information from conversations.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"content": map[string]any{
+						"type":        "string",
+						"description": "The content to remember (fact, preference, event, or summary)",
+					},
+					"category": map[string]any{
+						"type":        "string",
+						"description": "Category: fact, preference, event, or summary",
+						"enum":        []string{"fact", "preference", "event", "summary"},
+					},
+				},
+				"required": []string{"content"},
+			}),
 		func(ctx context.Context, args map[string]any) (any, error) {
-			action, _ := args["action"].(string)
-			if action == "" {
-				return nil, fmt.Errorf("action is required")
-			}
+			return handleMemorySave(ctx, store, sqliteStore, memCfg, args)
+		},
+	)
 
-			switch action {
-			case "save":
-				return handleMemorySave(ctx, store, sqliteStore, memCfg, args)
-			case "search":
-				return handleMemorySearch(ctx, store, sqliteStore, memCfg, args)
-			case "list":
-				return handleMemoryList(ctx, store, args)
-			case "index":
-				return handleMemoryIndex(ctx, sqliteStore, memCfg)
-			default:
-				return nil, fmt.Errorf("unknown action: %s (valid: save, search, list, index)", action)
-			}
+	// ── memory_search ──
+	searchDesc := "Search long-term memory for relevant facts, preferences, or past events. " +
+		"Use this before answering questions about prior work, decisions, dates, people, or preferences."
+	if sqliteStore != nil {
+		searchDesc += " Supports semantic search (vector + keyword hybrid)."
+	}
+	executor.Register(
+		MakeToolDefinition("memory_search", searchDesc,
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type":        "string",
+						"description": "Search query describing what to find in memory",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Maximum results to return (default: 10, max: 100)",
+					},
+				},
+				"required": []string{"query"},
+			}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			return handleMemorySearch(ctx, store, sqliteStore, memCfg, args)
+		},
+	)
+
+	// ── memory_list ──
+	executor.Register(
+		MakeToolDefinition("memory_list",
+			"List recent entries from long-term memory, ordered by date.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Maximum entries to return (default: 20, max: 100)",
+					},
+				},
+			}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			return handleMemoryList(ctx, store, args)
+		},
+	)
+
+	// ── memory_index ──
+	executor.Register(
+		MakeToolDefinition("memory_index",
+			"Rebuild the memory search index. Use this after manually editing memory files.",
+			map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			}),
+		func(ctx context.Context, _ map[string]any) (any, error) {
+			return handleMemoryIndex(ctx, sqliteStore, memCfg)
 		},
 	)
 }
@@ -92,10 +116,9 @@ func RegisterMemoryTools(executor *ToolExecutor, cfg MemoryDispatcherConfig) {
 func handleMemorySave(_ context.Context, store *memory.FileStore, sqliteStore *memory.SQLiteStore, cfg MemoryConfig, args map[string]any) (any, error) {
 	content, _ := args["content"].(string)
 	if content == "" {
-		return nil, fmt.Errorf("content is required for save action")
+		return nil, fmt.Errorf("content is required")
 	}
 
-	// Validate category
 	validCategories := map[string]bool{"fact": true, "preference": true, "event": true, "summary": true}
 	category, _ := args["category"].(string)
 	if category == "" {
@@ -122,7 +145,6 @@ func handleMemorySave(_ context.Context, store *memory.FileStore, sqliteStore *m
 			chunkCfg.MaxTokens = 500
 		}
 		go func() {
-			// Use timeout to prevent goroutine leak on shutdown
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			_ = sqliteStore.IndexMemoryDir(ctx, memDir, chunkCfg)
@@ -136,7 +158,7 @@ func handleMemorySave(_ context.Context, store *memory.FileStore, sqliteStore *m
 func handleMemorySearch(ctx context.Context, store *memory.FileStore, sqliteStore *memory.SQLiteStore, cfg MemoryConfig, args map[string]any) (any, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
-		return nil, fmt.Errorf("query is required for search action")
+		return nil, fmt.Errorf("query is required")
 	}
 
 	maxLimit := 100
@@ -150,7 +172,6 @@ func handleMemorySearch(ctx context.Context, store *memory.FileStore, sqliteStor
 
 	// Try hybrid search first if SQLite is available.
 	if sqliteStore != nil {
-		// Build config for temporal decay and MMR
 		decayCfg := memory.TemporalDecayConfig{
 			Enabled:      cfg.Search.TemporalDecay.Enabled,
 			HalfLifeDays: cfg.Search.TemporalDecay.HalfLifeDays,

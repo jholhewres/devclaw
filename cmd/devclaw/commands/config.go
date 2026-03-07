@@ -274,9 +274,6 @@ Examples:
   devclaw config get access.owners`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if args[0] == "" {
-				return fmt.Errorf("path cannot be empty")
-			}
 			configPath, _ := cmd.Root().PersistentFlags().GetString("config")
 			if configPath == "" {
 				configPath = copilot.FindConfigFile()
@@ -325,9 +322,6 @@ Examples:
   devclaw config set agent.max_turns 30`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if args[0] == "" {
-				return fmt.Errorf("path cannot be empty")
-			}
 			configPath, _ := cmd.Root().PersistentFlags().GetString("config")
 			if configPath == "" {
 				configPath = copilot.FindConfigFile()
@@ -356,9 +350,7 @@ Examples:
 
 			// Backup before writing.
 			bakPath := configPath + ".bak"
-			if err := os.WriteFile(bakPath, data, 0o600); err != nil {
-				return fmt.Errorf("backup config: %w", err)
-			}
+			_ = os.WriteFile(bakPath, data, 0o600)
 
 			out, err := yaml.Marshal(doc.Content[0])
 			if err != nil {
@@ -415,9 +407,7 @@ Examples:
 
 			// Backup before writing.
 			bakPath := configPath + ".bak"
-			if err := os.WriteFile(bakPath, data, 0o600); err != nil {
-				return fmt.Errorf("backup config: %w", err)
-			}
+			_ = os.WriteFile(bakPath, data, 0o600)
 
 			out, err := yaml.Marshal(doc.Content[0])
 			if err != nil {

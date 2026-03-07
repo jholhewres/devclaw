@@ -194,11 +194,7 @@ func (inst *Installer) extractZip(zipPath, destDir string) error {
 
 		outFile, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, f.Mode())
 		if os.IsExist(err) {
-			if err := os.Remove(target); err != nil {
-				rc.Close()
-				return fmt.Errorf("removing existing file before overwrite: %w", err)
-			}
-			outFile, err = os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, f.Mode())
+			outFile, err = os.OpenFile(target, os.O_WRONLY, f.Mode())
 		}
 		if err != nil {
 			rc.Close()

@@ -302,6 +302,8 @@ func (s *projectManagerSkill) Execute(_ context.Context, input string) (string, 
 	return "", fmt.Errorf("use specific tools: project-manager_list, project-manager_register, project-manager_activate")
 }
 
+func (s *projectManagerSkill) Location() string { return "" }
+
 func (s *projectManagerSkill) Shutdown() error { return nil }
 
 // resolveProject resolves a project from args (project_id or session active).

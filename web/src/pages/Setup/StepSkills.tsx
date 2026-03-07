@@ -5,6 +5,7 @@ import {
   Wrench, Sparkles, ChevronDown, ChevronRight, MessageSquare,
   Image, DollarSign, X,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import type { SetupData } from './SetupWizard'
 import {
   StepContainer, StepHeader, FieldGroup, Card, Checkbox, Button,
@@ -49,7 +50,7 @@ export function StepSkills({ data, updateData }: Props) {
   }), [t])
 
   function getCategoryMeta(cat?: string) {
-    return CATEGORY_META[cat ?? ''] ?? { label: cat ?? t('setupPage.catOther'), icon: Puzzle, color: 'text-[#64748b]' }
+    return CATEGORY_META[cat ?? ''] ?? { label: cat ?? t('setupPage.catOther'), icon: Puzzle, color: 'text-text-muted' }
   }
 
   useEffect(() => {
@@ -158,8 +159,8 @@ export function StepSkills({ data, updateData }: Props) {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-12">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#1e293b] border-t-[#3b82f6]" />
-        <p className="text-sm text-[#64748b]">{t('setupPage.loadingCatalog')}</p>
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-bg-subtle border-t-brand" />
+        <p className="text-sm text-text-muted">{t('setupPage.loadingCatalog')}</p>
       </div>
     )
   }
@@ -167,11 +168,11 @@ export function StepSkills({ data, updateData }: Props) {
   if (skills.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 py-10">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#1e293b]">
-          <Puzzle className="h-5 w-5 text-[#64748b]" />
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-bg-subtle">
+          <Puzzle className="h-5 w-5 text-text-muted" />
         </div>
-        <p className="text-sm text-[#94a3b8]">{t('setupPage.noSkills')}</p>
-        <p className="text-xs text-[#64748b]">{t('setupPage.skillsLater')}</p>
+        <p className="text-sm text-text-secondary">{t('setupPage.noSkills')}</p>
+        <p className="text-xs text-text-muted">{t('setupPage.skillsLater')}</p>
       </div>
     )
   }
@@ -187,9 +188,9 @@ export function StepSkills({ data, updateData }: Props) {
         {/* Starter Pack */}
         <Card highlight={allStarterSelected ? 'green' : undefined}>
           <Checkbox checked={allStarterSelected} onChange={toggleStarterPack}>
-            <Sparkles className="h-4 w-4 text-[#22c55e]" />
-            <span className="text-sm font-medium text-[#f8fafc]">{t('setupPage.starterPack')}</span>
-            <span className="text-xs text-[#64748b]">({starterSkills.length})</span>
+            <Sparkles className="h-4 w-4 text-success" />
+            <span className="text-sm font-medium text-text-primary">{t('setupPage.starterPack')}</span>
+            <span className="text-xs text-text-muted">({starterSkills.length})</span>
           </Checkbox>
 
           <div className="mt-2.5 flex flex-wrap gap-1.5">
@@ -199,19 +200,20 @@ export function StepSkills({ data, updateData }: Props) {
                 <button
                   key={skill.name}
                   onClick={() => toggleSkill(skill.name)}
-                  className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-all ${
+                  className={cn(
+                    'flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-all',
                     isActive
-                      ? 'border-[#22c55e]/30 bg-[#22c55e]/10 text-[#f8fafc]'
-                      : 'border-white/[0.06] bg-[#0c1222]/50 text-[#94a3b8] hover:border-white/10 hover:text-[#f8fafc]'
-                  }`}
+                      ? 'border-success/30 bg-success-subtle text-text-primary'
+                      : 'border-border bg-bg-main/50 text-text-secondary hover:border-border-hover hover:text-text-primary',
+                  )}
                   title={skill.description}
                 >
                   {isActive ? (
-                    <svg className="h-3 w-3 text-[#22c55e]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <svg className="h-3 w-3 text-success" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                   ) : (
-                    <div className="h-3 w-3 rounded-sm border border-white/20" />
+                    <div className="h-3 w-3 rounded-sm border border-border-hover" />
                   )}
                   <span className="font-medium">{skill.name}</span>
                 </button>
@@ -223,7 +225,7 @@ export function StepSkills({ data, updateData }: Props) {
         {/* Catalog */}
         <div>
           <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wider text-[#64748b]">
+            <p className="text-xs font-semibold uppercase tracking-wider text-text-muted">
               {t('setupPage.catalogAdd')}
             </p>
             <div className="flex gap-1.5">
@@ -238,14 +240,15 @@ export function StepSkills({ data, updateData }: Props) {
 
           {/* Category pills + Search */}
           <div className="mt-2.5 flex items-center gap-2">
-            <div className="flex flex-1 gap-1 overflow-x-auto pb-0.5 scrollbar-none">
+            <div className="flex flex-1 gap-1 overflow-x-auto pb-0.5 scrollbar-hide">
               <button
                 onClick={() => setActiveCategory(null)}
-                className={`shrink-0 cursor-pointer rounded-md px-2 py-1 text-[10px] font-medium transition-all ${
+                className={cn(
+                  'shrink-0 cursor-pointer rounded-md px-2 py-1 text-[10px] font-medium transition-all',
                   activeCategory === null
-                    ? 'bg-[#3b82f6] text-white'
-                    : 'text-[#64748b] hover:bg-[#1e293b] hover:text-[#f8fafc]'
-                }`}
+                    ? 'bg-brand text-white'
+                    : 'text-text-muted hover:bg-bg-subtle hover:text-text-primary',
+                )}
               >
                 {t('setupPage.all')}
               </button>
@@ -255,11 +258,12 @@ export function StepSkills({ data, updateData }: Props) {
                   <button
                     key={cat}
                     onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
-                    className={`shrink-0 cursor-pointer rounded-md px-2 py-1 text-[10px] font-medium transition-all ${
+                    className={cn(
+                      'shrink-0 cursor-pointer rounded-md px-2 py-1 text-[10px] font-medium transition-all',
                       activeCategory === cat
-                        ? 'bg-[#3b82f6] text-white'
-                        : 'text-[#64748b] hover:bg-[#1e293b] hover:text-[#f8fafc]'
-                    }`}
+                        ? 'bg-brand text-white'
+                        : 'text-text-muted hover:bg-bg-subtle hover:text-text-primary',
+                    )}
                   >
                     {meta.label}
                   </button>
@@ -268,18 +272,22 @@ export function StepSkills({ data, updateData }: Props) {
             </div>
 
             <div className="relative shrink-0">
-              <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[#475569]" />
+              <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-text-muted" />
               <input
                 type="text"
                 placeholder={t('setupPage.search')}
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                className="w-28 rounded-md border border-white/[0.06] bg-[#0c1222] py-1 pl-7 pr-6 text-[11px] text-[#f8fafc] placeholder:text-[#475569] outline-none transition-all focus:w-36 focus:border-[#3b82f6]/50"
+                className={cn(
+                  'w-28 rounded-md border border-border bg-bg-main py-1 pl-7 pr-6',
+                  'text-[11px] text-text-primary placeholder:text-text-muted',
+                  'outline-none transition-all focus:w-36 focus:border-brand/50',
+                )}
               />
               {filter && (
                 <button
                   onClick={() => setFilter('')}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 cursor-pointer text-[#475569] hover:text-[#f8fafc]"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 cursor-pointer text-text-muted hover:text-text-primary"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -288,9 +296,9 @@ export function StepSkills({ data, updateData }: Props) {
           </div>
 
           {/* Skills by category */}
-          <div className="mt-3 max-h-[200px] space-y-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-[#1e293b]">
+          <div className="mt-3 max-h-[200px] space-y-1 overflow-y-auto pr-1 scrollbar-thin scrollbar-track-transparent scrollbar-thumb-bg-subtle">
             {sortedCategories.length === 0 && (
-              <p className="py-6 text-center text-xs text-[#475569]">
+              <p className="py-6 text-center text-xs text-text-muted">
                 {filter ? t('setupPage.noSkillsMatch', { filter }) : t('setupPage.noAdditional')}
               </p>
             )}
@@ -303,28 +311,29 @@ export function StepSkills({ data, updateData }: Props) {
               const isCollapsed = collapsedCats.has(cat)
 
               return (
-                <div key={cat} className="rounded-lg border border-white/[0.04]">
+                <div key={cat} className="rounded-lg border border-bg-hover">
                   <button
                     onClick={() => toggleCategory(cat)}
                     className="flex w-full cursor-pointer items-center gap-2 px-3 py-2"
                   >
                     {isCollapsed
-                      ? <ChevronRight className="h-3 w-3 text-[#475569]" />
-                      : <ChevronDown className="h-3 w-3 text-[#475569]" />
+                      ? <ChevronRight className="h-3 w-3 text-text-muted" />
+                      : <ChevronDown className="h-3 w-3 text-text-muted" />
                     }
-                    <CatIcon className={`h-3.5 w-3.5 ${meta.color}`} />
-                    <span className={`text-xs font-semibold ${meta.color}`}>{meta.label}</span>
-                    <span className="text-[10px] text-[#475569]">
+                    <CatIcon className={cn('h-3.5 w-3.5', meta.color)} />
+                    <span className={cn('text-xs font-semibold', meta.color)}>{meta.label}</span>
+                    <span className="text-[10px] text-text-muted">
                       {selectedInCat > 0 ? `${selectedInCat}/${skillsInCat.length}` : skillsInCat.length}
                     </span>
                     <div className="flex-1" />
                     <button
                       onClick={(e) => { e.stopPropagation(); toggleEntireCategory(cat, skillsInCat) }}
-                      className={`cursor-pointer rounded px-1.5 py-0.5 text-[9px] font-medium transition-all ${
+                      className={cn(
+                        'cursor-pointer rounded px-1.5 py-0.5 text-[9px] font-medium transition-all',
                         selectedInCat === skillsInCat.length
-                          ? 'bg-[#22c55e]/10 text-[#22c55e]'
-                          : 'text-[#475569] hover:bg-[#1e293b] hover:text-[#94a3b8]'
-                      }`}
+                          ? 'bg-success-subtle text-success'
+                          : 'text-text-muted hover:bg-bg-subtle hover:text-text-secondary',
+                      )}
                     >
                       {selectedInCat === skillsInCat.length ? t('setupPage.deselect') : t('setupPage.selectSkills')}
                     </button>
@@ -338,17 +347,19 @@ export function StepSkills({ data, updateData }: Props) {
                           <button
                             key={skill.name}
                             onClick={() => toggleSkill(skill.name)}
-                            className={`flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-all ${
+                            className={cn(
+                              'flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-2 text-left transition-all',
                               isActive
-                                ? 'border-[#3b82f6]/30 bg-[#3b82f6]/5'
-                                : 'border-transparent bg-[#0c1222]/50 hover:bg-[#111827]'
-                            }`}
+                                ? 'border-brand/30 bg-brand/5'
+                                : 'border-transparent bg-bg-main/50 hover:bg-bg-surface',
+                            )}
                           >
-                            <div className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border transition-all ${
+                            <div className={cn(
+                              'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border transition-all',
                               isActive
-                                ? 'border-transparent bg-[#3b82f6] text-white'
-                                : 'border-white/20 bg-[#1e293b]'
-                            }`}>
+                                ? 'border-transparent bg-brand text-white'
+                                : 'border-border-hover bg-bg-subtle',
+                            )}>
                               {isActive && (
                                 <svg className="h-2 w-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -356,8 +367,8 @@ export function StepSkills({ data, updateData }: Props) {
                               )}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <span className="text-[11px] font-medium text-[#f8fafc]">{skill.name}</span>
-                              <p className="truncate text-[9px] leading-tight text-[#64748b]">{skill.description}</p>
+                              <span className="text-[11px] font-medium text-text-primary">{skill.name}</span>
+                              <p className="truncate text-[9px] leading-tight text-text-muted">{skill.description}</p>
                             </div>
                           </button>
                         )
@@ -371,20 +382,20 @@ export function StepSkills({ data, updateData }: Props) {
         </div>
 
         {/* Summary */}
-        <div className="flex items-center justify-between rounded-lg border border-white/[0.06] bg-[#0c1222]/50 px-3 py-2">
+        <div className="flex items-center justify-between rounded-lg border border-border bg-bg-main/50 px-3 py-2">
           <div className="flex items-center gap-1.5">
-            <div className="h-2 w-2 rounded-full bg-[#3b82f6]" />
-            <span className="text-[11px] text-[#94a3b8]">
-              <strong className="text-[#f8fafc]">{data.enabledSkills.length}</strong> {t('setupPage.skillsSelected')}
+            <div className="h-2 w-2 rounded-full bg-brand" />
+            <span className="text-[11px] text-text-secondary">
+              <strong className="text-text-primary">{data.enabledSkills.length}</strong> {t('setupPage.skillsSelected')}
             </span>
             {extraCount > 0 && (
-              <span className="text-[10px] text-[#64748b]">
+              <span className="text-[10px] text-text-muted">
                 ({starterSkills.filter((s) => data.enabledSkills.includes(s.name)).length} + {extraCount})
               </span>
             )}
           </div>
           {filtered.length !== catalogSkills.length && (
-            <p className="text-[10px] text-[#475569]">
+            <p className="text-[10px] text-text-muted">
               {t('setupPage.showingOf', { shown: filtered.length, total: catalogSkills.length })}
             </p>
           )}

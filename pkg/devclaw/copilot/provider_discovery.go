@@ -32,7 +32,7 @@ type ProviderDiscoveryConfig struct {
 	// OllamaURL is the base URL for the Ollama API (default: http://localhost:11434).
 	OllamaURL string `yaml:"ollama_url"`
 
-	// VLLMURL is the base URL for the vLLM API (default: http://localhost:8000).
+	// VLLMUrl is the base URL for the vLLM API (default: http://localhost:8000).
 	VLLMURL string `yaml:"vllm_url"`
 
 	// VLLMAPIKey is the optional API key for vLLM (some deployments require auth).

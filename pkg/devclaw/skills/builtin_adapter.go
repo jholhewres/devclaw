@@ -148,6 +148,8 @@ func (s *calculatorSkill) Execute(_ context.Context, input string) (string, erro
 	return fmt.Sprintf("%g", result), nil
 }
 
+func (s *calculatorSkill) Location() string { return "" }
+
 func (s *calculatorSkill) Shutdown() error { return nil }
 
 // evalSimpleMath evaluates basic math expressions (recursive descent parser).
@@ -348,6 +350,8 @@ func (s *webFetchSkill) Execute(ctx context.Context, input string) (string, erro
 	return s.fetch(ctx, strings.TrimSpace(input))
 }
 
+func (s *webFetchSkill) Location() string { return "" }
+
 func (s *webFetchSkill) Shutdown() error { return nil }
 
 func (s *webFetchSkill) fetch(ctx context.Context, url string) (string, error) {
@@ -457,6 +461,8 @@ func (s *datetimeSkill) Execute(_ context.Context, input string) (string, error)
 	return now.Format("2006-01-02 15:04:05 (Mon) MST"), nil
 }
 
+func (s *datetimeSkill) Location() string { return "" }
+
 func (s *datetimeSkill) Shutdown() error { return nil }
 
 // ============================================================
@@ -525,6 +531,8 @@ func (s *skillDBSkill) Init(_ context.Context, _ map[string]any) error { return 
 func (s *skillDBSkill) Execute(_ context.Context, input string) (string, error) {
 	return "", fmt.Errorf("skill-db is a tool-based skill. Use skill_db_* tools directly.")
 }
+
+func (s *skillDBSkill) Location() string { return "" }
 
 func (s *skillDBSkill) Shutdown() error { return nil }
 
@@ -629,6 +637,8 @@ func (s *imageGenSkill) Execute(ctx context.Context, input string) (string, erro
 	}
 	return fmt.Sprintf("%v", result), nil
 }
+
+func (s *imageGenSkill) Location() string { return "" }
 
 func (s *imageGenSkill) Shutdown() error { return nil }
 

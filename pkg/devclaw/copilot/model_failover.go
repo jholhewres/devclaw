@@ -390,23 +390,58 @@ func ClassifyError(statusCode int, errMsg string) FailoverReason {
 // IsLikelyContextOverflowError returns true if the error message indicates a context
 // window overflow. Context overflow errors should NOT trigger model failover because
 // rotating to a model with a potentially smaller context window makes things worse.
+// Aligned with OpenClaw's isLikelyContextOverflowError + isContextOverflowError.
 func IsLikelyContextOverflowError(errMsg string) bool {
 	lower := strings.ToLower(errMsg)
 
-	// Exclude rate limit TPM errors that mention "tokens".
+	// Exclude rate limit TPM errors that mention "tokens" — these are NOT overflow.
 	if strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit") ||
 		strings.Contains(lower, "tokens per minute") || strings.Contains(lower, "tpm") {
 		return false
 	}
 
-	return strings.Contains(lower, "context length exceeded") ||
+	// Exclude reasoning constraint errors (e.g. "reasoning effort too high").
+	if strings.Contains(lower, "reasoning") && (strings.Contains(lower, "constraint") || strings.Contains(lower, "budget")) {
+		return false
+	}
+
+	// Exclude "context window too small" (model selection issue, not overflow).
+	if strings.Contains(lower, "too small") {
+		return false
+	}
+
+	// Strict matches (high confidence).
+	if strings.Contains(lower, "context_length_exceeded") ||
+		strings.Contains(lower, "context length exceeded") ||
 		strings.Contains(lower, "request_too_large") ||
 		strings.Contains(lower, "prompt is too long") ||
 		strings.Contains(lower, "exceeds model context window") ||
 		strings.Contains(lower, "maximum context length") ||
 		strings.Contains(lower, "request size exceeds") ||
-		strings.Contains(lower, "context window") && (strings.Contains(lower, "too large") ||
-		strings.Contains(lower, "too long") || strings.Contains(lower, "exceed"))
+		strings.Contains(lower, "context_window_exceeded") {
+		return true
+	}
+
+	// Chinese provider messages.
+	if strings.Contains(errMsg, "上下文过长") || strings.Contains(errMsg, "超出最大上下文") {
+		return true
+	}
+
+	// Heuristic: "context window" + overflow-like term.
+	if strings.Contains(lower, "context window") && (strings.Contains(lower, "too large") ||
+		strings.Contains(lower, "too long") || strings.Contains(lower, "exceed") ||
+		strings.Contains(lower, "overflow") || strings.Contains(lower, "limit")) {
+		return true
+	}
+
+	// Heuristic: "input" or "request" + "context" + overflow-like term.
+	if (strings.Contains(lower, "input") || strings.Contains(lower, "request")) &&
+		strings.Contains(lower, "context") &&
+		(strings.Contains(lower, "too large") || strings.Contains(lower, "exceed") || strings.Contains(lower, "limit")) {
+		return true
+	}
+
+	return false
 }
 
 // GetCooldownStatus returns the current cooldown state of all models.

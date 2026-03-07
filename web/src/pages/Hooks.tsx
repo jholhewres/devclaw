@@ -14,6 +14,12 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { HookInfo, HookEventInfo } from '@/lib/api'
+import { cn } from '@/lib/utils'
+import { Card } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
+import { Tabs } from '@/components/ui/Tabs'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { LoadingSpinner } from '@/components/ui/ConfigComponents'
 
 /**
  * Lifecycle hooks management page.
@@ -24,7 +30,7 @@ export function Hooks() {
   const [events, setEvents] = useState<HookEventInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
-  const [view, setView] = useState<'hooks' | 'events'>('hooks')
+  const [view, setView] = useState<string>('hooks')
   const [filterEvent, setFilterEvent] = useState<string>('')
 
   const loadData = useCallback(async () => {
@@ -75,63 +81,46 @@ export function Hooks() {
   const activeCount = hooks.filter((h) => h.enabled).length
 
   if (loading) {
-    return (
-      <div className="flex flex-1 items-center justify-center bg-[#0c1222]">
-        <div className="h-10 w-10 rounded-full border-4 border-[#1e293b] border-t-[#3b82f6] animate-spin" />
-      </div>
-    )
+    return <LoadingSpinner />
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-[#0c1222]">
+    <div className="flex flex-1 flex-col overflow-hidden bg-bg-main">
       <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#475569]">
+            <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-text-muted">
               {t('hooks.subtitle')}
             </p>
-            <h1 className="mt-1 text-2xl font-bold text-[#f8fafc] tracking-tight">
+            <h1 className="mt-1 text-2xl font-bold text-text-primary tracking-tight">
               {t('hooks.title')}
             </h1>
-            <p className="mt-2 text-base text-[#64748b]">
-              {hooks.length} · {activeCount} {t('common.enabled').toLowerCase()}
+            <p className="mt-2 text-base text-text-muted">
+              {hooks.length} · {activeCount} {t('hooks.active')}
             </p>
           </div>
 
           {/* View toggle */}
-          <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-[#111827] p-1">
-            <button
-              onClick={() => setView('hooks')}
-              className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-                view === 'hooks'
-                  ? 'bg-[#3b82f6] text-white'
-                  : 'text-[#64748b] hover:text-[#f8fafc]'
-              }`}
-            >
-              Hooks
-            </button>
-            <button
-              onClick={() => setView('events')}
-              className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-                view === 'events'
-                  ? 'bg-[#3b82f6] text-white'
-                  : 'text-[#64748b] hover:text-[#f8fafc]'
-              }`}
-            >
-              Eventos
-            </button>
-          </div>
+          <Tabs
+            tabs={[
+              { id: 'hooks', label: t('hooks.tabHooks') },
+              { id: 'events', label: t('hooks.tabEvents') },
+            ]}
+            activeTab={view}
+            onChange={setView}
+          />
         </div>
 
         {/* Message */}
         {message && (
           <div
-            className={`mt-6 rounded-xl px-5 py-4 text-sm border ${
+            className={cn(
+              'mt-6 rounded-xl px-5 py-4 text-sm border',
               message.type === 'success'
-                ? 'bg-[#22c55e]/10 text-[#22c55e] border-[#22c55e]/20'
-                : 'bg-[#ef4444]/10 text-[#f87171] border-[#ef4444]/20'
-            }`}
+                ? 'bg-success-subtle text-success border-success/20'
+                : 'bg-error-subtle text-error border-error/20'
+            )}
           >
             {message.text}
           </div>
@@ -139,17 +128,17 @@ export function Hooks() {
 
         {view === 'hooks' ? (
           <>
-            {/* Filtro por evento */}
+            {/* Filter by event */}
             {hooks.length > 0 && (
               <div className="mt-6 flex items-center gap-3">
-                <Filter className="h-4 w-4 text-[#64748b]" />
+                <Filter className="h-4 w-4 text-text-muted" />
                 <select
                   value={filterEvent}
                   onChange={(e) => setFilterEvent(e.target.value)}
-                  aria-label="Filtrar por evento"
-                  className="h-9 cursor-pointer rounded-lg border border-white/10 bg-[#111827] px-3 text-xs text-[#f8fafc] outline-none transition-all hover:border-white/20 focus:border-[#3b82f6]/50"
+                  aria-label={t('hooks.allEvents')}
+                  className="h-9 cursor-pointer rounded-lg border border-border bg-bg-surface px-3 text-xs text-text-primary outline-none transition-all hover:border-border-hover focus:border-brand/50"
                 >
-                  <option value="">Todos os eventos</option>
+                  <option value="">{t('hooks.allEvents')}</option>
                   {events
                     .filter((ev) => ev.hooks.length > 0)
                     .map((ev) => (
@@ -161,39 +150,37 @@ export function Hooks() {
                 {filterEvent && (
                   <button
                     onClick={() => setFilterEvent('')}
-                    className="cursor-pointer text-xs text-[#64748b] hover:text-[#f8fafc] transition-colors"
+                    className="cursor-pointer text-xs text-text-muted hover:text-text-primary transition-colors"
                   >
-                    Limpar filtro
+                    {t('hooks.clearFilter')}
                   </button>
                 )}
               </div>
             )}
 
-            {/* Lista de hooks */}
+            {/* Hook list */}
             <div className="mt-6">
               <div className="mb-5 flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#1e293b]">
-                  <Zap className="h-4 w-4 text-[#64748b]" />
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-bg-subtle">
+                  <Zap className="h-4 w-4 text-text-muted" />
                 </div>
                 <div>
-                  <h2 className="text-base font-semibold text-[#f8fafc]">Hooks registrados</h2>
-                  <p className="text-xs text-[#64748b]">
+                  <h2 className="text-base font-semibold text-text-primary">{t('hooks.tabHooks')} {t('hooks.registered')}</h2>
+                  <p className="text-xs text-text-muted">
                     {filteredHooks.length === 0
-                      ? 'Nenhum hook encontrado'
+                      ? t('hooks.noHooks')
                       : `${filteredHooks.length} hook${filteredHooks.length > 1 ? 's' : ''}`}
                   </p>
                 </div>
               </div>
 
               {filteredHooks.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-white/10 bg-[#111827] px-8 py-14 text-center">
-                  <Zap className="mx-auto h-10 w-10 text-[#475569]" />
-                  <p className="mt-4 text-sm text-[#64748b]">
-                    {filterEvent
-                      ? `Nenhum hook registrado para o evento "${filterEvent}"`
-                      : 'Nenhum hook registrado. Hooks são adicionados por plugins, skills e pelo sistema.'}
-                  </p>
-                </div>
+                <EmptyState
+                  icon={<Zap className="h-6 w-6" />}
+                  title={filterEvent ? t('hooks.noHooksForEvent', { event: filterEvent }) : t('hooks.noHooks')}
+                  description={!filterEvent ? t('hooks.noHooksHint') : undefined}
+                  className="rounded-2xl border border-dashed border-border bg-bg-surface"
+                />
               ) : (
                 <div className="space-y-3">
                   {filteredHooks.map((hook) => (
@@ -209,7 +196,7 @@ export function Hooks() {
             </div>
           </>
         ) : (
-          /* Vista de eventos */
+          /* Events view */
           <div className="mt-6 space-y-3">
             {events.map((ev) => (
               <EventCard
@@ -225,28 +212,24 @@ export function Hooks() {
         )}
 
         {/* Info card */}
-        <div className="mt-10 mb-6 rounded-2xl border border-white/10 bg-[#111827] p-6">
-          <h3 className="text-sm font-semibold text-[#94a3b8] mb-3">Sobre Hooks</h3>
-          <p className="text-xs text-[#64748b] leading-relaxed">
-            Hooks permitem que plugins, skills e o sistema observem e modifiquem o comportamento
-            do agente em pontos específicos do ciclo de vida. Hooks com menor prioridade
-            executam primeiro. Para eventos bloqueantes (<code className="text-[#94a3b8]">pre_tool_use</code>,{' '}
-            <code className="text-[#94a3b8]">user_prompt_submit</code>), o primeiro hook que
-            bloquear impede a operação.
+        <Card padding="lg" className="mt-10 mb-6 rounded-2xl">
+          <h3 className="text-sm font-semibold text-text-secondary mb-3">{t('hooks.aboutTitle')}</h3>
+          <p className="text-xs text-text-muted leading-relaxed">
+            {t('hooks.aboutTip1')} {t('hooks.aboutTip2')} {t('hooks.aboutTip3')}
           </p>
-          <div className="mt-3 flex items-start gap-2 rounded-lg bg-[#1e293b] px-3 py-2">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#f59e0b]" />
-            <p className="text-xs text-[#f59e0b]">
-              Desativar hooks do sistema pode afetar funcionalidades essenciais. Use com cautela.
+          <div className="mt-3 flex items-start gap-2 rounded-lg bg-bg-subtle px-3 py-2">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+            <p className="text-xs text-warning">
+              {t('hooks.aboutWarning')}
             </p>
           </div>
-        </div>
+        </Card>
       </div>
     </div>
   )
 }
 
-/* ── Componente de Card de Hook ── */
+/* -- Hook Card Component -- */
 
 function HookCard({
   hook,
@@ -257,57 +240,47 @@ function HookCard({
   onToggle: (name: string, enabled: boolean) => void
   onDelete: (name: string) => void
 }) {
+  const { t } = useTranslation()
   const [confirming, setConfirming] = useState(false)
 
   const sourceLabel = (source: string) => {
-    if (!source || source === 'system') return 'Sistema'
-    if (source.startsWith('plugin:')) return `Plugin: ${source.slice(7)}`
-    if (source.startsWith('skill:')) return `Skill: ${source.slice(6)}`
+    if (!source || source === 'system') return t('hooks.sourceSystem')
+    if (source.startsWith('plugin:')) return `${t('hooks.sourcePlugin')}: ${source.slice(7)}`
+    if (source.startsWith('skill:')) return `${t('hooks.sourceSkill')}: ${source.slice(6)}`
     return source
   }
 
-  const sourceColor = (source: string) => {
-    if (!source || source === 'system') return 'text-[#f8fafc] bg-[#1e293b]'
-    if (source.startsWith('plugin:')) return 'text-[#f8fafc] bg-[#1e293b]'
-    if (source.startsWith('skill:')) return 'text-[#f8fafc] bg-[#1e293b]'
-    return 'text-[#94a3b8] bg-[#1e293b]'
-  }
-
   return (
-    <div
-      className={`rounded-2xl border bg-[#111827] p-5 transition-all ${
-        hook.enabled ? 'border-white/10' : 'border-white/5 opacity-60'
-      }`}
+    <Card
+      padding="md"
+      className={cn(
+        'rounded-2xl p-5 transition-all',
+        !hook.enabled && 'opacity-60'
+      )}
     >
-      {/* Linha superior */}
+      {/* Top row */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2.5 mb-1.5">
             {hook.enabled ? (
-              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#22c55e]" />
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
             ) : (
-              <XCircle className="h-3.5 w-3.5 shrink-0 text-[#64748b]" />
+              <XCircle className="h-3.5 w-3.5 shrink-0 text-text-muted" />
             )}
-            <span className="text-sm font-semibold text-[#f8fafc] truncate">{hook.name}</span>
-            <span
-              className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-medium ${sourceColor(
-                hook.source
-              )}`}
-            >
-              {sourceLabel(hook.source)}
-            </span>
+            <span className="text-sm font-semibold text-text-primary truncate">{hook.name}</span>
+            <Badge>{sourceLabel(hook.source)}</Badge>
           </div>
 
           {hook.description && (
-            <p className="text-xs text-[#94a3b8] mt-1">{hook.description}</p>
+            <p className="text-xs text-text-secondary mt-1">{hook.description}</p>
           )}
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
-          {/* Prioridade */}
+          {/* Priority */}
           <span
-            className="flex h-8 items-center rounded-lg px-2 text-[11px] font-mono text-[#64748b]"
-            title="Prioridade (menor = executa primeiro)"
+            className="flex h-8 items-center rounded-lg px-2 text-[11px] font-mono text-text-muted"
+            title={t('hooks.priority')}
           >
             P{hook.priority}
           </span>
@@ -315,8 +288,8 @@ function HookCard({
           {/* Toggle */}
           <button
             onClick={() => onToggle(hook.name, !hook.enabled)}
-            title={hook.enabled ? 'Desativar' : 'Ativar'}
-            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[#64748b] transition-colors hover:bg-[#1e293b] hover:text-[#f8fafc]"
+            title={hook.enabled ? t('common.disabled') : t('common.enabled')}
+            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
           >
             {hook.enabled ? (
               <PowerOff className="h-4 w-4" />
@@ -325,16 +298,16 @@ function HookCard({
             )}
           </button>
 
-          {/* Excluir */}
+          {/* Delete */}
           {confirming ? (
             <button
               onClick={() => {
                 onDelete(hook.name)
                 setConfirming(false)
               }}
-              className="flex h-8 cursor-pointer items-center gap-1 rounded-lg bg-[#ef4444]/10 px-2 text-xs font-medium text-[#f87171] transition-colors hover:bg-[#ef4444]/20"
+              className="flex h-8 cursor-pointer items-center gap-1 rounded-lg bg-error-subtle px-2 text-xs font-medium text-error transition-colors hover:bg-error/20"
             >
-              Confirmar
+              {t('common.confirm')}
             </button>
           ) : (
             <button
@@ -342,8 +315,8 @@ function HookCard({
                 setConfirming(true)
                 setTimeout(() => setConfirming(false), 3000)
               }}
-              title="Remover"
-              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[#64748b] transition-colors hover:bg-[#ef4444]/10 hover:text-[#f87171]"
+              title={t('common.delete')}
+              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-error-subtle hover:text-error"
             >
               <Trash2 className="h-4 w-4" />
             </button>
@@ -351,22 +324,22 @@ function HookCard({
         </div>
       </div>
 
-      {/* Eventos */}
+      {/* Events */}
       <div className="mt-3 flex flex-wrap gap-1.5">
         {hook.events.map((event) => (
           <span
             key={event}
-            className="rounded-md bg-[#1e293b] px-2 py-0.5 text-[11px] font-mono text-[#94a3b8]"
+            className="rounded-md bg-bg-subtle px-2 py-0.5 text-[11px] font-mono text-text-secondary"
           >
             {event}
           </span>
         ))}
       </div>
-    </div>
+    </Card>
   )
 }
 
-/* ── Componente de Card de Evento ── */
+/* -- Event Card Component -- */
 
 function EventCard({
   event,
@@ -375,11 +348,12 @@ function EventCard({
   event: HookEventInfo
   onFilterByEvent: (event: string) => void
 }) {
+  const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
   const hasHooks = event.hooks.length > 0
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#111827] transition-all">
+    <Card padding="sm" className="rounded-2xl transition-all p-0">
       <button
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
@@ -387,47 +361,47 @@ function EventCard({
       >
         <div className="flex items-center gap-3">
           {expanded ? (
-            <ChevronDown className="h-4 w-4 text-[#64748b]" />
+            <ChevronDown className="h-4 w-4 text-text-muted" />
           ) : (
-            <ChevronRight className="h-4 w-4 text-[#64748b]" />
+            <ChevronRight className="h-4 w-4 text-text-muted" />
           )}
           <div className="text-left">
-            <code className="text-sm font-semibold text-[#f8fafc]">{event.event}</code>
-            <p className="text-xs text-[#64748b] mt-0.5">{event.description}</p>
+            <code className="text-sm font-semibold text-text-primary">{event.event}</code>
+            <p className="text-xs text-text-muted mt-0.5">{event.description}</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           {hasHooks ? (
-            <span className="rounded-full bg-[#3b82f6]/20 px-2.5 py-0.5 text-[11px] font-medium text-[#3b82f6]">
+            <Badge className="bg-brand-subtle text-brand">
               {event.hooks.length} hook{event.hooks.length > 1 ? 's' : ''}
-            </span>
+            </Badge>
           ) : (
-            <span className="text-[11px] text-[#475569]">sem hooks</span>
+            <span className="text-[11px] text-text-muted">{t('hooks.noHooksAttached')}</span>
           )}
         </div>
       </button>
 
       {expanded && hasHooks && (
-        <div className="border-t border-white/10 px-5 py-3">
+        <div className="border-t border-border px-5 py-3">
           <div className="space-y-1.5">
             {event.hooks.map((hookName) => (
               <div
                 key={hookName}
-                className="flex items-center justify-between rounded-lg bg-[#0c1222] px-3 py-2"
+                className="flex items-center justify-between rounded-lg bg-bg-main px-3 py-2"
               >
-                <span className="text-xs font-mono text-[#f8fafc]">{hookName}</span>
+                <span className="text-xs font-mono text-text-primary">{hookName}</span>
                 <button
                   onClick={() => onFilterByEvent(event.event)}
-                  className="cursor-pointer text-[11px] text-[#64748b] hover:text-[#f8fafc] transition-colors"
+                  className="cursor-pointer text-[11px] text-text-muted hover:text-text-primary transition-colors"
                 >
-                  Ver na lista
+                  {t('hooks.viewInList')}
                 </button>
               </div>
             ))}
           </div>
         </div>
       )}
-    </div>
+    </Card>
   )
 }

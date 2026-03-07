@@ -63,7 +63,7 @@ COPY --from=builder /app/devclaw /usr/local/bin/devclaw
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8085/health || exit 1
 
-EXPOSE 8085 8090
+EXPOSE 8085 47716
 
 ENTRYPOINT ["devclaw"]
 CMD ["serve"]

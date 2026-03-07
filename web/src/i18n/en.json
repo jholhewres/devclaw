@@ -68,7 +68,8 @@
     "newConversation": "New conversation",
     "home": "Home",
     "scheduledTasks": "Scheduled tasks",
-    "seeAllConversations": "See all ({{count}})"
+    "seeAllConversations": "See all ({{count}})",
+    "recent": "Recent"
   },
   "userMenu": {
     "myAccount": "My account",
@@ -122,7 +123,7 @@
     "browseClawHub": "Browse skills on ClawHub"
   },
   "channelsPage": {
-    "title": "Connect a channel to chat with GatorClaw",
+    "title": "Connect a channel to chat with DevClaw",
     "subtitle": "We take care of installation and updates.",
     "connect": "Connect",
     "connected": "Connected",
@@ -136,17 +137,17 @@
   },
   "settingsPage": {
     "title": "Settings",
-    "tabSystem": "System",
-    "tabCanais": "Channels",
-    "tabDominio": "Domain & Network",
-    "tabMemoria": "Memory",
-    "tabAcessos": "Access & Permissions",
-    "tabSeguranca": "Security",
-    "tabDev": "Developer Settings"
+    "tabGeneral": "General",
+    "tabAI": "AI & Models",
+    "tabAccess": "Access & Security",
+    "tabData": "Data & Storage",
+    "tabIntegrations": "Integrations"
   },
   "sidebarSections": {
     "start": "Start",
+    "main": "Main",
     "manage": "Manage",
+    "system": "System",
     "settings": "Settings",
     "security": "Security"
   },
@@ -447,7 +448,7 @@
   "config": {
     "title": "Configuration",
     "subtitle": "Settings",
-    "pageTitle": "Fine-tune the intelligence behind your GatorClaw.",
+    "pageTitle": "Fine-tune the intelligence behind your DevClaw.",
     "pageDescription": "These choices define what your agent can do and how it communicates with you.",
     "providerModel": "Main AI provider and model",
     "providerDesc": "Manage the model that will drive the reasoning and responses of your agent.",
@@ -663,7 +664,7 @@
     "sshAllowedHosts": "SSH allowed hosts",
     "dangerousCommands": "Dangerous commands",
     "vault": "Vault",
-    "vaultDesc": "Manage your external tool passwords connected to GatorClaw.",
+    "vaultDesc": "Manage your external tool passwords connected to DevClaw.",
     "vaultExists": "Vault exists",
     "vaultUnlocked": "Vault unlocked",
     "vaultKeys": "Stored keys",
@@ -678,7 +679,7 @@
     "auditTime": "Time",
     "noAuditEntries": "No audit entries",
     "auth": "Authentication",
-    "authDesc": "Manage your main access password to GatorClaw.",
+    "authDesc": "Manage your main access password to DevClaw.",
     "gatewayAuth": "Gateway Auth",
     "gatewayAuthHint": "Bearer token for HTTP API",
     "webuiAuth": "Web UI Auth",
@@ -712,7 +713,7 @@
   },
   "login": {
     "title": "Login",
-    "subtitle": "GatorClaw Admin",
+    "subtitle": "DevClaw Admin",
     "password": "Password",
     "passwordPlaceholder": "Enter your password",
     "login": "Login",
@@ -794,11 +795,11 @@
     "modeParanoid": "Super restricted",
     "modeParanoidDesc": "All actions will only be executed with your confirmation",
     "recommended": "Recommended",
-    "completeTitle": "Setting up GatorClaw",
+    "completeTitle": "Setting up DevClaw",
     "completeSubtitle": "Configuring agent skills...",
     "completeFooter": "Just a few seconds and it will be worth it.",
     "skillsTitle": "Select the initial skills you want to give your agent",
-    "skillsDescription": "Here we list some of the most used skills, but you can install many others in the GatorClaw panel and chat.",
+    "skillsDescription": "Here we list some of the most used skills, but you can install many others in the DevClaw panel and chat.",
     "skillsInfo": "Choose the skills now. The connection with your tools will be made after the initial setup.",
     "skillsSearch": "Search skills...",
     "skillsEmpty": "No skills found.",
@@ -1011,6 +1012,10 @@
     "title": "WhatsApp",
     "subtitle": "Connect your account via QR code",
     "connected": "Connected",
+    "owner": "Owner",
+    "admin": "Admin",
+    "allowed": "Allowed",
+    "blocked": "Blocked",
     "checkingConnection": "Checking connection...",
     "waitingQR": "Waiting for QR code...",
     "scanQR": "Scan the QR code with your WhatsApp",
@@ -1067,8 +1072,9 @@
     },
     "users": "Users",
     "noUsers": "No users configured",
-    "level": "Level",
-    "changeLevel": "Change level",
+    "phoneNumber": "WhatsApp Number",
+    "permission": "Permission",
+    "changePermission": "Change permission",
     "levels": {
       "owner": "Owner",
       "admin": "Admin",

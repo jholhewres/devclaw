@@ -1,13 +1,33 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
-import { api, type MessageInfo } from '@/lib/api'
-import { createPOSTSSEConnection, type SSEEvent } from '@/lib/sse'
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { api, type MessageInfo } from '@/lib/api';
+import { createPOSTSSEConnection, type SSEEvent } from '@/lib/sse';
+
+/**
+ * Strips internal LLM tags that should never be shown to the user.
+ * Mirrors the server-side StripInternalTags logic.
+ */
+function stripInternalTags(text: string): string {
+  return (
+    text
+      .replace(/\[\[reply_to[^\]]*\]\]/g, '')
+      .replace(/<final>[\s\S]*?<\/final>/g, '')
+      .replace(/<\/?final>/g, '')
+      // Note: <thinking> and <reasoning> tags are intentionally preserved here
+      // so that ChatMessageV2's extractThinkingContent() can extract them
+      // and display them in a collapsible ThinkingBlock.
+      .replace(/\bNO_REPLY\b/g, '')
+      .replace(/\bHEARTBEAT_OK\b/g, '')
+      .replace(/\[Tools used:[^\]]*\]\n?/g, '')
+      .replace(/<tool_provenance>[\s\S]*?<\/tool_provenance>\n?/g, '')
+  );
+}
 
 interface ChatState {
-  messages: MessageInfo[]
-  streamingContent: string
-  isStreaming: boolean
-  error: string | null
-  isLoadingHistory: boolean
+  messages: MessageInfo[];
+  streamingContent: string;
+  isStreaming: boolean;
+  error: string | null;
+  isLoadingHistory: boolean;
 }
 
 /**
@@ -21,57 +41,75 @@ export function useChat(sessionId: string | null) {
     isStreaming: false,
     error: null,
     isLoadingHistory: false,
-  })
-  const cleanupRef = useRef<(() => void) | null>(null)
-  const streamContentRef = useRef('')
+  });
+  const cleanupRef = useRef<(() => void) | null>(null);
+  const streamContentRef = useRef('');
 
   /* Carregar histórico ao mudar de sessão */
   useEffect(() => {
     // FIX: Clean up any active SSE stream from the previous session
     // to prevent events from leaking across sessions.
-    cleanupRef.current?.()
-    cleanupRef.current = null
-    streamContentRef.current = ''
+    cleanupRef.current?.();
+    cleanupRef.current = null;
+    streamContentRef.current = '';
 
     if (!sessionId) {
-      setState({ messages: [], streamingContent: '', isStreaming: false, error: null, isLoadingHistory: false })
-      return
+      setState({
+        messages: [],
+        streamingContent: '',
+        isStreaming: false,
+        error: null,
+        isLoadingHistory: false,
+      });
+      return;
     }
 
-    setState({ messages: [], streamingContent: '', isStreaming: false, error: null, isLoadingHistory: true })
+    setState({
+      messages: [],
+      streamingContent: '',
+      isStreaming: false,
+      error: null,
+      isLoadingHistory: true,
+    });
 
-    api.chat.history(sessionId).then((messages) => {
-      setState((s) => ({ ...s, messages, error: null, isLoadingHistory: false }))
-    }).catch(() => {
-      // Sessão nova, sem histórico - stop loading
-      setState((s) => ({ ...s, isLoadingHistory: false }))
-    })
-  }, [sessionId])
+    api.chat
+      .history(sessionId)
+      .then((messages) => {
+        const cleaned = messages.map((m) =>
+          m.role === 'assistant' ? { ...m, content: stripInternalTags(m.content).trim() } : m
+        );
+        setState((s) => ({ ...s, messages: cleaned, error: null, isLoadingHistory: false }));
+      })
+      .catch(() => {
+        // Sessão nova, sem histórico - stop loading
+        setState((s) => ({ ...s, isLoadingHistory: false }));
+      });
+  }, [sessionId]);
 
   /* Enviar mensagem */
   const sendMessage = useCallback(
     async (content: string) => {
-      if (!sessionId || !content.trim()) return
+      if (!sessionId || !content.trim()) return;
 
       // Add user message immediately
       const userMsg: MessageInfo = {
         role: 'user',
         content: content.trim(),
         timestamp: new Date().toISOString(),
-      }
+      };
       setState((s) => ({
         ...s,
         messages: [...s.messages, userMsg],
         streamingContent: '',
         isStreaming: true,
         error: null,
-      }))
-      streamContentRef.current = ''
+      }));
+      streamContentRef.current = '';
 
       try {
         // Unified endpoint: POST with body, receive SSE on the same connection.
         // Eliminates the extra round-trip of send → GET stream.
-        cleanupRef.current?.()
+        cleanupRef.current?.();
         cleanupRef.current = createPOSTSSEConnection({
           url: `/api/chat/${sessionId}/stream`,
           body: { content: content.trim() },
@@ -81,19 +119,19 @@ export function useChat(sessionId: string | null) {
               ...s,
               isStreaming: false,
               error: err.message || 'Stream error',
-            }))
+            }));
           },
-        })
+        });
       } catch (err) {
         setState((s) => ({
           ...s,
           isStreaming: false,
           error: err instanceof Error ? err.message : 'Failed to send message',
-        }))
+        }));
       }
     },
-    [sessionId],
-  )
+    [sessionId]
+  );
 
   /* Processar eventos SSE do stream */
   const handleStreamEvent = useCallback((event: SSEEvent) => {
@@ -101,118 +139,121 @@ export function useChat(sessionId: string | null) {
       case 'run_start': {
         // Unified endpoint sends run_id on start — no action needed,
         // but we could store it for advanced abort flows if desired.
-        break
+        break;
       }
       case 'delta': {
-        const data = event.data as { content: string }
-        streamContentRef.current += data.content
+        const data = event.data as { content: string };
+        streamContentRef.current += data.content;
         setState((s) => ({
           ...s,
-          streamingContent: streamContentRef.current,
-        }))
-        break
+          streamingContent: stripInternalTags(streamContentRef.current),
+        }));
+        break;
       }
       case 'tool_use': {
-        const data = event.data as { tool: string; input: Record<string, unknown> }
+        const data = event.data as { tool: string; input: Record<string, unknown> };
         const toolMsg: MessageInfo = {
           role: 'tool',
           content: `Usando: ${data.tool}`,
           timestamp: new Date().toISOString(),
           tool_name: data.tool,
           tool_input: JSON.stringify(data.input, null, 2),
-        }
+        };
         setState((s) => ({
           ...s,
           messages: [...s.messages, toolMsg],
-        }))
-        break
+        }));
+        break;
       }
       case 'tool_result': {
-        const data = event.data as { tool: string; output: string }
+        const data = event.data as { tool: string; output: string };
         const resultMsg: MessageInfo = {
           role: 'tool',
           content: data.output,
           timestamp: new Date().toISOString(),
           tool_name: data.tool,
-        }
+        };
         setState((s) => ({
           ...s,
           messages: [...s.messages, resultMsg],
-        }))
-        break
+        }));
+        break;
       }
       case 'done': {
-        // Flush streaming content como mensagem final
+        // Flush streaming content as final message, stripping internal tags
         if (streamContentRef.current) {
+          const cleanContent = stripInternalTags(streamContentRef.current).trim();
           const assistantMsg: MessageInfo = {
             role: 'assistant',
-            content: streamContentRef.current,
+            content: cleanContent,
             timestamp: new Date().toISOString(),
-          }
+          };
           setState((s) => ({
             ...s,
             messages: [...s.messages, assistantMsg],
             streamingContent: '',
             isStreaming: false,
-          }))
+          }));
         } else {
-          setState((s) => ({ ...s, isStreaming: false, streamingContent: '' }))
+          setState((s) => ({ ...s, isStreaming: false, streamingContent: '' }));
         }
-        streamContentRef.current = ''
-        cleanupRef.current?.()
-        cleanupRef.current = null
-        break
+        streamContentRef.current = '';
+        cleanupRef.current?.();
+        cleanupRef.current = null;
+        break;
       }
       case 'error': {
-        const data = event.data as { message: string }
+        const data = event.data as { message: string };
         setState((s) => ({
           ...s,
           isStreaming: false,
           streamingContent: '',
           error: data.message,
-        }))
-        cleanupRef.current?.()
-        cleanupRef.current = null
-        break
+        }));
+        cleanupRef.current?.();
+        cleanupRef.current = null;
+        break;
       }
     }
-  }, [])
+  }, []);
 
   /* Abortar */
   const abort = useCallback(async () => {
-    if (!sessionId) return
-    cleanupRef.current?.()
-    cleanupRef.current = null
+    if (!sessionId) return;
+    cleanupRef.current?.();
+    cleanupRef.current = null;
 
     try {
-      await api.chat.abort(sessionId)
-    } catch { /* ignore */ }
+      await api.chat.abort(sessionId);
+    } catch {
+      /* ignore */
+    }
 
     // Flush o que tiver
     if (streamContentRef.current) {
       const msg: MessageInfo = {
         role: 'assistant',
-        content: streamContentRef.current + '\n\n*[Abortado]*',
+        content: `${streamContentRef.current}\n\n*[Abortado]*`,
         timestamp: new Date().toISOString(),
-      }
+      };
       setState((s) => ({
         ...s,
         messages: [...s.messages, msg],
         streamingContent: '',
         isStreaming: false,
-      }))
+      }));
     } else {
-      setState((s) => ({ ...s, isStreaming: false, streamingContent: '' }))
+      setState((s) => ({ ...s, isStreaming: false, streamingContent: '' }));
     }
-    streamContentRef.current = ''
-  }, [sessionId])
+    streamContentRef.current = '';
+  }, [sessionId]);
 
   /* Cleanup ao desmontar */
   useEffect(() => {
     return () => {
-      cleanupRef.current?.()
-    }
-  }, [])
+      cleanupRef.current?.();
+    };
+  }, []);
 
   return {
     messages: state.messages,
@@ -222,5 +263,5 @@ export function useChat(sessionId: string | null) {
     isLoadingHistory: state.isLoadingHistory,
     sendMessage,
     abort,
-  }
+  };
 }

@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Check, Phone, Globe } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import type { SetupData } from './SetupWizard'
 import {
   StepContainer, StepHeader, FieldGroup, Field, Input, Card, InfoBox,
@@ -76,29 +77,31 @@ export function StepChannels({ data, updateData }: Props) {
               <button
                 key={ch.id}
                 onClick={() => toggleChannel(ch.id)}
-                className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-all ${
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-all',
                   isActive
-                    ? 'border-transparent bg-[#1e293b]'
-                    : 'border-white/[0.06] bg-[#0c1222]/50 hover:border-white/10 hover:bg-[#111827]'
-                }`}
+                    ? 'border-transparent bg-bg-subtle'
+                    : 'border-border bg-bg-main/50 hover:border-border-hover hover:bg-bg-surface',
+                )}
                 style={isActive ? { borderLeftWidth: '3px', borderLeftColor: ch.color } : {}}
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#1e293b]">
-                  <div style={{ color: isActive ? ch.color : '#64748b' }}>{ch.icon}</div>
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-bg-subtle">
+                  <div style={{ color: isActive ? ch.color : 'var(--color-text-muted)' }}>{ch.icon}</div>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-[#f8fafc]">
+                  <span className="text-sm font-medium text-text-primary">
                     {t(`setupPage.channel${ch.id.charAt(0).toUpperCase() + ch.id.slice(1)}`)}
                   </span>
-                  <p className="text-xs text-[#94a3b8]">
+                  <p className="text-xs text-text-secondary">
                     {t(`setupPage.channel${ch.id.charAt(0).toUpperCase() + ch.id.slice(1)}Desc`)}
                   </p>
                 </div>
-                <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-all ${
+                <div className={cn(
+                  'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-all',
                   isActive
-                    ? 'border-transparent bg-[#22c55e] text-white'
-                    : 'border-white/20 bg-[#1e293b]'
-                }`}>
+                    ? 'border-transparent bg-success text-white'
+                    : 'border-border-hover bg-bg-subtle',
+                )}>
                   {isActive && <Check className="h-3 w-3" />}
                 </div>
               </button>

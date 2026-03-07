@@ -264,9 +264,7 @@ func rotateConfigBackup(path string, keep int) {
 	for i := keep - 1; i >= 1; i-- {
 		src := fmt.Sprintf("%s.bak.%d", path, i)
 		dst := fmt.Sprintf("%s.bak.%d", path, i+1)
-		if _, err := os.Stat(src); err == nil {
-			_ = os.Rename(src, dst)
-		}
+		_ = os.Rename(src, dst)
 	}
 
 	// Remove the oldest if it exceeds the keep limit.

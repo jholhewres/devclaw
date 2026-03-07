@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { User, Globe, Clock } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import type { SetupData } from './SetupWizard'
 import { StepContainer, StepHeader, FieldGroup, Field, Input, Select } from './SetupComponents'
 
@@ -9,30 +10,30 @@ interface Props {
 }
 
 const LANGUAGES = [
-  { value: 'pt-BR', label: 'Português (Brasil)', flag: '🇧🇷' },
-  { value: 'en', label: 'English', flag: '🇺🇸' },
-  { value: 'es', label: 'Español', flag: '🇪🇸' },
+  { value: 'pt-BR', label: 'Portugues (Brasil)', flag: '\uD83C\uDDE7\uD83C\uDDF7' },
+  { value: 'en', label: 'English', flag: '\uD83C\uDDFA\uD83C\uDDF8' },
+  { value: 'es', label: 'Espanol', flag: '\uD83C\uDDEA\uD83C\uDDF8' },
 ]
 
 // Common timezones organized by region
 const TIMEZONES = [
   { value: 'UTC', label: 'UTC' },
-  { value: 'America/Sao_Paulo', label: 'Brasília (GMT-3)' },
+  { value: 'America/Sao_Paulo', label: 'Brasilia (GMT-3)' },
   { value: 'America/Manaus', label: 'Manaus (GMT-4)' },
-  { value: 'America/Belem', label: 'Belém (GMT-3)' },
+  { value: 'America/Belem', label: 'Belem (GMT-3)' },
   { value: 'America/Fortaleza', label: 'Fortaleza (GMT-3)' },
   { value: 'America/New_York', label: 'New York (EST)' },
   { value: 'America/Los_Angeles', label: 'Los Angeles (PST)' },
   { value: 'America/Chicago', label: 'Chicago (CST)' },
   { value: 'America/Denver', label: 'Denver (MST)' },
   { value: 'America/Toronto', label: 'Toronto (EST)' },
-  { value: 'America/Mexico_City', label: 'Cidade do México' },
+  { value: 'America/Mexico_City', label: 'Cidade do Mexico' },
   { value: 'Europe/London', label: 'Londres (GMT)' },
   { value: 'Europe/Paris', label: 'Paris (CET)' },
   { value: 'Europe/Berlin', label: 'Berlim (CET)' },
   { value: 'Europe/Madrid', label: 'Madrid (CET)' },
   { value: 'Europe/Lisbon', label: 'Lisboa (WET)' },
-  { value: 'Asia/Tokyo', label: 'Tóquio (JST)' },
+  { value: 'Asia/Tokyo', label: 'Toquio (JST)' },
   { value: 'Asia/Shanghai', label: 'Shanghai (CST)' },
   { value: 'Asia/Dubai', label: 'Dubai (GST)' },
   { value: 'Asia/Singapore', label: 'Singapura (SGT)' },
@@ -69,11 +70,12 @@ export function StepIdentity({ data, updateData }: Props) {
               <button
                 key={lang.value}
                 onClick={() => handleLanguageChange(lang.value)}
-                className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-all ${
+                className={cn(
+                  'flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-all',
                   data.language === lang.value
-                    ? 'border-[#3b82f6]/50 bg-[#3b82f6]/10 text-[#f8fafc]'
-                    : 'border-white/10 bg-[#0c1222] text-[#94a3b8] hover:border-white/20 hover:bg-[#111827]'
-                }`}
+                    ? 'border-brand/50 bg-brand-subtle text-text-primary'
+                    : 'border-border-hover bg-bg-main text-text-secondary hover:border-text-muted hover:bg-bg-surface',
+                )}
               >
                 <span className="text-base">{lang.flag}</span>
                 <span className="text-xs font-medium">{lang.label}</span>

@@ -6,24 +6,12 @@ import { Chat } from '@/pages/Chat'
 import { Dashboard } from '@/pages/Dashboard'
 import { Sessions } from '@/pages/Sessions'
 import { Skills } from '@/pages/Skills'
-import { Channels } from '@/pages/Channels'
-import { Config } from '@/pages/Config'
-import { Domain } from '@/pages/Domain'
-import { Webhooks } from '@/pages/Webhooks'
-import { Hooks } from '@/pages/Hooks'
-import { Security } from '@/pages/Security'
 import { Jobs } from '@/pages/Jobs'
+import { Settings } from '@/pages/Settings'
 import { Login } from '@/pages/Login'
 import { SetupWizard } from '@/pages/Setup/SetupWizard'
 import { WhatsAppConnect } from '@/pages/WhatsAppConnect'
-import { System } from '@/pages/System'
-import { ApiConfig } from '@/pages/ApiConfig'
-import { Access } from '@/pages/Access'
-import { Budget } from '@/pages/Budget'
-import { Memory } from '@/pages/Memory'
-import { DatabasePage } from '@/pages/Database'
-import { Groups } from '@/pages/Groups'
-import { Mcp } from '@/pages/Mcp'
+import { Channels } from '@/pages/Channels'
 
 /** Estado global de autenticação obtido de /api/auth/status */
 interface AuthState {
@@ -67,7 +55,6 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
         })
       })
       .catch(() => {
-        // Se o endpoint falhar, assume configurado e sem auth
         setState({
           loading: false,
           authRequired: false,
@@ -79,23 +66,20 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (state.loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0c1222]">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#1e293b] border-t-[#3b82f6]" />
+      <div className="flex min-h-screen items-center justify-center bg-bg-main">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-bg-elevated border-t-brand" />
       </div>
     )
   }
 
-  // Não configurado → redireciona para o wizard
   if (!state.setupComplete && location.pathname !== '/setup') {
     return <Navigate to="/setup" replace />
   }
 
-  // Já configurado mas na página de setup → redireciona para home
   if (state.setupComplete && location.pathname === '/setup') {
     return <Navigate to="/" replace />
   }
 
-  // Auth requerida e não autenticado → redireciona para login
   if (state.authRequired && !state.authenticated && location.pathname !== '/login') {
     return <Navigate to="/login" replace />
   }
@@ -103,38 +87,19 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-/**
- * Roteamento principal da aplicação.
- *
- * - /setup → Wizard de configuração inicial (layout centrado, sem sidebar)
- * - /login → Página de login (layout centrado, sem sidebar)
- * - / → Chat conversacional (página inicial)
- * - /chat/:sessionId → Chat de sessão específica
- * - /stats → Dashboard com estatísticas
- * - /sessions → Lista de sessões
- * - /skills → Store de skills
- * - /channels → Status dos canais
- * - /config → Provedores LLM
- * - /system → Configurações do sistema (nome, timezone, idioma)
- * - /domain → Domínio & Rede
- * - /webhooks → Webhooks
- * - /hooks → Hooks
- * - /security → Painel de segurança
- * - /jobs → Cron jobs
- */
 export function App() {
   return (
     <AuthGuard>
       <Routes>
-        {/* Setup wizard — layout separado */}
+        {/* Setup wizard */}
         <Route element={<SetupLayout />}>
           <Route path="/setup" element={<SetupWizard />} />
         </Route>
 
-        {/* Login — sem layout */}
+        {/* Login */}
         <Route path="/login" element={<Login />} />
 
-        {/* App principal — layout com sidebar */}
+        {/* App principal */}
         <Route element={<AppLayout />}>
           <Route path="/" element={<Chat />} />
           <Route path="/chat/:sessionId" element={<Chat />} />
@@ -143,20 +108,8 @@ export function App() {
           <Route path="/skills" element={<Skills />} />
           <Route path="/channels" element={<Channels />} />
           <Route path="/channels/whatsapp" element={<WhatsAppConnect />} />
-          <Route path="/config" element={<Config />} />
-          <Route path="/api-config" element={<ApiConfig />} />
-          <Route path="/access" element={<Access />} />
-          <Route path="/budget" element={<Budget />} />
-          <Route path="/memory" element={<Memory />} />
-          <Route path="/database" element={<DatabasePage />} />
-          <Route path="/groups" element={<Groups />} />
-          <Route path="/mcp" element={<Mcp />} />
-          <Route path="/system" element={<System />} />
-          <Route path="/domain" element={<Domain />} />
-          <Route path="/webhooks" element={<Webhooks />} />
-          <Route path="/hooks" element={<Hooks />} />
-          <Route path="/security" element={<Security />} />
           <Route path="/jobs" element={<Jobs />} />
+          <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>
     </AuthGuard>

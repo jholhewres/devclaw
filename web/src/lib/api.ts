@@ -1,297 +1,389 @@
 /** Typed HTTP client for DevClaw API */
 
-const BASE = '/api'
+const BASE = '/api';
 
 /** Generic fetch wrapper with auth and error handling */
-async function request<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const token = localStorage.getItem('devclaw_token')
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = localStorage.getItem('devclaw_token');
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
-  }
+  };
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+    headers['Authorization'] = `Bearer ${token}`;
   }
 
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers,
-  })
+  });
 
   if (!res.ok) {
-    const body = await res.text().catch(() => '')
-    throw new ApiError(res.status, body || res.statusText)
+    const body = await res.text().catch(() => '');
+    throw new ApiError(res.status, body || res.statusText);
   }
 
-  if (res.status === 204) return undefined as T
+  if (res.status === 204) return undefined as T;
 
-  return res.json()
+  return res.json();
 }
 
 export class ApiError extends Error {
-  status: number
+  status: number;
 
   constructor(status: number, message: string) {
-    super(message)
-    this.name = 'ApiError'
-    this.status = status
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
   }
 }
 
 /* ── Types ── */
 
 export interface SessionInfo {
-  id: string
-  channel: string
-  chat_id: string
-  message_count: number
-  last_message_at: string
-  created_at: string
+  id: string;
+  channel: string;
+  chat_id: string;
+  title?: string;
+  message_count: number;
+  last_message_at: string;
+  created_at: string;
 }
 
 export interface MessageInfo {
-  role: 'user' | 'assistant' | 'tool'
-  content: string
-  timestamp: string
-  tool_name?: string
-  tool_input?: string
+  role: 'user' | 'assistant' | 'tool';
+  content: string;
+  timestamp: string;
+  tool_name?: string;
+  tool_input?: string;
 }
 
 export interface UsageInfo {
-  total_input_tokens: number
-  total_output_tokens: number
-  total_cost: number
-  request_count: number
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cost: number;
+  request_count: number;
 }
 
 export interface ChannelHealth {
-  name: string
-  connected: boolean
-  error_count: number
-  last_msg_at: string
+  name: string;
+  connected: boolean;
+  error_count: number;
+  last_msg_at: string;
 }
 
 export interface JobInfo {
-  id: string
-  schedule: string
-  type: string
-  command: string
-  enabled: boolean
-  run_count: number
-  last_run_at: string
-  last_error: string
+  id: string;
+  schedule: string;
+  type: string;
+  command: string;
+  enabled: boolean;
+  run_count: number;
+  last_run_at: string;
+  last_error: string;
 }
 
 export interface SkillInfo {
-  name: string
-  description: string
-  enabled: boolean
-  tool_count: number
+  name: string;
+  label?: string;
+  label_pt?: string;
+  description: string;
+  description_pt?: string;
+  enabled: boolean;
+  tool_count: number;
 }
 
 export interface WhatsAppStatus {
-  connected: boolean
-  needs_qr: boolean
-  phone?: string
+  connected: boolean;
+  needs_qr: boolean;
+  phone?: string;
+}
+
+/* WhatsApp Access & Groups */
+export interface WhatsAppAccessConfig {
+  default_policy: string;
+  owners: string[];
+  admins: string[];
+  allowed_users: string[];
+  blocked_users: string[];
+  allowed_groups: string[];
+  blocked_groups: string[];
+  pending_message: string;
+}
+
+export interface WhatsAppGroupPolicy {
+  id: string;
+  name: string;
+  policy: string; // Legacy, single policy
+  policies?: string[]; // New, multiple policies (OR logic)
+  keywords?: string[];
+  allowed_users?: string[];
+  workspace?: string;
+}
+
+export interface WhatsAppGroupPolicies {
+  default_policy: string; // Legacy, single default policy
+  default_policies?: string[]; // New, multiple default policies (OR logic)
+  groups: WhatsAppGroupPolicy[];
+}
+
+export interface WhatsAppSettings {
+  respond_to_groups: boolean;
+  respond_to_dms: boolean;
+  auto_read: boolean;
+  send_typing: boolean;
 }
 
 export interface DashboardData {
-  sessions: SessionInfo[]
-  usage: UsageInfo
-  channels: ChannelHealth[]
-  jobs: JobInfo[]
+  sessions: SessionInfo[];
+  usage: UsageInfo;
+  channels: ChannelHealth[];
+  jobs: JobInfo[];
 }
 
 export interface SetupStatus {
-  configured: boolean
-  current_step: number
+  configured: boolean;
+  current_step: number;
 }
 
 /* ── Security Types ── */
 
 export interface AuditEntry {
-  id: number
-  tool: string
-  caller: string
-  level: string
-  allowed: boolean
-  args_summary: string
-  result_summary: string
-  created_at: string
+  id: number;
+  tool: string;
+  caller: string;
+  level: string;
+  allowed: boolean;
+  args_summary: string;
+  result_summary: string;
+  created_at: string;
 }
 
 export interface AuditResponse {
-  entries: AuditEntry[]
-  total: number
+  entries: AuditEntry[];
+  total: number;
 }
 
 export interface ToolGuardStatus {
-  enabled: boolean
-  allow_destructive: boolean
-  allow_sudo: boolean
-  allow_reboot: boolean
-  auto_approve: string[]
-  require_confirmation: string[]
-  protected_paths: string[]
-  ssh_allowed_hosts: string[]
-  dangerous_commands: string[]
-  tool_permissions: Record<string, string>
+  enabled: boolean;
+  allow_destructive: boolean;
+  allow_sudo: boolean;
+  allow_reboot: boolean;
+  auto_approve: string[];
+  require_confirmation: string[];
+  protected_paths: string[];
+  ssh_allowed_hosts: string[];
+  dangerous_commands: string[];
+  tool_permissions: Record<string, string>;
 }
 
 export interface VaultStatus {
-  exists: boolean
-  unlocked: boolean
-  keys: string[]
+  exists: boolean;
+  unlocked: boolean;
+  keys: string[];
 }
 
 export interface SecurityStatus {
-  gateway_auth_configured: boolean
-  webui_auth_configured: boolean
-  tool_guard_enabled: boolean
-  vault_exists: boolean
-  vault_unlocked: boolean
-  audit_entry_count: number
+  gateway_auth_configured: boolean;
+  webui_auth_configured: boolean;
+  tool_guard_enabled: boolean;
+  vault_exists: boolean;
+  vault_unlocked: boolean;
+  audit_entry_count: number;
 }
 
 /* ── Hook Types ── */
 
 export interface HookInfo {
-  name: string
-  description: string
-  source: string
-  events: string[]
-  priority: number
-  enabled: boolean
+  name: string;
+  description: string;
+  source: string;
+  events: string[];
+  priority: number;
+  enabled: boolean;
 }
 
 export interface HookEventInfo {
-  event: string
-  description: string
-  hooks: string[]
+  event: string;
+  description: string;
+  hooks: string[];
 }
 
 export interface HookListResponse {
-  hooks: HookInfo[]
-  events: HookEventInfo[]
+  hooks: HookInfo[];
+  events: HookEventInfo[];
 }
 
 /* ── Webhook Types ── */
 
 export interface WebhookInfo {
-  id: string
-  url: string
-  events: string[]
-  active: boolean
-  created_at: string
+  id: string;
+  url: string;
+  events: string[];
+  active: boolean;
+  created_at: string;
 }
 
 export interface WebhookListResponse {
-  webhooks: WebhookInfo[]
-  valid_events: string[]
+  webhooks: WebhookInfo[];
+  valid_events: string[];
 }
 
 /* ── Domain Types ── */
 
 export interface DomainConfig {
-  webui_address: string
-  webui_auth_configured: boolean
-  gateway_enabled: boolean
-  gateway_address: string
-  gateway_auth_configured: boolean
-  cors_origins: string[]
-  tailscale_enabled: boolean
-  tailscale_serve: boolean
-  tailscale_funnel: boolean
-  tailscale_port: number
-  tailscale_hostname: string
-  tailscale_url: string
-  webui_url: string
-  gateway_url: string
-  public_url: string
+  webui_address: string;
+  webui_auth_configured: boolean;
+  gateway_enabled: boolean;
+  gateway_address: string;
+  gateway_auth_configured: boolean;
+  cors_origins: string[];
+  tailscale_enabled: boolean;
+  tailscale_serve: boolean;
+  tailscale_funnel: boolean;
+  tailscale_port: number;
+  tailscale_hostname: string;
+  tailscale_url: string;
+  webui_url: string;
+  gateway_url: string;
+  public_url: string;
 }
 
 export interface DomainConfigUpdate {
-  webui_address?: string
-  webui_auth_token?: string
-  gateway_enabled?: boolean
-  gateway_address?: string
-  gateway_auth_token?: string
-  cors_origins?: string[]
-  tailscale_enabled?: boolean
-  tailscale_serve?: boolean
-  tailscale_funnel?: boolean
-  tailscale_port?: number
+  webui_address?: string;
+  webui_auth_token?: string;
+  gateway_enabled?: boolean;
+  gateway_address?: string;
+  gateway_auth_token?: string;
+  cors_origins?: string[];
+  tailscale_enabled?: boolean;
+  tailscale_serve?: boolean;
+  tailscale_funnel?: boolean;
+  tailscale_port?: number;
 }
 
 /* ── MCP Server Types ── */
 
 export interface MCPServerInfo {
-  name: string
-  command: string
-  args: string[]
-  env: Record<string, string>
-  enabled: boolean
-  status: string
-  error?: string
+  name: string;
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  enabled: boolean;
+  status: string;
+  error?: string;
 }
 
 export interface MCPServerListResponse {
-  servers: MCPServerInfo[]
+  servers: MCPServerInfo[];
 }
 
 /* ── Database Types ── */
 
 export interface DatabaseStatusInfo {
-  name: string
-  healthy: boolean
-  latency: number
-  version: string
-  open_connections: number
-  in_use: number
-  idle: number
-  wait_count: number
-  wait_duration: number
-  max_open_conns: number
-  error?: string
+  name: string;
+  healthy: boolean;
+  latency: number;
+  version: string;
+  open_connections: number;
+  in_use: number;
+  idle: number;
+  wait_count: number;
+  wait_duration: number;
+  max_open_conns: number;
+  error?: string;
 }
 
 /* Tool Profile Settings */
 export interface ToolProfileInfo {
-  name: string
-  description: string
-  allow: string[]
-  deny: string[]
-  builtin: boolean
+  name: string;
+  description: string;
+  allow: string[];
+  deny: string[];
+  builtin: boolean;
 }
 
 /* ── OAuth Types ── */
 
 export interface OAuthProvider {
-  id: string
-  label: string
-  flow_type: 'pkce' | 'device_code' | 'manual'
-  experimental?: boolean
+  id: string;
+  label: string;
+  flow_type: 'pkce' | 'device_code' | 'manual';
+  experimental?: boolean;
 }
 
 export interface OAuthStatus {
-  provider: string
-  status: 'valid' | 'expiring_soon' | 'expired' | 'unknown'
-  email?: string
-  expires_in?: number
-  has_token: boolean
+  provider: string;
+  status: 'valid' | 'expiring_soon' | 'expired' | 'unknown';
+  email?: string;
+  expires_in?: number;
+  has_token: boolean;
 }
 
 export interface OAuthStartResponse {
-  flow_type: 'pkce' | 'device_code' | 'manual'
-  auth_url?: string
+  flow_type: 'pkce' | 'device_code' | 'manual';
+  auth_url?: string;
+  provider: string;
+  user_code?: string;
+  verify_url?: string;
+  expires_in?: number;
+  experimental?: boolean;
+}
+
+/* ── Hub Types ── */
+
+export interface HubSkillInfo {
+  id: string
+  name: string
   provider: string
-  user_code?: string
-  verify_url?: string
-  expires_in?: number
-  experimental?: boolean
+  service: string
+  label: string
+  label_pt: string
+  description: string
+  description_pt: string
+  emoji: string
+  icon_svg?: string
+  category: string
+  scopes: string[]
+  hub_url: string
+  connected: boolean
+  connection_id?: string
+  email?: string
+}
+
+export interface HubConnection {
+  id: string
+  provider: string
+  service: string
+  email?: string
+  status: string
+  connected_at?: string
+}
+
+export interface HubConnectResponse {
+  session_id: string
+  connect_url: string
+  expires_in: number
+}
+
+export interface HubConfigStatus {
+  configured: boolean
+  hub_url: string
+  connected: boolean
+}
+
+/* ── Update Types ── */
+
+export interface UpdateInfo {
+  available: boolean;
+  current_version: string;
+  latest_version: string;
+  checked_at: string;
+}
+
+export interface VersionInfo {
+  version: string;
+  update?: UpdateInfo;
 }
 
 /* ── API Methods ── */
@@ -314,10 +406,8 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ content }),
       }),
-    abort: (sessionId: string) =>
-      request<void>(`/chat/${sessionId}/abort`, { method: 'POST' }),
-    history: (sessionId: string) =>
-      request<MessageInfo[]>(`/chat/${sessionId}/history`),
+    abort: (sessionId: string) => request<void>(`/chat/${sessionId}/abort`, { method: 'POST' }),
+    history: (sessionId: string) => request<MessageInfo[]>(`/chat/${sessionId}/history`),
   },
 
   /* Skills */
@@ -329,9 +419,13 @@ export const api = {
         body: JSON.stringify({ enabled }),
       }),
     install: (name: string) =>
-      request<void>(`/skills/install`, {
+      request<{ status: string; message: string }>(`/skills/install`, {
         method: 'POST',
         body: JSON.stringify({ name }),
+      }),
+    remove: (name: string) =>
+      request<void>(`/skills/${name}/remove`, {
+        method: 'POST',
       }),
   },
 
@@ -340,7 +434,82 @@ export const api = {
     list: () => request<ChannelHealth[]>('/channels'),
     whatsapp: {
       status: () => request<WhatsAppStatus>('/channels/whatsapp/status'),
-      requestQR: () => request<{ status: string; message: string }>('/channels/whatsapp/qr', { method: 'POST' }),
+      requestQR: () =>
+        request<{ status: string; message: string }>('/channels/whatsapp/qr', { method: 'POST' }),
+      disconnect: () =>
+        request<{ status: string; message: string }>('/channels/whatsapp/disconnect', {
+          method: 'POST',
+        }),
+      // Access control
+      getAccess: () => request<WhatsAppAccessConfig>('/channels/whatsapp/access'),
+      updateAccessDefaultPolicy: (policy: string) =>
+        request<{ status: string }>('/channels/whatsapp/access', {
+          method: 'PATCH',
+          body: JSON.stringify({ default_policy: policy }),
+        }),
+      grantUser: (jid: string, level: string) =>
+        request<{ status: string; jid: string; level: string }>(
+          `/channels/whatsapp/access/users/${encodeURIComponent(jid)}`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ level }),
+          }
+        ),
+      revokeUser: (jid: string) =>
+        request<{ status: string; jid: string }>(
+          `/channels/whatsapp/access/users/${encodeURIComponent(jid)}`,
+          {
+            method: 'DELETE',
+          }
+        ),
+      blockUser: (jid: string) =>
+        request<{ status: string; jid: string }>(
+          `/channels/whatsapp/access/blocked/${encodeURIComponent(jid)}`,
+          {
+            method: 'POST',
+          }
+        ),
+      unblockUser: (jid: string) =>
+        request<{ status: string; jid: string }>(
+          `/channels/whatsapp/access/blocked/${encodeURIComponent(jid)}`,
+          {
+            method: 'DELETE',
+          }
+        ),
+      // Groups
+      getGroups: () => request<WhatsAppGroupPolicies>('/channels/whatsapp/groups'),
+      getJoinedGroups: () =>
+        request<{ jid: string; name: string }[]>('/channels/whatsapp/groups/joined'),
+      updateGroupDefaultPolicy: (policy: string) =>
+        request<{ status: string }>('/channels/whatsapp/groups', {
+          method: 'PATCH',
+          body: JSON.stringify({ default_policy: policy }),
+        }),
+      setGroupPolicy: (
+        jid: string,
+        policy: {
+          name: string;
+          policy: string;
+          policies?: string[];
+          keywords?: string[];
+          allowed_users?: string[];
+          workspace?: string;
+        }
+      ) =>
+        request<{ status: string; group: string }>(
+          `/channels/whatsapp/groups/${encodeURIComponent(jid)}`,
+          {
+            method: 'PUT',
+            body: JSON.stringify(policy),
+          }
+        ),
+      // Settings
+      getSettings: () => request<WhatsAppSettings>('/channels/whatsapp/config'),
+      updateConfig: (config: Partial<WhatsAppSettings>) =>
+        request<{ status: string }>('/channels/whatsapp/config', {
+          method: 'PATCH',
+          body: JSON.stringify(config),
+        }),
     },
   },
 
@@ -362,8 +531,7 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify({ enabled }),
       }),
-    unregister: (name: string) =>
-      request<void>(`/hooks/${name}`, { method: 'DELETE' }),
+    unregister: (name: string) => request<void>(`/hooks/${name}`, { method: 'DELETE' }),
   },
 
   /* Webhooks */
@@ -374,8 +542,7 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ url, events }),
       }),
-    delete: (id: string) =>
-      request<void>(`/webhooks/${id}`, { method: 'DELETE' }),
+    delete: (id: string) => request<void>(`/webhooks/${id}`, { method: 'DELETE' }),
     toggle: (id: string, active: boolean) =>
       request<void>(`/webhooks/${id}`, {
         method: 'PATCH',
@@ -399,6 +566,12 @@ export const api = {
   /* Jobs */
   jobs: {
     list: () => request<JobInfo[]>('/jobs'),
+    toggle: (id: string, enabled: boolean) =>
+      request<void>(`/jobs/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled }),
+      }),
+    remove: (id: string) => request<void>(`/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   },
 
   /* Setup */
@@ -443,12 +616,21 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ password }),
       }),
+    logout: () =>
+      request<{ status: string }>('/auth/logout', {
+        method: 'POST',
+      }),
   },
 
   /* MCP Servers */
   mcp: {
     list: () => request<MCPServerListResponse>('/mcp/servers'),
-    create: (name: string, command: string, args: string[] = [], env: Record<string, string> = {}) =>
+    create: (
+      name: string,
+      command: string,
+      args: string[] = [],
+      env: Record<string, string> = {}
+    ) =>
       request<{ status: string }>('/mcp/servers', {
         method: 'POST',
         body: JSON.stringify({ name, command, args, env }),
@@ -472,13 +654,30 @@ export const api = {
     status: () => request<DatabaseStatusInfo>('/database/status'),
   },
 
+  /* System */
+  system: {
+    restart: () =>
+      request<{ status: string }>('/system/restart', {
+        method: 'POST',
+      }),
+    version: () => request<VersionInfo>('/system/version'),
+    checkUpdate: () =>
+      request<UpdateInfo>('/system/check-update', {
+        method: 'POST',
+      }),
+    update: () =>
+      request<{ status: string }>('/system/update', {
+        method: 'POST',
+      }),
+  },
+
   /* Settings / Tool Profiles */
   settings: {
     toolProfiles: {
       list: () =>
         request<{
-          profiles: ToolProfileInfo[]
-          groups: Record<string, string[]>
+          profiles: ToolProfileInfo[];
+          groups: Record<string, string[]>;
         }>('/settings/tool-profiles'),
       create: (profile: ToolProfileInfo) =>
         request<ToolProfileInfo>('/settings/tool-profiles', {
@@ -495,6 +694,47 @@ export const api = {
     },
   },
 
+  /* Hub (OAuth Hub integration) */
+  hub: {
+    config: () => request<HubConfigStatus>('/oauth/hub/config'),
+    setup: (hubUrl: string, apiKey: string) =>
+      request<{ status: string; message: string }>('/oauth/hub/setup', {
+        method: 'POST',
+        body: JSON.stringify({ hub_url: hubUrl, api_key: apiKey }),
+      }),
+    skills: () => request<HubSkillInfo[]>('/oauth/hub/skills'),
+    installSkill: (skillId: string) =>
+      request<{ status: string; message: string }>('/oauth/hub/skills/install', {
+        method: 'POST',
+        body: JSON.stringify({ skill_id: skillId }),
+      }),
+    installBundle: (skillId = 'gator-hub') =>
+      request<{ status: string; message: string }>('/oauth/hub/skills/install-bundle', {
+        method: 'POST',
+        body: JSON.stringify({ skill_id: skillId }),
+      }),
+    installReference: (provider: string, service: string) =>
+      request<{ status: string; message: string }>('/oauth/hub/skills/install-reference', {
+        method: 'POST',
+        body: JSON.stringify({ provider, service }),
+      }),
+    removeReference: (provider: string, service: string) =>
+      request<{ status: string; message: string }>('/oauth/hub/skills/remove-reference', {
+        method: 'POST',
+        body: JSON.stringify({ provider, service }),
+      }),
+    connect: (provider: string, service: string, scopes?: string[]) =>
+      request<HubConnectResponse>('/oauth/hub/connect', {
+        method: 'POST',
+        body: JSON.stringify({ provider, service, scopes }),
+      }),
+    connections: () => request<HubConnection[]>('/oauth/hub/connections'),
+    disconnect: (connectionId: string) =>
+      request<void>(`/oauth/hub/connections/${connectionId}`, { method: 'DELETE' }),
+    status: (sessionId: string) =>
+      request<{ status: string; connection_id?: string; email?: string }>(`/oauth/hub/status/${sessionId}`),
+  },
+
   /* OAuth */
   oauth: {
     providers: () => request<OAuthProvider[]>('/oauth/providers'),
@@ -505,8 +745,7 @@ export const api = {
       request<{ status: string }>(`/oauth/callback/${provider}?code=${code}&state=${state}`),
     refresh: (provider: string) =>
       request<{ status: string }>(`/oauth/refresh/${provider}`, { method: 'POST' }),
-    logout: (provider: string) =>
-      request<void>(`/oauth/logout/${provider}`, { method: 'DELETE' }),
+    logout: (provider: string) => request<void>(`/oauth/logout/${provider}`, { method: 'DELETE' }),
     poll: (provider: string) =>
       request<{ status: string; message?: string }>(`/oauth/poll/${provider}`, { method: 'POST' }),
   },
@@ -529,45 +768,48 @@ export const api = {
     delete: (id: string) =>
       request<{ id: string; success: boolean }>(`/profiles/${id}`, { method: 'DELETE' }),
     test: (id: string) =>
-      request<{ id: string; valid: boolean; expired: boolean; error?: string }>(`/profiles/${id}/test`, {
-        method: 'POST',
-      }),
+      request<{ id: string; valid: boolean; expired: boolean; error?: string }>(
+        `/profiles/${id}/test`,
+        {
+          method: 'POST',
+        }
+      ),
   },
-}
+};
 
 /* ── Auth Profile Types ── */
 
 export interface AuthProviderInfo {
-  name: string
-  label: string
-  description: string
-  modes: string[]
-  website?: string
-  env_key?: string
-  parent_provider?: string
+  name: string;
+  label: string;
+  description: string;
+  modes: string[];
+  website?: string;
+  env_key?: string;
+  parent_provider?: string;
 }
 
 export interface AuthProfileInfo {
-  id: string
-  provider: string
-  name: string
-  mode: 'api_key' | 'oauth' | 'token'
-  enabled: boolean
-  priority: number
-  valid: boolean
-  expired: boolean
-  email?: string
-  last_error?: string
-  created_at: string
-  updated_at: string
-  last_used_at?: string
+  id: string;
+  provider: string;
+  name: string;
+  mode: 'api_key' | 'oauth' | 'token';
+  enabled: boolean;
+  priority: number;
+  valid: boolean;
+  expired: boolean;
+  email?: string;
+  last_error?: string;
+  created_at: string;
+  updated_at: string;
+  last_used_at?: string;
 }
 
 export interface CreateAuthProfileRequest {
-  provider: string
-  name: string
-  mode: 'api_key' | 'oauth' | 'token'
-  api_key?: string
-  token?: string
-  priority?: number
+  provider: string;
+  name: string;
+  mode: 'api_key' | 'oauth' | 'token';
+  api_key?: string;
+  token?: string;
+  priority?: number;
 }
