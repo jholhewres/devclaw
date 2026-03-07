@@ -1236,6 +1236,45 @@ func (w *WhatsApp) UnblockUser(jid string) {
 	w.logger.Info("whatsapp: user unblocked", "jid", jid)
 }
 
+// ReplaceAccessList replaces the entire access list atomically.
+func (w *WhatsApp) ReplaceAccessList(owners, admins, allowedUsers, blockedUsers []string, defaultPolicy, pendingMessage string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// Clear existing lists
+	w.accessUsers = make(map[string]string)
+	w.blockedUsers = make(map[string]struct{})
+
+	// Populate from new lists
+	for _, jid := range owners {
+		w.accessUsers[normalizeJID(jid)] = "owner"
+	}
+	for _, jid := range admins {
+		w.accessUsers[normalizeJID(jid)] = "admin"
+	}
+	for _, jid := range allowedUsers {
+		w.accessUsers[normalizeJID(jid)] = "user"
+	}
+	for _, jid := range blockedUsers {
+		w.blockedUsers[normalizeJID(jid)] = struct{}{}
+	}
+
+	// Update config
+	if defaultPolicy != "" {
+		w.cfg.Access.DefaultPolicy = defaultPolicy
+	}
+	if pendingMessage != "" {
+		w.cfg.Access.PendingMessage = pendingMessage
+	}
+
+	w.logger.Info("whatsapp: access list replaced",
+		"owners", len(owners),
+		"admins", len(admins),
+		"allowed", len(allowedUsers),
+		"blocked", len(blockedUsers),
+	)
+}
+
 // ---------- GroupFilter Interface ----------
 
 // ShouldRespond checks if the bot should respond to a group message.
