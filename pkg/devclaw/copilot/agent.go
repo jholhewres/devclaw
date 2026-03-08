@@ -58,6 +58,25 @@ func ScaledMaxRetries(profileCount int) int {
 	return n
 }
 
+// VerboseLevel controls tool progress message visibility, matching
+// OpenClaw's verboseLevel semantics:
+//   - "off"  → no tool progress messages (default)
+//   - "on"   → tool name summaries are shown
+//   - "full" → tool names + detailed output are shown
+type VerboseLevel string
+
+const (
+	VerboseOff  VerboseLevel = "off"
+	VerboseOn   VerboseLevel = "on"
+	VerboseFull VerboseLevel = "full"
+)
+
+// ShouldEmitToolProgress returns true when tool progress messages should
+// be sent to the user (verbose "on" or "full").
+func (v VerboseLevel) ShouldEmitToolProgress() bool {
+	return v == VerboseOn || v == VerboseFull
+}
+
 // AgentConfig holds configurable agent loop parameters.
 type AgentConfig struct {
 	// RunTimeoutSeconds is the max seconds for the entire agent run (default: 600).
@@ -87,6 +106,10 @@ type AgentConfig struct {
 	// When > 0, this value is used instead of the built-in model-specific lookup.
 	// Set this for custom/fine-tuned models or when using an unusual context window.
 	ContextTokens int `yaml:"context_tokens"`
+
+	// ToolVerbose controls whether tool progress messages are sent to the user.
+	// Default "off" means only the final response is shown (OpenClaw-aligned).
+	ToolVerbose VerboseLevel `yaml:"tool_verbose"`
 
 	// ToolLoop configures tool loop detection thresholds.
 	ToolLoop ToolLoopConfig `yaml:"tool_loop"`
@@ -134,6 +157,7 @@ func DefaultAgentConfig() AgentConfig {
 		MaxContinuations:      2,
 		ReflectionEnabled:     true,
 		MaxCompactionAttempts: DefaultMaxCompactionAttempts,
+		ToolVerbose:           VerboseOff,
 		MemoryFlush: MemoryFlushConfig{
 			Enabled:             true,
 			ProactiveEnabled:    true,
@@ -710,10 +734,11 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 
 		// Send progress to the user so they see what the agent is doing
 		// while tools execute (especially for long-running tools).
-		// When a stream callback (BlockStreamer) is active, it already delivers
-		// the LLM's text progressively — sending resp.Content via ProgressSender
-		// would duplicate messages. Only send tool descriptions as progress.
-		if ps := ProgressSenderFromContext(runCtx); ps != nil {
+		// Gated by ToolVerbose: when "off" (default, OpenClaw-aligned), no
+		// tool progress messages are sent — only the final response.
+		// ProgressSender stays in the context for tools that need it internally
+		// (e.g. claude-code sending progress during long operations).
+		if ps := ProgressSenderFromContext(runCtx); ps != nil && a.cfg.ToolVerbose.ShouldEmitToolProgress() {
 			now := time.Now()
 			if now.Sub(lastProgressAt) >= progressCooldown {
 				var progressMsg string

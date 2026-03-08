@@ -549,7 +549,7 @@ func (p *PromptComposer) buildCoreLayer() string {
 		b.WriteString("- vault: Encrypted secret storage (action=status/save/get/list/delete)\n")
 	}
 	b.WriteString("\nTool names are case-sensitive. Call tools exactly as listed.\n")
-	b.WriteString("Use `list_capabilities` to see all available tools organized by category.\n")
+	b.WriteString("All available tools are already in your tool definitions — use them directly without calling list_capabilities first.\n")
 	b.WriteString("TOOLS.md does not control tool availability; it is user guidance for how to use external tools.\n")
 	b.WriteString("If a task is more complex or takes longer, spawn a sub-agent using `spawn_subagent`. Completion is push-based: it will auto-announce when done.\n")
 	b.WriteString("Do NOT poll in a loop. Check status on-demand only (for intervention, debugging, or when explicitly asked).\n\n")

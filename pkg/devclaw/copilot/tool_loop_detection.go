@@ -89,6 +89,14 @@ var knownNoProgressTools = map[string]map[string]bool{
 	"process": {"poll": true, "log": true},
 }
 
+// idempotentReadOnlyTools are tools that always return the same output for the
+// same arguments (no side effects, no external state changes). Calling them
+// more than 2-3 times with the same args is always a loop — block earlier
+// than generic repeat detection.
+var idempotentReadOnlyTools = map[string]bool{
+	"list_capabilities": true,
+}
+
 // destructiveTools are tools that can cause data loss or irreversible changes.
 // These get additional batch detection to prevent accidental mass operations.
 // Note: Dispatcher tools (team_agent, team_manage, team_task) are NOT included
@@ -309,6 +317,27 @@ func (d *ToolLoopDetector) RecordAndCheck(toolName string, args map[string]any) 
 					toolName, pollStreak),
 				Streak:  pollStreak,
 				Pattern: "known_poll",
+			}
+		}
+	}
+
+	// 2a. Idempotent read-only tools: block after 3 consecutive identical calls.
+	// These tools always return the same output for the same args (e.g. list_capabilities).
+	// Calling them repeatedly is always a loop — no reason to wait for generic thresholds.
+	if idempotentReadOnlyTools[toolName] {
+		repeatStreak := d.getRepeatStreak(hash)
+		if repeatStreak >= 3 {
+			d.logger.Warn("idempotent tool loop detected",
+				"tool", toolName, "streak", repeatStreak)
+			return LoopDetectionResult{
+				Severity: LoopCritical,
+				Message: fmt.Sprintf(
+					"BLOCKED: '%s' has been called %d times with the same arguments. "+
+						"This tool always returns the same result — calling it again won't help. "+
+						"Use the tools you already have available directly.",
+					toolName, repeatStreak),
+				Streak:  repeatStreak,
+				Pattern: "idempotent_repeat",
 			}
 		}
 	}
