@@ -29,6 +29,7 @@ func TestStripInternalTags(t *testing.T) {
 		{"tools used annotation", "[Tools used: cron_add, web_search]\nHello", "Hello"},
 		{"tools used inline", "[Tools used: calculator_calculate, timestamp_convert]\nDone!", "Done!"},
 		{"tool_provenance tag", "<tool_provenance>cron_list</tool_provenance>\nNo jobs.", "No jobs."},
+		{"tool_provenace typo tag", "<tool_provenace>scheduler_add; web_search,web_fetch</tool_provenace>\nDone!", "Done!"},
 	}
 
 	for _, tt := range tests {

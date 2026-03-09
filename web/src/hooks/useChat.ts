@@ -18,7 +18,7 @@ function stripInternalTags(text: string): string {
       .replace(/\bNO_REPLY\b/g, '')
       .replace(/\bHEARTBEAT_OK\b/g, '')
       .replace(/\[Tools used:[^\]]*\]\n?/g, '')
-      .replace(/<tool_provenance>[\s\S]*?<\/tool_provenance>\n?/g, '')
+      .replace(/<tool_proven\w+>[\s\S]*?<\/tool_proven\w+>\n?/g, '')
   );
 }
 
