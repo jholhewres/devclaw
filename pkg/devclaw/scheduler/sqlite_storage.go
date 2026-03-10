@@ -63,6 +63,9 @@ func (s *SQLiteJobStorage) Delete(id string) error {
 
 // LoadAll reads all persisted jobs.
 func (s *SQLiteJobStorage) LoadAll() ([]*Job, error) {
+	// Ensure announce column exists (idempotent migration for older DBs).
+	_, _ = s.db.Exec(`ALTER TABLE jobs ADD COLUMN announce INTEGER DEFAULT 1`)
+
 	rows, err := s.db.Query(`
 		SELECT id, schedule, type, command, channel, chat_id, enabled,
 		       COALESCE(announce, 1), created_by, created_at, last_run_at, last_error, run_count
