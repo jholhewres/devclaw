@@ -29,9 +29,9 @@ func (s *SQLiteJobStorage) Save(job *Job) error {
 
 	_, err := s.db.Exec(`
 		INSERT OR REPLACE INTO jobs
-			(id, schedule, type, command, channel, chat_id, enabled,
+			(id, schedule, type, command, channel, chat_id, enabled, announce,
 			 created_by, created_at, last_run_at, last_error, run_count)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID,
 		job.Schedule,
 		job.Type,
@@ -39,6 +39,7 @@ func (s *SQLiteJobStorage) Save(job *Job) error {
 		job.Channel,
 		job.ChatID,
 		boolToInt(job.Enabled),
+		boolToInt(job.Announce),
 		job.CreatedBy,
 		job.CreatedAt.UTC().Format(time.RFC3339),
 		lastRunAt,
@@ -64,7 +65,7 @@ func (s *SQLiteJobStorage) Delete(id string) error {
 func (s *SQLiteJobStorage) LoadAll() ([]*Job, error) {
 	rows, err := s.db.Query(`
 		SELECT id, schedule, type, command, channel, chat_id, enabled,
-		       created_by, created_at, last_run_at, last_error, run_count
+		       COALESCE(announce, 1), created_by, created_at, last_run_at, last_error, run_count
 		FROM jobs`)
 	if err != nil {
 		return nil, fmt.Errorf("load jobs: %w", err)
@@ -76,19 +77,21 @@ func (s *SQLiteJobStorage) LoadAll() ([]*Job, error) {
 		var (
 			j          Job
 			enabled    int
+			announce   int
 			createdAt  string
 			lastRunAt  sql.NullString
 		)
 		if err := rows.Scan(
 			&j.ID, &j.Schedule, &j.Type, &j.Command,
 			&j.Channel, &j.ChatID, &enabled,
-			&j.CreatedBy, &createdAt, &lastRunAt,
+			&announce, &j.CreatedBy, &createdAt, &lastRunAt,
 			&j.LastError, &j.RunCount,
 		); err != nil {
 			return nil, fmt.Errorf("scan job: %w", err)
 		}
 
 		j.Enabled = enabled != 0
+		j.Announce = announce != 0
 		j.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 		if lastRunAt.Valid {
 			t, _ := time.Parse(time.RFC3339, lastRunAt.String)

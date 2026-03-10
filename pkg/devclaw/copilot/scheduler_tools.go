@@ -160,6 +160,7 @@ func handleSchedulerAdd(ctx context.Context, sched *scheduler.Scheduler, skillDB
 		Channel:  channel,
 		ChatID:   chatID,
 		Enabled:  true,
+		Announce: true, // always deliver result back to originating channel
 	}
 
 	if err := sched.Add(job); err != nil {

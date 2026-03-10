@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     channel     TEXT DEFAULT '',
     chat_id     TEXT DEFAULT '',
     enabled     INTEGER DEFAULT 1,
+    announce    INTEGER DEFAULT 1,
     created_by  TEXT DEFAULT '',
     created_at  TEXT NOT NULL,
     last_run_at TEXT,
@@ -378,6 +379,16 @@ func OpenDatabase(path string) (*sql.DB, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
+	}
+
+	// Column migrations: add new columns to existing tables without dropping data.
+	// Each ALTER is best-effort; errors are ignored because SQLite returns an error
+	// if the column already exists (no IF NOT EXISTS support for ALTER TABLE ADD COLUMN).
+	columnMigrations := []string{
+		`ALTER TABLE jobs ADD COLUMN announce INTEGER DEFAULT 1`,
+	}
+	for _, m := range columnMigrations {
+		_, _ = db.Exec(m) // ignore "duplicate column" errors
 	}
 
 	return db, nil
