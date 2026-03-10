@@ -2816,9 +2816,15 @@ func (a *Assistant) registerSystemTools() {
 	}
 
 	toolNames := a.toolExecutor.ToolNames()
+	visibleDefs := a.toolExecutor.Tools()
+	visibleNames := make([]string, 0, len(visibleDefs))
+	for _, d := range visibleDefs {
+		visibleNames = append(visibleNames, d.Function.Name)
+	}
 	a.logger.Info("system tools registered",
-		"count", len(toolNames),
-		"tools", toolNames,
+		"total", len(toolNames),
+		"visible", len(visibleNames),
+		"visible_tools", visibleNames,
 	)
 }
 
