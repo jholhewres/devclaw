@@ -34,7 +34,7 @@ type ToolLoopConfig struct {
 	// CircuitBreakerThreshold force-stops the agent run (default: 25).
 	CircuitBreakerThreshold int `yaml:"circuit_breaker_threshold"`
 
-	// GlobalCircuitBreaker is the max total no-progress calls before hard stop (default: 30).
+	// GlobalCircuitBreaker is the max total no-progress calls before hard stop (default: 20).
 	GlobalCircuitBreaker int `yaml:"global_circuit_breaker"`
 
 	// ProgressDetection enables content-based progress analysis (default: true).
@@ -49,7 +49,7 @@ func DefaultToolLoopConfig() ToolLoopConfig {
 		WarningThreshold:        8,
 		CriticalThreshold:       15,
 		CircuitBreakerThreshold: 25,
-		GlobalCircuitBreaker:    30,
+		GlobalCircuitBreaker:    20,
 		ProgressDetection:     true,
 	}
 }
@@ -95,6 +95,8 @@ var knownNoProgressTools = map[string]map[string]bool{
 // than generic repeat detection.
 var idempotentReadOnlyTools = map[string]bool{
 	"list_capabilities": true,
+	"skill_test":        true, // Returns same result per skill name regardless of input
+	"skill_list":        true, // Listing installed skills is idempotent
 }
 
 // destructiveTools are tools that can cause data loss or irreversible changes.
@@ -120,6 +122,12 @@ type ToolLoopDetector struct {
 	warningBucket   map[string]int // tool → warning count (coalesce repeated warnings)
 	logger          *slog.Logger
 
+	// Same-tool-name streak tracking (regardless of args).
+	// Catches patterns where the agent calls the same tool repeatedly with
+	// varying arguments but always gets the same useless result.
+	lastToolName   string // last tool name called
+	sameNameStreak int    // consecutive calls to the same tool name
+
 	// Destructive batch tracking
 	destructiveStreak     int    // consecutive destructive tool calls
 	lastDestructiveTool   string // last destructive tool called
@@ -141,7 +149,7 @@ func NewToolLoopDetector(cfg ToolLoopConfig, logger *slog.Logger) *ToolLoopDetec
 		cfg.CircuitBreakerThreshold = 25
 	}
 	if cfg.GlobalCircuitBreaker <= 0 {
-		cfg.GlobalCircuitBreaker = 30
+		cfg.GlobalCircuitBreaker = 20
 	}
 	// Ensure thresholds are ordered.
 	if cfg.CriticalThreshold <= cfg.WarningThreshold {
@@ -270,6 +278,14 @@ func (d *ToolLoopDetector) RecordAndCheck(toolName string, args map[string]any) 
 		d.history = d.history[len(d.history)-d.config.HistorySize:]
 	}
 
+	// Track same-tool-name consecutive streak (regardless of args).
+	if toolName == d.lastToolName {
+		d.sameNameStreak++
+	} else {
+		d.sameNameStreak = 1
+		d.lastToolName = toolName
+	}
+
 	// 1. Global circuit breaker: total no-progress calls.
 	if d.noProgressCount >= d.config.GlobalCircuitBreaker {
 		d.logger.Error("global circuit breaker triggered",
@@ -342,7 +358,46 @@ func (d *ToolLoopDetector) RecordAndCheck(toolName string, args map[string]any) 
 		}
 	}
 
-	// 2b. Destructive batch detection: BLOCK on consecutive destructive calls.
+	// 2b. Same-tool-name-no-progress detection: catches the pattern where the
+	// agent calls the same tool repeatedly with varying arguments but no progress
+	// (e.g. skill_test with "listar tarefas", "listar", "query tasks" — all returning
+	// the same useless result). The exact-hash streak never builds up because args
+	// change, so this detector uses tool name only + global no-progress count.
+	if d.sameNameStreak >= 10 && d.noProgressCount >= 5 {
+		d.logger.Warn("same-name no-progress loop detected",
+			"tool", toolName, "name_streak", d.sameNameStreak,
+			"no_progress", d.noProgressCount)
+		return LoopDetectionResult{
+			Severity: LoopCritical,
+			Message: fmt.Sprintf(
+				"BLOCKED: You have called '%s' %d times consecutively (with varying arguments) "+
+					"and made no progress in the last %d calls. The tool is not producing useful results. "+
+					"STOP using this tool and try a completely different approach or ask the user for help.",
+				toolName, d.sameNameStreak, d.noProgressCount),
+			Streak:  d.sameNameStreak,
+			Pattern: "same_name_no_progress",
+		}
+	}
+	if d.sameNameStreak >= 6 && d.noProgressCount >= 3 {
+		d.warningBucket[toolName+"_name"]++
+		warnCount := d.warningBucket[toolName+"_name"]
+		if warnCount == 1 || warnCount%2 == 0 {
+			d.logger.Warn("same-name streak building up",
+				"tool", toolName, "name_streak", d.sameNameStreak,
+				"no_progress", d.noProgressCount)
+			return LoopDetectionResult{
+				Severity: LoopWarning,
+				Message: fmt.Sprintf(
+					"WARNING: You have called '%s' %d times in a row with different arguments but no progress. "+
+						"This suggests the tool cannot help with this task. Consider a different approach.",
+					toolName, d.sameNameStreak),
+				Streak:  d.sameNameStreak,
+				Pattern: "same_name_no_progress",
+			}
+		}
+	}
+
+	// 2c. Destructive batch detection: BLOCK on consecutive destructive calls.
 	// With dispatcher consolidation, destructive actions are now sub-actions
 	// within dispatchers. This check remains for any user-configured destructive tools.
 	if destructiveTools[toolName] {
@@ -442,6 +497,8 @@ func (d *ToolLoopDetector) Reset() {
 	d.lastOutputHash = ""
 	d.lastErrorMsg = ""
 	d.sameErrorCount = 0
+	d.lastToolName = ""
+	d.sameNameStreak = 0
 	d.warningBucket = make(map[string]int)
 }
 

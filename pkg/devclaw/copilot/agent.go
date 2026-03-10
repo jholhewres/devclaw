@@ -87,8 +87,9 @@ type AgentConfig struct {
 	// (default: 300). Only catches hung connections — not the primary timeout.
 	LLMCallTimeoutSeconds int `yaml:"llm_call_timeout_seconds"`
 
-	// MaxTurns is a soft safety limit on LLM round-trips (default: 0 = unlimited).
+	// MaxTurns is a soft safety limit on LLM round-trips (default: 25).
 	// When > 0, the agent will request a summary after this many turns.
+	// Set to 0 for unlimited (not recommended in production).
 	MaxTurns int `yaml:"max_turns"`
 
 	// MaxContinuations is how many auto-continue rounds are allowed when
@@ -153,7 +154,7 @@ func DefaultAgentConfig() AgentConfig {
 	return AgentConfig{
 		RunTimeoutSeconds:     int(DefaultRunTimeout / time.Second),
 		LLMCallTimeoutSeconds: int(DefaultLLMCallTimeout / time.Second),
-		MaxTurns:              0, // Unlimited
+		MaxTurns:              25, // Safety limit — prevents runaway agent loops
 		MaxContinuations:      2,
 		ReflectionEnabled:     true,
 		MaxCompactionAttempts: DefaultMaxCompactionAttempts,
@@ -275,7 +276,7 @@ func NewAgentRun(llm *LLMClient, executor *ToolExecutor, logger *slog.Logger) *A
 		executor:              executor,
 		runTimeout:            DefaultRunTimeout,
 		llmCallTimeout:        DefaultLLMCallTimeout,
-		maxTurns:              0, // Unlimited
+		maxTurns:              25, // Safety limit, matches DefaultAgentConfig
 		reflectionOn:          true,
 		maxCompactionAttempts: DefaultMaxCompactionAttempts,
 		logger:                logger.With("component", "agent"),
@@ -291,8 +292,10 @@ func NewAgentRunWithConfig(llm *LLMClient, executor *ToolExecutor, cfg AgentConf
 	if cfg.LLMCallTimeoutSeconds > 0 {
 		ar.llmCallTimeout = time.Duration(cfg.LLMCallTimeoutSeconds) * time.Second
 	}
-	if cfg.MaxTurns >= 0 {
+	if cfg.MaxTurns > 0 {
 		ar.maxTurns = cfg.MaxTurns
+	} else if cfg.MaxTurns < 0 {
+		ar.maxTurns = 0 // Explicit -1 means unlimited
 	}
 	ar.maxContinuations = cfg.MaxContinuations
 	ar.reflectionOn = cfg.ReflectionEnabled
