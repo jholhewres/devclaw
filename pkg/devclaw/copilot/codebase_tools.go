@@ -33,7 +33,7 @@ type codeSearchResult struct {
 // RegisterCodebaseTools registers codebase analysis tools in the executor.
 func RegisterCodebaseTools(executor *ToolExecutor) {
 	// codebase_index
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "codebase_index",
@@ -66,7 +66,7 @@ func RegisterCodebaseTools(executor *ToolExecutor) {
 	})
 
 	// code_search
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "code_search",
@@ -128,7 +128,7 @@ func RegisterCodebaseTools(executor *ToolExecutor) {
 	})
 
 	// code_symbols
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "code_symbols",
@@ -160,7 +160,7 @@ func RegisterCodebaseTools(executor *ToolExecutor) {
 	})
 
 	// cursor_rules_generate
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "cursor_rules_generate",

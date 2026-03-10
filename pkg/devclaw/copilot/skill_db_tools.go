@@ -58,7 +58,7 @@ func RegisterSkillDBTools(executor *ToolExecutor, skillDB *SkillDB) {
 	)
 
 	// skill_db_insert - insert a record into a skill table
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("skill_db_insert", "Insert a new record into a skill database table. Returns the generated record ID.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -84,7 +84,7 @@ func RegisterSkillDBTools(executor *ToolExecutor, skillDB *SkillDB) {
 	)
 
 	// skill_db_update - update an existing record in a skill table
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("skill_db_update", "Update an existing record in a skill database table by row ID.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -114,7 +114,7 @@ func RegisterSkillDBTools(executor *ToolExecutor, skillDB *SkillDB) {
 	)
 
 	// skill_db_delete - delete a record from a skill table
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("skill_db_delete", "Delete a record from a skill database table by row ID.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -139,7 +139,7 @@ func RegisterSkillDBTools(executor *ToolExecutor, skillDB *SkillDB) {
 	)
 
 	// skill_db_create_table - create a new table for a skill
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("skill_db_create_table", "Create a new database table for a skill with custom column definitions.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -191,7 +191,7 @@ func RegisterSkillDBTools(executor *ToolExecutor, skillDB *SkillDB) {
 	)
 
 	// skill_db_describe - describe the structure of a skill table
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("skill_db_describe", "Describe the structure of a skill database table, including column names and types.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -212,7 +212,7 @@ func RegisterSkillDBTools(executor *ToolExecutor, skillDB *SkillDB) {
 	)
 
 	// skill_db_drop_table - drop (permanently delete) a skill table
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("skill_db_drop_table", "Permanently drop a skill database table and all its data.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{

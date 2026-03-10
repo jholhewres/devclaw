@@ -214,6 +214,10 @@ type AgentRun struct {
 	// lastRunToolSummary accumulates tool names called during this run.
 	lastRunToolSummary string
 
+	// collectedToolCalls stores individual tool invocations for session history.
+	// Populated during the agent loop and retrieved via CollectedToolCalls().
+	collectedToolCalls []ToolCallRecord
+
 	logger *slog.Logger
 }
 
@@ -267,6 +271,11 @@ func (ua *UsageAccumulator) ToLLMUsage() LLMUsage {
 // ToolSummary returns a digest of all tools called during this run.
 func (a *AgentRun) ToolSummary() string {
 	return strings.TrimSuffix(a.lastRunToolSummary, "; ")
+}
+
+// CollectedToolCalls returns the individual tool call records collected during the run.
+func (a *AgentRun) CollectedToolCalls() []ToolCallRecord {
+	return a.collectedToolCalls
 }
 
 // NewAgentRun creates a new agent runner.
@@ -418,9 +427,10 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 	}
 
 	// Compact tool descriptions to save tokens in the tool definitions payload.
-	// 300 chars preserves enough detail for the LLM to understand tool behavior
+	// 400 chars preserves enough detail for the LLM to understand tool behavior
 	// while capping excessively long descriptions from plugins/skills.
-	const maxDescLen = 300
+	// With ~25 visible tools (down from ~90), we can afford slightly longer descriptions.
+	const maxDescLen = 400
 	for i := range tools {
 		if len(tools[i].Function.Description) > maxDescLen {
 			tools[i].Function.Description = tools[i].Function.Description[:maxDescLen-3] + "..."
@@ -570,13 +580,17 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 		if a.reflectionOn && totalTurns > 1 && totalTurns%reflectionInterval == 0 {
 			elapsed := time.Since(runStart).Seconds()
 			remaining := a.runTimeout.Seconds() - elapsed
+			maxT := a.maxTurns
+			if maxT <= 0 {
+				maxT = 25 // default for display
+			}
 			messages = append(messages, chatMessage{
 				Role: "user",
 				Content: fmt.Sprintf(
-					"[System: Turn %d checkpoint (%.0fs elapsed, ~%.0fs remaining). "+
-						"If you're stuck or repeating the same approach, STOP and investigate the root cause. "+
-						"Don't repeat failed approaches — think before acting.]",
-					totalTurns, elapsed, remaining,
+					"[System: Turn %d/%d. If you have enough information to respond, do so now. "+
+						"Do not continue searching unless the user's question is still unanswered. "+
+						"(%.0fs elapsed, ~%.0fs remaining)]",
+					totalTurns, maxT, elapsed, remaining,
 				),
 			})
 		}
@@ -888,13 +902,30 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 			}
 		}
 
-		// Accumulate tool names for provenance tracking.
+		// Accumulate tool names for provenance tracking + collect ToolCallRecords.
 		if len(resp.ToolCalls) > 0 {
 			names := make([]string, len(resp.ToolCalls))
 			for i, tc := range resp.ToolCalls {
 				names[i] = tc.Function.Name
 			}
 			a.lastRunToolSummary += strings.Join(names, ",") + "; "
+
+			// Build ToolCallRecords for session history fidelity.
+			resultMap := make(map[string]string, len(results))
+			for _, r := range results {
+				resultMap[r.ToolCallID] = r.Content
+			}
+			for _, tc := range resp.ToolCalls {
+				rec := ToolCallRecord{
+					ID:   tc.ID,
+					Name: tc.Function.Name,
+					Args: truncateStr(tc.Function.Arguments, 200),
+				}
+				if res, ok := resultMap[tc.ID]; ok {
+					rec.Result = truncateStr(res, 500)
+				}
+				a.collectedToolCalls = append(a.collectedToolCalls, rec)
+			}
 		}
 
 		// Track consecutive turns where ALL tool calls were blocked.
@@ -1325,13 +1356,26 @@ func (a *AgentRun) buildMessages(systemPrompt string, history []ConversationEntr
 		})
 		if entry.AssistantResponse != "" {
 			content := entry.AssistantResponse
-			// Annotate with tool provenance so the LLM knows what was
-			// actually verified vs. inferred in previous turns.
-			// Uses XML tags to avoid the LLM mimicking the annotation
-			// as plain text in its own responses.
-			if entry.ToolSummary != "" {
+
+			// When ToolCalls are available, reconstruct them as readable context
+			// so the LLM knows what was actually executed in previous turns.
+			if len(entry.ToolCalls) > 0 {
+				var tcSummary strings.Builder
+				tcSummary.WriteString("[Previous tool calls in this turn:]\n")
+				for _, tc := range entry.ToolCalls {
+					result := tc.Result
+					if result == "" {
+						result = "(no output)"
+					}
+					tcSummary.WriteString(fmt.Sprintf("- %s → %q\n", tc.Name, result))
+				}
+				tcSummary.WriteString("\n")
+				content = tcSummary.String() + content
+			} else if entry.ToolSummary != "" {
+				// Fallback: use ToolSummary/tool_provenance for old entries without ToolCalls.
 				content = "<tool_provenance>" + entry.ToolSummary + "</tool_provenance>\n" + content
 			}
+
 			messages = append(messages, chatMessage{
 				Role:    "assistant",
 				Content: content,
@@ -1523,8 +1567,8 @@ func (a *AgentRun) truncateToolResults(messages []chatMessage, maxLen int) []cha
 // truncated or removed to keep the context lean without waiting for overflow.
 func (a *AgentRun) pruneOldToolResults(messages []chatMessage, currentTurn int) []chatMessage {
 	const (
-		softTrimAge   = 5   // Turns before soft trim (truncate to 500 chars)
-		hardTrimAge   = 10  // Turns before hard trim (remove entirely)
+		softTrimAge   = 3   // Turns before soft trim (truncate to 500 chars)
+		hardTrimAge   = 6   // Turns before hard trim (remove entirely)
 		softTrimChars = 500 // Max chars after soft trim
 	)
 
@@ -1632,9 +1676,9 @@ func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []ch
 		// ── Compaction strategy ──
 		// Step 1: Try truncating oversized tool results first (cheap operation).
 		if !toolResultTruncated {
-			if hasOversizedToolResults(messages, 4000) {
+			if hasOversizedToolResults(messages, 2000) {
 				a.logger.Info("truncating oversized tool results before compaction")
-				messages = a.truncateToolResults(messages, 4000)
+				messages = a.truncateToolResults(messages, 2000)
 				toolResultTruncated = true
 				continue // Retry without compacting messages.
 			}

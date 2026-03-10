@@ -902,7 +902,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, ll
 	}
 
 	// browser_navigate
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("browser_navigate",
 			"Navigate the browser to a URL. Opens the page and waits for it to load.",
 			map[string]any{
@@ -939,7 +939,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, ll
 		screenshotDesc = "Take a screenshot of the current browser page. Returns base64-encoded PNG image data. Use describe_image to analyze it."
 	}
 
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("browser_screenshot", screenshotDesc,
 			map[string]any{
 				"type":                 "object",
@@ -976,7 +976,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, ll
 	)
 
 	// browser_content
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("browser_content",
 			"Get the text content of the current browser page. Useful for reading web pages "+
 				"without rendering. Returns the visible text, truncated if too long.",
@@ -992,7 +992,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, ll
 	)
 
 	// browser_click
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("browser_click",
 			"Click an element on the current page by CSS selector.",
 			map[string]any{
@@ -1019,7 +1019,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, ll
 	)
 
 	// browser_fill
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("browser_fill",
 			"Fill a text input on the current page by CSS selector.",
 			map[string]any{
@@ -1051,7 +1051,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, ll
 	)
 
 	// browser_snapshot
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("browser_snapshot",
 			"Capture an accessibility snapshot of the current page. Returns structured tree with element refs (e1, e2, ...) for subsequent actions. Use this to understand page structure before interacting.",
 			map[string]any{
@@ -1085,7 +1085,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, ll
 	)
 
 	// browser_tabs
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("browser_tabs",
 			"List all open browser tabs. Returns tab IDs, URLs, and titles.",
 			map[string]any{
@@ -1099,7 +1099,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, ll
 	)
 
 	// browser_open_tab
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("browser_open_tab",
 			"Open a new browser tab and optionally navigate to a URL.",
 			map[string]any{
@@ -1125,7 +1125,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, ll
 	)
 
 	// browser_focus_tab
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("browser_focus_tab",
 			"Focus a browser tab by its target ID.",
 			map[string]any{
@@ -1152,7 +1152,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, ll
 	)
 
 	// browser_close_tab
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("browser_close_tab",
 			"Close a browser tab by its target ID.",
 			map[string]any{
@@ -1179,7 +1179,7 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, ll
 	)
 
 	// browser_act - Unified browser actions
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("browser_act",
 			"Perform a browser action. Use after browser_snapshot to get element refs (e1, e2, ...). Kinds: click, type, press, hover, drag, select, fill, resize, wait, evaluate. TIP: After submitting forms, use wait (1-2 seconds) then browser_snapshot to check for success or error messages before retrying.",
 			map[string]any{
@@ -1326,7 +1326,43 @@ func RegisterBrowserTools(executor *ToolExecutor, browserMgr *BrowserManager, ll
 		},
 	)
 
+	// browser — unified dispatcher that routes action to individual browser_* tools.
+	// Matches OpenClaw's single `browser` tool pattern.
+	executor.Register(
+		MakeToolDefinition("browser",
+			"Control web browser: navigate, screenshot, extract content, click elements, fill forms, manage tabs, or act on natural language instructions.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"action":      map[string]any{"type": "string", "description": "Browser action to perform", "enum": []string{"navigate", "screenshot", "content", "click", "fill", "snapshot", "tabs", "open_tab", "focus_tab", "close_tab", "act"}},
+					"url":         map[string]any{"type": "string", "description": "URL to navigate to (for navigate/open_tab)"},
+					"selector":    map[string]any{"type": "string", "description": "CSS selector (for click/fill)"},
+					"value":       map[string]any{"type": "string", "description": "Value to fill (for fill)"},
+					"tab_id":      map[string]any{"type": "string", "description": "Tab ID (for focus_tab/close_tab)"},
+					"instruction": map[string]any{"type": "string", "description": "Natural language instruction (for act)"},
+				},
+				"required": []string{"action"},
+			}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			action, _ := args["action"].(string)
+			return legacyDispatch(ctx, executor, map[string]string{
+				"navigate":  "browser_navigate",
+				"screenshot": "browser_screenshot",
+				"content":   "browser_content",
+				"click":     "browser_click",
+				"fill":      "browser_fill",
+				"snapshot":  "browser_snapshot",
+				"tabs":      "browser_tabs",
+				"open_tab":  "browser_open_tab",
+				"focus_tab": "browser_focus_tab",
+				"close_tab": "browser_close_tab",
+				"act":       "browser_act",
+			}, action, "browser", args)
+		},
+	)
+
 	logger.Info("browser tools registered",
-		"tools", []string{"browser_navigate", "browser_screenshot", "browser_content", "browser_click", "browser_fill", "browser_snapshot", "browser_tabs", "browser_open_tab", "browser_focus_tab", "browser_close_tab", "browser_act"},
+		"dispatcher", "browser",
+		"hidden_tools", []string{"browser_navigate", "browser_screenshot", "browser_content", "browser_click", "browser_fill", "browser_snapshot", "browser_tabs", "browser_open_tab", "browser_focus_tab", "browser_close_tab", "browser_act"},
 	)
 }

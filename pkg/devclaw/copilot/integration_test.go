@@ -146,7 +146,6 @@ func TestPromptLayerIntegration(t *testing.T) {
 		"## Messaging",
 		"## Silent Replies",
 		"## Heartbeats",
-		"## Media Capabilities",
 		"NO_REPLY",
 		"HEARTBEAT_OK",
 	}

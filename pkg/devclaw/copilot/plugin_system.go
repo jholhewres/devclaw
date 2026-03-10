@@ -248,7 +248,7 @@ func SentryPlugin(dsn, token string) *Plugin {
 // RegisterPluginTools registers plugin management tools in the executor.
 func RegisterPluginTools(executor *ToolExecutor, pm *PluginManager) {
 	// plugin_list
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "plugin_list",
@@ -270,7 +270,7 @@ func RegisterPluginTools(executor *ToolExecutor, pm *PluginManager) {
 	})
 
 	// plugin_install
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "plugin_install",
@@ -313,7 +313,7 @@ func RegisterPluginTools(executor *ToolExecutor, pm *PluginManager) {
 	})
 
 	// plugin_call
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "plugin_call",

@@ -132,7 +132,7 @@ func parseGitStatus() (*gitStatusResult, error) {
 // RegisterGitTools registers native Git tools in the executor.
 func RegisterGitTools(executor *ToolExecutor) {
 	// git_status
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "git_status",
@@ -153,7 +153,7 @@ func RegisterGitTools(executor *ToolExecutor) {
 	})
 
 	// git_diff
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "git_diff",
@@ -196,7 +196,7 @@ func RegisterGitTools(executor *ToolExecutor) {
 	})
 
 	// git_log
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "git_log",
@@ -276,7 +276,7 @@ func RegisterGitTools(executor *ToolExecutor) {
 	})
 
 	// git_commit
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "git_commit",
@@ -310,7 +310,7 @@ func RegisterGitTools(executor *ToolExecutor) {
 	})
 
 	// git_branch
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "git_branch",
@@ -388,7 +388,7 @@ func RegisterGitTools(executor *ToolExecutor) {
 	})
 
 	// git_stash
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "git_stash",
@@ -455,7 +455,7 @@ func RegisterGitTools(executor *ToolExecutor) {
 	})
 
 	// git_blame
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "git_blame",

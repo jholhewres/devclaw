@@ -30,7 +30,7 @@ func RegisterMemoryTools(executor *ToolExecutor, cfg MemoryDispatcherConfig) {
 	memCfg := cfg.Config
 
 	// ── memory_save ──
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("memory_save",
 			"Save a fact, preference, event, or summary to long-term memory. "+
 				"Use this to remember important information from conversations.",
@@ -60,7 +60,7 @@ func RegisterMemoryTools(executor *ToolExecutor, cfg MemoryDispatcherConfig) {
 	if sqliteStore != nil {
 		searchDesc += " Supports semantic search (vector + keyword hybrid)."
 	}
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("memory_search", searchDesc,
 			map[string]any{
 				"type": "object",
@@ -82,7 +82,7 @@ func RegisterMemoryTools(executor *ToolExecutor, cfg MemoryDispatcherConfig) {
 	)
 
 	// ── memory_list ──
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("memory_list",
 			"List recent entries from long-term memory, ordered by date.",
 			map[string]any{
@@ -100,7 +100,7 @@ func RegisterMemoryTools(executor *ToolExecutor, cfg MemoryDispatcherConfig) {
 	)
 
 	// ── memory_index ──
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("memory_index",
 			"Rebuild the memory search index. Use this after manually editing memory files.",
 			map[string]any{

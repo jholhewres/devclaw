@@ -193,10 +193,11 @@ var internalTagRe = regexp.MustCompile(`</?(?:final|thinking|reasoning|\w+_prove
 // before the user sees the text.
 var toolsUsedRe = regexp.MustCompile(`(?m)^\[Tools used:[^\]]*\]\n?`)
 
-// duplicatedFinalRe matches <final>...</final> blocks that contain a full
-// duplicate of the response (LLM wrapping already-streamed text). The entire
-// block including content is removed to prevent duplication.
-var duplicatedFinalRe = regexp.MustCompile(`(?s)<final>\s*(.*?)\s*</final>`)
+// finalTagRe matches <final>...</final> blocks and captures their inner content.
+// The inner content is preserved (it's the user-visible response); only the
+// wrapper tags are stripped. This aligns with the <final> convention where the
+// LLM wraps user-facing output inside <final> tags after <think> blocks.
+var finalTagRe = regexp.MustCompile(`(?s)<final>\s*(.*?)\s*</final>`)
 
 // toolProvenanceRe matches <tool_provenance>...</tool_provenance> blocks
 // including their content. These are internal annotations added to conversation
@@ -211,9 +212,9 @@ var toolProvenanceRe = regexp.MustCompile(`(?s)<\w+_proven\w+>.*?</\w+_proven\w+
 //   - [Tools used: ...] annotations (LLM may mimic the history format)
 //   - NO_REPLY / HEARTBEAT_OK sentinel tokens
 func StripInternalTags(text string) string {
-	// First: remove full <final>...</final> blocks — these typically contain
-	// a duplicate of the already-streamed response.
-	text = duplicatedFinalRe.ReplaceAllString(text, "")
+	// Unwrap <final>...</final> blocks — keep inner content, remove wrapper tags.
+	// The content inside <final> is the user-visible response.
+	text = finalTagRe.ReplaceAllString(text, "$1")
 
 	// Remove <tool_provenance>...</tool_provenance> blocks (internal history annotations).
 	text = toolProvenanceRe.ReplaceAllString(text, "")

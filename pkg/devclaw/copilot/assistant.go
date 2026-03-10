@@ -1832,11 +1832,12 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	a.proactiveMemoryFlush(agentCtx, session, modelOverride)
 
 	agentStart := time.Now()
-	response, toolSummary := a.executeAgentWithStream(agentCtx, workspace.ID, session, sessionID, prompt, userContent, blockStreamer, modelOverride)
+	response, toolSummary, toolCalls := a.executeAgentWithStream(agentCtx, workspace.ID, session, sessionID, prompt, userContent, blockStreamer, modelOverride)
 	logger.Info("agent execution complete",
 		"agent_duration_ms", time.Since(agentStart).Milliseconds(),
 		"response_len", len(response),
 	)
+	_ = toolSummary // kept for backward compat logging; toolCalls is the primary record
 
 	// Agent run complete — transition to grace period for block streamer dispatch.
 	typingCtrl.MarkRunComplete()
@@ -1855,7 +1856,7 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	}
 
 	// ── Step 10: Update session ──
-	session.AddMessageWithTools(userContent, response, toolSummary)
+	session.AddMessageWithToolCalls(userContent, response, toolCalls)
 
 	// ── Step 10b: Auto-capture memories from this conversation turn ──
 	// Asynchronously extract important facts, preferences, and decisions from
@@ -2120,7 +2121,7 @@ func (a *Assistant) proactiveMemoryFlush(ctx context.Context, session *Session, 
 // progressively to the channel via a BlockStreamer.
 // sessionID is the channel:chatID key used for interrupt inbox routing.
 // modelOverride specifies the model to use (empty = use default).
-func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID string, session *Session, sessionID string, systemPrompt string, userMessage string, streamer *BlockStreamer, modelOverride string) (string, string) {
+func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID string, session *Session, sessionID string, systemPrompt string, userMessage string, streamer *BlockStreamer, modelOverride string) (string, string, []ToolCallRecord) {
 	runKey := workspaceID + ":" + session.ID
 
 	// Create interrupt inbox so follow-up messages can be injected mid-run.
@@ -2206,10 +2207,10 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 	response, usage, err := agent.RunWithUsage(runCtx, systemPrompt, history, userMessage)
 	if err != nil {
 		if runCtx.Err() != nil {
-			return "Agent stopped.", ""
+			return "Agent stopped.", "", nil
 		}
 		a.logger.Error("agent failed", "error", err)
-		return fmt.Sprintf("Sorry, I encountered an error: %v", err), ""
+		return fmt.Sprintf("Sorry, I encountered an error: %v", err), "", nil
 	}
 
 	if usage != nil {
@@ -2218,7 +2219,7 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 		session.UpdateLastCallTokens(usage.PromptTokens, usage.CompletionTokens, usage.CacheReadTokens, usage.CacheWriteTokens)
 	}
 
-	return response, agent.ToolSummary()
+	return response, agent.ToolSummary(), agent.CollectedToolCalls()
 }
 
 // executeAgent runs the agentic loop with tool use support.
@@ -3812,7 +3813,7 @@ func (a *Assistant) resumeInterruptedRuns() {
 			)
 			defer blockStreamer.Finish()
 
-			response, toolSummary := a.executeAgentWithStream(
+			response, _, toolCalls := a.executeAgentWithStream(
 				resumeCtx, resolved.Workspace.ID, session, sessionID,
 				prompt, run.UserMessage, blockStreamer, modelOverride,
 			)
@@ -3828,7 +3829,7 @@ func (a *Assistant) resumeInterruptedRuns() {
 			}
 
 			// Save to session history.
-			session.AddMessageWithTools(run.UserMessage, response, toolSummary)
+			session.AddMessageWithToolCalls(run.UserMessage, response, toolCalls)
 		}(r)
 	}
 }

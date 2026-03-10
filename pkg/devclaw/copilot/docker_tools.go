@@ -49,7 +49,7 @@ func runDocker(args ...string) (string, error) {
 // RegisterDockerTools registers Docker management tools in the executor.
 func RegisterDockerTools(executor *ToolExecutor) {
 	// docker_ps
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "docker_ps",
@@ -101,7 +101,7 @@ func RegisterDockerTools(executor *ToolExecutor) {
 	})
 
 	// docker_logs
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "docker_logs",
@@ -130,7 +130,7 @@ func RegisterDockerTools(executor *ToolExecutor) {
 	})
 
 	// docker_exec
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "docker_exec",
@@ -157,7 +157,7 @@ func RegisterDockerTools(executor *ToolExecutor) {
 	})
 
 	// docker_images
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "docker_images",
@@ -200,7 +200,7 @@ func RegisterDockerTools(executor *ToolExecutor) {
 	})
 
 	// docker_compose
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "docker_compose",
@@ -249,7 +249,7 @@ func RegisterDockerTools(executor *ToolExecutor) {
 	})
 
 	// docker_stop
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "docker_stop",
@@ -272,7 +272,7 @@ func RegisterDockerTools(executor *ToolExecutor) {
 	})
 
 	// docker_rm
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "docker_rm",

@@ -673,7 +673,7 @@ func registerWebFetchTool(executor *ToolExecutor, ssrfGuard *security.SSRFGuard)
 // ---------- Exec Tool (sandboxed) ----------
 
 func registerExecTool(executor *ToolExecutor, runner *sandbox.Runner) {
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("exec", "Execute a shell command in a sandboxed environment. For full access, use the 'bash' tool instead.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -837,7 +837,7 @@ func registerBashTool(executor *ToolExecutor) {
 	)
 
 	// ssh — execute commands on remote machines via SSH.
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("ssh", "Execute a command on a remote machine via SSH. Uses the user's SSH keys and config (~/.ssh/config). Supports any host configured in SSH config or direct user@host.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -928,7 +928,7 @@ func registerBashTool(executor *ToolExecutor) {
 	)
 
 	// scp — copy files to/from remote machines.
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("scp", "Copy files between local machine and remote hosts via SCP/SFTP. Uses the user's SSH keys and config.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -990,7 +990,7 @@ func registerBashTool(executor *ToolExecutor) {
 	)
 
 	// set_env — set environment variables for subsequent bash/ssh calls.
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("set_env", "Set an environment variable that persists across subsequent bash calls in this session.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -1678,7 +1678,7 @@ type SecurityAuditToolConfig struct {
 }
 
 func registerSecurityAuditTool(executor *ToolExecutor, cfg SecurityAuditToolConfig) {
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("security_audit", "Run a security audit checking for misconfigurations, exposed secrets, and security gaps.", map[string]any{
 			"type":       "object",
 			"properties": map[string]any{},

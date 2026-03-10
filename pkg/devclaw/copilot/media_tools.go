@@ -131,7 +131,7 @@ func registerDescribeImageTool(executor *ToolExecutor, llm *LLMClient, media Med
 }
 
 func registerTranscribeAudioTool(executor *ToolExecutor, llm *LLMClient, media MediaConfig, registry *MediaRegistry, logger *slog.Logger) {
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("transcribe_audio", "Transcribe audio/voice to text from base64-encoded audio data.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -206,7 +206,7 @@ func RegisterNativeMediaTools(executor *ToolExecutor, mediaSvc *media.MediaServi
 }
 
 func registerSendImageTool(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("send_image", "Send an image to the user via media_id, file path, or URL.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -243,7 +243,7 @@ func registerSendImageTool(executor *ToolExecutor, mediaSvc *media.MediaService,
 }
 
 func registerSendAudioTool(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("send_audio", "Send an audio file to the user via media_id, file path, or URL.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -276,7 +276,7 @@ func registerSendAudioTool(executor *ToolExecutor, mediaSvc *media.MediaService,
 }
 
 func registerSendDocumentTool(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("send_document", "Send a document to the user via media_id, file path, or URL.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{

@@ -40,7 +40,7 @@ type apiTestResult struct {
 // RegisterTestingTools registers testing engine tools.
 func RegisterTestingTools(executor *ToolExecutor) {
 	// test_run
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "test_run",
@@ -96,7 +96,7 @@ func RegisterTestingTools(executor *ToolExecutor) {
 	})
 
 	// api_test
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "api_test",
@@ -178,7 +178,7 @@ func RegisterTestingTools(executor *ToolExecutor) {
 	})
 
 	// test_coverage
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "test_coverage",

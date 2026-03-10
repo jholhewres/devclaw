@@ -14,7 +14,7 @@ import (
 func RegisterVaultTools(executor *ToolExecutor, vault *Vault) {
 
 	// ── vault_status ──
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("vault_status",
 			"Check the encrypted vault state: whether it exists, is locked/unlocked, and how many secrets are stored.",
 			map[string]any{
@@ -27,7 +27,7 @@ func RegisterVaultTools(executor *ToolExecutor, vault *Vault) {
 	)
 
 	// ── vault_save ──
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("vault_save",
 			"Store a secret (API key, token, password) in the encrypted vault (AES-256-GCM + Argon2id). "+
 				"Never store secrets in plain text files — always use this tool.",
@@ -51,7 +51,7 @@ func RegisterVaultTools(executor *ToolExecutor, vault *Vault) {
 	)
 
 	// ── vault_get ──
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("vault_get",
 			"Retrieve a secret value from the encrypted vault by name.",
 			map[string]any{
@@ -70,7 +70,7 @@ func RegisterVaultTools(executor *ToolExecutor, vault *Vault) {
 	)
 
 	// ── vault_list ──
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("vault_list",
 			"List all secret names stored in the encrypted vault (values are not shown).",
 			map[string]any{
@@ -83,7 +83,7 @@ func RegisterVaultTools(executor *ToolExecutor, vault *Vault) {
 	)
 
 	// ── vault_delete ──
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("vault_delete",
 			"Remove a secret from the encrypted vault by name.",
 			map[string]any{

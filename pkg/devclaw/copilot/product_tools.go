@@ -48,7 +48,7 @@ type doraMetrics struct {
 // RegisterProductTools registers product management tools.
 func RegisterProductTools(executor *ToolExecutor) {
 	// sprint_report
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "sprint_report",
@@ -97,7 +97,7 @@ func RegisterProductTools(executor *ToolExecutor) {
 	})
 
 	// dora_metrics
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "dora_metrics",
@@ -174,7 +174,7 @@ func RegisterProductTools(executor *ToolExecutor) {
 	})
 
 	// project_summary
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "project_summary",

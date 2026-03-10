@@ -184,7 +184,7 @@ func (p *PromptComposer) Compose(session *Session, input string) string {
 	layers = append(layers, layerEntry{layer: LayerCore, content: p.buildCoreLayer()})
 	layers = append(layers, layerEntry{layer: LayerSafety, content: p.buildSafetyLayer()})
 	layers = append(layers, layerEntry{layer: LayerTemporal, content: p.buildTemporalLayer()})
-	layers = append(layers, layerEntry{layer: LayerRuntime, content: p.buildRuntimeLayer()})
+	layers = append(layers, layerEntry{layer: LayerRuntime, content: p.buildRuntimeLayer(session)})
 
 	if p.config.Instructions != "" {
 		layers = append(layers, layerEntry{
@@ -324,7 +324,7 @@ func (p *PromptComposer) ComposeWithMode(session *Session, input string, mode Pr
 		{layer: LayerCore, content: p.buildCoreLayer()},
 		{layer: LayerSafety, content: p.buildSafetyLayer()},
 		{layer: LayerTemporal, content: p.buildTemporalLayer()},
-		{layer: LayerRuntime, content: p.buildRuntimeLayer()},
+		{layer: LayerRuntime, content: p.buildRuntimeLayer(session)},
 	}
 
 	// Add additional layers based on mode
@@ -512,26 +512,18 @@ func (p *PromptComposer) buildCoreLayer() string {
 	}
 	b.WriteString(intro + "\n\n")
 
-	// ## Tooling — curated core tool summaries (aligned with OpenClaw approach).
+	// ## Tooling — dynamic tool summaries from registered visible tools.
 	// Full tool schemas are sent via the API tools[] parameter; this section
 	// gives the LLM a quick reference of the most important tools only.
 	b.WriteString("## Tooling\n\n")
-	b.WriteString("Core tools (always available):\n")
-	b.WriteString("- read / write / edit — file operations\n")
-	b.WriteString("- grep / glob — search file contents and find files by pattern\n")
-	b.WriteString("- bash — run shell commands\n")
-	b.WriteString("- web_search / web_fetch — search the web, fetch URLs\n")
-	b.WriteString("- memory — long-term memory (save, search, list, index)\n")
-	b.WriteString("- scheduler — schedule jobs and reminders (add/list/remove/search)\n")
-	b.WriteString("- message — send messages and channel actions\n")
-	b.WriteString("- vault — encrypted secret storage (status/save/get/list/delete)\n")
-	b.WriteString("- skill_init / skill_list / skill_install — create, discover, install skills\n")
-	b.WriteString("- spawn_subagent — delegate complex subtasks to a child agent\n")
-	b.WriteString("- image_generate — generate images via AI\n")
+	b.WriteString(p.buildToolSummaries())
 	b.WriteString("\nAll tools are in your tool definitions — call them directly by name.\n")
 	b.WriteString("TOOLS.md does not control tool availability; it is user guidance for how to use external tools.\n")
 	b.WriteString("For complex or long-running tasks, use `spawn_subagent`. Completion is push-based: it auto-announces when done.\n")
 	b.WriteString("Do NOT poll in a loop. Check status on-demand only (for intervention, debugging, or when explicitly asked).\n\n")
+	b.WriteString("When you have gathered enough information to answer the user's question, STOP calling tools and respond immediately. Do not over-research — the user is waiting.\n")
+	b.WriteString("If you have called web_search or web_fetch more than 5 times for the same topic without finding what you need, summarize what you found and ask the user for clarification.\n")
+	b.WriteString("When a first-class tool exists for an action, use the tool directly instead of asking the user to run CLI commands.\n\n")
 
 	// Note: Memory Recall instructions are in buildMemoryLayer() to avoid duplication.
 
@@ -548,27 +540,17 @@ func (p *PromptComposer) buildCoreLayer() string {
 	b.WriteString("## Safety\n\n")
 	b.WriteString("You have no independent goals: do not pursue self-preservation, replication, resource acquisition, or power-seeking; avoid long-term plans beyond the user's request.\n")
 	b.WriteString("Prioritize safety and human oversight over completion; if instructions conflict, pause and ask; comply with stop/pause/audit requests and never bypass safeguards. (Inspired by Anthropic's constitution.)\n")
-	b.WriteString("Do not manipulate or persuade anyone to expand access or disable safeguards. Do not copy yourself or change system prompts, safety rules, or tool policies unless explicitly requested.\n\n")
-
-	// ## Epistemic Restraint — anti-hallucination grounding rules
-	b.WriteString("## Epistemic Restraint\n\n")
-	b.WriteString("Facts and knowledge:\n")
-	b.WriteString("- Only state facts you can verify via a tool call or that appear in this system prompt.\n")
-	b.WriteString("- When uncertain, say so explicitly: use phrases like \"I'm not sure\", \"I don't have that information\", or \"let me check\".\n")
-	b.WriteString("- Do NOT invent URLs, file names, API endpoints, version numbers, dates, or identifiers.\n")
-	b.WriteString("- Do NOT extrapolate from memory what should be confirmed by a tool — run the tool instead.\n")
-	b.WriteString("- Claims about the current state of the world (files, repos, services) MUST come from a tool result in the current session.\n")
-	b.WriteString("- If you used a tool and it returned data, you may cite that data. If you did not use a tool, do not fabricate what a tool \"would\" return.\n")
-	b.WriteString("- These restraint rules apply even when following a SOUL.md persona — the persona sets style, not license to fabricate.\n\n")
+	b.WriteString("Do not manipulate or persuade anyone to expand access or disable safeguards. Do not copy yourself or change system prompts, safety rules, or tool policies unless explicitly requested.\n")
+	b.WriteString("Do NOT invent URLs, file names, API endpoints, version numbers, dates, or identifiers — verify via tool calls.\n\n")
 
 	// ## Memory Recall — instruct the agent to search memory proactively.
 	// This lives in the core layer (never trimmed) instead of the memory layer
 	// (which can be dropped when the system prompt exceeds token budget).
 	b.WriteString("## Memory Recall\n\n")
 	b.WriteString("Before answering questions about prior work, decisions, dates, people, preferences, or todos:\n")
-	b.WriteString("1. Run memory_search(query=\"...\") to recall relevant information.\n")
-	b.WriteString("2. Do NOT assume you remember — always verify with memory_search first.\n")
-	b.WriteString("3. If memory_search returns no results, tell the user you don't have that information saved.\n\n")
+	b.WriteString("1. Run memory(action=\"search\", query=\"...\") to recall relevant information.\n")
+	b.WriteString("2. Do NOT assume you remember — always verify with memory first.\n")
+	b.WriteString("3. If memory returns no results, tell the user you don't have that information saved.\n\n")
 
 	// ## Workspace - matches structure (comes BEFORE Reply Tags)
 	b.WriteString("## Workspace\n\n")
@@ -619,28 +601,78 @@ func (p *PromptComposer) buildCoreLayer() string {
 	return b.String()
 }
 
-// buildSafetyLayer creates additional safety and capability sections.
-// Note: Core safety is in buildCoreLayer to match structure.
-// This layer contains DevClaw-specific additions (Media).
-// Vault instructions are in the individual vault tool descriptions (vault_save, vault_get, etc.).
+// coreToolSummaries maps tool names to their one-line prompt descriptions.
+// Only tools present in the executor's visible set AND in this map are included.
+// This avoids hardcoding the list — if a tool is hidden or removed, it disappears.
+var coreToolSummaries = map[string]string{
+	"read_file":      "Read file contents",
+	"write_file":     "Write/create a file",
+	"edit_file":      "Apply targeted edits to a file",
+	"list_files":     "List directory contents",
+	"search_files":   "Search file contents with regex",
+	"glob_files":     "Find files by glob pattern",
+	"bash":           "Run shell commands",
+	"web_search":     "Search the web",
+	"web_fetch":      "Fetch a URL and extract content",
+	"memory":         "Long-term memory (action: save/search/list/index)",
+	"scheduler":      "Scheduled tasks and reminders (action: add/list/remove/search)",
+	"vault":          "Encrypted secret storage (action: status/save/get/list/delete)",
+	"message":        "Send messages, channel actions (polls, reactions, etc.)",
+	"sessions":       "Manage chat sessions (list/get/send/rename)",
+	"spawn_subagent": "Delegate complex subtasks to a child agent",
+	"list_subagents": "List running child agents",
+	"describe_image": "Describe image contents via Vision",
+	"browser":        "Control web browser (navigate/screenshot/click/fill/act)",
+	"daemon":         "Manage background daemons",
+	"apply_patch":    "Apply a unified diff patch to files",
+	"skill_init":     "Create a new skill",
+	"skill_list":     "List available skills",
+	"skill_install":  "Install a skill from URL",
+	"skill_db_query": "Query a skill's SQLite database",
+	"skill_db_list_tables": "List tables in a skill's database",
+}
+
+// buildToolSummaries generates a dynamic tool summary section.
+// Iterates the executor's visible tools and includes only those present in coreToolSummaries.
+func (p *PromptComposer) buildToolSummaries() string {
+	var b strings.Builder
+	b.WriteString("Core tools (always available):\n")
+
+	if p.toolExecutor == nil {
+		// Fallback: static list when executor not set.
+		for name, desc := range coreToolSummaries {
+			b.WriteString(fmt.Sprintf("- %s — %s\n", name, desc))
+		}
+		return b.String()
+	}
+
+	// Get visible tool names from executor.
+	visibleDefs := p.toolExecutor.Tools()
+	visibleSet := make(map[string]bool, len(visibleDefs))
+	for _, td := range visibleDefs {
+		visibleSet[td.Function.Name] = true
+	}
+
+	// Include only tools that are both visible and in the curated summaries map.
+	// Sort for consistent output.
+	var names []string
+	for name := range coreToolSummaries {
+		if visibleSet[name] {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		b.WriteString(fmt.Sprintf("- %s — %s\n", name, coreToolSummaries[name]))
+	}
+
+	return b.String()
+}
+
+// buildSafetyLayer returns an empty string — core safety lives in buildCoreLayer.
+// Media capabilities are implicit from tool descriptions; no separate section needed.
 func (p *PromptComposer) buildSafetyLayer() string {
-	return `## Media Capabilities
-
-You can receive and process media from users:
-
-- **Images**: Automatically analyzed via Vision API. You see the description in [Image: ...].
-- **Audio/Voice notes**: Automatically transcribed via Whisper. You see the transcript directly.
-- **Documents (PDF, DOCX, TXT, code files)**: Automatically extracted and injected as text. You see the content in [Document: filename].
-- **Video**: First frame analyzed via Vision API. You see the description in [Video: ...].
-
-When you generate an image with generate_image, it is automatically sent as media to the user's channel — no need to describe the file path.
-
-**System dependencies for media processing** (install on the server if needed):
-- poppler-utils: for PDF text extraction (pdftotext)
-- ffmpeg: for video frame extraction
-- unzip: for DOCX text extraction
-
-Install with: sudo apt install -y poppler-utils ffmpeg unzip`
+	return ""
 }
 
 // buildThinkingLayer adds extended-thinking guidance based on session /think level.
@@ -655,7 +687,9 @@ func (p *PromptComposer) buildThinkingLayer(session *Session) string {
 		"high":   "Use extended thinking: reason carefully before answering, consider alternatives, then respond. Favor depth over speed.",
 	}
 	if instr, ok := instructions[level]; ok {
-		return "## Thinking Mode\n\n" + instr
+		return "## Thinking Mode\n\n" + instr + "\n\n" +
+			"Format every reply as <think>...</think> then <final>...</final>.\n" +
+			"Only text inside <final> is shown to the user; everything else is discarded."
 	}
 	return ""
 }
@@ -900,7 +934,8 @@ func (p *PromptComposer) buildSkillsLayerReference() string {
 	b.WriteString("- If exactly one skill clearly applies: read its SKILL.md at <location> with read_file, then follow it.\n")
 	b.WriteString("- If multiple could apply: choose the most specific one, then read/follow it.\n")
 	b.WriteString("- If none clearly apply: do not read any SKILL.md.\n")
-	b.WriteString("Constraints: never read more than one skill up front; only read after selecting.\n\n")
+	b.WriteString("Constraints: never read more than one skill up front; only read after selecting.\n")
+	b.WriteString("When a skill drives external API writes, assume rate limits: prefer fewer larger writes, avoid tight one-item loops, and respect 429/Retry-After.\n\n")
 
 	// Build XML reference list.
 	b.WriteString("<available_skills>\n")
@@ -1229,7 +1264,7 @@ func (p *PromptComposer) buildBuiltinSkillsLayer() string {
 }
 
 // buildRuntimeLayer creates the runtime info line (last in prompt).
-func (p *PromptComposer) buildRuntimeLayer() string {
+func (p *PromptComposer) buildRuntimeLayer(session *Session) string {
 	hostname, _ := os.Hostname()
 	cwd, _ := os.Getwd()
 
@@ -1239,14 +1274,28 @@ func (p *PromptComposer) buildRuntimeLayer() string {
 		name = p.agentProfile.Identity.Name
 	}
 
-	return fmt.Sprintf("---\nRuntime: agent=%s | model=%s | os=%s/%s | host=%s | cwd=%s | lang=%s",
+	channel := "unknown"
+	if session != nil && session.Channel != "" {
+		channel = session.Channel
+	}
+
+	thinkingLevel := "off"
+	if session != nil {
+		if lvl := session.GetThinkingLevel(); lvl != "" {
+			thinkingLevel = lvl
+		}
+	}
+
+	return fmt.Sprintf("---\nRuntime: agent=%s | model=%s | os=%s/%s | host=%s | channel=%s | cwd=%s | lang=%s | thinking=%s",
 		name,
 		p.config.Model,
 		runtime.GOOS,
 		runtime.GOARCH,
 		hostname,
+		channel,
 		cwd,
 		p.config.Language,
+		thinkingLevel,
 	)
 }
 

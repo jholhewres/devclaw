@@ -161,17 +161,18 @@ func DefaultToolGuardConfig() ToolGuardConfig {
 // ToolGroups maps group names to tool name lists.
 // Allows policy management at a higher level than individual tools.
 var ToolGroups = map[string][]string{
-	"group:memory":    {"memory_save", "memory_search", "memory_list", "memory_index"},
+	"group:memory":    {"memory", "memory_save", "memory_search", "memory_list", "memory_index"},
 	"group:web":       {"web_search", "web_fetch"},
 	"group:fs":        {"read_file", "write_file", "edit_file", "list_files", "search_files", "glob_files"},
 	"group:runtime":   {"bash", "exec", "ssh", "scp", "set_env"},
 	"group:subagents": {"spawn_subagent", "list_subagents", "wait_subagent", "stop_subagent"},
 	"group:skills":    {"skill_init", "skill_edit", "skill_add_script", "skill_list", "skill_test", "skill_install", "skill_defaults_list", "skill_defaults_install", "skill_remove"},
-	"group:scheduler": {"scheduler_add", "scheduler_list", "scheduler_remove", "scheduler_search"},
-	"group:vault":     {"vault_status", "vault_save", "vault_get", "vault_list", "vault_delete"},
+	"group:scheduler": {"scheduler", "scheduler_add", "scheduler_list", "scheduler_remove", "scheduler_search"},
+	"group:vault":     {"vault", "vault_status", "vault_save", "vault_get", "vault_list", "vault_delete"},
 	"group:sessions":  {"sessions"},
 	"group:daemon":    {"daemon"},
 	"group:media":     {"describe_image", "transcribe_audio", "image-gen_generate_image"},
+	"group:browser":   {"browser", "browser_navigate", "browser_screenshot", "browser_content", "browser_click", "browser_fill", "browser_snapshot", "browser_tabs", "browser_open_tab", "browser_focus_tab", "browser_close_tab", "browser_act"},
 	"group:teams": {
 		"team_manage",
 		"team_agent",

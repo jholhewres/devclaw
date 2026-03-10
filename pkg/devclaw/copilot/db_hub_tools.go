@@ -63,7 +63,7 @@ func RegisterDBHubTools(executor *ToolExecutor, hub *database.Hub) {
 	}
 
 	// db_hub_status
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "db_hub_status",
@@ -121,7 +121,7 @@ func RegisterDBHubTools(executor *ToolExecutor, hub *database.Hub) {
 	})
 
 	// db_hub_query
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "db_hub_query",
@@ -219,7 +219,7 @@ func RegisterDBHubTools(executor *ToolExecutor, hub *database.Hub) {
 	})
 
 	// db_hub_execute
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "db_hub_execute",
@@ -259,7 +259,7 @@ func RegisterDBHubTools(executor *ToolExecutor, hub *database.Hub) {
 	})
 
 	// db_hub_schema
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "db_hub_schema",
@@ -360,7 +360,7 @@ func RegisterDBHubTools(executor *ToolExecutor, hub *database.Hub) {
 	})
 
 	// db_hub_migrate
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "db_hub_migrate",
@@ -438,7 +438,7 @@ func RegisterDBHubTools(executor *ToolExecutor, hub *database.Hub) {
 	})
 
 	// db_hub_backup
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "db_hub_backup",
@@ -500,7 +500,7 @@ func RegisterDBHubTools(executor *ToolExecutor, hub *database.Hub) {
 	})
 
 	// db_hub_backends
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "db_hub_backends",
@@ -543,7 +543,7 @@ func RegisterDBHubTools(executor *ToolExecutor, hub *database.Hub) {
 	})
 
 	// db_hub_raw - direct SQL access for debugging (rate-limited)
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "db_hub_raw",

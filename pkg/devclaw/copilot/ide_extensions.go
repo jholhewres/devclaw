@@ -31,7 +31,7 @@ func DefaultIDEConfig() IDEConfig {
 // RegisterIDETools registers IDE extension configuration tools.
 func RegisterIDETools(executor *ToolExecutor) {
 	// ide_configure
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "ide_configure",

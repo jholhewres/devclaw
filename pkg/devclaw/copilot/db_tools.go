@@ -13,7 +13,7 @@ import (
 // RegisterDBTools registers database query and management tools.
 func RegisterDBTools(executor *ToolExecutor) {
 	// db_query
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "db_query",
@@ -41,7 +41,7 @@ func RegisterDBTools(executor *ToolExecutor) {
 	})
 
 	// db_execute
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "db_execute",
@@ -65,7 +65,7 @@ func RegisterDBTools(executor *ToolExecutor) {
 	})
 
 	// db_schema
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "db_schema",
@@ -117,7 +117,7 @@ func RegisterDBTools(executor *ToolExecutor) {
 	})
 
 	// db_connections
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "db_connections",

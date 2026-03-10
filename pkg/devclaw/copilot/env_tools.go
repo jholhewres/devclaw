@@ -39,7 +39,7 @@ type portScanResult struct {
 // RegisterEnvTools registers system information and diagnostic tools.
 func RegisterEnvTools(executor *ToolExecutor) {
 	// env_info
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "env_info",
@@ -75,7 +75,7 @@ func RegisterEnvTools(executor *ToolExecutor) {
 	})
 
 	// port_scan
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "port_scan",
@@ -134,7 +134,7 @@ func RegisterEnvTools(executor *ToolExecutor) {
 	})
 
 	// process_list
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "process_list",

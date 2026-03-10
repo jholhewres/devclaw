@@ -36,7 +36,7 @@ type deployResult struct {
 // RegisterOpsTools registers operations and deployment tools.
 func RegisterOpsTools(executor *ToolExecutor) {
 	// server_health
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "server_health",
@@ -85,7 +85,7 @@ func RegisterOpsTools(executor *ToolExecutor) {
 	})
 
 	// deploy_run
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "deploy_run",
@@ -154,7 +154,7 @@ func RegisterOpsTools(executor *ToolExecutor) {
 	})
 
 	// tunnel_manage
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "tunnel_manage",
@@ -213,7 +213,7 @@ func RegisterOpsTools(executor *ToolExecutor) {
 	})
 
 	// ssh_exec
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "ssh_exec",

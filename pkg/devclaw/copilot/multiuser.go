@@ -192,7 +192,7 @@ func (um *UserManager) ListSharedMemory() []*SharedMemory {
 // RegisterMultiUserTools registers multi-user management tools.
 func RegisterMultiUserTools(executor *ToolExecutor, um *UserManager) {
 	// team_users
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "team_users",
@@ -268,7 +268,7 @@ func RegisterMultiUserTools(executor *ToolExecutor, um *UserManager) {
 	})
 
 	// shared_memory
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "shared_memory",

@@ -37,8 +37,8 @@ func TestBuiltInProfiles_Minimal(t *testing.T) {
 	if !allowMap["group:web"] {
 		t.Error("minimal profile should allow group:web")
 	}
-	if !allowMap["group:memory"] {
-		t.Error("minimal profile should allow group:memory")
+	if !allowMap["memory"] {
+		t.Error("minimal profile should allow memory dispatcher")
 	}
 
 	// Minimal should deny runtime and write operations.
@@ -70,8 +70,8 @@ func TestBuiltInProfiles_Coding(t *testing.T) {
 	if !allowMap["bash"] {
 		t.Error("coding profile should allow bash")
 	}
-	if !allowMap["git_*"] {
-		t.Error("coding profile should allow git_*")
+	if !allowMap["memory"] {
+		t.Error("coding profile should allow memory dispatcher")
 	}
 
 	// Coding should deny ssh, scp.

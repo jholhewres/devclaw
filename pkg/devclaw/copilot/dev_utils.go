@@ -22,7 +22,7 @@ import (
 // RegisterDevUtilTools registers developer utility tools.
 func RegisterDevUtilTools(executor *ToolExecutor) {
 	// json_format
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "json_format",
@@ -55,7 +55,7 @@ func RegisterDevUtilTools(executor *ToolExecutor) {
 	})
 
 	// jwt_decode
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "jwt_decode",
@@ -111,7 +111,7 @@ func RegisterDevUtilTools(executor *ToolExecutor) {
 	})
 
 	// regex_test
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "regex_test",
@@ -157,7 +157,7 @@ func RegisterDevUtilTools(executor *ToolExecutor) {
 	})
 
 	// base64_encode
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "base64_encode",
@@ -176,7 +176,7 @@ func RegisterDevUtilTools(executor *ToolExecutor) {
 	})
 
 	// base64_decode
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "base64_decode",
@@ -203,7 +203,7 @@ func RegisterDevUtilTools(executor *ToolExecutor) {
 	})
 
 	// hash
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "hash",
@@ -237,7 +237,7 @@ func RegisterDevUtilTools(executor *ToolExecutor) {
 	})
 
 	// uuid_generate
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "uuid_generate",
@@ -270,7 +270,7 @@ func RegisterDevUtilTools(executor *ToolExecutor) {
 	})
 
 	// url_parse
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "url_parse",
@@ -320,7 +320,7 @@ func RegisterDevUtilTools(executor *ToolExecutor) {
 	})
 
 	// timestamp_convert
-	executor.Register(ToolDefinition{
+	executor.RegisterHidden(ToolDefinition{
 		Type: "function",
 		Function: FunctionDef{
 			Name:        "timestamp_convert",

@@ -1,7 +1,7 @@
-// Package copilot – legacy_aliases.go registers thin wrappers for old dispatcher
-// tool names (memory, vault, skill_manage, scheduler) that route to the new
-// individual tools based on the "action" parameter.
-// All are marked [DEPRECATED] and should be removed after one release cycle.
+// Package copilot – legacy_aliases.go registers dispatcher tools that route to
+// individual tools based on the "action" parameter. The memory, vault, and
+// scheduler dispatchers are the PRIMARY visible tools; individual tools are
+// hidden but callable. skill_manage remains hidden.
 package copilot
 
 import (
@@ -9,9 +9,8 @@ import (
 	"fmt"
 )
 
-// RegisterLegacyAliases registers deprecated dispatcher tools that route to
-// the new individual tools. This preserves backward compatibility for existing
-// sessions, configs, and any LLM context that references the old names.
+// RegisterLegacyAliases registers dispatcher tools. Memory, vault, and scheduler
+// are visible (primary tools); skill_manage is hidden (backward compat only).
 func RegisterLegacyAliases(executor *ToolExecutor) {
 	registerLegacyMemory(executor)
 	registerLegacyVault(executor)
@@ -35,9 +34,9 @@ func legacyDispatch(ctx context.Context, executor *ToolExecutor, toolMap map[str
 }
 
 func registerLegacyMemory(executor *ToolExecutor) {
-	executor.RegisterHidden(
+	executor.Register(
 		MakeToolDefinition("memory",
-			"[DEPRECATED: use memory_save, memory_search, memory_list, memory_index] Legacy memory dispatcher.",
+			"Long-term memory: save facts, search recalled information, list entries, or rebuild index.",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -62,9 +61,9 @@ func registerLegacyMemory(executor *ToolExecutor) {
 }
 
 func registerLegacyVault(executor *ToolExecutor) {
-	executor.RegisterHidden(
+	executor.Register(
 		MakeToolDefinition("vault",
-			"[DEPRECATED: use vault_status, vault_save, vault_get, vault_list, vault_delete] Legacy vault dispatcher.",
+			"Encrypted secret storage: check status, save/get/list/delete secrets.",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -127,9 +126,9 @@ func registerLegacySkillManage(executor *ToolExecutor) {
 }
 
 func registerLegacyScheduler(executor *ToolExecutor) {
-	executor.RegisterHidden(
+	executor.Register(
 		MakeToolDefinition("scheduler",
-			"[DEPRECATED: use scheduler_add, scheduler_list, scheduler_remove, scheduler_search] Legacy scheduler dispatcher.",
+			"Manage scheduled tasks and reminders: add, list, remove, or search jobs.",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{

@@ -1058,7 +1058,7 @@ func RegisterSubagentTools(
 	)
 
 	// ── wait_subagent ──
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("wait_subagent",
 			"Wait for a subagent to complete and return its result. "+
 				"Blocks until the subagent finishes or the timeout is reached.",
@@ -1132,7 +1132,7 @@ func RegisterSubagentTools(
 	)
 
 	// ── stop_subagent ──
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("stop_subagent",
 			"Stop a running subagent by cancelling its execution.",
 			map[string]any{

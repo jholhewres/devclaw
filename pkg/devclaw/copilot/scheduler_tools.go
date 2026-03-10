@@ -15,7 +15,7 @@ import (
 // scheduler_add, scheduler_list, scheduler_remove, and scheduler_search.
 func RegisterSchedulerDispatcher(executor *ToolExecutor, sched *scheduler.Scheduler, skillDB *SkillDB) {
 	// scheduler_add — schedule a new task or reminder.
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("scheduler_add",
 			"Schedule a new task or reminder. Supports natural language schedules ('every 5 minutes', 'daily at 9am'), cron expressions, and one-shot reminders.",
 			map[string]any{
@@ -55,7 +55,7 @@ func RegisterSchedulerDispatcher(executor *ToolExecutor, sched *scheduler.Schedu
 	)
 
 	// scheduler_list — list all scheduled jobs.
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("scheduler_list",
 			"List all currently scheduled jobs with their status, schedule, run count, and last execution details.",
 			map[string]any{
@@ -68,7 +68,7 @@ func RegisterSchedulerDispatcher(executor *ToolExecutor, sched *scheduler.Schedu
 	)
 
 	// scheduler_remove — remove a scheduled job by ID.
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("scheduler_remove",
 			"Remove a scheduled job by its ID. Requires explicit confirmation to prevent accidental deletion.",
 			map[string]any{
@@ -91,7 +91,7 @@ func RegisterSchedulerDispatcher(executor *ToolExecutor, sched *scheduler.Schedu
 	)
 
 	// scheduler_search — search reminders by keyword.
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("scheduler_search",
 			"Search reminders and scheduled tasks by keyword. Returns matching reminders with their schedule, command, and status.",
 			map[string]any{

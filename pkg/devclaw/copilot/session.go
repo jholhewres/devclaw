@@ -120,6 +120,15 @@ type SessionConfig struct {
 	ToolProfile string `yaml:"tool_profile"`
 }
 
+// ToolCallRecord stores a single tool invocation for session history fidelity.
+// Truncated args/result keep storage bounded while preserving context.
+type ToolCallRecord struct {
+	ID     string `json:"id,omitempty"`
+	Name   string `json:"name"`
+	Args   string `json:"args,omitempty"`   // truncated to 200 chars
+	Result string `json:"result,omitempty"` // truncated to 500 chars
+}
+
 // ConversationEntry representa uma troca de mensagem na sessão.
 type ConversationEntry struct {
 	UserMessage       string
@@ -128,6 +137,9 @@ type ConversationEntry struct {
 	// ToolSummary is a comma-separated digest of tools called during this turn.
 	// Injected into history so future turns know what was actually verified vs. inferred.
 	ToolSummary string `json:"tool_summary,omitempty"`
+	// ToolCalls stores individual tool invocations for richer history reconstruction.
+	// When present, buildMessages uses these instead of ToolSummary.
+	ToolCalls []ToolCallRecord `json:"tool_calls,omitempty"`
 }
 
 // AddMessage adiciona uma nova entrada de conversa à sessão.
@@ -139,13 +151,42 @@ func (s *Session) AddMessage(userMsg, assistantResp string) {
 
 // AddMessageWithTools adds a conversation entry with an optional tool summary.
 func (s *Session) AddMessageWithTools(userMsg, assistantResp, toolSummary string) {
-	entry := ConversationEntry{
+	s.addEntry(ConversationEntry{
 		UserMessage:       userMsg,
 		AssistantResponse: assistantResp,
 		Timestamp:         time.Now(),
 		ToolSummary:       toolSummary,
+	})
+}
+
+// AddMessageWithToolCalls adds a conversation entry with individual tool call records.
+// Falls back to ToolSummary derived from the records for backward compat.
+func (s *Session) AddMessageWithToolCalls(userMsg, assistantResp string, toolCalls []ToolCallRecord) {
+	// Build a ToolSummary from the tool calls for backward compat.
+	var names []string
+	seen := make(map[string]bool)
+	for _, tc := range toolCalls {
+		if !seen[tc.Name] {
+			names = append(names, tc.Name)
+			seen[tc.Name] = true
+		}
+	}
+	summary := ""
+	if len(names) > 0 {
+		summary = strings.Join(names, ", ")
 	}
 
+	s.addEntry(ConversationEntry{
+		UserMessage:       userMsg,
+		AssistantResponse: assistantResp,
+		Timestamp:         time.Now(),
+		ToolSummary:       summary,
+		ToolCalls:         toolCalls,
+	})
+}
+
+// addEntry appends a ConversationEntry, trims history, and persists.
+func (s *Session) addEntry(entry ConversationEntry) {
 	s.mu.Lock()
 	s.history = append(s.history, entry)
 
