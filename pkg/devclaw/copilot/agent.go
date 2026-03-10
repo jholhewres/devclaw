@@ -464,6 +464,12 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 	var lastProgressAt time.Time
 	var continuationRounds int
 
+	// Consecutive blocked turns: if ALL tool calls are blocked for N turns
+	// in a row, the LLM is stuck calling tools it's been told to stop using.
+	// Terminate the run early to avoid wasting tokens.
+	const maxConsecutiveBlockedTurns = 3
+	var consecutiveBlockedTurns int
+
 	// ── Main agent loop ──
 	// Loop until: (1) LLM produces no tool calls, (2) run timeout fires, or
 	// (3) optional soft turn limit + continuation budget is exhausted.
@@ -889,6 +895,34 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 				names[i] = tc.Function.Name
 			}
 			a.lastRunToolSummary += strings.Join(names, ",") + "; "
+		}
+
+		// Track consecutive turns where ALL tool calls were blocked.
+		// If the LLM keeps calling blocked tools, terminate early to avoid
+		// wasting tokens on an LLM that ignores loop detection errors.
+		if len(blockedResults) > 0 && len(execCalls) == 0 {
+			consecutiveBlockedTurns++
+			if consecutiveBlockedTurns >= maxConsecutiveBlockedTurns {
+				a.logger.Warn("agent terminated: all tool calls blocked for consecutive turns",
+					"consecutive_blocked", consecutiveBlockedTurns,
+					"total_turns", totalTurns,
+				)
+				// Force a final LLM call without tools to get a text response.
+				messages = append(messages, chatMessage{
+					Role: "user",
+					Content: "[System: All your recent tool calls have been BLOCKED by the loop detector. " +
+						"You MUST stop using tools and provide your best response using only what you know. " +
+						"Do NOT attempt any more tool calls.]",
+				})
+				resp, err := a.doLLMCallWithOverflowRetry(runCtx, messages, nil)
+				if err != nil {
+					return "I was unable to complete this task — I got stuck in a loop calling the same tools repeatedly.", &totalUsage, nil
+				}
+				a.accumulateUsage(&totalUsage, resp)
+				return resp.Content, &totalUsage, nil
+			}
+		} else {
+			consecutiveBlockedTurns = 0
 		}
 
 		// Inject deferred loop warning AFTER tool results (valid message order:
