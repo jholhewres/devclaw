@@ -94,9 +94,9 @@ var knownNoProgressTools = map[string]map[string]bool{
 // more than 2-3 times with the same args is always a loop — block earlier
 // than generic repeat detection.
 var idempotentReadOnlyTools = map[string]bool{
-	"list_capabilities": true,
-	"skill_test":        true, // Returns same result per skill name regardless of input
-	"skill_list":        true, // Listing installed skills is idempotent
+	// list_capabilities: now RegisterHidden — no longer in LLM schemas
+	// skill_test: now RegisterHidden — no longer in LLM schemas
+	// skill_list: loop detection normal is sufficient
 }
 
 // destructiveTools are tools that can cause data loss or irreversible changes.

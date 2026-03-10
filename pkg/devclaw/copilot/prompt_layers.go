@@ -512,33 +512,25 @@ func (p *PromptComposer) buildCoreLayer() string {
 	}
 	b.WriteString(intro + "\n\n")
 
-	// ## Tooling - DYNAMIC if toolExecutor available, fallback to hardcoded
+	// ## Tooling — curated core tool summaries (aligned with OpenClaw approach).
+	// Full tool schemas are sent via the API tools[] parameter; this section
+	// gives the LLM a quick reference of the most important tools only.
 	b.WriteString("## Tooling\n\n")
-	b.WriteString("Tool availability (filtered by policy):\n")
-
-	// Generate tool list dynamically if toolExecutor is available
-	if p.toolExecutor != nil {
-		tools := p.toolExecutor.Tools()
-		b.WriteString(FormatToolsForPrompt(tools, 60))
-	} else {
-		// Fallback to hardcoded list (backward compatibility)
-		b.WriteString("- read: Read file contents\n")
-		b.WriteString("- write: Create or overwrite files\n")
-		b.WriteString("- edit: Make precise edits to files\n")
-		b.WriteString("- grep: Search file contents for patterns\n")
-		b.WriteString("- glob: Find files by glob pattern\n")
-		b.WriteString("- bash: Run shell commands\n")
-		b.WriteString("- web_search: Search the web\n")
-		b.WriteString("- web_fetch: Fetch and extract content from URLs\n")
-		b.WriteString("- memory: Long-term memory (save, search, list, index)\n")
-		b.WriteString("- scheduler: Schedule jobs and reminders (action=add/list/remove/search)\n")
-		b.WriteString("- message: Send messages and channel actions\n")
-		b.WriteString("- vault: Encrypted secret storage (action=status/save/get/list/delete)\n")
-	}
-	b.WriteString("\nTool names are case-sensitive. Call tools exactly as listed.\n")
-	b.WriteString("All available tools are already in your tool definitions — use them directly without calling list_capabilities first.\n")
+	b.WriteString("Core tools (always available):\n")
+	b.WriteString("- read / write / edit — file operations\n")
+	b.WriteString("- grep / glob — search file contents and find files by pattern\n")
+	b.WriteString("- bash — run shell commands\n")
+	b.WriteString("- web_search / web_fetch — search the web, fetch URLs\n")
+	b.WriteString("- memory — long-term memory (save, search, list, index)\n")
+	b.WriteString("- scheduler — schedule jobs and reminders (add/list/remove/search)\n")
+	b.WriteString("- message — send messages and channel actions\n")
+	b.WriteString("- vault — encrypted secret storage (status/save/get/list/delete)\n")
+	b.WriteString("- skill_init / skill_list / skill_install — create, discover, install skills\n")
+	b.WriteString("- spawn_subagent — delegate complex subtasks to a child agent\n")
+	b.WriteString("- image_generate — generate images via AI\n")
+	b.WriteString("\nAll tools are in your tool definitions — call them directly by name.\n")
 	b.WriteString("TOOLS.md does not control tool availability; it is user guidance for how to use external tools.\n")
-	b.WriteString("If a task is more complex or takes longer, spawn a sub-agent using `spawn_subagent`. Completion is push-based: it will auto-announce when done.\n")
+	b.WriteString("For complex or long-running tasks, use `spawn_subagent`. Completion is push-based: it auto-announces when done.\n")
 	b.WriteString("Do NOT poll in a loop. Check status on-demand only (for intervention, debugging, or when explicitly asked).\n\n")
 
 	// Note: Memory Recall instructions are in buildMemoryLayer() to avoid duplication.

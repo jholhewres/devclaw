@@ -68,7 +68,6 @@ var BuiltInProfiles = map[string]ToolProfile{
 			"git_*",
 			"docker_*",
 			"test_*",
-			"list_capabilities",
 		},
 		Deny: []string{
 			"ssh",
@@ -86,7 +85,6 @@ var BuiltInProfiles = map[string]ToolProfile{
 			"group:skills",
 			"group:sessions",
 			"group:media",
-			"list_capabilities",
 		},
 		Deny: []string{
 			"group:runtime",

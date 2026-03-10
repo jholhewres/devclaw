@@ -78,8 +78,8 @@ func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry
 		}),
 	)
 
-	// ── skill_edit ──
-	executor.Register(
+	// ── skill_edit ── (hidden: admin tool, LLM uses edit_file directly)
+	executor.RegisterHidden(
 		MakeToolDefinition("skill_edit",
 			"Edit an existing skill's SKILL.md content.",
 			map[string]any{
@@ -95,8 +95,8 @@ func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry
 		}),
 	)
 
-	// ── skill_add_script ──
-	executor.Register(
+	// ── skill_add_script ── (hidden: admin tool, rare direct use)
+	executor.RegisterHidden(
 		MakeToolDefinition("skill_add_script",
 			"Add an executable script (Python, Node.js, Shell) to an existing skill.",
 			map[string]any{
@@ -126,8 +126,8 @@ func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry
 		},
 	)
 
-	// ── skill_test ──
-	executor.Register(
+	// ── skill_test ── (hidden: frequent loop source, LLM tests via bash)
+	executor.RegisterHidden(
 		MakeToolDefinition("skill_test",
 			"Test a skill by executing it with sample input.",
 			map[string]any{
@@ -159,8 +159,8 @@ func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry
 		}),
 	)
 
-	// ── skill_defaults_list ──
-	executor.Register(
+	// ── skill_defaults_list ── (hidden: admin/setup only)
+	executor.RegisterHidden(
 		MakeToolDefinition("skill_defaults_list",
 			"List available default skills that can be installed.",
 			map[string]any{
@@ -172,8 +172,8 @@ func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry
 		},
 	)
 
-	// ── skill_defaults_install ──
-	executor.Register(
+	// ── skill_defaults_install ── (hidden: admin/setup only)
+	executor.RegisterHidden(
 		MakeToolDefinition("skill_defaults_install",
 			"Install one or more default skills. Pass [\"all\"] to install all defaults.",
 			map[string]any{
@@ -191,8 +191,8 @@ func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry
 		}),
 	)
 
-	// ── skill_remove ──
-	executor.Register(
+	// ── skill_remove ── (hidden: admin, destructive)
+	executor.RegisterHidden(
 		MakeToolDefinition("skill_remove",
 			"Remove an installed skill and its directory.",
 			map[string]any{

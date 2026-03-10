@@ -1598,7 +1598,7 @@ func (c *osExecCmd) CombinedOutput() ([]byte, error) {
 // This tool allows the agent to discover what tools and skills it has available,
 // addressing the "agent doesn't know its capabilities" problem.
 func registerCapabilitiesTool(executor *ToolExecutor) {
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("list_capabilities",
 			"List all available tools and skills with their descriptions. Use this to discover what you can do. "+
 				"Filter options: 'tools' (only tools), 'skills' (only skills), 'all' (both). "+
