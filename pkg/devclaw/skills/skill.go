@@ -5,6 +5,9 @@ package skills
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"runtime"
 )
 
 // Skill define a interface que toda skill deve implementar.
@@ -188,9 +191,81 @@ type Metadata struct {
 	// Tags são palavras-chave para busca e indexação.
 	Tags []string `yaml:"tags"`
 
+	// Requires declares runtime eligibility requirements. Skills that don't
+	// meet these requirements are excluded from the prompt to avoid confusing
+	// the LLM with unavailable capabilities.
+	Requires SkillRequirements `yaml:"requires" json:"requires,omitempty"`
+
 	// SourceTier indicates the load priority tier of this skill.
 	// Higher tiers override lower tiers with the same name.
 	SourceTier SourceTier `yaml:"-" json:"-"`
+}
+
+// SkillRequirements declares runtime eligibility for a skill.
+type SkillRequirements struct {
+	// Bins lists binaries that must ALL exist in PATH.
+	Bins []string `yaml:"bins" json:"bins,omitempty"`
+
+	// AnyBins lists binaries where at least one must exist in PATH.
+	AnyBins []string `yaml:"any_bins" json:"anyBins,omitempty"`
+
+	// Env lists environment variables that must all be set (non-empty).
+	Env []string `yaml:"env" json:"env,omitempty"`
+
+	// OS lists compatible operating systems (runtime.GOOS values).
+	// Empty means all OSes are supported.
+	OS []string `yaml:"os" json:"os,omitempty"`
+}
+
+// osAliases maps non-Go OS names to runtime.GOOS values. ClawHub/OpenClaw
+// skills use "win32" while Go uses "windows".
+var osAliases = map[string]string{
+	"win32": "windows",
+}
+
+// IsEligible checks whether the current runtime satisfies all requirements.
+// Returns true when no requirements are declared or all checks pass.
+func (r SkillRequirements) IsEligible() bool {
+	if len(r.OS) > 0 {
+		found := false
+		goos := runtime.GOOS
+		for _, o := range r.OS {
+			normalized := o
+			if alias, ok := osAliases[o]; ok {
+				normalized = alias
+			}
+			if normalized == goos {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	for _, bin := range r.Bins {
+		if _, err := exec.LookPath(bin); err != nil {
+			return false
+		}
+	}
+	if len(r.AnyBins) > 0 {
+		anyFound := false
+		for _, bin := range r.AnyBins {
+			if _, err := exec.LookPath(bin); err == nil {
+				anyFound = true
+				break
+			}
+		}
+		if !anyFound {
+			return false
+		}
+	}
+	for _, env := range r.Env {
+		if os.Getenv(env) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // Tool representa uma função/ferramenta exposta por uma skill ao agente LLM.

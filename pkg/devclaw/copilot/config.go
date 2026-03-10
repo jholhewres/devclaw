@@ -869,11 +869,11 @@ func DefaultConfig() *Config {
 				MaxResults:         6,
 				MinScore:           0.1,
 				TemporalDecay: TemporalDecayConfig{
-					Enabled:      false,
+					Enabled:      true,
 					HalfLifeDays: 30,
 				},
 				MMR: MMRConfig{
-					Enabled: false,
+					Enabled: true,
 					Lambda:  0.7,
 				},
 			},

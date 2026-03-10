@@ -10,7 +10,6 @@ package copilot
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/xml"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,16 +17,19 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
 )
 
-// xmlEscape escapes a string for safe embedding inside XML content nodes.
-func xmlEscape(s string) string {
-	var b strings.Builder
-	xml.EscapeText(&b, []byte(s))
-	return b.String()
+// xmlAttrEscape escapes a string for safe use as an XML attribute value.
+func xmlAttrEscape(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
 }
 
 // PromptLayer defines the priority of a prompt layer.
@@ -83,15 +85,12 @@ type bootstrapCacheEntry struct {
 // During this window, no disk I/O is performed.
 const bootstrapCacheTTL = 30 * time.Second
 
-// promptLayerCache holds a cached prompt layer result with TTL.
+// promptLayerCache holds a cached prompt layer result.
 type promptLayerCache struct {
 	content  string
 	cachedAt time.Time
+	version  uint64 // snapshot version for version-based invalidation
 }
-
-// promptLayerCacheTTL is how long memory and skills layers are considered fresh.
-// Within this window, the cached result is used without re-running the search.
-const promptLayerCacheTTL = 60 * time.Second
 
 // PromptComposer assembles the final system prompt from multiple layers.
 type PromptComposer struct {
@@ -114,6 +113,11 @@ type PromptComposer struct {
 	// prompt composition on I/O-heavy operations. Key: "sessionID:layerType".
 	layerCacheMu sync.RWMutex
 	layerCache   map[string]*promptLayerCache
+
+	// skillsVersion is an atomic counter incremented when skills change
+	// (install, remove, reload). Skills cache is invalidated when the cached
+	// version differs from the current version, replacing TTL-based expiry.
+	skillsVersion atomic.Uint64
 }
 
 // SkillInfo holds basic skill information for the Skill Discovery XML.
@@ -215,11 +219,22 @@ func (p *PromptComposer) Compose(session *Session, input string) string {
 	bootstrap := p.buildBootstrapLayer()
 
 	// Memory and skills: use cached versions to avoid blocking.
-	memoryPrompt := p.getCachedLayer(session.ID, "memory")
-	skills := p.getCachedLayer(session.ID, "skills")
+	memoryPrompt, memoryHit := p.getCachedLayer(session.ID, "memory")
+	skills, skillsHit := p.getCachedLayer(session.ID, "skills")
 
-	// If cache is stale or empty, refresh in background (non-blocking).
-	// The current prompt uses whatever is cached; the NEXT prompt benefits.
+	// Cache miss (first message in session): build synchronously so the LLM
+	// sees skills and memory from the very first prompt. Subsequent refreshes
+	// (cache stale) still happen asynchronously.
+	if !skillsHit || !memoryHit {
+		if !skillsHit {
+			skills = p.buildSkillsLayer(session)
+			p.setCachedLayer(session.ID, "skills", skills)
+		}
+		if !memoryHit {
+			memoryPrompt = p.buildMemoryLayer(session, input)
+			p.setCachedLayer(session.ID, "memory", memoryPrompt)
+		}
+	}
 	go p.refreshLayerCache(session, input)
 
 	if bootstrap != "" {
@@ -373,23 +388,41 @@ func (p *PromptComposer) ComposeWithMode(session *Session, input string, mode Pr
 
 // ---------- Layer Caching ----------
 
-// getCachedLayer returns a cached layer result if fresh, or "" if stale/missing.
-func (p *PromptComposer) getCachedLayer(sessionID, layerType string) string {
+// memoryCacheTTL is how long the memory layer is considered fresh.
+const memoryCacheTTL = 60 * time.Second
+
+// IncrementSkillsVersion bumps the skills snapshot version, causing all
+// sessions to rebuild their skills layer on the next prompt composition.
+// Call after installing, removing, or reloading skills.
+func (p *PromptComposer) IncrementSkillsVersion() {
+	p.skillsVersion.Add(1)
+}
+
+// getCachedLayer returns a cached layer result and whether it is still valid.
+// Skills use version-based invalidation; memory uses TTL-based invalidation.
+func (p *PromptComposer) getCachedLayer(sessionID, layerType string) (string, bool) {
 	key := sessionID + ":" + layerType
 	p.layerCacheMu.RLock()
 	cached, ok := p.layerCache[key]
 	p.layerCacheMu.RUnlock()
-	if ok && time.Since(cached.cachedAt) < promptLayerCacheTTL {
-		return cached.content
+	if !ok {
+		return "", false
 	}
-	return ""
+	if layerType == "skills" {
+		return cached.content, cached.version == p.skillsVersion.Load()
+	}
+	return cached.content, time.Since(cached.cachedAt) < memoryCacheTTL
 }
 
 // setCachedLayer updates the cache for a layer.
 func (p *PromptComposer) setCachedLayer(sessionID, layerType, content string) {
 	key := sessionID + ":" + layerType
 	p.layerCacheMu.Lock()
-	p.layerCache[key] = &promptLayerCache{content: content, cachedAt: time.Now()}
+	p.layerCache[key] = &promptLayerCache{
+		content:  content,
+		cachedAt: time.Now(),
+		version:  p.skillsVersion.Load(),
+	}
 	p.layerCacheMu.Unlock()
 }
 
@@ -861,24 +894,6 @@ func (p *PromptComposer) loadBootstrapFileCached(filename string, searchDirs []s
 	return text
 }
 
-// compactSkillPath replaces the user's home directory prefix with ~
-// to reduce system prompt token usage (~400-600 tokens saved across all skills).
-// Models understand ~ expansion, and the read tool resolves ~ to home.
-func compactSkillPath(p string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return p
-	}
-	prefix := home
-	if !strings.HasSuffix(prefix, "/") {
-		prefix += "/"
-	}
-	if strings.HasPrefix(p, prefix) {
-		return "~/" + p[len(prefix):]
-	}
-	return p
-}
-
 // buildSkillsLayer creates the skills reference list for the system prompt.
 //
 // Reference model (OpenClaw pattern): skills are listed as compact XML references
@@ -899,8 +914,8 @@ func (p *PromptComposer) buildSkillsLayer(session *Session) string {
 }
 
 // buildSkillsLayerReference builds the skills section using the reference model.
-// Skills are listed as XML entries with name + description + location. The LLM
-// reads SKILL.md on demand via read_file. Never truncates skill instructions.
+// Skills are listed as compact XML entries with name + description + tools.
+// The LLM loads full instructions on demand via get_skill_instructions(name).
 func (p *PromptComposer) buildSkillsLayerReference() string {
 	allSkills := p.skillLister()
 	if len(allSkills) == 0 {
@@ -928,13 +943,13 @@ func (p *PromptComposer) buildSkillsLayerReference() string {
 
 	var b strings.Builder
 
-	// Instruction header (OpenClaw pattern).
 	b.WriteString("## Skills (mandatory)\n\n")
 	b.WriteString("Before replying: scan <available_skills> <description> entries.\n")
-	b.WriteString("- If exactly one skill clearly applies: read its SKILL.md at <location> with read_file, then follow it.\n")
-	b.WriteString("- If multiple could apply: choose the most specific one, then read/follow it.\n")
-	b.WriteString("- If none clearly apply: do not read any SKILL.md.\n")
-	b.WriteString("Constraints: never read more than one skill up front; only read after selecting.\n")
+	b.WriteString("- If exactly one skill clearly applies: call get_skill_instructions(name=\"skill-name\") to load its full instructions, then follow them.\n")
+	b.WriteString("- If multiple could apply: choose the most specific one, then load and follow it.\n")
+	b.WriteString("- If none clearly apply: do not load any skill instructions.\n")
+	b.WriteString("Constraints: never load more than one skill up front; only load after selecting.\n")
+	b.WriteString("Use get_skill_reference(skill_name, reference_path) to load supporting documentation from a skill.\n")
 	b.WriteString("When a skill drives external API writes, assume rate limits: prefer fewer larger writes, avoid tight one-item loops, and respect 429/Retry-After.\n\n")
 
 	// Build XML reference list.
@@ -942,22 +957,16 @@ func (p *PromptComposer) buildSkillsLayerReference() string {
 	totalChars := 0
 	included := 0
 	for _, skill := range skills {
-		// Build the entry.
 		var entry strings.Builder
-		entry.WriteString("  <skill>\n")
-		entry.WriteString(fmt.Sprintf("    <name>%s</name>\n", xmlEscape(skill.Name)))
-		entry.WriteString(fmt.Sprintf("    <description>%s</description>\n", xmlEscape(skill.Description)))
-		if skill.Location != "" {
-			entry.WriteString(fmt.Sprintf("    <location>%s</location>\n", xmlEscape(compactSkillPath(skill.Location))))
-		}
+		entry.WriteString(fmt.Sprintf("  <skill name=\"%s\" description=\"%s\"",
+			xmlAttrEscape(skill.Name), xmlAttrEscape(skill.Description)))
 		if len(skill.Tools) > 0 {
-			entry.WriteString(fmt.Sprintf("    <tools>%s</tools>\n", xmlEscape(strings.Join(skill.Tools, ", "))))
+			entry.WriteString(fmt.Sprintf(" tools=\"%s\"", xmlAttrEscape(strings.Join(skill.Tools, ", "))))
 		}
-		entry.WriteString("  </skill>\n")
+		entry.WriteString(" />\n")
 
 		entryStr := entry.String()
 
-		// Check character budget.
 		if totalChars+len(entryStr) > maxChars {
 			break
 		}
@@ -1076,9 +1085,17 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 			maxResults = 6
 		}
 
-		results, err := p.sqliteMemory.HybridSearch(
+		results, err := p.sqliteMemory.HybridSearchWithOptions(
 			ctx, input, maxResults, searchCfg.MinScore,
 			searchCfg.HybridWeightVector, searchCfg.HybridWeightBM25,
+			memory.TemporalDecayConfig{
+				Enabled:      searchCfg.TemporalDecay.Enabled,
+				HalfLifeDays: searchCfg.TemporalDecay.HalfLifeDays,
+			},
+			memory.MMRConfig{
+				Enabled: searchCfg.MMR.Enabled,
+				Lambda:  searchCfg.MMR.Lambda,
+			},
 		)
 		if err == nil && len(results) > 0 {
 			memTexts := make([]string, 0, len(results))

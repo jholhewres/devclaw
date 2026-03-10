@@ -1,7 +1,7 @@
 ---
 name: media
 description: "Handle images, audio, and document files for messaging channels"
-trigger: automatic
+trigger: on-demand
 ---
 
 # Media Tools

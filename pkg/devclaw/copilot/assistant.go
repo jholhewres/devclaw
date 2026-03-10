@@ -170,6 +170,12 @@ type Assistant struct {
 	// pairingMgr manages DM pairing tokens and requests.
 	pairingMgr *PairingManager
 
+	// builtinSkills holds embedded skill guides loaded from the binary.
+	builtinSkills *BuiltinSkills
+
+	// skillWatcher watches skill directories for SKILL.md changes.
+	skillWatcher *SkillWatcher
+
 	// agentRouter routes messages to specialized agent profiles.
 	agentRouter *AgentRouter
 
@@ -512,6 +518,9 @@ func (a *Assistant) Start(ctx context.Context) error {
 			if !ok || !a.skillRegistry.IsEnabled(m.Name) {
 				continue
 			}
+			if !m.Requires.IsEligible() {
+				continue
+			}
 			var toolNames []string
 			for _, t := range skill.Tools() {
 				toolNames = append(toolNames, t.Name)
@@ -523,12 +532,23 @@ func (a *Assistant) Start(ctx context.Context) error {
 				Tools:       toolNames,
 			})
 		}
+		// Include on-demand builtin skills in the same XML list so the LLM
+		// can discover them alongside installed skills and load their
+		// instructions via get_skill_instructions(name).
+		if a.builtinSkills != nil {
+			for _, bs := range a.builtinSkills.OnDemandSkills() {
+				infos = append(infos, SkillInfo{
+					Name:        bs.Name,
+					Description: bs.Description,
+				})
+			}
+		}
 		return infos
 	})
 
 	// Load built-in skills (embedded in binary).
-	builtinSkills := LoadBuiltinSkills(a.logger.With("component", "builtin-skills"))
-	a.promptComposer.SetBuiltinSkills(builtinSkills)
+	a.builtinSkills = LoadBuiltinSkills(a.logger.With("component", "builtin-skills"))
+	a.promptComposer.SetBuiltinSkills(a.builtinSkills)
 
 	// Wire tool executor to prompt composer for dynamic tool list generation.
 	a.promptComposer.SetToolExecutor(a.toolExecutor)
@@ -654,6 +674,16 @@ func (a *Assistant) Start(ctx context.Context) error {
 
 	// 1c. Register skill tools + system tools in the executor.
 	a.registerSkillTools()
+
+	// 1c-2. Start filesystem watcher for skill directories.
+	if len(a.config.Skills.ClawdHubDirs) > 0 {
+		sw, err := NewSkillWatcher(a.config.Skills.ClawdHubDirs, a.promptComposer, a.logger)
+		if err != nil {
+			a.logger.Warn("skill watcher not available", "error", err)
+		} else if sw != nil {
+			a.skillWatcher = sw
+		}
+	}
 
 	// 1d. Create and start scheduler if enabled.
 	if a.config.Scheduler.Enabled {
@@ -930,6 +960,9 @@ func (a *Assistant) Stop() {
 	}
 
 	// Shut down in reverse initialization order.
+	if a.skillWatcher != nil {
+		a.skillWatcher.Stop()
+	}
 	if a.scheduler != nil {
 		a.scheduler.Stop()
 	}
@@ -1396,6 +1429,9 @@ func (a *Assistant) messageLoop() {
 		case msg, ok := <-a.channelMgr.Messages():
 			if !ok {
 				return
+			}
+			if a.messageQueue.IsDuplicate(msg) {
+				continue
 			}
 			go a.handleMessage(msg)
 
@@ -2679,6 +2715,7 @@ func (a *Assistant) ReloadAndInitializeSkills(ctx context.Context) (int, error) 
 	}
 	a.initializeSkills()
 	a.registerSkillTools()
+	a.promptComposer.IncrementSkillsVersion()
 	return reloaded, nil
 }
 
@@ -2728,7 +2765,7 @@ func (a *Assistant) registerSystemTools() {
 		if len(a.config.Skills.ClawdHubDirs) > 0 {
 			skillsDir = a.config.Skills.ClawdHubDirs[0]
 		}
-		RegisterSkillCreatorTools(a.toolExecutor, a.skillRegistry, skillsDir, a.skillDB, a.ReloadAndInitializeSkills, a.logger)
+		RegisterSkillCreatorTools(a.toolExecutor, a.skillRegistry, skillsDir, a.skillDB, a.builtinSkills, a.ReloadAndInitializeSkills, a.logger)
 	}
 
 	// Register subagent tools (spawn, list, wait, stop).

@@ -201,6 +201,22 @@ func (bs *BuiltinSkills) FormatSkillForPrompt(name string) string {
 	return sb.String()
 }
 
+// OnDemandSkills returns builtin skills that should be listed in the XML
+// reference list (trigger="on-demand") instead of injected inline.
+// The LLM loads their full instructions via get_skill_instructions(name).
+func (bs *BuiltinSkills) OnDemandSkills() []*BuiltinSkill {
+	bs.mu.RLock()
+	defer bs.mu.RUnlock()
+
+	var result []*BuiltinSkill
+	for _, skill := range bs.skills {
+		if skill.Trigger == "on-demand" {
+			result = append(result, skill)
+		}
+	}
+	return result
+}
+
 // titleCase capitalizes the first letter of a string.
 // Simple implementation for ASCII skill names (memory, teams, etc.)
 func titleCase(s string) string {

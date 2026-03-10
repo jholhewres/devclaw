@@ -1,7 +1,7 @@
 ---
 name: execution
 description: "Run shell commands locally and on remote machines via SSH"
-trigger: automatic
+trigger: on-demand
 ---
 
 # Execution

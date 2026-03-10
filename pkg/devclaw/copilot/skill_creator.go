@@ -31,8 +31,9 @@ type SkillReloadCallback func(ctx context.Context) (int, error)
 // RegisterSkillCreatorTools registers individual skill management tools.
 // Replaces the old dispatcher pattern with focused tools:
 // skill_init, skill_edit, skill_add_script, skill_list, skill_test,
-// skill_install, skill_defaults_list, skill_defaults_install, skill_remove.
-func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry, skillsDir string, skillDB *SkillDB, reloadCb SkillReloadCallback, logger *slog.Logger) {
+// skill_install, skill_defaults_list, skill_defaults_install, skill_remove,
+// get_skill_instructions, get_skill_reference.
+func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry, skillsDir string, skillDB *SkillDB, builtinSkills *BuiltinSkills, reloadCb SkillReloadCallback, logger *slog.Logger) {
 	if skillsDir == "" {
 		skillsDir = "./skills"
 	}
@@ -205,6 +206,35 @@ func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry
 		withAdminCheck(func(_ context.Context, args map[string]any) (any, error) {
 			return handleSkillRemove(registry, skillsDir, args)
 		}),
+	)
+
+	// ── get_skill_instructions ──
+	executor.Register(
+		MakeToolDefinition("get_skill_instructions",
+			"Load full instructions for a skill. Call this when you need to follow a skill's guidance.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string", "description": "Name of the skill to load instructions for"},
+				},
+				"required": []string{"name"},
+			}),
+		handleGetSkillInstructions(registry, builtinSkills),
+	)
+
+	// ── get_skill_reference ──
+	executor.Register(
+		MakeToolDefinition("get_skill_reference",
+			"Load a reference document from a skill's references/ directory.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"skill_name":     map[string]any{"type": "string", "description": "Name of the skill"},
+					"reference_path": map[string]any{"type": "string", "description": "Path to the reference file (e.g. 'style-guide.md')"},
+				},
+				"required": []string{"skill_name", "reference_path"},
+			}),
+		handleGetSkillReference(registry, skillsDir),
 	)
 }
 
@@ -508,6 +538,74 @@ func handleSkillRemove(registry *skills.Registry, skillsDir string, args map[str
 	}
 	registry.Remove(sanitizeSkillName(name))
 	return fmt.Sprintf("Skill '%s' removed successfully.", name), nil
+}
+
+func handleGetSkillInstructions(registry *skills.Registry, builtinSkills *BuiltinSkills) func(context.Context, map[string]any) (any, error) {
+	return func(_ context.Context, args map[string]any) (any, error) {
+		name, _ := args["name"].(string)
+		if name == "" {
+			return nil, fmt.Errorf("name is required")
+		}
+
+		// 1. Try registry (installed + builtin Go skills).
+		if skill, ok := registry.Get(name); ok {
+			loc := skill.Location()
+			if loc != "" {
+				content, err := os.ReadFile(loc)
+				if err != nil {
+					return nil, fmt.Errorf("reading skill %q: %w", name, err)
+				}
+				return string(content), nil
+			}
+			return skill.SystemPrompt(), nil
+		}
+
+		// 2. Try embedded builtin skills.
+		if builtinSkills != nil {
+			if bs := builtinSkills.Get(name); bs != nil {
+				return bs.Content, nil
+			}
+		}
+
+		return nil, fmt.Errorf("skill %q not found in registry or built-in skills", name)
+	}
+}
+
+func handleGetSkillReference(registry *skills.Registry, skillsDir string) func(context.Context, map[string]any) (any, error) {
+	return func(_ context.Context, args map[string]any) (any, error) {
+		skillName, _ := args["skill_name"].(string)
+		referencePath, _ := args["reference_path"].(string)
+		if skillName == "" || referencePath == "" {
+			return nil, fmt.Errorf("skill_name and reference_path are required")
+		}
+
+		// Resolve the skill directory.
+		var refDir string
+		if skill, ok := registry.Get(skillName); ok {
+			loc := skill.Location()
+			if loc != "" {
+				refDir = filepath.Join(filepath.Dir(loc), "references")
+			}
+		}
+		if refDir == "" {
+			refDir = filepath.Join(skillsDir, sanitizeSkillName(skillName), "references")
+		}
+
+		// Security: prevent path traversal using filepath.Rel to ensure the
+		// resolved path stays within the references directory.
+		refDirClean := filepath.Clean(refDir)
+		fullPathClean := filepath.Clean(filepath.Join(refDir, referencePath))
+		rel, err := filepath.Rel(refDirClean, fullPathClean)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return nil, fmt.Errorf("invalid reference path (path traversal)")
+		}
+
+		content, err := os.ReadFile(fullPathClean)
+		if err != nil {
+			return nil, fmt.Errorf("reading reference %q for skill %q: %w", referencePath, skillName, err)
+		}
+		return string(content), nil
+	}
 }
 
 // sanitizeSkillName normalizes a skill name to filesystem-safe format.

@@ -1,7 +1,7 @@
 ---
 name: filesystem
 description: "Read, write, and manage files on the local machine"
-trigger: automatic
+trigger: on-demand
 ---
 
 # Filesystem

@@ -1,7 +1,7 @@
 ---
 name: cron
 description: "Schedule jobs to run at specific times or intervals"
-trigger: automatic
+trigger: on-demand
 ---
 
 # Scheduler

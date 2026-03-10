@@ -49,9 +49,17 @@ func NewScriptSkill(def *ClawdHubSkillDef) *ScriptSkill {
 		},
 	}
 
-	// Set emoji as tag if available.
-	if def.OpenClaw != nil && def.OpenClaw.Emoji != "" {
-		s.meta.Tags = append(s.meta.Tags, "emoji:"+def.OpenClaw.Emoji)
+	// Populate eligibility requirements from OpenClaw metadata.
+	if def.OpenClaw != nil {
+		if def.OpenClaw.Emoji != "" {
+			s.meta.Tags = append(s.meta.Tags, "emoji:"+def.OpenClaw.Emoji)
+		}
+		s.meta.Requires = SkillRequirements{
+			Bins:    def.OpenClaw.Requires.Bins,
+			AnyBins: def.OpenClaw.Requires.AnyBins,
+			Env:     def.OpenClaw.Requires.Env,
+			OS:      def.OpenClaw.OS,
+		}
 	}
 
 	// Discover scripts in the skill directory.

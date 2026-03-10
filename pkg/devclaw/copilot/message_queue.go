@@ -181,6 +181,23 @@ func NewMessageQueue(debounceMs, maxPending int, onDrain OnDrainFunc, logger *sl
 	}
 }
 
+// IsDuplicate checks if a message is a platform-level duplicate delivery
+// (webhook retries, reconnection replays) using Message-ID deduplication.
+// Safe to call from any goroutine. Records the message so future duplicates
+// are caught. Returns true if the message was already seen.
+func (q *MessageQueue) IsDuplicate(msg *channels.IncomingMessage) bool {
+	if msg == nil || msg.ID == "" || q.dedupCache == nil {
+		return false
+	}
+	key := dedupKey(msg.Channel, msg.From, msg.ChatID, msg.ID)
+	if q.dedupCache.CheckAndRecord(key) {
+		q.logger.Debug("inbound message deduplicated by ID",
+			"channel", msg.Channel, "from", msg.From, "msg_id", msg.ID)
+		return true
+	}
+	return false
+}
+
 // Enqueue adds a message to the session queue. Returns true if enqueued,
 // false if deduplicated (same content within 5 seconds).
 func (q *MessageQueue) Enqueue(sessionID string, msg *channels.IncomingMessage) bool {

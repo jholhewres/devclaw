@@ -1,7 +1,7 @@
 ---
 name: browser
 description: "Automate web browsing, scraping, and form interaction"
-trigger: automatic
+trigger: on-demand
 ---
 
 # Browser Automation
