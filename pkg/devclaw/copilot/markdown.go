@@ -185,8 +185,8 @@ var replyTagRe = regexp.MustCompile(`\[\[reply_to[^\]]*\]\]`)
 // internalTagRe matches XML-style internal tags that should never reach the
 // user: <final>, </final>, <thinking>, </thinking>, <tool_provenance>, and
 // their content when it duplicates the already-streamed response.
-// The tool_proven\w+ pattern also catches LLM typos like <tool_provenace>.
-var internalTagRe = regexp.MustCompile(`</?(?:final|thinking|reasoning|tool_proven\w+)>`)
+// The \w+_proven\w+ pattern catches LLM variants like <tool_provenace>, <skill_provenance>, etc.
+var internalTagRe = regexp.MustCompile(`</?(?:final|thinking|reasoning|\w+_proven\w+)>`)
 
 // toolsUsedRe matches "[Tools used: ...]" annotations that may be generated
 // by the LLM mimicking the internal history format. These must be stripped
@@ -201,8 +201,8 @@ var duplicatedFinalRe = regexp.MustCompile(`(?s)<final>\s*(.*?)\s*</final>`)
 // toolProvenanceRe matches <tool_provenance>...</tool_provenance> blocks
 // including their content. These are internal annotations added to conversation
 // history and must be fully stripped if they leak into user-facing output.
-// The tool_proven\w+ pattern also catches LLM typos like <tool_provenace>.
-var toolProvenanceRe = regexp.MustCompile(`(?s)<tool_proven\w+>.*?</tool_proven\w+>\n?`)
+// The \w+_proven\w+ pattern catches LLM variants like <tool_provenace>, <skill_provenance>, etc.
+var toolProvenanceRe = regexp.MustCompile(`(?s)<\w+_proven\w+>.*?</\w+_proven\w+>\n?`)
 
 // StripInternalTags removes all internal control tags and sentinel tokens
 // from LLM output so they never reach the user. Handles:
