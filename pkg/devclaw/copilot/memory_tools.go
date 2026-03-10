@@ -6,6 +6,7 @@ package copilot
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"time"
@@ -138,17 +139,18 @@ func handleMemorySave(_ context.Context, store *memory.FileStore, sqliteStore *m
 	}
 
 	// Re-index the MEMORY.md file if SQLite memory is available.
+	// Run synchronously so searches immediately after save find the new entry.
 	if sqliteStore != nil && cfg.Index.Auto {
 		memDir := filepath.Join(filepath.Dir(cfg.Path), "memory")
 		chunkCfg := memory.ChunkConfig{MaxTokens: cfg.Index.ChunkMaxTokens, Overlap: 100}
 		if chunkCfg.MaxTokens <= 0 {
 			chunkCfg.MaxTokens = 500
 		}
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			_ = sqliteStore.IndexMemoryDir(ctx, memDir, chunkCfg)
-		}()
+		indexCtx, indexCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer indexCancel()
+		if err := sqliteStore.IndexMemoryDir(indexCtx, memDir, chunkCfg); err != nil {
+			slog.Warn("memory index update after save failed", "error", err)
+		}
 	}
 
 	return fmt.Sprintf("Saved to memory [%s]: %s", category, content), nil

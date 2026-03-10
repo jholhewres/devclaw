@@ -694,9 +694,12 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 
 		// ── Tool Loop Detection ──
 		// Record tool calls and check for repetitive patterns before execution.
-		// Warnings/criticals are deferred until AFTER tool results to maintain
-		// valid message ordering (assistant→tool→user, not assistant→user→tool).
+		// LoopBreaker → hard stop the entire agent run.
+		// LoopCritical → block that specific tool call (skip execution, return
+		//   a synthetic error result so the LLM sees the block reason).
+		// LoopWarning → inject a nudge message after tool results.
 		var loopWarning string
+		blockedCalls := make(map[string]string) // tool call ID → block reason
 		if a.loopDetector != nil {
 			for _, tc := range resp.ToolCalls {
 				args, _ := parseToolArgs(tc.Function.Arguments)
@@ -708,20 +711,48 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 						"tool", tc.Function.Name, "streak", result.Streak, "pattern", result.Pattern)
 					return result.Message, &totalUsage, nil
 
-				case LoopCritical, LoopWarning:
+				case LoopCritical:
+					// Block this specific tool call — do NOT execute it.
+					// The LLM will receive an error result forcing it to change strategy.
+					blockedCalls[tc.ID] = result.Message
+					loopWarning = result.Message
+					a.logger.Warn("tool call blocked by loop detector",
+						"tool", tc.Function.Name, "id", tc.ID, "streak", result.Streak, "pattern", result.Pattern)
+
+				case LoopWarning:
 					loopWarning = result.Message
 				}
 			}
 		}
 
-		// Execute all requested tool calls.
+		// Filter out blocked tool calls — only execute non-blocked ones.
+		execCalls := resp.ToolCalls
+		var blockedResults []ToolResult
+		if len(blockedCalls) > 0 {
+			execCalls = make([]ToolCall, 0, len(resp.ToolCalls))
+			for _, tc := range resp.ToolCalls {
+				if reason, blocked := blockedCalls[tc.ID]; blocked {
+					blockedResults = append(blockedResults, ToolResult{
+						ToolCallID: tc.ID,
+						Name:       tc.Function.Name,
+						Content:    "ERROR: " + reason,
+						Error:      fmt.Errorf("blocked by loop detector"),
+					})
+				} else {
+					execCalls = append(execCalls, tc)
+				}
+			}
+		}
+
+		// Execute non-blocked tool calls.
 		toolStart := time.Now()
-		toolNames := make([]string, len(resp.ToolCalls))
-		for i, tc := range resp.ToolCalls {
+		toolNames := make([]string, len(execCalls))
+		for i, tc := range execCalls {
 			toolNames[i] = tc.Function.Name
 		}
 		a.logger.Info("executing tool calls",
-			"count", len(resp.ToolCalls),
+			"count", len(execCalls),
+			"blocked", len(blockedCalls),
 			"tools", strings.Join(toolNames, ","),
 			"turn", totalTurns,
 		)
@@ -763,7 +794,14 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 			}
 		}
 
-		results := a.executor.Execute(runCtx, resp.ToolCalls)
+		// Execute only non-blocked calls; prepend blocked synthetic results.
+		var results []ToolResult
+		if len(execCalls) > 0 {
+			results = a.executor.Execute(runCtx, execCalls)
+		}
+		if len(blockedResults) > 0 {
+			results = append(blockedResults, results...)
+		}
 
 		a.logger.Info("tool calls complete",
 			"count", len(results),

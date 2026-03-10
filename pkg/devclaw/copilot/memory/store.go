@@ -97,18 +97,30 @@ func (fs *FileStore) Save(entry Entry) error {
 	return err
 }
 
-// Search returns entries whose content matches the query (case-insensitive substring).
+// Search returns entries whose content matches the query (case-insensitive).
+// The query is split into words; an entry matches if ALL words appear in its content.
 func (fs *FileStore) Search(query string, maxResults int) ([]Entry, error) {
 	all, err := fs.GetAll()
 	if err != nil {
 		return nil, err
 	}
 
-	query = strings.ToLower(query)
-	var results []Entry
+	words := strings.Fields(strings.ToLower(query))
+	if len(words) == 0 {
+		return nil, nil
+	}
 
+	var results []Entry
 	for _, entry := range all {
-		if strings.Contains(strings.ToLower(entry.Content), query) {
+		lower := strings.ToLower(entry.Content)
+		allMatch := true
+		for _, w := range words {
+			if !strings.Contains(lower, w) {
+				allMatch = false
+				break
+			}
+		}
+		if allMatch {
 			results = append(results, entry)
 			if maxResults > 0 && len(results) >= maxResults {
 				break
