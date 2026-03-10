@@ -192,6 +192,13 @@ func (s *Session) SetMaxHistory(n int) {
 	}
 }
 
+// GetMaxHistory returns the maximum history size for this session (thread-safe).
+func (s *Session) GetMaxHistory() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.maxHistory
+}
+
 // HistoryLimitForType returns the appropriate history limit based on
 // whether the conversation is a DM or group/channel.
 func HistoryLimitForType(isGroup bool) int {

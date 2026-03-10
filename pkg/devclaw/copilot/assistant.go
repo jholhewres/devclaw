@@ -2155,9 +2155,11 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 	a.activeRuns[runKey] = cancel
 	a.activeRunsMu.Unlock()
 
-	// 10 recent entries ≈ 2-3K tokens: enough context without bloating the
-	// prompt. Older history is summarized by session memory if enabled.
-	history := session.RecentHistory(10)
+	// Dynamic history sizing: include as many entries as the token budget allows
+	// instead of the old hardcoded 10. This gives the LLM access to the full
+	// conversation context (50-100 entries) instead of just ~5 turns.
+	historySize := a.calculateDynamicHistorySize(systemPrompt, modelOverride, session)
+	history := session.RecentHistory(historySize)
 
 	agent := NewAgentRunWithConfig(a.llmClient, a.toolExecutor, a.config.Agent, a.logger)
 	agent.SetModelOverride(modelOverride)
@@ -2236,9 +2238,10 @@ func (a *Assistant) executeAgent(ctx context.Context, workspaceID string, sessio
 	a.activeRuns[runKey] = cancel
 	a.activeRunsMu.Unlock()
 
-	history := session.RecentHistory(10)
-
 	modelOverride := session.GetConfig().Model
+	historySize := a.calculateDynamicHistorySize(systemPrompt, modelOverride, session)
+	history := session.RecentHistory(historySize)
+
 	agent := NewAgentRunWithConfig(a.llmClient, a.toolExecutor, a.config.Agent, a.logger)
 	agent.SetModelOverride(modelOverride)
 
@@ -2324,6 +2327,38 @@ func (a *Assistant) SessionStore() *SessionStore {
 // Scheduler returns the task scheduler (may be nil if not initialized).
 func (a *Assistant) Scheduler() *scheduler.Scheduler {
 	return a.scheduler
+}
+
+// calculateDynamicHistorySize determines how many conversation entries to include
+// based on the available token budget after accounting for the system prompt.
+// This replaces the old hardcoded RecentHistory(10) with a dynamic calculation
+// that uses the full context window, similar to how OpenClaw handles history.
+func (a *Assistant) calculateDynamicHistorySize(systemPrompt, model string, session *Session) int {
+	const (
+		reserveTokens     = 20_000 // headroom for current message + tool calls + LLM response
+		avgEntryTokens    = 400    // estimated tokens per ConversationEntry (user ~150 + assistant ~250)
+		minEntries        = 10     // never go below this
+	)
+
+	ctxWindow := ResolveContextWindowTokens(a.config.Agent.ContextTokens, model)
+	promptTokens := estimateTokensForModel(systemPrompt, model)
+	available := ctxWindow - promptTokens - reserveTokens
+	if available <= 0 {
+		return minEntries
+	}
+
+	entries := available / avgEntryTokens
+
+	// Cap at the session's maxHistory (50 for groups, 100 for DMs).
+	maxHist := session.GetMaxHistory()
+	if maxHist > 0 && entries > maxHist {
+		entries = maxHist
+	}
+
+	if entries < minEntries {
+		entries = minEntries
+	}
+	return entries
 }
 
 // ComposePrompt builds a system prompt for the given session and input.

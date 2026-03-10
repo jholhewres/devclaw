@@ -207,20 +207,12 @@ func (p *PromptComposer) Compose(session *Session, input string) string {
 	}
 
 	// ── Heavy layers (I/O, search) ──
-	// Critical layers (bootstrap + history) are loaded synchronously because
-	// they are always needed and typically fast (bootstrap is cached, history
-	// is in-memory). Optional layers (memory + skills) use session-level
-	// caching: if a fresh result exists, it's used immediately without I/O.
-	// Stale results are refreshed in background for the next prompt.
-	var (
-		wg        sync.WaitGroup
-		bootstrap string
-		history   string
-	)
-
-	wg.Add(2)
-	go func() { defer wg.Done(); bootstrap = p.buildBootstrapLayer() }()
-	go func() { defer wg.Done(); history = p.buildConversationLayer(session) }()
+	// Bootstrap is loaded synchronously (cached, fast). Memory and skills use
+	// session-level caching. Conversation layer is NOT included here because
+	// the full conversation history is now passed directly as messages to the
+	// LLM (via dynamic history sizing in assistant.go), making the summary
+	// in the system prompt redundant and wasteful of token budget.
+	bootstrap := p.buildBootstrapLayer()
 
 	// Memory and skills: use cached versions to avoid blocking.
 	memoryPrompt := p.getCachedLayer(session.ID, "memory")
@@ -229,8 +221,6 @@ func (p *PromptComposer) Compose(session *Session, input string) string {
 	// If cache is stale or empty, refresh in background (non-blocking).
 	// The current prompt uses whatever is cached; the NEXT prompt benefits.
 	go p.refreshLayerCache(session, input)
-
-	wg.Wait()
 
 	if bootstrap != "" {
 		layers = append(layers, layerEntry{layer: LayerBootstrap, content: bootstrap})
@@ -243,9 +233,6 @@ func (p *PromptComposer) Compose(session *Session, input string) string {
 	}
 	if memoryPrompt != "" {
 		layers = append(layers, layerEntry{layer: LayerMemory, content: memoryPrompt})
-	}
-	if history != "" {
-		layers = append(layers, layerEntry{layer: LayerConversation, content: history})
 	}
 
 	return p.assembleLayers(layers)
@@ -581,6 +568,15 @@ func (p *PromptComposer) buildCoreLayer() string {
 	b.WriteString("- Claims about the current state of the world (files, repos, services) MUST come from a tool result in the current session.\n")
 	b.WriteString("- If you used a tool and it returned data, you may cite that data. If you did not use a tool, do not fabricate what a tool \"would\" return.\n")
 	b.WriteString("- These restraint rules apply even when following a SOUL.md persona — the persona sets style, not license to fabricate.\n\n")
+
+	// ## Memory Recall — instruct the agent to search memory proactively.
+	// This lives in the core layer (never trimmed) instead of the memory layer
+	// (which can be dropped when the system prompt exceeds token budget).
+	b.WriteString("## Memory Recall\n\n")
+	b.WriteString("Before answering questions about prior work, decisions, dates, people, preferences, or todos:\n")
+	b.WriteString("1. Run memory_search(query=\"...\") to recall relevant information.\n")
+	b.WriteString("2. Do NOT assume you remember — always verify with memory_search first.\n")
+	b.WriteString("3. If memory_search returns no results, tell the user you don't have that information saved.\n\n")
 
 	// ## Workspace - matches structure (comes BEFORE Reply Tags)
 	b.WriteString("## Workspace\n\n")
@@ -1067,7 +1063,9 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 				memTexts = append(memTexts, fmt.Sprintf("[%s] %s", r.FileID, text))
 			}
 			// Wrap with untrusted-data boundary from memory_hardening.go.
-			parts = append(parts, "## Memory Recall\n\nBefore answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search(query=\"...\") to recall relevant information.\n\n"+WrapMemoriesForPrompt(memTexts))
+			// Note: the "recall before answering" instruction is now in buildCoreLayer()
+			// (never trimmed), so we only include the memories here.
+			parts = append(parts, "## Recalled Memories\n\n"+WrapMemoriesForPrompt(memTexts))
 		}
 	}
 
@@ -1087,7 +1085,7 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 				memTexts = append(memTexts, line)
 			}
 			if len(memTexts) > 0 {
-				parts = append(parts, "## Memory Recall\n\nRelevant facts from long-term memory:\n\n"+WrapMemoriesForPrompt(memTexts))
+				parts = append(parts, "## Recalled Memories\n\nRelevant facts from long-term memory:\n\n"+WrapMemoriesForPrompt(memTexts))
 			}
 		}
 	}
