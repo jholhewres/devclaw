@@ -67,7 +67,7 @@ func (h *handlerContext) resolveTeamID(teamRef string) (string, error) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func registerTeamManageDispatcher(executor *ToolExecutor, hctx *handlerContext) {
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("team_manage",
 			"Manage teams with actions: create, list, get, update, delete. Create teams to organize agents with shared memory and tasks.",
 			map[string]any{
@@ -222,7 +222,7 @@ func (h *handlerContext) handleTeamDelete(args map[string]any) (any, error) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func registerTeamAgentDispatcher(executor *ToolExecutor, hctx *handlerContext) {
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("team_agent",
 			"Manage team agents with actions: create, list, get, update, start, stop, delete. Also manage working state: working_get, working_update, working_clear.",
 			map[string]any{
@@ -597,7 +597,7 @@ func (h *handlerContext) handleAgentWorkingClear(args map[string]any) (any, erro
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func registerTeamTaskDispatcher(executor *ToolExecutor, hctx *handlerContext) {
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("team_task",
 			"Manage team tasks with actions: create, list, get, update, assign, delete. Tasks track work items for team agents.",
 			map[string]any{
@@ -830,7 +830,7 @@ func (h *handlerContext) handleTaskDelete(args map[string]any) (any, error) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func registerTeamMemoryDispatcher(executor *ToolExecutor, hctx *handlerContext) {
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("team_memory",
 			"Manage team memory with actions: fact_save, fact_list, fact_delete, doc_create, doc_list, doc_get, doc_update, doc_delete, standup. Shared memory for team knowledge.",
 			map[string]any{
@@ -1128,7 +1128,7 @@ func (h *handlerContext) handleStandup(args map[string]any) (any, error) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 func registerTeamCommDispatcher(executor *ToolExecutor, hctx *handlerContext) {
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("team_comm",
 			"Team communication with actions: comment, mention_check, send_message, notify, notify_list. Interact with other agents and receive notifications.",
 			map[string]any{

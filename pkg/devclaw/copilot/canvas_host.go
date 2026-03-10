@@ -324,7 +324,7 @@ func RegisterCanvasTools(executor *ToolExecutor, canvasHost *CanvasHost, logger 
 	}
 
 	// canvas_create
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("canvas_create",
 			"Create an interactive HTML/JS canvas that the user can view in their browser. "+
 				"Use this for data visualizations, interactive prototypes, rich output, or any "+
@@ -374,7 +374,7 @@ func RegisterCanvasTools(executor *ToolExecutor, canvasHost *CanvasHost, logger 
 	)
 
 	// canvas_update
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("canvas_update",
 			"Update the HTML content of an existing canvas. Triggers live-reload so "+
 				"the user sees changes immediately without refreshing.",
@@ -407,7 +407,7 @@ func RegisterCanvasTools(executor *ToolExecutor, canvasHost *CanvasHost, logger 
 	)
 
 	// canvas_list
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("canvas_list",
 			"List all active canvas hosts with their URLs and status.",
 			map[string]any{
@@ -431,7 +431,7 @@ func RegisterCanvasTools(executor *ToolExecutor, canvasHost *CanvasHost, logger 
 	)
 
 	// canvas_stop
-	executor.Register(
+	executor.RegisterHidden(
 		MakeToolDefinition("canvas_stop",
 			"Stop a canvas server by its ID.",
 			map[string]any{
