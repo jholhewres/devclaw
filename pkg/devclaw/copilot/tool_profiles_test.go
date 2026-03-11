@@ -111,6 +111,7 @@ func TestBuiltInProfiles_Messaging(t *testing.T) {
 		"group:vault", "group:skills", "group:sessions",
 		"group:media", "group:skill_db",
 		"group:fs", "group:subagents", "group:browser",
+		"group:teams", "group:daemon",
 		"bash", "exec", "apply_patch",
 	} {
 		if !allowMap[required] {
@@ -123,10 +124,9 @@ func TestBuiltInProfiles_Messaging(t *testing.T) {
 		denyMap[item] = true
 	}
 
-	// Messaging denies only remote access, daemon, and team management.
+	// Messaging denies only remote access and env modification.
 	for _, denied := range []string{
 		"ssh", "scp", "set_env",
-		"group:daemon", "group:teams",
 	} {
 		if !denyMap[denied] {
 			t.Errorf("messaging profile should deny %s", denied)
