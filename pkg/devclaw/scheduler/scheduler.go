@@ -393,6 +393,10 @@ func (s *Scheduler) scheduleCronJob(job *Job) error {
 
 	// Handle "at" type (one-shot): convert to nearest future time.
 	if job.Type == "at" {
+		// Validate time format before accepting the job.
+		if _, err := parseOneShotTime(schedule); err != nil {
+			return fmt.Errorf("invalid one-shot time %q: %w", schedule, err)
+		}
 		// For one-shot jobs, we use a simple goroutine with a timer instead of cron.
 		go s.runOneShotJob(job, schedule)
 		return nil
@@ -501,6 +505,25 @@ func parseOneShotTime(timeStr string) (time.Time, error) {
 			target = target.Add(24 * time.Hour)
 		}
 		return target, nil
+	}
+
+	// Try "today HH:MM" / "today at HH:MM" / "tomorrow HH:MM" / "tomorrow at HH:MM".
+	cleaned := strings.ToLower(strings.TrimSpace(timeStr))
+	cleaned = strings.ReplaceAll(cleaned, " at ", " ")
+	if strings.HasPrefix(cleaned, "today ") || strings.HasPrefix(cleaned, "tomorrow ") {
+		isTomorrow := strings.HasPrefix(cleaned, "tomorrow ")
+		timePart := strings.TrimPrefix(strings.TrimPrefix(cleaned, "today "), "tomorrow ")
+		timePart = strings.TrimSpace(timePart)
+		if t, err := time.Parse("15:04", timePart); err == nil {
+			target := time.Date(now.Year(), now.Month(), now.Day(),
+				t.Hour(), t.Minute(), 0, 0, now.Location())
+			if isTomorrow {
+				target = target.Add(24 * time.Hour)
+			} else if target.Before(now) {
+				target = target.Add(24 * time.Hour) // today but past → tomorrow
+			}
+			return target, nil
+		}
 	}
 
 	return time.Time{}, fmt.Errorf("unrecognized time format: %s", timeStr)
