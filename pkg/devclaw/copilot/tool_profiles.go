@@ -27,109 +27,121 @@ type ToolProfile struct {
 }
 
 // BuiltInProfiles provides predefined tool profiles for common use cases.
+//
+// Design rules:
+//   - Always use "group:xxx" references instead of individual tool names when
+//     the intent is to include all tools in a category. This ensures new tools
+//     added to a group are automatically picked up by profiles.
+//   - Individual tool names are used only for tools that don't belong to any
+//     group (e.g. "apply_patch") or when only a subset of a group is needed.
+//   - Dispatcher tools (memory, vault, scheduler, browser) internally call
+//     hidden sub-tools via executeByName which bypasses the profile guard.
+//     Using the group (e.g. "group:vault") instead of just "vault" ensures
+//     the sub-tools are also in the allow set for direct Execute() calls.
 var BuiltInProfiles = map[string]ToolProfile{
 	"minimal": {
 		Name:        "minimal",
-		Description: "Basic queries only - read-only access",
+		Description: "Basic queries only - read-only access, no writes",
 		Allow: []string{
-			"group:web",
-			"memory",
-			"read_file",
+			"group:web",    // web_search, web_fetch
+			"group:memory", // memory dispatcher + sub-tools (save, search, list, index)
+			"read_file",    // read-only filesystem
 			"list_files",
 			"search_files",
 			"glob_files",
-			"describe_image",
+			"describe_image", // analyze images
 		},
 		Deny: []string{
-			"group:runtime",
-			"write_file",
-			"edit_file",
-			"group:skills",
-			"scheduler",
-			"vault",
-			"group:subagents",
+			"group:runtime",   // bash, exec, ssh, scp, set_env
+			"write_file",      // no writes
+			"edit_file",       // no edits
+			"group:skills",    // no skill management
+			"group:scheduler", // no scheduling
+			"group:vault",     // no secrets
+			"group:subagents", // no subagents
+			"group:daemon",    // no daemons
+			"group:browser",   // no browser
+			"group:teams",     // no teams
 		},
 	},
 	"coding": {
 		Name:        "coding",
-		Description: "Software development - file access, skills, reminders, vault",
+		Description: "Software development - file access, skills, vault, scheduler, browser",
 		Allow: []string{
-			"group:fs",
-			"group:web",
-			"memory",
-			"scheduler",
-			"vault",
-			"group:skills",
-			"sessions",
-			"group:subagents",
-			"daemon",
-			"describe_image",
-			"browser",
-			"bash",
-			"exec",
-			"apply_patch",
-			"skill_db_query",
-			"skill_db_list_tables",
+			"group:fs",        // read_file, write_file, edit_file, list_files, search_files, glob_files
+			"group:web",       // web_search, web_fetch
+			"group:memory",    // memory dispatcher + sub-tools
+			"group:scheduler", // scheduler dispatcher + sub-tools
+			"group:vault",     // vault dispatcher + sub-tools
+			"group:skills",    // get_skill_instructions, get_skill_reference, skill_list, etc.
+			"group:sessions",  // sessions
+			"group:subagents", // spawn, list, wait, stop subagents
+			"group:daemon",    // daemon manager
+			"group:media",     // describe_image, transcribe_audio, send_image/audio/document
+			"group:browser",   // browser dispatcher + sub-tools
+			"group:skill_db",  // skill_db_query, skill_db_list_tables, etc.
+			"bash",            // shell access
+			"exec",            // sandboxed execution
+			"apply_patch",     // multi-file patches
 		},
 		Deny: []string{
-			"ssh",
+			"ssh", // no remote access
 			"scp",
 		},
 	},
 	"messaging": {
 		Name:        "messaging",
-		Description: "Chat channel usage - web, memory, reminders, skills, vault, media",
+		Description: "Chat channels (WhatsApp, Discord, Telegram, Slack) - web, memory, skills, vault, media",
 		Allow: []string{
-			"group:web",
-			"memory",
-			"scheduler",
-			"vault",
-			"group:skills",
-			"sessions",
-			"describe_image",
-			"message",
-			"skill_db_query",
-			"skill_db_list_tables",
+			"group:web",       // web_search, web_fetch (essential for skills that call APIs)
+			"group:memory",    // memory dispatcher + sub-tools
+			"group:scheduler", // scheduler dispatcher + sub-tools
+			"group:vault",     // vault dispatcher + sub-tools (save/get API keys)
+			"group:skills",    // get_skill_instructions, get_skill_reference, skill_list, etc.
+			"group:sessions",  // sessions
+			"group:media",     // describe_image, transcribe_audio, send_image/audio/document
+			"group:skill_db",  // skill_db_query, skill_db_list_tables, etc.
 		},
 		Deny: []string{
-			"group:runtime",
-			"group:fs",
-			"group:subagents",
-			"daemon",
-			"bash",
-			"exec",
-			"browser",
+			"group:runtime",   // bash, exec, ssh, scp, set_env
+			"group:fs",        // no direct file access
+			"group:subagents", // no subagents
+			"group:daemon",    // no daemon management
+			"group:browser",   // no browser automation
+			"group:teams",     // no team management
 		},
 	},
 	"team": {
 		Name:        "team",
-		Description: "Team agent - team tools, web, memory, scheduler, vault, skills",
+		Description: "Team agent - team tools, web, memory, scheduler, vault, skills, read-only FS",
 		Allow: []string{
-			"group:teams",
-			"group:web",
-			"memory",
-			"scheduler",
-			"vault",
-			"group:skills",
-			"read_file",
+			"group:teams",     // team_manage, team_agent, team_task, team_memory, team_comm
+			"group:web",       // web_search, web_fetch
+			"group:memory",    // memory dispatcher + sub-tools
+			"group:scheduler", // scheduler dispatcher + sub-tools
+			"group:vault",     // vault dispatcher + sub-tools
+			"group:skills",    // get_skill_instructions, get_skill_reference, skill_list, etc.
+			"group:media",     // describe_image, transcribe_audio, send_image/audio/document
+			"group:skill_db",  // skill_db_query, skill_db_list_tables, etc.
+			"read_file",       // read-only filesystem
 			"list_files",
 			"search_files",
 			"glob_files",
-			"bash",
-			"describe_image",
+			"bash", // shell access (for team task execution)
 		},
 		Deny: []string{
-			"group:subagents",
-			"ssh",
+			"group:subagents", // no subagents (team agents are agents themselves)
+			"group:daemon",    // no daemon management
+			"ssh",             // no remote access
 			"scp",
-			"exec",
-			"write_file",
+			"exec",       // no sandboxed exec
+			"write_file", // no writes
 			"edit_file",
 		},
 	},
 	"full": {
 		Name:        "full",
-		Description: "Full access - all tools available (respect permissions)",
+		Description: "Full access - all tools available (respect per-tool permissions)",
 		Allow:       []string{"*"},
 		Deny:        []string{},
 	},

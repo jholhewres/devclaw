@@ -176,7 +176,8 @@ var ToolGroups = map[string][]string{
 	"group:vault":     {"vault", "vault_status", "vault_save", "vault_get", "vault_list", "vault_delete"},
 	"group:sessions":  {"sessions"},
 	"group:daemon":    {"daemon"},
-	"group:media":     {"describe_image", "transcribe_audio", "image-gen_generate_image"},
+	"group:media":     {"describe_image", "transcribe_audio", "send_image", "send_audio", "send_document", "image-gen_generate_image"},
+	"group:skill_db":  {"skill_db_query", "skill_db_list_tables", "skill_db_insert", "skill_db_update", "skill_db_delete", "skill_db_create_table", "skill_db_describe", "skill_db_drop_table"},
 	"group:browser":   {"browser", "browser_navigate", "browser_screenshot", "browser_content", "browser_click", "browser_fill", "browser_snapshot", "browser_tabs", "browser_open_tab", "browser_focus_tab", "browser_close_tab", "browser_act"},
 	"group:teams": {
 		"team_manage",

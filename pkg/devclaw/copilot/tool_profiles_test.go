@@ -37,8 +37,8 @@ func TestBuiltInProfiles_Minimal(t *testing.T) {
 	if !allowMap["group:web"] {
 		t.Error("minimal profile should allow group:web")
 	}
-	if !allowMap["memory"] {
-		t.Error("minimal profile should allow memory dispatcher")
+	if !allowMap["group:memory"] {
+		t.Error("minimal profile should allow group:memory")
 	}
 
 	// Minimal should deny runtime and write operations.
@@ -58,7 +58,7 @@ func TestBuiltInProfiles_Minimal(t *testing.T) {
 func TestBuiltInProfiles_Coding(t *testing.T) {
 	profile := BuiltInProfiles["coding"]
 
-	// Coding should allow fs, web, memory, bash, git, docker.
+	// Coding should allow fs, web, memory, bash.
 	allowMap := make(map[string]bool)
 	for _, item := range profile.Allow {
 		allowMap[item] = true
@@ -70,8 +70,17 @@ func TestBuiltInProfiles_Coding(t *testing.T) {
 	if !allowMap["bash"] {
 		t.Error("coding profile should allow bash")
 	}
-	if !allowMap["memory"] {
-		t.Error("coding profile should allow memory dispatcher")
+	if !allowMap["group:memory"] {
+		t.Error("coding profile should allow group:memory")
+	}
+	if !allowMap["group:vault"] {
+		t.Error("coding profile should allow group:vault")
+	}
+	if !allowMap["group:scheduler"] {
+		t.Error("coding profile should allow group:scheduler")
+	}
+	if !allowMap["group:skills"] {
+		t.Error("coding profile should allow group:skills")
 	}
 
 	// Coding should deny ssh, scp.
@@ -85,6 +94,75 @@ func TestBuiltInProfiles_Coding(t *testing.T) {
 	}
 	if !denyMap["scp"] {
 		t.Error("coding profile should deny scp")
+	}
+}
+
+func TestBuiltInProfiles_Messaging(t *testing.T) {
+	profile := BuiltInProfiles["messaging"]
+
+	allowMap := make(map[string]bool)
+	for _, item := range profile.Allow {
+		allowMap[item] = true
+	}
+
+	// Messaging must allow all essential groups for chat channel usage.
+	for _, required := range []string{
+		"group:web", "group:memory", "group:scheduler",
+		"group:vault", "group:skills", "group:sessions",
+		"group:media", "group:skill_db",
+	} {
+		if !allowMap[required] {
+			t.Errorf("messaging profile should allow %s", required)
+		}
+	}
+
+	denyMap := make(map[string]bool)
+	for _, item := range profile.Deny {
+		denyMap[item] = true
+	}
+
+	// Messaging must deny dangerous groups.
+	for _, denied := range []string{
+		"group:runtime", "group:fs", "group:subagents",
+		"group:daemon", "group:browser", "group:teams",
+	} {
+		if !denyMap[denied] {
+			t.Errorf("messaging profile should deny %s", denied)
+		}
+	}
+}
+
+func TestBuiltInProfiles_Team(t *testing.T) {
+	profile := BuiltInProfiles["team"]
+
+	allowMap := make(map[string]bool)
+	for _, item := range profile.Allow {
+		allowMap[item] = true
+	}
+
+	if !allowMap["group:teams"] {
+		t.Error("team profile should allow group:teams")
+	}
+	if !allowMap["group:vault"] {
+		t.Error("team profile should allow group:vault")
+	}
+	if !allowMap["group:skills"] {
+		t.Error("team profile should allow group:skills")
+	}
+	if !allowMap["bash"] {
+		t.Error("team profile should allow bash")
+	}
+
+	denyMap := make(map[string]bool)
+	for _, item := range profile.Deny {
+		denyMap[item] = true
+	}
+
+	if !denyMap["group:subagents"] {
+		t.Error("team profile should deny group:subagents")
+	}
+	if !denyMap["write_file"] {
+		t.Error("team profile should deny write_file")
 	}
 }
 
