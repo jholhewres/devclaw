@@ -57,13 +57,22 @@ func (fc *FailoverCoordinator) SelectModelAndProfile(provider, modelOverride str
 	}
 
 	// Resolve profile for credentials.
+	// When no profiles exist for the provider, fall through silently
+	// so the caller can use the API key from config/env instead.
 	if fc.profileMgr != nil {
 		result := fc.profileMgr.Resolve(profiles.ResolutionOptions{
 			Provider: provider,
 		})
 		if result != nil {
 			if result.Error != nil {
-				return model, "", "", fmt.Errorf("resolving profile for %s: %w", provider, result.Error)
+				// Only treat as fatal if profiles were actually attempted
+				// (i.e., profiles exist but all failed). When no profiles
+				// exist at all, this is expected — not an error.
+				if len(result.AttemptedProfiles) > 0 {
+					return model, "", "", fmt.Errorf("resolving profile for %s: %w", provider, result.Error)
+				}
+				// No profiles for this provider — fall through to use
+				// API key from config or environment.
 			}
 			if result.Profile != nil {
 				profileID = result.Profile.ID
