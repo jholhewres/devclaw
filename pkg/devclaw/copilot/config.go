@@ -975,7 +975,7 @@ func DefaultConfig() *Config {
 		Browser: DefaultBrowserConfig(),
 		Update: UpdateConfig{
 			Enabled:       true,
-			AssetsURL:     "https://assets-gatorclaw.hostgator.io",
+			AssetsURL:     "https://assets.devclaw.dev",
 			CheckInterval: "1h",
 		},
 	}

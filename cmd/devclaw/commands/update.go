@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultAssetsURL = "https://assets-gatorclaw.hostgator.io"
+const defaultAssetsURL = "https://assets.devclaw.dev"
 
 func newUpdateCmd(version string) *cobra.Command {
 	var assetsURL string

@@ -22,9 +22,9 @@ set -euo pipefail
 BINARY="devclaw"
 SCRIPT_VERSION="2.1.0"
 
-# GatorClaw Assets URLs
-PRODUCTION_URL="https://assets-gatorclaw.hostgator.io"
-TEST_URL="https://test-assets-gatorclaw.hostgator.io"
+# Assets URLs
+PRODUCTION_URL="https://assets.devclaw.dev"
+TEST_URL="https://test-assets.devclaw.dev"
 
 # Installation directories
 LINUX_INSTALL_DIR="/opt/devclaw"

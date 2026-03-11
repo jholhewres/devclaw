@@ -9,12 +9,12 @@ VERBOSE ?=
 DIST_DIR := dist
 
 #AWS
-S3_BUCKET ?= assets-gatorclaw.hostgator.io
+S3_BUCKET ?= assets.devclaw.dev
 
 #SonarQube variables
 stage=dev
 m_gopath=$(shell go env GOPATH 2>/dev/null || echo "/var/go")
-repo_name=$(shell egrep -oi "latamd.*" .git/config 2>/dev/null | cut -d\/ -f2 | head -1 | sed 's/.git*//g' || echo "gatorclaw")
+repo_name=$(shell egrep -oi "latamd.*" .git/config 2>/dev/null | cut -d\/ -f2 | head -1 | sed 's/.git*//g' || echo "devclaw")
 branch=$(shell git branch 2>/dev/null | egrep '^\*' | cut -d" " -f2 || echo "unknown")
 commit=$(shell git rev-parse --short HEAD 2> /dev/null | sed "s/\(.*\)/@\1/" || echo "@unknown")
 

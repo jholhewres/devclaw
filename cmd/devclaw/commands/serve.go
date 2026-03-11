@@ -321,7 +321,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		if cfg.Update.Enabled {
 			assetsURL := cfg.Update.AssetsURL
 			if assetsURL == "" {
-				assetsURL = "https://assets-gatorclaw.hostgator.io"
+				assetsURL = "https://assets.devclaw.dev"
 			}
 			checkInterval := 1 * time.Hour
 			if cfg.Update.CheckInterval != "" {
