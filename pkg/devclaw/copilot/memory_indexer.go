@@ -9,20 +9,30 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 // MemoryIndexer performs incremental indexing of memory files in the background.
+// Uses fsnotify for event-driven re-indexing with the ticker as fallback.
 type MemoryIndexer struct {
 	interval   time.Duration
 	memoryDir  string
 	logger     *slog.Logger
 	sqliteMem  SQLiteMemoryStore // Interface for SQLite memory operations
 
+	// fsnotify watcher for event-driven re-indexing
+	fsWatcher *fsnotify.Watcher
+
 	// Hash tracking for incremental updates
 	hashesMu sync.RWMutex
 	hashes   map[string]string // filepath -> content hash
+
+	// indexMu serializes indexAll() calls from timer and fsnotify goroutines.
+	indexMu sync.Mutex
 
 	// Stats
 	indexedTotal  int64
@@ -149,37 +159,99 @@ func (m *MemoryIndexer) Start(ctx context.Context) error {
 	ticker := time.NewTicker(m.interval)
 	defer ticker.Stop()
 
+	// Try to set up fsnotify watcher for event-driven indexing.
+	fsw, err := fsnotify.NewWatcher()
+	if err != nil {
+		m.logger.Warn("fsnotify unavailable, using polling only", "error", err)
+	} else {
+		if watchErr := fsw.Add(m.memoryDir); watchErr != nil {
+			m.logger.Warn("cannot watch memory dir, using polling only", "error", watchErr)
+			fsw.Close()
+			fsw = nil
+		} else {
+			m.fsWatcher = fsw
+		}
+	}
+
 	m.logger.Info("memory indexer started",
 		"interval", m.interval.String(),
 		"memory_dir", m.memoryDir,
+		"fsnotify", m.fsWatcher != nil,
 	)
 
 	// Initial index
 	m.indexAll()
 
+	const fsDebounce = 500 * time.Millisecond
+	var debounceTimer *time.Timer
+
+	// Event channels (nil-safe: select on nil channel never fires).
+	var fsEvents <-chan fsnotify.Event
+	var fsErrors <-chan error
+	if m.fsWatcher != nil {
+		fsEvents = m.fsWatcher.Events
+		fsErrors = m.fsWatcher.Errors
+	}
+
 	for {
 		select {
 		case <-ticker.C:
 			m.indexAll()
+
+		case event, ok := <-fsEvents:
+			if !ok {
+				fsEvents = nil
+				continue
+			}
+			if !isMemoryMDEvent(event) {
+				continue
+			}
+			m.logger.Debug("memory file changed", "path", event.Name, "op", event.Op.String())
+			if debounceTimer != nil {
+				debounceTimer.Stop()
+			}
+			debounceTimer = time.AfterFunc(fsDebounce, func() {
+				m.indexAll()
+			})
+
+		case err, ok := <-fsErrors:
+			if !ok {
+				fsErrors = nil
+				continue
+			}
+			m.logger.Warn("memory watcher error", "error", err)
+
 		case <-m.ctx.Done():
+			if debounceTimer != nil {
+				debounceTimer.Stop()
+			}
 			m.logger.Info("memory indexer stopped")
 			return m.ctx.Err()
 		}
 	}
 }
 
-// Stop stops the memory indexer.
+// Stop stops the memory indexer and its filesystem watcher.
 func (m *MemoryIndexer) Stop() {
 	m.mu.Lock()
 	cancel := m.cancel
+	fsw := m.fsWatcher
+	m.fsWatcher = nil
 	m.mu.Unlock()
+	if fsw != nil {
+		fsw.Close()
+	}
 	if cancel != nil {
 		cancel()
 	}
 }
 
 // indexAll performs a full incremental index.
+// Serialized via indexMu to prevent concurrent runs from timer and fsnotify.
 func (m *MemoryIndexer) indexAll() {
+	m.indexMu.Lock()
+	defer m.indexMu.Unlock()
+
 	start := time.Now()
 	m.logger.Debug("starting incremental memory index")
 
@@ -366,6 +438,15 @@ func (m *MemoryIndexer) Stats() (indexedTotal, indexedLast, deletedTotal int64, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.indexedTotal, m.indexedLast, m.deletedTotal, m.lastIndexTime
+}
+
+// isMemoryMDEvent returns true if the event is for a markdown file (create/write/remove).
+func isMemoryMDEvent(event fsnotify.Event) bool {
+	ext := strings.ToLower(filepath.Ext(event.Name))
+	if ext != ".md" {
+		return false
+	}
+	return event.Has(fsnotify.Create) || event.Has(fsnotify.Write) || event.Has(fsnotify.Remove)
 }
 
 // ForceReindex clears all stored hashes and triggers a full reindex.

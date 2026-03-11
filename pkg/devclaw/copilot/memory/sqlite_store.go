@@ -274,7 +274,7 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 			}
 		}
 
-		_, err := stmt.Exec(chunk.FileID, chunk.Index, chunk.Text, chunk.Hash, embJSON)
+		_, err := stmt.Exec(fileID, chunk.Index, chunk.Text, chunk.Hash, embJSON)
 		if err != nil {
 			return fmt.Errorf("insert chunk: %w", err)
 		}
@@ -907,4 +907,43 @@ func (s *SQLiteStore) IndexMemoryDir(ctx context.Context, memDir string, chunkCf
 	)
 
 	return nil
+}
+
+// TranscriptEntry is a conversation entry for transcript indexing.
+type TranscriptEntry struct {
+	Role    string // "user" or "assistant"
+	Content string
+}
+
+// IndexTranscript indexes conversation transcript entries as searchable chunks.
+// Each entry is stored as a chunk with file_id "session:<sessionID>".
+// Uses content hashing to avoid re-indexing identical content.
+func (s *SQLiteStore) IndexTranscript(ctx context.Context, sessionID string, entries []TranscriptEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	fileID := "session:" + sessionID
+	var chunks []Chunk
+	for i, e := range entries {
+		text := fmt.Sprintf("[%s] %s", e.Role, e.Content)
+		if len(text) > 2000 {
+			text = text[:2000]
+		}
+		h := sha256.Sum256([]byte(text))
+		chunks = append(chunks, Chunk{
+			Index: i,
+			Text:  text,
+			Hash:  hex.EncodeToString(h[:]),
+		})
+	}
+
+	var allHashes string
+	for _, c := range chunks {
+		allHashes += c.Hash
+	}
+	fh := sha256.Sum256([]byte(allHashes))
+	fileHash := hex.EncodeToString(fh[:])
+
+	return s.IndexChunks(ctx, fileID, chunks, fileHash)
 }

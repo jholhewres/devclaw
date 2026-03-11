@@ -26,6 +26,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"os/exec"
+	"runtime"
 	"sync"
 )
 
@@ -60,6 +63,11 @@ const (
 	HookLLMInput           HookEvent = "llm_input"            // Modify prompt before sending to LLM
 	HookLLMOutput          HookEvent = "llm_output"          // Modify LLM response
 	HookToolResultPersist  HookEvent = "tool_result_persist" // Transform tool result before persisting
+
+	// Message pipeline hooks
+	HookMessageTranscribed  HookEvent = "message_transcribed"  // Audio/media transcribed to text
+	HookMessagePreprocessed HookEvent = "message_preprocessed" // After directives, links, enrichment
+	HookBeforeReset         HookEvent = "before_reset"         // Before session/history reset
 )
 
 // AllHookEvents lists every supported hook event for discovery/documentation.
@@ -82,6 +90,10 @@ var AllHookEvents = []HookEvent{
 	HookLLMInput,
 	HookLLMOutput,
 	HookToolResultPersist,
+	// Message pipeline hooks
+	HookMessageTranscribed,
+	HookMessagePreprocessed,
+	HookBeforeReset,
 }
 
 // HooksConfig holds all hook configuration.
@@ -177,6 +189,47 @@ type HookAction struct {
 // Handlers should be fast and non-blocking. For async work, spawn a goroutine.
 type HookHandler func(ctx context.Context, payload HookPayload) HookAction
 
+// HookRequirements declares runtime prerequisites for a hook.
+// If any requirement is not met, the hook is silently skipped during dispatch.
+type HookRequirements struct {
+	// Binaries that must be in PATH (e.g. ["ffmpeg", "jq"]).
+	Bins []string `yaml:"bins,omitempty" json:"bins,omitempty"`
+
+	// Environment variables that must be non-empty (e.g. ["SLACK_WEBHOOK_URL"]).
+	Env []string `yaml:"env,omitempty" json:"env,omitempty"`
+
+	// OS restricts the hook to specific operating systems (e.g. ["linux", "darwin"]).
+	// Empty = all platforms.
+	OS []string `yaml:"os,omitempty" json:"os,omitempty"`
+}
+
+// Met returns true if all requirements are satisfied on the current system.
+func (r *HookRequirements) Met() bool {
+	if len(r.OS) > 0 {
+		found := false
+		for _, o := range r.OS {
+			if o == runtime.GOOS {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	for _, bin := range r.Bins {
+		if _, err := exec.LookPath(bin); err != nil {
+			return false
+		}
+	}
+	for _, env := range r.Env {
+		if os.Getenv(env) == "" {
+			return false
+		}
+	}
+	return true
+}
+
 // RegisteredHook associates a handler with metadata.
 type RegisteredHook struct {
 	// Name identifies this hook for logging.
@@ -197,18 +250,22 @@ type RegisteredHook struct {
 	// Enabled controls whether this hook is active. Default: true.
 	Enabled bool
 
+	// Requires declares runtime prerequisites. Hook is skipped if unmet.
+	Requires *HookRequirements
+
 	// Handler is the callback function.
 	Handler HookHandler
 }
 
 // HookSummary is a serializable representation of a registered hook (no handler).
 type HookSummary struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	Source      string      `json:"source"`
-	Events      []HookEvent `json:"events"`
-	Priority    int         `json:"priority"`
-	Enabled     bool        `json:"enabled"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Source      string            `json:"source"`
+	Events      []HookEvent       `json:"events"`
+	Priority    int               `json:"priority"`
+	Enabled     bool              `json:"enabled"`
+	Requires    *HookRequirements `json:"requires,omitempty"`
 }
 
 // HookManager manages lifecycle hook registration and dispatch.
@@ -243,10 +300,6 @@ func (hm *HookManager) Register(hook *RegisteredHook) error {
 	}
 	if hook.Priority == 0 {
 		hook.Priority = 100
-	}
-	// Default: enabled.
-	if !hook.Enabled {
-		hook.Enabled = true
 	}
 
 	hm.mu.Lock()
@@ -304,6 +357,9 @@ func (hm *HookManager) Dispatch(ctx context.Context, payload HookPayload) HookAc
 		if !hook.Enabled {
 			continue
 		}
+		if hook.Requires != nil && !hook.Requires.Met() {
+			continue
+		}
 
 		action, panicked := func(h *RegisteredHook) (a HookAction, didPanic bool) {
 			defer func() {
@@ -359,6 +415,9 @@ func (hm *HookManager) DispatchAsync(payload HookPayload) {
 		ctx := context.Background()
 		for _, hook := range hooks {
 			if !hook.Enabled {
+				continue
+			}
+			if hook.Requires != nil && !hook.Requires.Met() {
 				continue
 			}
 			func(h *RegisteredHook) {
@@ -429,6 +488,7 @@ func (hm *HookManager) ListDetailed() []HookSummary {
 				Events:      h.Events,
 				Priority:    h.Priority,
 				Enabled:     h.Enabled,
+				Requires:    h.Requires,
 			})
 		}
 	}
@@ -532,6 +592,12 @@ func HookEventDescription(ev HookEvent) string {
 		return "Output recebido do LLM (permite modificar)"
 	case HookToolResultPersist:
 		return "Antes de persistir resultado da ferramenta (permite transformar)"
+	case HookMessageTranscribed:
+		return "Áudio/mídia transcrito para texto"
+	case HookMessagePreprocessed:
+		return "Mensagem pré-processada (após directives, links, enriquecimento)"
+	case HookBeforeReset:
+		return "Antes de resetar sessão/histórico"
 	default:
 		return string(ev)
 	}

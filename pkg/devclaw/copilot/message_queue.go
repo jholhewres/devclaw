@@ -133,14 +133,15 @@ func (dc *DedupCache) cleanup() {
 
 // MessageQueue handles message bursts with per-session debouncing.
 type MessageQueue struct {
-	queues     map[string]*sessionQueue
-	debounceMs int
-	maxPending int
-	dedupSec   int
-	dedupCache *DedupCache // Message-ID deduplication cache
-	onDrain    OnDrainFunc
-	mu         sync.Mutex
-	logger     *slog.Logger
+	queues          map[string]*sessionQueue
+	debounceMs      int
+	channelDebounce map[string]int // per-channel debounce overrides (ms)
+	maxPending      int
+	dedupSec        int
+	dedupCache      *DedupCache // Message-ID deduplication cache
+	onDrain         OnDrainFunc
+	mu              sync.Mutex
+	logger          *slog.Logger
 }
 
 // sessionQueue holds pending messages for a single session.
@@ -179,6 +180,25 @@ func NewMessageQueue(debounceMs, maxPending int, onDrain OnDrainFunc, logger *sl
 		onDrain:    onDrain,
 		logger:     logger.With("component", "message_queue"),
 	}
+}
+
+// SetChannelDebounce configures per-channel debounce overrides.
+// Channels not in the map use the default debounceMs.
+func (q *MessageQueue) SetChannelDebounce(m map[string]int) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.channelDebounce = m
+}
+
+// resolveDebounceMs returns the effective debounce for a channel, checking
+// per-channel overrides first, then falling back to the default.
+func (q *MessageQueue) resolveDebounceMs(channel string) int {
+	if q.channelDebounce != nil && channel != "" {
+		if ms, ok := q.channelDebounce[channel]; ok && ms > 0 {
+			return ms
+		}
+	}
+	return q.debounceMs
 }
 
 // IsDuplicate checks if a message is a platform-level duplicate delivery
@@ -261,9 +281,12 @@ func (q *MessageQueue) Enqueue(sessionID string, msg *channels.IncomingMessage) 
 		}()
 	} else {
 		// Session busy — short debounce to collect followup burst.
+		// Per-channel override takes priority, otherwise FollowupDebounceMs.
 		dur := time.Duration(FollowupDebounceMs) * time.Millisecond
-		if q.debounceMs > 0 && q.debounceMs < FollowupDebounceMs {
-			dur = time.Duration(q.debounceMs) * time.Millisecond
+		if q.channelDebounce != nil && msg.Channel != "" {
+			if ms, ok := q.channelDebounce[msg.Channel]; ok && ms > 0 {
+				dur = time.Duration(ms) * time.Millisecond
+			}
 		}
 		sq.timer = time.AfterFunc(dur, func() {
 			msgs := q.Drain(sid)

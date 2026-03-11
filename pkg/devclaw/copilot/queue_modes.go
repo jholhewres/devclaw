@@ -5,6 +5,7 @@ package copilot
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels"
@@ -77,6 +78,59 @@ func ParseQueueMode(s string) (QueueMode, bool) {
 	default:
 		return "", false
 	}
+}
+
+// QueueDirective holds the parsed result of a /queue directive with optional parameters.
+// Supports: /queue [mode] [debounce=Xms] [cap=N] [drop=policy]
+type QueueDirective struct {
+	Mode       QueueMode      // required
+	DebounceMs int            // 0 = not set
+	Cap        int            // 0 = not set
+	Drop       QueueDropPolicy // "" = not set
+}
+
+// ParseQueueDirective parses an extended /queue directive string.
+// Input format: "mode [debounce=500ms] [cap=10] [drop=old]"
+// Returns nil if the mode is invalid.
+func ParseQueueDirective(args string) *QueueDirective {
+	parts := strings.Fields(args)
+	if len(parts) == 0 {
+		return nil
+	}
+
+	mode, ok := ParseQueueMode(parts[0])
+	if !ok {
+		return nil
+	}
+
+	d := &QueueDirective{Mode: mode}
+
+	for _, p := range parts[1:] {
+		key, value, found := strings.Cut(p, "=")
+		if !found {
+			continue
+		}
+		key = strings.ToLower(key)
+		switch key {
+		case "debounce":
+			value = strings.TrimSuffix(strings.ToLower(value), "ms")
+			if ms, err := strconv.Atoi(value); err == nil && ms > 0 {
+				d.DebounceMs = ms
+			}
+		case "cap":
+			if n, err := strconv.Atoi(value); err == nil && n > 0 {
+				d.Cap = n
+			}
+		case "drop":
+			policy := QueueDropPolicy(strings.ToLower(value))
+			switch policy {
+			case DropOld, DropNew, DropSummarize:
+				d.Drop = policy
+			}
+		}
+	}
+
+	return d
 }
 
 // FormatCollectedMessages combines multiple messages into a single prompt

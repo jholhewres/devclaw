@@ -197,6 +197,9 @@ type Assistant struct {
 	// browserMgr manages browser automation (navigate, screenshot, snapshot, act).
 	browserMgr *BrowserManager
 
+	// ssrfGuard validates URLs against SSRF rules (shared with web_fetch and link understanding).
+	ssrfGuard *security.SSRFGuard
+
 	// sessPersister is the session persistence backend (SQLite or JSONL).
 	// Stored to wire into AgentRun for compaction summary persistence.
 	sessPersister SessionPersister
@@ -287,6 +290,9 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 		maxPending = 20
 	}
 	a.messageQueue = NewMessageQueue(debounceMs, maxPending, a.handleDrainedMessages, logger)
+	if len(cfg.Queue.ChannelDebounce) > 0 {
+		a.messageQueue.SetChannelDebounce(cfg.Queue.ChannelDebounce)
+	}
 
 	// Wire confirmation requester for tools in RequireConfirmation list.
 	te.SetConfirmationRequester(func(sessionID, callerJID, toolName string, args map[string]any) (bool, error) {
@@ -430,6 +436,7 @@ func (a *Assistant) Start(ctx context.Context) error {
 		modelFallbackCfg,
 		a.logger,
 	)
+	a.llmClient.SetFailoverCoordinator(a.failoverCoordinator)
 
 	// 0pre-b. Auto-resolve media transcription provider from main API config.
 	a.config.Media.ResolveForProvider(a.config.API.Provider, a.config.API.BaseURL)
@@ -553,6 +560,11 @@ func (a *Assistant) Start(ctx context.Context) error {
 	// Wire tool executor to prompt composer for dynamic tool list generation.
 	a.promptComposer.SetToolExecutor(a.toolExecutor)
 
+	// Wire context engine registry with legacy engine as default.
+	ctxRegistry := NewContextEngineRegistry()
+	ctxRegistry.Register(NewLegacyContextEngine(a.promptComposer))
+	a.promptComposer.SetContextEngines(ctxRegistry)
+
 	// 0c. Open the central devclaw.db and wire all SQLite-backed storage.
 	// Uses the Database Hub for unified access (supports SQLite, PostgreSQL, MySQL).
 	hubConfig := a.config.Database.Effective()
@@ -627,6 +639,8 @@ func (a *Assistant) Start(ctx context.Context) error {
 		a.subagentMgr.PruneOldRuns(7)
 		// Clean up stale "running" entries from previous crashes.
 		a.subagentMgr.cleanupStaleRunning()
+		// Periodic sweeper: prune old runs every 6 hours.
+		a.subagentMgr.StartPeriodicSweeper(a.ctx, 6*time.Hour, 7)
 		a.logger.Info("subagent persistence enabled (SQLite)")
 	}
 
@@ -871,6 +885,12 @@ func (a *Assistant) Start(ctx context.Context) error {
 		)
 	}
 
+	// 5e. Start session reaper (if enabled).
+	if a.config.Sessions.Enabled {
+		sessDir := filepath.Join(filepath.Dir(a.config.Memory.Path), "sessions")
+		StartPersistentSessionReaper(a.ctx, sessDir, a.config.Sessions.MaxAgeDays, a.logger)
+	}
+
 	// 6. Start main message processing loop.
 	go a.messageLoop()
 
@@ -1034,6 +1054,9 @@ func (a *Assistant) UpdateLLMClient(cfg *Config) {
 	a.config.Model = cfg.Model
 	a.config.Fallback = cfg.Fallback
 	a.llmClient = NewLLMClient(cfg, a.logger)
+	if a.failoverCoordinator != nil {
+		a.llmClient.SetFailoverCoordinator(a.failoverCoordinator)
+	}
 
 	a.logger.Info("LLM client hot-reloaded",
 		"provider", cfg.API.Provider,
@@ -1737,12 +1760,80 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	// Phase 2 (async): media results are injected via interruptCh when ready.
 	userContent, hasMediaPending := a.enrichMessageContentFast(msg, logger)
 
+	if msg.Media != nil && userContent != msg.Content {
+		a.hookMgr.DispatchAsync(HookPayload{
+			Event:     HookMessageTranscribed,
+			SessionID: sessionID,
+			Channel:   msg.Channel,
+			Message:   userContent,
+		})
+	}
+
 	// ── Step 5: Validate input ──
 	if err := a.inputGuard.Validate(msg.From, userContent); err != nil {
 		logger.Warn("input rejected", "error", err)
 		a.sendReply(msg, fmt.Sprintf("Sorry, I can't process that: %v", err))
 		return
 	}
+
+	// ── Step 5b: Inline directive parsing ──
+	// Extract /think, /model, /verbose, /queue directives from the message body.
+	// Directives are applied to session/run config; cleaned body continues.
+	directives, cleanedContent := ParseInlineDirectives(userContent)
+	if directives.HasAny() {
+		logger.Info("inline directives parsed",
+			"think", directives.Think,
+			"model", directives.Model,
+			"verbose", directives.Verbose,
+			"queue", directives.Queue,
+		)
+		if directives.Think != "" {
+			session.SetThinkingLevel(directives.Think)
+		}
+		if directives.Verbose != nil {
+			cfg := session.GetConfig()
+			cfg.Verbose = *directives.Verbose
+			session.SetConfig(cfg)
+		}
+		if directives.Queue != "" {
+			a.configMu.Lock()
+			if a.config.Queue.ByChannel == nil {
+				a.config.Queue.ByChannel = make(map[string]QueueMode)
+			}
+			a.config.Queue.ByChannel[msg.Channel] = QueueMode(directives.Queue)
+			a.configMu.Unlock()
+		}
+		if cleanedContent != "" {
+			userContent = cleanedContent
+		}
+	}
+
+	// ── Step 5c: Link understanding ──
+	// If enabled, extract URLs from the message and fetch their content.
+	// Enriched content is prepended to the user message so the agent has context.
+	if a.config.Links.Enabled {
+		urls := ExtractLinksFromMessage(userContent, a.config.Links.MaxLinks)
+		if len(urls) > 0 {
+			linkCtx, linkCancel := context.WithTimeout(a.ctx, time.Duration(a.config.Links.TimeoutSeconds)*time.Second)
+			results := RunLinkUnderstanding(linkCtx, urls, a.config.Links, a.ssrfGuard, logger)
+			linkCancel()
+			if formatted := FormatLinkResults(results); formatted != "" {
+				userContent = userContent + "\n\n---\n" + formatted
+				logger.Info("link understanding enriched message",
+					"urls_found", len(urls),
+					"enriched_len", len(formatted),
+				)
+			}
+		}
+	}
+
+	// Dispatch message_preprocessed after all enrichments are applied.
+	a.hookMgr.DispatchAsync(HookPayload{
+		Event:     HookMessagePreprocessed,
+		SessionID: sessionID,
+		Channel:   msg.Channel,
+		Message:   userContent,
+	})
 
 	// ── Step 6: Caller context is now passed via context.Context (see Step 8).
 	// The old global SetCallerContext/SetSessionContext is kept for backward
@@ -1785,9 +1876,13 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 		}
 	}
 
-	// Apply model override from session config if not set by agent profile.
+	// Apply model override: directive > session config > agent profile.
 	if modelOverride == "" {
-		modelOverride = session.GetConfig().Model
+		if directives.Model != "" {
+			modelOverride = directives.Model
+		} else {
+			modelOverride = session.GetConfig().Model
+		}
 	}
 
 	logger.Info("prompt composed",
@@ -2520,29 +2615,35 @@ func (a *Assistant) initScheduler() {
 	// were explicitly created by the user and execute autonomously.
 	handler := func(ctx context.Context, job *scheduler.Job) (string, error) {
 		a.logger.Info("scheduler executing job", "id", job.ID, "command", job.Command,
-			"channel", job.Channel, "chat_id", job.ChatID)
+			"channel", job.Channel, "chat_id", job.ChatID,
+			"isolate", job.IsolateSession, "as_subagent", job.AsSubagent)
 
-		// Get or create a session for this scheduled job.
-		session := a.sessionStore.GetOrCreate("scheduler", job.ID)
+		// ── AsSubagent path: delegate to the subagent manager ──
+		if job.AsSubagent && a.subagentMgr != nil {
+			return a.runCronAsSubagent(ctx, job)
+		}
 
-		// Grant session trust for all tools that normally require confirmation
-		// so the scheduled agent can run without user interaction.
-		schedulerSessionID := "scheduler:" + job.ID
+		// ── Standard agent path ──
+
+		// Session: isolated per-run or shared per-job.
+		var session *Session
+		sessionSuffix := job.ID
+		if job.IsolateSession {
+			sessionSuffix = fmt.Sprintf("%s-%d", job.ID, time.Now().UnixMilli())
+		}
+		session = a.sessionStore.GetOrCreate("scheduler", sessionSuffix)
+
+		schedulerSessionID := "scheduler:" + sessionSuffix
 		for _, toolName := range a.config.Security.ToolGuard.RequireConfirmation {
 			a.approvalMgr.GrantTrust(schedulerSessionID, toolName)
 		}
-		// Propagate caller, session, and delivery target via context (goroutine-safe).
-		// This replaces the old global SetCallerContext/SetSessionContext pattern.
+
 		jobCtx := ContextWithCaller(ctx, AccessOwner, "scheduler")
 		jobCtx = ContextWithSession(jobCtx, schedulerSessionID)
 		if job.Channel != "" && job.ChatID != "" {
 			jobCtx = ContextWithDelivery(jobCtx, job.Channel, job.ChatID)
 		}
 
-		// Build a delivery-focused prompt. Use ComposeMinimal() to skip
-		// bootstrap files, memory search, and conversation history — this
-		// cuts the prompt from ~7600 tokens to ~500, dramatically reducing
-		// latency and preventing the LLM from wasting turns reading files.
 		deliveryPrompt := fmt.Sprintf(
 			"[SCHEDULED REMINDER — deliver this to the user]\n"+
 				"You are delivering a previously scheduled reminder/task. "+
@@ -2553,8 +2654,6 @@ func (a *Assistant) initScheduler() {
 
 		prompt := a.promptComposer.ComposeMinimal()
 
-		// Use a minimal agent config: 1 turn, short timeout, no continuations.
-		// The agent just needs to generate a single delivery response.
 		jobAgentCfg := AgentConfig{
 			MaxTurns:              1,
 			RunTimeoutSeconds:     60,
@@ -2569,19 +2668,15 @@ func (a *Assistant) initScheduler() {
 			return "", err
 		}
 
-		// Validate scheduled job output through guardrails.
 		if guardErr := a.outputGuard.Validate(result); guardErr != nil {
 			a.logger.Warn("scheduled job output rejected by guardrail",
 				"job_id", job.ID, "error", guardErr)
 			result = "Scheduled task encountered an output validation issue."
 		}
 
-		// Save to session history.
 		session.AddMessage(job.Command, result)
 
-		// If job has a target channel/chat, send the result.
 		if job.Channel != "" && job.ChatID != "" {
-			// Strip internal tags before sending to user
 			cleanResult := StripInternalTags(result)
 			outMsg := &channels.OutgoingMessage{Content: cleanResult}
 			if sendErr := a.channelMgr.Send(ctx, job.Channel, job.ChatID, outMsg); sendErr != nil {
@@ -2596,6 +2691,41 @@ func (a *Assistant) initScheduler() {
 
 	a.scheduler = scheduler.New(storage, handler, a.logger)
 	a.logger.Info("scheduler initialized")
+}
+
+// runCronAsSubagent executes a cron job as a subagent, providing full
+// isolation (own session, own goroutine, filtered tools) while still
+// delivering the result back to the originating channel.
+func (a *Assistant) runCronAsSubagent(ctx context.Context, job *scheduler.Job) (string, error) {
+	params := SpawnParams{
+		Label:          fmt.Sprintf("cron-%s", job.ID),
+		Task:           job.Command,
+		Model:          job.Model,
+		OriginChannel:  job.Channel,
+		OriginTo:       job.ChatID,
+		SpawnDepth:     1,
+		TimeoutSeconds: job.TimeoutSeconds,
+	}
+	if params.TimeoutSeconds <= 0 {
+		params.TimeoutSeconds = 120
+	}
+
+	run, err := a.subagentMgr.Spawn(ctx, params, a.llmClient, a.toolExecutor, a.promptComposer)
+	if err != nil {
+		return "", fmt.Errorf("cron subagent spawn: %w", err)
+	}
+
+	// Block until the subagent completes (cron handler expects synchronous result).
+	select {
+	case <-run.Done():
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+
+	if run.Error != "" {
+		return run.Result, fmt.Errorf("cron subagent error: %s", run.Error)
+	}
+	return run.Result, nil
 }
 
 // registerSkillLoaders registers the builtin and clawdhub skill loaders
@@ -2617,7 +2747,7 @@ func (a *Assistant) registerSkillLoaders() {
 		a.skillRegistry.AddLoader(builtinLoader)
 	}
 
-	// ClawdHub skills loader (loads from configured skill directories).
+	// ClawdHub skills loader (loads from configured skill directories — TierManaged).
 	// Always include ./skills/ as the default user skills directory, even if
 	// not explicitly listed in config. This ensures user-installed skills are
 	// always discovered.
@@ -2635,6 +2765,30 @@ func (a *Assistant) registerSkillLoaders() {
 	}
 	clawdHubLoader := skills.NewClawdHubLoader(dirs, a.logger)
 	a.skillRegistry.AddLoader(clawdHubLoader)
+
+	// Personal skills loader (TierPersonal): user-global skills from ~/.devclaw/skills/.
+	personalDir := a.config.Skills.PersonalDir
+	if personalDir == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			personalDir = filepath.Join(home, ".devclaw", "skills")
+		}
+	}
+	if personalDir != "" {
+		if info, err := os.Stat(personalDir); err == nil && info.IsDir() {
+			personalLoader := skills.NewClawdHubLoaderWithTier([]string{personalDir}, skills.TierPersonal, a.logger)
+			a.skillRegistry.AddLoader(personalLoader)
+		}
+	}
+
+	// Project skills loader (TierProject): project-scoped skills from .devclaw/skills/.
+	projectDir := a.config.Skills.ProjectDir
+	if projectDir == "" {
+		projectDir = ".devclaw/skills"
+	}
+	if info, err := os.Stat(projectDir); err == nil && info.IsDir() {
+		projectLoader := skills.NewClawdHubLoaderWithTier([]string{projectDir}, skills.TierProject, a.logger)
+		a.skillRegistry.AddLoader(projectLoader)
+	}
 }
 
 // initializeSkills initializes all loaded skills, passing the sandbox runner
@@ -2751,8 +2905,8 @@ func (a *Assistant) registerSystemTools() {
 		}
 	}
 
-	ssrfGuard := security.NewSSRFGuard(a.config.Security.SSRF, a.logger)
-	RegisterSystemTools(a.toolExecutor, sandboxRunner, a.memoryStore, a.sqliteMemory, a.config.Memory, a.scheduler, dataDir, ssrfGuard, a.vault, a.config.WebSearch, a.skillDB, a.config.Gateway, a.config.Security.ToolGuard)
+	a.ssrfGuard = security.NewSSRFGuard(a.config.Security.SSRF, a.logger)
+	RegisterSystemTools(a.toolExecutor, sandboxRunner, a.memoryStore, a.sqliteMemory, a.config.Memory, a.scheduler, dataDir, a.ssrfGuard, a.vault, a.config.WebSearch, a.skillDB, a.config.Gateway, a.config.Security.ToolGuard)
 
 	// Register skill database tools if available.
 	if a.skillDB != nil {
@@ -2819,7 +2973,7 @@ func (a *Assistant) registerSystemTools() {
 	// Register browser tools if enabled.
 	if a.config.Browser.Enabled {
 		a.browserMgr = NewBrowserManager(a.config.Browser, a.logger)
-		a.browserMgr.WithSSRFGuard(ssrfGuard)
+		a.browserMgr.WithSSRFGuard(a.ssrfGuard)
 		mediaCfg := a.config.Media.Effective()
 		RegisterBrowserTools(a.toolExecutor, a.browserMgr, a.llmClient, mediaCfg, a.logger)
 	}

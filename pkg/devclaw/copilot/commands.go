@@ -502,10 +502,16 @@ func (a *Assistant) newCommand(msg *channels.IncomingMessage) string {
 		}
 	}
 
+	sessionID := MakeSessionID(msg.Channel, msg.ChatID)
+	a.hookMgr.Dispatch(context.Background(), HookPayload{
+		Event:     HookBeforeReset,
+		SessionID: sessionID,
+		Channel:   msg.Channel,
+	})
+
 	session.ClearHistory()
 
 	// Clear session-scoped tool trust (user must re-approve tools in new session).
-	sessionID := MakeSessionID(msg.Channel, msg.ChatID)
 	a.approvalMgr.ClearSessionTrust(sessionID)
 
 	return "New session started. Facts and config preserved."
@@ -514,6 +520,14 @@ func (a *Assistant) newCommand(msg *channels.IncomingMessage) string {
 func (a *Assistant) resetCommand(msg *channels.IncomingMessage) string {
 	resolved := a.workspaceMgr.Resolve(msg.Channel, msg.ChatID, msg.From, msg.IsGroup)
 	session := resolved.Session
+
+	sessionID := MakeSessionID(msg.Channel, msg.ChatID)
+	a.hookMgr.Dispatch(context.Background(), HookPayload{
+		Event:     HookBeforeReset,
+		SessionID: sessionID,
+		Channel:   msg.Channel,
+	})
+
 	session.ClearHistory()
 	session.ClearFacts()
 	session.SetActiveSkills(nil)
@@ -527,7 +541,6 @@ func (a *Assistant) resetCommand(msg *channels.IncomingMessage) string {
 	}
 
 	// Clear session-scoped tool trust.
-	sessionID := MakeSessionID(msg.Channel, msg.ChatID)
 	a.approvalMgr.ClearSessionTrust(sessionID)
 
 	return "Session reset completely."

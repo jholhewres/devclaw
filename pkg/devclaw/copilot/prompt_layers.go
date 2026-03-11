@@ -103,6 +103,7 @@ type PromptComposer struct {
 	builtinSkills *BuiltinSkills
 	toolExecutor  *ToolExecutor // For dynamic tool list generation
 	isSubagent    bool // When true, only AGENTS.md + TOOLS.md are loaded.
+	contextEngines *ContextEngineRegistry // Pluggable context engines.
 
 	// bootstrapCache caches bootstrap file contents to avoid re-reading from disk
 	// on every prompt compose. Invalidated when file content changes (hash mismatch).
@@ -158,6 +159,11 @@ func (p *PromptComposer) SetSQLiteMemory(store *memory.SQLiteStore) {
 	p.sqliteMemory = store
 }
 
+// SetContextEngines sets the pluggable context engine registry.
+func (p *PromptComposer) SetContextEngines(registry *ContextEngineRegistry) {
+	p.contextEngines = registry
+}
+
 // SetSkillGetter sets the function used to retrieve skill system prompts.
 func (p *PromptComposer) SetSkillGetter(getter func(name string) (interface{ SystemPrompt() string }, bool)) {
 	p.skillGetter = getter
@@ -208,6 +214,15 @@ func (p *PromptComposer) Compose(session *Session, input string) string {
 	}
 	if projectContext := p.buildProjectContextLayer(); projectContext != "" {
 		layers = append(layers, layerEntry{layer: LayerProjectContext, content: projectContext})
+	}
+
+	// Pluggable context engines: gather additional context from registered engines.
+	if p.contextEngines != nil {
+		engineCtx := context.Background()
+		extra := p.contextEngines.GatherAll(engineCtx, session, input, 2000)
+		if extra != "" {
+			layers = append(layers, layerEntry{layer: LayerProjectContext + 1, content: extra})
+		}
 	}
 
 	// ── Heavy layers (I/O, search) ──
@@ -952,11 +967,9 @@ func (p *PromptComposer) buildSkillsLayerReference() string {
 	b.WriteString("Use get_skill_reference(skill_name, reference_path) to load supporting documentation from a skill.\n")
 	b.WriteString("When a skill drives external API writes, assume rate limits: prefer fewer larger writes, avoid tight one-item loops, and respect 429/Retry-After.\n\n")
 
-	// Build XML reference list.
-	b.WriteString("<available_skills>\n")
-	totalChars := 0
-	included := 0
-	for _, skill := range skills {
+	// Pre-render all skill entries and compute prefix sums for binary search.
+	entries := make([]string, len(skills))
+	for i, skill := range skills {
 		var entry strings.Builder
 		entry.WriteString(fmt.Sprintf("  <skill name=\"%s\" description=\"%s\"",
 			xmlAttrEscape(skill.Name), xmlAttrEscape(skill.Description)))
@@ -964,15 +977,14 @@ func (p *PromptComposer) buildSkillsLayerReference() string {
 			entry.WriteString(fmt.Sprintf(" tools=\"%s\"", xmlAttrEscape(strings.Join(skill.Tools, ", "))))
 		}
 		entry.WriteString(" />\n")
+		entries[i] = entry.String()
+	}
 
-		entryStr := entry.String()
+	included := findMaxSkillsFit(entries, maxChars)
 
-		if totalChars+len(entryStr) > maxChars {
-			break
-		}
-		b.WriteString(entryStr)
-		totalChars += len(entryStr)
-		included++
+	b.WriteString("<available_skills>\n")
+	for i := 0; i < included; i++ {
+		b.WriteString(entries[i])
 	}
 	b.WriteString("</available_skills>\n")
 
@@ -981,6 +993,39 @@ func (p *PromptComposer) buildSkillsLayerReference() string {
 	}
 
 	return b.String()
+}
+
+// findMaxSkillsFit uses binary search over prefix sums to find the maximum
+// number of skill entries that fit within maxChars. O(n) for prefix sums,
+// O(log n) for the search — faster than linear iteration for large skill sets.
+func findMaxSkillsFit(entries []string, maxChars int) int {
+	n := len(entries)
+	if n == 0 {
+		return 0
+	}
+
+	// Build prefix sums: prefix[i] = total chars of entries[0..i-1].
+	prefix := make([]int, n+1)
+	for i, e := range entries {
+		prefix[i+1] = prefix[i] + len(e)
+	}
+
+	// All entries fit.
+	if prefix[n] <= maxChars {
+		return n
+	}
+
+	// Binary search for the largest k where prefix[k] <= maxChars.
+	lo, hi := 0, n
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		if prefix[mid] <= maxChars {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo
 }
 
 // skillsMaxTokenBudget is the maximum approximate token budget for the legacy

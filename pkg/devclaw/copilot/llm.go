@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+
 )
 
 // StreamCallback is called for each token/chunk during streaming.
@@ -43,15 +44,39 @@ type LLMClient struct {
 	// OAuth support (optional)
 	oauthTokenManager OAuthTokenManager
 
-	// Rate-limit cooldown tracking for auto-recovery.
-	// When the primary model hits a rate limit, we record when the cooldown
-	// expires and which fallback model we're using. Once the cooldown nears
-	// expiry, we probe the primary model to see if it recovered.
+	// failoverCoord unifies profile+model failover. When set,
+	// CompleteWithFallback delegates model selection and error reporting
+	// to the coordinator instead of using inline cooldown tracking.
+	failoverCoord *FailoverCoordinator
+
+	// Rate-limit cooldown tracking for auto-recovery (used when failoverCoord is nil).
 	cooldownMu       sync.Mutex
 	cooldownExpires  time.Time     // when primary model cooldown expires
 	cooldownModel    string        // the model that was rate-limited
 	lastProbeAt      time.Time     // avoid probe storms
 	probeMinInterval time.Duration // min time between probe attempts
+}
+
+// ctxKeyProfileAPIKey is a context key for injecting a profile-resolved API key
+// into completeOnce without changing its signature. Thread-safe per-request.
+type ctxKeyProfileAPIKey struct{}
+
+func contextWithProfileAPIKey(ctx context.Context, key string) context.Context {
+	return context.WithValue(ctx, ctxKeyProfileAPIKey{}, key)
+}
+
+func profileAPIKeyFromCtx(ctx context.Context) string {
+	if v, ok := ctx.Value(ctxKeyProfileAPIKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// SetFailoverCoordinator injects the unified failover coordinator for
+// model+profile rotation. When set, CompleteWithFallback uses the coordinator
+// instead of inline cooldown tracking.
+func (c *LLMClient) SetFailoverCoordinator(fc *FailoverCoordinator) {
+	c.failoverCoord = fc
 }
 
 // OAuthTokenManager is the interface for OAuth token management.
@@ -156,6 +181,15 @@ func detectProvider(baseURL string) string {
 	default:
 		return "openai" // assume OpenAI-compatible
 	}
+}
+
+// resolveAPIKeyFromCtx returns the API key, checking context first for a
+// profile-resolved key injected by the failover coordinator.
+func (c *LLMClient) resolveAPIKeyFromCtx(ctx context.Context) string {
+	if key := profileAPIKeyFromCtx(ctx); key != "" {
+		return key
+	}
+	return c.resolveAPIKey()
 }
 
 // resolveAPIKey returns the API key to use for this client.
@@ -1615,9 +1649,9 @@ func (c *LLMClient) completeOnceAnthropic(ctx context.Context, model string, mes
 	c.setAnthropicBetaHeaders(req, model)
 	// Z.Ai Anthropic Proxy expects Authorization: Bearer; native Anthropic uses x-api-key.
 	if c.provider == "zai-anthropic" {
-		req.Header.Set("Authorization", "Bearer "+c.resolveAPIKey())
+		req.Header.Set("Authorization", "Bearer "+c.resolveAPIKeyFromCtx(ctx))
 	} else {
-		req.Header.Set("x-api-key", c.resolveAPIKey())
+		req.Header.Set("x-api-key", c.resolveAPIKeyFromCtx(ctx))
 	}
 
 	c.logger.Debug("sending anthropic chat completion",
@@ -1713,7 +1747,7 @@ func (c *LLMClient) completeOnceOpenAI(ctx context.Context, model string, messag
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.resolveAPIKey())
+	req.Header.Set("Authorization", "Bearer "+c.resolveAPIKeyFromCtx(ctx))
 	c.setProviderHeaders(req)
 
 	c.logger.Debug("sending chat completion",
@@ -1843,7 +1877,7 @@ func (c *LLMClient) CompleteWithToolsStream(ctx context.Context, messages []chat
 // when non-empty. Empty = use c.model. Includes retry for transient HTTP errors
 // before falling back to non-streaming.
 func (c *LLMClient) CompleteWithToolsStreamUsingModel(ctx context.Context, modelOverride string, messages []chatMessage, tools []ToolDefinition, onChunk StreamCallback) (*LLMResponse, error) {
-	if c.resolveAPIKey() == "" && c.provider != "ollama" {
+	if c.resolveAPIKey() == "" && c.provider != "ollama" && c.failoverCoord == nil {
 		return nil, fmt.Errorf("API key not configured. Set %s in vault or environment", GetProviderKeyName(c.provider))
 	}
 
@@ -1944,9 +1978,9 @@ func (c *LLMClient) completeOnceStreamAnthropic(ctx context.Context, model strin
 	c.setAnthropicBetaHeaders(req, model)
 	// Z.Ai Anthropic Proxy expects Authorization: Bearer; native Anthropic uses x-api-key.
 	if c.provider == "zai-anthropic" {
-		req.Header.Set("Authorization", "Bearer "+c.resolveAPIKey())
+		req.Header.Set("Authorization", "Bearer "+c.resolveAPIKeyFromCtx(ctx))
 	} else {
-		req.Header.Set("x-api-key", c.resolveAPIKey())
+		req.Header.Set("x-api-key", c.resolveAPIKeyFromCtx(ctx))
 	}
 
 	start := time.Now()
@@ -2183,7 +2217,7 @@ func (c *LLMClient) completeOnceStreamOpenAI(ctx context.Context, model string, 
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.resolveAPIKey())
+	req.Header.Set("Authorization", "Bearer "+c.resolveAPIKeyFromCtx(ctx))
 	req.Header.Set("Accept", "text/event-stream")
 	c.setProviderHeaders(req)
 
@@ -2442,8 +2476,14 @@ func (c *LLMClient) isInCooldown(model string) bool {
 // calls use fallback models. Near cooldown expiry, a probe is sent to the
 // primary model to check if it recovered. On success, cooldown is cleared.
 func (c *LLMClient) CompleteWithFallbackUsingModel(ctx context.Context, modelOverride string, messages []chatMessage, tools []ToolDefinition) (*LLMResponse, error) {
-	if c.resolveAPIKey() == "" && c.provider != "ollama" {
+	if c.resolveAPIKey() == "" && c.provider != "ollama" && c.failoverCoord == nil {
 		return nil, fmt.Errorf("API key not configured. Set %s in vault or environment", GetProviderKeyName(c.provider))
+	}
+
+	// When a FailoverCoordinator is available, delegate to it for unified
+	// model+profile rotation with consistent error classification.
+	if c.failoverCoord != nil {
+		return c.completeWithCoordinator(ctx, modelOverride, messages, tools)
 	}
 
 	primary := c.model
@@ -2594,6 +2634,100 @@ func (c *LLMClient) CompleteWithFallbackUsingModel(ctx context.Context, modelOve
 	}
 
 	return nil, fmt.Errorf("all models and retries exhausted: %w", lastErr)
+}
+
+// completeWithCoordinator uses the FailoverCoordinator for model+profile rotation.
+// Each iteration asks the coordinator for the best model and profile, then reports
+// success or failure back so cooldowns apply to both systems consistently.
+func (c *LLMClient) completeWithCoordinator(ctx context.Context, modelOverride string, messages []chatMessage, tools []ToolDefinition) (*LLMResponse, error) {
+	maxAttempts := 2 + len(c.fallback.Models)
+	if maxAttempts < 3 {
+		maxAttempts = 3
+	}
+
+	initialBackoff := time.Duration(c.fallback.InitialBackoffMs) * time.Millisecond
+	if initialBackoff <= 0 {
+		initialBackoff = 500 * time.Millisecond
+	}
+	maxBackoff := time.Duration(c.fallback.MaxBackoffMs) * time.Millisecond
+	if maxBackoff <= 0 {
+		maxBackoff = 30 * time.Second
+	}
+
+	var lastErr error
+	var lastModel string
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		model, profileID, apiKey, err := c.failoverCoord.SelectModelAndProfile(c.provider, modelOverride)
+		if err != nil {
+			return nil, fmt.Errorf("failover coordinator: %w", err)
+		}
+		if model == "" {
+			model = c.model
+		}
+
+		// Inject profile-resolved API key into context for this request.
+		callCtx := ctx
+		if apiKey != "" {
+			callCtx = contextWithProfileAPIKey(ctx, apiKey)
+		}
+
+		resp, callErr := c.completeOnce(callCtx, model, messages, tools)
+		if callErr == nil {
+			c.failoverCoord.ReportSuccess(model, profileID)
+			return resp, nil
+		}
+
+		lastErr = callErr
+		lastModel = model
+
+		statusCode := 0
+		body := ""
+		if apierr, ok := callErr.(*apiError); ok {
+			statusCode = apierr.statusCode
+			body = apierr.body
+		}
+
+		// Context overflow should NOT trigger model rotation.
+		if IsLikelyContextOverflowError(body) {
+			return nil, callErr
+		}
+
+		reason := c.failoverCoord.ReportFailure(model, profileID, statusCode, body)
+
+		switch reason {
+		case FailoverFormat:
+			return nil, callErr
+		case FailoverBilling, FailoverAuthPermanent:
+			provider := c.providerForModel(model)
+			return nil, fmt.Errorf("%s (%s): %w", provider, model, callErr)
+		}
+
+		// Backoff before next attempt.
+		backoff := initialBackoff
+		for i := 0; i < attempt; i++ {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+				break
+			}
+		}
+
+		c.logger.Info("coordinator failover: retrying with next candidate",
+			"failed_model", model,
+			"profile", profileID,
+			"reason", reason,
+			"attempt", attempt+1,
+			"backoff_ms", backoff.Milliseconds(),
+		)
+
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("context cancelled during failover: %w", ctx.Err())
+		case <-time.After(backoff):
+		}
+	}
+
+	return nil, fmt.Errorf("all models and profiles exhausted (last: %s): %w", lastModel, lastErr)
 }
 
 // needsAudioConversion returns true if the audio format is not natively

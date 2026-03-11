@@ -108,22 +108,35 @@ type VaultReader interface {
 
 // SourceTier indicates where a skill was loaded from.
 // Higher tiers override lower tiers when skills have the same name.
+// Aligned with OpenClaw's 6-tier model.
 type SourceTier int
 
 const (
 	// TierBundled is for skills bundled with DevClaw (lowest priority).
 	TierBundled SourceTier = 0
-	// TierManaged is for skills installed via the managed skill system.
+	// TierManaged is for skills installed via the managed skill system (hub/registry).
 	TierManaged SourceTier = 1
-	// TierWorkspace is for skills defined in the workspace directory (highest priority).
-	TierWorkspace SourceTier = 2
+	// TierPersonal is for user-global skills (~/.devclaw/skills/).
+	TierPersonal SourceTier = 2
+	// TierProject is for project-scoped skills (.devclaw/skills/ in project root).
+	TierProject SourceTier = 3
+	// TierWorkspace is for skills defined in the active workspace directory.
+	TierWorkspace SourceTier = 4
+	// TierExtra is for dynamically injected skills at runtime (highest priority).
+	TierExtra SourceTier = 5
 )
 
 // String returns a human-readable tier name.
 func (t SourceTier) String() string {
 	switch t {
+	case TierExtra:
+		return "extra"
 	case TierWorkspace:
 		return "workspace"
+	case TierProject:
+		return "project"
+	case TierPersonal:
+		return "personal"
 	case TierManaged:
 		return "managed"
 	default:
