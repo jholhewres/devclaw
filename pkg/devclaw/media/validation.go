@@ -204,8 +204,7 @@ func CategorizeType(mimeType string) MediaType {
 		// OGG can be audio
 		return MediaTypeAudio
 	case strings.HasPrefix(mimeType, "video/"):
-		// Video support for future
-		return MediaTypeDocument // Fallback for now
+		return MediaTypeVideo
 	case mimeType == "application/pdf":
 		return MediaTypeDocument
 	case strings.HasPrefix(mimeType, "application/vnd.openxmlformats"):

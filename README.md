@@ -227,7 +227,7 @@ All secrets are stored in the encrypted vault (`.devclaw.vault`), never in plain
 | **Subagents** | spawn_subagent, list_subagents, wait_subagent, stop_subagent |
 | **Plugins** | plugin_list, plugin_install, plugin_call (GitHub, Jira, Sentry) |
 | **Teams** | create/list teams & agents, tasks CRUD, @mentions, shared facts, documents, working state |
-| **Media** | describe_image (vision), transcribe_audio (Whisper), send_image, send_audio, send_document |
+| **Media** | describe_image (vision), transcribe_audio (Whisper), send_media (image/audio/video/document) |
 | **IDE** | ide_configure (VSCode, Cursor, JetBrains, Neovim) |
 | **Remote** | SSH exec, SCP upload/download |
 | **Web** | search, fetch, browser automation |

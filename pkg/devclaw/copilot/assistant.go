@@ -2945,7 +2945,7 @@ func (a *Assistant) registerSystemTools() {
 	// Register media tools (describe_image, transcribe_audio).
 	RegisterMediaTools(a.toolExecutor, a.llmClient, a.config, a.logger)
 
-	// Register native media tools (send_image, send_audio, send_document).
+	// Register unified send_media tool (images, audio, video, documents).
 	if a.mediaSvc != nil {
 		RegisterNativeMediaTools(a.toolExecutor, a.mediaSvc, a.channelMgr, a.logger)
 	}

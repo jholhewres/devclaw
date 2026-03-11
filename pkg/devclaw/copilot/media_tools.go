@@ -1,6 +1,6 @@
 // Package copilot – media_tools.go registers tools for image understanding
-// (describe_image) and audio transcription (transcribe_audio).
-// Also includes native media sending tools (send_image, send_audio, send_document).
+// (describe_image), audio transcription (transcribe_audio), and the unified
+// send_media tool for sending images, audio, video, and documents.
 package copilot
 
 import (
@@ -193,38 +193,50 @@ func registerTranscribeAudioTool(executor *ToolExecutor, llm *LLMClient, media M
 	logger.Debug("registered transcribe_audio tool")
 }
 
-// RegisterNativeMediaTools registers send_image, send_audio, send_document tools
-// for the LLM to send media to users through the channel manager.
+// RegisterNativeMediaTools registers the unified send_media tool
+// for the LLM to send media (images, audio, documents, video) to users
+// through the channel manager.
 func RegisterNativeMediaTools(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
 	if mediaSvc == nil || channelMgr == nil {
 		return
 	}
 
-	registerSendImageTool(executor, mediaSvc, channelMgr, logger)
-	registerSendAudioTool(executor, mediaSvc, channelMgr, logger)
-	registerSendDocumentTool(executor, mediaSvc, channelMgr, logger)
+	registerSendMediaTool(executor, mediaSvc, channelMgr, logger)
 }
 
-func registerSendImageTool(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
+// validMediaTypes maps user-facing type strings to channels.MessageType.
+var validMediaTypes = map[string]channels.MessageType{
+	"image":    channels.MessageImage,
+	"audio":    channels.MessageAudio,
+	"video":    channels.MessageVideo,
+	"document": channels.MessageDocument,
+}
+
+func registerSendMediaTool(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
 	executor.Register(
-		MakeToolDefinition("send_image", "Send an image to the user via media_id, file path, or URL.", map[string]any{
+		MakeToolDefinition("send_media", "Send media (image, audio, video, or document) to the user via media_id, file path, or URL. The type is auto-detected from the file content when not specified.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"type": map[string]any{
+					"type":        "string",
+					"description": "Media type: image, audio, video, or document. If omitted, auto-detected from the file MIME type.",
+					"enum":        []string{"image", "audio", "video", "document"},
+				},
 				"media_id": map[string]any{
 					"type":        "string",
 					"description": "ID of previously uploaded media (from /api/media upload)",
 				},
 				"file_path": map[string]any{
 					"type":        "string",
-					"description": "Local file path to an image on the server",
+					"description": "Local file path to the media on the server",
 				},
 				"url": map[string]any{
 					"type":        "string",
-					"description": "URL to download the image from",
+					"description": "URL to download the media from",
 				},
 				"caption": map[string]any{
 					"type":        "string",
-					"description": "Optional caption text for the image",
+					"description": "Optional caption text for the media",
 				},
 				"channel": map[string]any{
 					"type":        "string",
@@ -237,148 +249,74 @@ func registerSendImageTool(executor *ToolExecutor, mediaSvc *media.MediaService,
 			},
 			"required": []string{"channel", "to"},
 		}),
-		makeSendMediaHandler(mediaSvc, channelMgr, channels.MessageImage, logger),
-	)
-	logger.Debug("registered send_image tool")
-}
-
-func registerSendAudioTool(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
-	executor.Register(
-		MakeToolDefinition("send_audio", "Send an audio file to the user via media_id, file path, or URL.", map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"media_id": map[string]any{
-					"type":        "string",
-					"description": "ID of previously uploaded media (from /api/media upload)",
-				},
-				"file_path": map[string]any{
-					"type":        "string",
-					"description": "Local file path to an audio file on the server",
-				},
-				"url": map[string]any{
-					"type":        "string",
-					"description": "URL to download the audio from",
-				},
-				"channel": map[string]any{
-					"type":        "string",
-					"description": "Target channel (e.g., whatsapp, telegram)",
-				},
-				"to": map[string]any{
-					"type":        "string",
-					"description": "Recipient phone number or chat ID",
-				},
-			},
-			"required": []string{"channel", "to"},
-		}),
-		makeSendMediaHandler(mediaSvc, channelMgr, channels.MessageAudio, logger),
-	)
-	logger.Debug("registered send_audio tool")
-}
-
-func registerSendDocumentTool(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
-	executor.Register(
-		MakeToolDefinition("send_document", "Send a document to the user via media_id, file path, or URL.", map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"media_id": map[string]any{
-					"type":        "string",
-					"description": "ID of previously uploaded media (from /api/media upload)",
-				},
-				"file_path": map[string]any{
-					"type":        "string",
-					"description": "Local file path to a document on the server",
-				},
-				"url": map[string]any{
-					"type":        "string",
-					"description": "URL to download the document from",
-				},
-				"caption": map[string]any{
-					"type":        "string",
-					"description": "Optional caption text for the document",
-				},
-				"channel": map[string]any{
-					"type":        "string",
-					"description": "Target channel (e.g., whatsapp, telegram)",
-				},
-				"to": map[string]any{
-					"type":        "string",
-					"description": "Recipient phone number or chat ID",
-				},
-			},
-			"required": []string{"channel", "to"},
-		}),
-		makeSendMediaHandler(mediaSvc, channelMgr, channels.MessageDocument, logger),
-	)
-	logger.Debug("registered send_document tool")
-}
-
-func makeSendMediaHandler(mediaSvc *media.MediaService, channelMgr *channels.Manager, expectedType channels.MessageType, logger *slog.Logger) func(ctx context.Context, args map[string]any) (any, error) {
-	return func(ctx context.Context, args map[string]any) (any, error) {
-		// Resolve media source
-		data, mimeType, filename, err := mediaSvc.ResolveMediaSource(ctx, args)
-		if err != nil {
-			return nil, fmt.Errorf("resolving media source: %w", err)
-		}
-
-		// Validate media type matches expected
-		actualType := channels.MessageType(media.CategorizeType(mimeType))
-		if actualType != expectedType {
-			// Allow some flexibility (e.g., audio/ogg could be detected as different things)
-			if !(expectedType == channels.MessageAudio && actualType == channels.MessageVideo) {
-				logger.Warn("media type mismatch",
-					"expected", expectedType,
-					"actual", actualType,
-					"mime", mimeType,
-				)
+		func(ctx context.Context, args map[string]any) (any, error) {
+			// Resolve media source
+			data, mimeType, filename, err := mediaSvc.ResolveMediaSource(ctx, args)
+			if err != nil {
+				return nil, fmt.Errorf("resolving media source: %w", err)
 			}
-		}
 
-		// Get parameters
-		caption, _ := args["caption"].(string)
-		channelName, _ := args["channel"].(string)
-		to, _ := args["to"].(string)
+			// Determine media type: explicit > auto-detect from MIME
+			var msgType channels.MessageType
+			if typeStr, _ := args["type"].(string); typeStr != "" {
+				mt, ok := validMediaTypes[typeStr]
+				if !ok {
+					return nil, fmt.Errorf("invalid media type %q: must be image, audio, video, or document", typeStr)
+				}
+				msgType = mt
+			} else {
+				// Auto-detect from MIME type
+				msgType = channels.MessageType(media.CategorizeType(mimeType))
+			}
 
-		if channelName == "" {
-			return nil, fmt.Errorf("channel parameter is required")
-		}
-		if to == "" {
-			return nil, fmt.Errorf("to parameter is required (recipient)")
-		}
+			// Get parameters
+			caption, _ := args["caption"].(string)
+			channelName, _ := args["channel"].(string)
+			to, _ := args["to"].(string)
 
-		// Build MediaMessage
-		msg := &channels.MediaMessage{
-			Type:     expectedType,
-			Data:     data,
-			MimeType: mimeType,
-			Filename: filename,
-			Caption:  caption,
-		}
+			if channelName == "" {
+				return nil, fmt.Errorf("channel parameter is required")
+			}
+			if to == "" {
+				return nil, fmt.Errorf("to parameter is required (recipient)")
+			}
 
-		// Send via channel manager
-		if err := channelMgr.SendMedia(ctx, channelName, to, msg); err != nil {
-			logger.Error("failed to send media",
+			// Build MediaMessage
+			msg := &channels.MediaMessage{
+				Type:     msgType,
+				Data:     data,
+				MimeType: mimeType,
+				Filename: filename,
+				Caption:  caption,
+			}
+
+			// Send via channel manager
+			if err := channelMgr.SendMedia(ctx, channelName, to, msg); err != nil {
+				logger.Error("failed to send media",
+					"channel", channelName,
+					"to", to,
+					"type", msgType,
+					"error", err,
+				)
+				return nil, fmt.Errorf("sending media via %s: %w", channelName, err)
+			}
+
+			logger.Info("media sent",
 				"channel", channelName,
 				"to", to,
-				"type", expectedType,
-				"error", err,
+				"type", msgType,
+				"filename", filename,
+				"size", len(data),
 			)
-			return nil, fmt.Errorf("sending media via %s: %w", channelName, err)
-		}
 
-		logger.Info("media sent",
-			"channel", channelName,
-			"to", to,
-			"type", expectedType,
-			"filename", filename,
-			"size", len(data),
-		)
-
-		return map[string]any{
-			"status":   "sent",
-			"type":     string(expectedType),
-			"filename": filename,
-			"size":     len(data),
-			"channel":  channelName,
-		}, nil
-	}
+			return map[string]any{
+				"status":   "sent",
+				"type":     string(msgType),
+				"filename": filename,
+				"size":     len(data),
+				"channel":  channelName,
+			}, nil
+		},
+	)
+	logger.Debug("registered send_media tool")
 }

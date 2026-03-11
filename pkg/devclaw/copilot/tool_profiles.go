@@ -77,7 +77,7 @@ var BuiltInProfiles = map[string]ToolProfile{
 			"group:sessions",  // sessions
 			"group:subagents", // spawn, list, wait, stop subagents
 			"group:daemon",    // daemon manager
-			"group:media",     // describe_image, transcribe_audio, send_image/audio/document
+			"group:media",     // describe_image, transcribe_audio, send_media
 			"group:browser",   // browser dispatcher + sub-tools
 			"group:skill_db",  // skill_db_query, skill_db_list_tables, etc.
 			"bash",            // shell access
@@ -105,7 +105,7 @@ var BuiltInProfiles = map[string]ToolProfile{
 			"group:vault",     // vault dispatcher + sub-tools (save/get API keys)
 			"group:skills",    // get_skill_instructions, get_skill_reference, skill_list, etc.
 			"group:sessions",  // sessions
-			"group:media",     // describe_image, transcribe_audio, send_image/audio/document
+			"group:media",     // describe_image, transcribe_audio, send_media
 			"group:skill_db",  // skill_db_query, skill_db_list_tables, etc.
 			"group:fs",        // read_file, write_file, edit_file, list_files, search_files, glob_files
 			"group:subagents", // spawn, list, wait, stop subagents
@@ -138,7 +138,7 @@ var BuiltInProfiles = map[string]ToolProfile{
 			"group:scheduler", // scheduler dispatcher + sub-tools
 			"group:vault",     // vault dispatcher + sub-tools
 			"group:skills",    // get_skill_instructions, get_skill_reference, skill_list, etc.
-			"group:media",     // describe_image, transcribe_audio, send_image/audio/document
+			"group:media",     // describe_image, transcribe_audio, send_media
 			"group:skill_db",  // skill_db_query, skill_db_list_tables, etc.
 			"group:fs",        // full filesystem access
 			"group:sessions",  // sessions
@@ -462,7 +462,8 @@ func InferToolCategory(name string) string {
 		return "Daemon"
 
 	// Media
-	case strings.Contains(name, "image") ||
+	case name == "send_media" ||
+		strings.Contains(name, "image") ||
 		strings.Contains(name, "audio") ||
 		strings.Contains(name, "video") ||
 		strings.Contains(name, "transcribe"):

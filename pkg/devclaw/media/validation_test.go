@@ -148,7 +148,7 @@ func TestCategorizeType(t *testing.T) {
 		{"audio/wav", MediaTypeAudio},
 		{"application/pdf", MediaTypeDocument},
 		{"text/plain", MediaTypeDocument},
-		{"video/mp4", MediaTypeDocument}, // Video not supported, fallback to document
+		{"video/mp4", MediaTypeVideo},
 		{"unknown/type", MediaTypeDocument},
 	}
 

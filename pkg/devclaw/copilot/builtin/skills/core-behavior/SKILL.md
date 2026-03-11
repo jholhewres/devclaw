@@ -45,8 +45,7 @@ Before creating, deleting, or modifying:
 |------|------|------------|
 | Create subagent | `spawn_subagent` | ~~scheduler~~ |
 | Schedule reminder | `scheduler(action=add)` | ~~spawn_subagent~~ |
-| Send file | `send_document` | ~~just create file~~ |
-| Send image | `send_image` | ~~just create image~~ |
+| Send file/image/audio | `send_media` | ~~just create file~~ |
 
 ---
 
@@ -74,7 +73,7 @@ Step 2 - Confirm generation:
 "PDF created: lista.pdf (2KB)"
 
 Step 3 - Send:
-send_document(document_path="/tmp/lista.pdf", caption="Shopping list")
+send_media(file_path="/tmp/lista.pdf", type="document", caption="Shopping list")
 
 Step 4 - Confirm sent:
 "Sent!"
@@ -121,7 +120,7 @@ Step 4 - Confirm sent:
    Agent: "The PDF is ready at /tmp/file.pdf" (didn't send)
 
 ✓ User: "Send me the PDF"
-   Agent: send_document(document_path="/tmp/file.pdf", caption="...")
+   Agent: send_media(file_path="/tmp/file.pdf", type="document", caption="...")
 ```
 
 ---
