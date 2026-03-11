@@ -83,6 +83,12 @@ var BuiltInProfiles = map[string]ToolProfile{
 			"bash",            // shell access
 			"exec",            // sandboxed execution
 			"apply_patch",     // multi-file patches
+			"read_file",       // read files
+			"write_file",      // write files
+			"edit_file",       // edit files
+			"list_files",      // list files
+			"search_files",    // search files
+			"glob_files",      // glob files
 		},
 		Deny: []string{
 			"ssh", // no remote access
@@ -104,16 +110,22 @@ var BuiltInProfiles = map[string]ToolProfile{
 			"group:fs",        // read_file, write_file, edit_file, list_files, search_files, glob_files
 			"group:subagents", // spawn, list, wait, stop subagents
 			"group:browser",   // browser automation for skills
+			"group:teams",     // team_manage, team_agent, team_task, team_memory, team_comm
+			"group:daemon",    // daemon manager
 			"bash",            // shell access (curl, jq, etc. for API skills)
 			"exec",            // sandboxed execution
 			"apply_patch",     // multi-file patches
+			"read_file",       // read files
+			"write_file",      // write files
+			"edit_file",       // edit files
+			"list_files",      // list files
+			"search_files",    // search files
+			"glob_files",      // glob files
 		},
 		Deny: []string{
-			"ssh",           // no remote access
-			"scp",           // no remote copy
-			"set_env",       // no env modification
-			"group:daemon",  // no daemon management from chat
-			"group:teams",   // no team management from chat
+			"ssh",     // no remote access
+			"scp",     // no remote copy
+			"set_env", // no env modification
 		},
 	},
 	"team": {
