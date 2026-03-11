@@ -116,9 +116,9 @@ const (
 	TierBundled SourceTier = 0
 	// TierManaged is for skills installed via the managed skill system (hub/registry).
 	TierManaged SourceTier = 1
-	// TierPersonal is for user-global skills (~/.devclaw/skills/).
+	// TierPersonal is for user-global skills (optional, configured via personal_dir).
 	TierPersonal SourceTier = 2
-	// TierProject is for project-scoped skills (.devclaw/skills/ in project root).
+	// TierProject is for project-scoped skills (optional, configured via project_dir).
 	TierProject SourceTier = 3
 	// TierWorkspace is for skills defined in the active workspace directory.
 	TierWorkspace SourceTier = 4

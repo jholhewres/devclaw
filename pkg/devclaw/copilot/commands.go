@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels"
+	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
 	"github.com/jholhewres/devclaw/pkg/devclaw/skills"
 )
 
@@ -824,7 +825,7 @@ func (a *Assistant) skillsCommand(args []string, msg *channels.IncomingMessage) 
 	subArgs := args[1:]
 
 	// Resolve skills directory from config.
-	skillsDir := "./skills"
+	skillsDir := paths.ResolveSkillsDir()
 	if len(a.config.Skills.ClawdHubDirs) > 0 {
 		skillsDir = a.config.Skills.ClawdHubDirs[0]
 	}

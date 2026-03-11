@@ -27,6 +27,7 @@ import (
 	"github.com/jholhewres/devclaw/pkg/devclaw/sandbox"
 	"github.com/jholhewres/devclaw/pkg/devclaw/scheduler"
 	"github.com/jholhewres/devclaw/pkg/devclaw/skills"
+	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
 	"github.com/jholhewres/devclaw/pkg/devclaw/tts"
 )
 
@@ -532,11 +533,20 @@ func (a *Assistant) Start(ctx context.Context) error {
 			for _, t := range skill.Tools() {
 				toolNames = append(toolNames, t.Name)
 			}
+			loc := skill.Location()
+			hasRefs := false
+			if loc != "" {
+				refDir := filepath.Join(filepath.Dir(loc), "references")
+				if info, err := os.Stat(refDir); err == nil && info.IsDir() {
+					hasRefs = true
+				}
+			}
 			infos = append(infos, SkillInfo{
-				Name:        m.Name,
-				Description: m.Description,
-				Location:    skill.Location(),
-				Tools:       toolNames,
+				Name:          m.Name,
+				Description:   m.Description,
+				Location:      loc,
+				HasReferences: hasRefs,
+				Tools:         toolNames,
 			})
 		}
 		// Include on-demand builtin skills in the same XML list so the LLM
@@ -2748,14 +2758,18 @@ func (a *Assistant) registerSkillLoaders() {
 	}
 
 	// ClawdHub skills loader (loads from configured skill directories — TierManaged).
-	// Always include ./skills/ as the default user skills directory, even if
-	// not explicitly listed in config. This ensures user-installed skills are
-	// always discovered.
+	// Default: paths.ResolveSkillsDir() which resolves to $DEVCLAW_STATE_DIR/skills
+	// or ./skills relative to the process working directory.
 	dirs := a.config.Skills.ClawdHubDirs
-	defaultDir := "./skills"
+	defaultDir := paths.ResolveSkillsDir()
 	hasDefault := false
 	for _, d := range dirs {
-		if d == defaultDir || d == "skills" || d == "skills/" {
+		resolved := d
+		if !filepath.IsAbs(d) {
+			resolved, _ = filepath.Abs(d)
+		}
+		absDefault, _ := filepath.Abs(defaultDir)
+		if resolved == absDefault || d == defaultDir || d == "skills" || d == "skills/" || d == "./skills" {
 			hasDefault = true
 			break
 		}
@@ -2766,28 +2780,23 @@ func (a *Assistant) registerSkillLoaders() {
 	clawdHubLoader := skills.NewClawdHubLoader(dirs, a.logger)
 	a.skillRegistry.AddLoader(clawdHubLoader)
 
-	// Personal skills loader (TierPersonal): user-global skills from ~/.devclaw/skills/.
-	personalDir := a.config.Skills.PersonalDir
-	if personalDir == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			personalDir = filepath.Join(home, ".devclaw", "skills")
-		}
-	}
-	if personalDir != "" {
+	// Personal skills loader (TierPersonal): only activated when explicitly
+	// configured via config.Skills.PersonalDir. DevClaw's skills live in
+	// ./skills (the installation directory), not ~/.devclaw/.
+	if personalDir := a.config.Skills.PersonalDir; personalDir != "" {
 		if info, err := os.Stat(personalDir); err == nil && info.IsDir() {
 			personalLoader := skills.NewClawdHubLoaderWithTier([]string{personalDir}, skills.TierPersonal, a.logger)
 			a.skillRegistry.AddLoader(personalLoader)
 		}
 	}
 
-	// Project skills loader (TierProject): project-scoped skills from .devclaw/skills/.
-	projectDir := a.config.Skills.ProjectDir
-	if projectDir == "" {
-		projectDir = ".devclaw/skills"
-	}
-	if info, err := os.Stat(projectDir); err == nil && info.IsDir() {
-		projectLoader := skills.NewClawdHubLoaderWithTier([]string{projectDir}, skills.TierProject, a.logger)
-		a.skillRegistry.AddLoader(projectLoader)
+	// Project skills loader (TierProject): only activated when explicitly
+	// configured via config.Skills.ProjectDir or when the directory exists.
+	if projectDir := a.config.Skills.ProjectDir; projectDir != "" {
+		if info, err := os.Stat(projectDir); err == nil && info.IsDir() {
+			projectLoader := skills.NewClawdHubLoaderWithTier([]string{projectDir}, skills.TierProject, a.logger)
+			a.skillRegistry.AddLoader(projectLoader)
+		}
 	}
 }
 
@@ -2915,7 +2924,7 @@ func (a *Assistant) registerSystemTools() {
 
 	// Register skill creator tools (conditional on skill system being active).
 	if a.skillRegistry != nil {
-		skillsDir := "./skills"
+		skillsDir := paths.ResolveSkillsDir()
 		if len(a.config.Skills.ClawdHubDirs) > 0 {
 			skillsDir = a.config.Skills.ClawdHubDirs[0]
 		}

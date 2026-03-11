@@ -32,6 +32,22 @@ func xmlAttrEscape(s string) string {
 	return s
 }
 
+// compactHomePath replaces the home directory prefix with ~ to save prompt tokens.
+// Saves ~5-6 tokens per skill path. Models understand ~ expansion.
+func compactHomePath(p, homeDir string) string {
+	if homeDir == "" {
+		return p
+	}
+	prefix := homeDir
+	if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	if strings.HasPrefix(p, prefix) {
+		return "~/" + p[len(prefix):]
+	}
+	return p
+}
+
 // PromptLayer defines the priority of a prompt layer.
 // Lower values = higher priority (never trimmed first on budget cuts).
 type PromptLayer int
@@ -124,10 +140,11 @@ type PromptComposer struct {
 // SkillInfo holds basic skill information for the Skill Discovery XML.
 // Used by the reference model: skills listed as XML references, LLM reads SKILL.md on demand.
 type SkillInfo struct {
-	Name        string
-	Description string
-	Location    string   // Absolute path to SKILL.md ("" for built-in skills)
-	Tools       []string
+	Name          string
+	Description   string
+	Location      string   // Absolute path to SKILL.md ("" for built-in skills)
+	HasReferences bool     // True if the skill has a references/ directory
+	Tools         []string
 }
 
 // NewPromptComposer creates a new prompt composer.
@@ -963,9 +980,14 @@ func (p *PromptComposer) buildSkillsLayerReference() string {
 	b.WriteString("- If exactly one skill clearly applies: call get_skill_instructions(name=\"skill-name\") to load its full instructions, then follow them.\n")
 	b.WriteString("- If multiple could apply: choose the most specific one, then load and follow it.\n")
 	b.WriteString("- If none clearly apply: do not load any skill instructions.\n")
-	b.WriteString("Constraints: never load more than one skill up front; only load after selecting.\n")
-	b.WriteString("Use get_skill_reference(skill_name, reference_path) to load supporting documentation from a skill.\n")
+	b.WriteString("Constraints: never load more than one skill up front; only load after selecting.\n\n")
+	b.WriteString("**Reading skill files:** To read, view, or show any skill's SKILL.md content, ALWAYS use get_skill_instructions(name). ")
+	b.WriteString("This returns the full SKILL.md regardless of where the skill is installed. NEVER try to read SKILL.md files directly from the filesystem.\n")
+	b.WriteString("Use get_skill_reference(skill_name, reference_path) to load files from a skill's references/ directory.\n")
 	b.WriteString("When a skill drives external API writes, assume rate limits: prefer fewer larger writes, avoid tight one-item loops, and respect 429/Retry-After.\n\n")
+
+	// Compact absolute paths with ~ to save prompt tokens (~5-6 tokens per skill).
+	homeDir, _ := os.UserHomeDir()
 
 	// Pre-render all skill entries and compute prefix sums for binary search.
 	entries := make([]string, len(skills))
@@ -973,6 +995,13 @@ func (p *PromptComposer) buildSkillsLayerReference() string {
 		var entry strings.Builder
 		entry.WriteString(fmt.Sprintf("  <skill name=\"%s\" description=\"%s\"",
 			xmlAttrEscape(skill.Name), xmlAttrEscape(skill.Description)))
+		if skill.Location != "" {
+			loc := compactHomePath(skill.Location, homeDir)
+			entry.WriteString(fmt.Sprintf(" location=\"%s\"", xmlAttrEscape(loc)))
+		}
+		if skill.HasReferences {
+			entry.WriteString(" has_references=\"true\"")
+		}
 		if len(skill.Tools) > 0 {
 			entry.WriteString(fmt.Sprintf(" tools=\"%s\"", xmlAttrEscape(strings.Join(skill.Tools, ", "))))
 		}

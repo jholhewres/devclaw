@@ -827,12 +827,12 @@ type SkillsConfig struct {
 	// ClawdHubDirs lists directories with ClawdHub SKILL.md skills (TierManaged).
 	ClawdHubDirs []string `yaml:"clawdhub_dirs"`
 
-	// PersonalDir is the user-global skills directory (TierPersonal).
-	// Default: ~/.devclaw/skills/
+	// PersonalDir is an optional user-global skills directory (TierPersonal).
+	// No default — only activated when explicitly set in config.
 	PersonalDir string `yaml:"personal_dir"`
 
-	// ProjectDir is the project-scoped skills directory (TierProject).
-	// Default: .devclaw/skills/
+	// ProjectDir is an optional project-scoped skills directory (TierProject).
+	// No default — only activated when explicitly set in config.
 	ProjectDir string `yaml:"project_dir"`
 
 	// Limits configures resource limits for skill loading.

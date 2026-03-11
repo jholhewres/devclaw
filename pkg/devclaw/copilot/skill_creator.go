@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
 	"github.com/jholhewres/devclaw/pkg/devclaw/skills"
 )
 
@@ -35,7 +36,7 @@ type SkillReloadCallback func(ctx context.Context) (int, error)
 // get_skill_instructions, get_skill_reference.
 func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry, skillsDir string, skillDB *SkillDB, builtinSkills *BuiltinSkills, reloadCb SkillReloadCallback, logger *slog.Logger) {
 	if skillsDir == "" {
-		skillsDir = "./skills"
+		skillsDir = paths.ResolveSkillsDir()
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -225,14 +226,14 @@ func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry
 	// ── get_skill_reference ──
 	executor.Register(
 		MakeToolDefinition("get_skill_reference",
-			"Load a reference document from a skill's references/ directory.",
+			"Load a reference document from a skill's references/ directory. Pass reference_path=\"list\" or omit it to list available files.",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"skill_name":     map[string]any{"type": "string", "description": "Name of the skill"},
-					"reference_path": map[string]any{"type": "string", "description": "Path to the reference file (e.g. 'style-guide.md')"},
+					"reference_path": map[string]any{"type": "string", "description": "Path to the reference file (e.g. 'style-guide.md'). Pass 'list' or omit to list available references."},
 				},
-				"required": []string{"skill_name", "reference_path"},
+				"required": []string{"skill_name"},
 			}),
 		handleGetSkillReference(registry, skillsDir),
 	)
@@ -409,6 +410,11 @@ func handleSkillList(registry *skills.Registry, skillsDir string) (any, error) {
 		fmt.Fprintf(&sb, "- **%s** v%s by %s\n  %s\n  Category: %s, Tags: %s\n",
 			meta.Name, meta.Version, meta.Author, meta.Description,
 			meta.Category, strings.Join(meta.Tags, ", "))
+		if skill, ok := registry.Get(meta.Name); ok {
+			if loc := skill.Location(); loc != "" {
+				fmt.Fprintf(&sb, "  Location: %s\n", loc)
+			}
+		}
 	}
 	userSkills := listUserSkillDirs(skillsDir)
 	if len(userSkills) > 0 {
@@ -417,6 +423,7 @@ func handleSkillList(registry *skills.Registry, skillsDir string) (any, error) {
 			fmt.Fprintf(&sb, "- %s\n", name)
 		}
 	}
+	sb.WriteString("\nTip: Use get_skill_instructions(name) to read any skill's full SKILL.md content.\n")
 	return sb.String(), nil
 }
 
@@ -575,11 +582,11 @@ func handleGetSkillReference(registry *skills.Registry, skillsDir string) func(c
 	return func(_ context.Context, args map[string]any) (any, error) {
 		skillName, _ := args["skill_name"].(string)
 		referencePath, _ := args["reference_path"].(string)
-		if skillName == "" || referencePath == "" {
-			return nil, fmt.Errorf("skill_name and reference_path are required")
+		if skillName == "" {
+			return nil, fmt.Errorf("skill_name is required")
 		}
 
-		// Resolve the skill directory.
+		// Resolve the skill's references directory.
 		var refDir string
 		if skill, ok := registry.Get(skillName); ok {
 			loc := skill.Location()
@@ -589,6 +596,11 @@ func handleGetSkillReference(registry *skills.Registry, skillsDir string) func(c
 		}
 		if refDir == "" {
 			refDir = filepath.Join(skillsDir, sanitizeSkillName(skillName), "references")
+		}
+
+		// When reference_path is empty or "list", list available reference files.
+		if referencePath == "" || referencePath == "list" {
+			return listSkillReferences(refDir, skillName)
 		}
 
 		// Security: prevent path traversal using filepath.Rel to ensure the
@@ -606,6 +618,27 @@ func handleGetSkillReference(registry *skills.Registry, skillsDir string) func(c
 		}
 		return string(content), nil
 	}
+}
+
+func listSkillReferences(refDir, skillName string) (any, error) {
+	entries, err := os.ReadDir(refDir)
+	if err != nil {
+		return nil, fmt.Errorf("no references directory found for skill %q", skillName)
+	}
+	if len(entries) == 0 {
+		return fmt.Sprintf("Skill %q has an empty references/ directory.", skillName), nil
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "References for skill %q (%d files):\n\n", skillName, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			fmt.Fprintf(&sb, "- %s/ (directory)\n", e.Name())
+		} else {
+			fmt.Fprintf(&sb, "- %s\n", e.Name())
+		}
+	}
+	sb.WriteString("\nUse get_skill_reference(skill_name, reference_path) to read a specific file.\n")
+	return sb.String(), nil
 }
 
 // sanitizeSkillName normalizes a skill name to filesystem-safe format.
