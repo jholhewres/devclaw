@@ -105,12 +105,13 @@ func TestBuiltInProfiles_Messaging(t *testing.T) {
 		allowMap[item] = true
 	}
 
-	// Messaging must allow all essential groups for chat channel usage.
+	// Messaging should allow nearly everything for rich chat interactions.
 	for _, required := range []string{
 		"group:web", "group:memory", "group:scheduler",
 		"group:vault", "group:skills", "group:sessions",
 		"group:media", "group:skill_db",
-		"bash", "exec", // shell access for skills that use curl, jq, etc.
+		"group:fs", "group:subagents", "group:browser",
+		"bash", "exec", "apply_patch",
 	} {
 		if !allowMap[required] {
 			t.Errorf("messaging profile should allow %s", required)
@@ -122,11 +123,10 @@ func TestBuiltInProfiles_Messaging(t *testing.T) {
 		denyMap[item] = true
 	}
 
-	// Messaging must deny dangerous tools/groups.
+	// Messaging denies only remote access, daemon, and team management.
 	for _, denied := range []string{
 		"ssh", "scp", "set_env",
-		"group:fs", "group:subagents",
-		"group:daemon", "group:browser", "group:teams",
+		"group:daemon", "group:teams",
 	} {
 		if !denyMap[denied] {
 			t.Errorf("messaging profile should deny %s", denied)
@@ -142,17 +142,16 @@ func TestBuiltInProfiles_Team(t *testing.T) {
 		allowMap[item] = true
 	}
 
-	if !allowMap["group:teams"] {
-		t.Error("team profile should allow group:teams")
-	}
-	if !allowMap["group:vault"] {
-		t.Error("team profile should allow group:vault")
-	}
-	if !allowMap["group:skills"] {
-		t.Error("team profile should allow group:skills")
-	}
-	if !allowMap["bash"] {
-		t.Error("team profile should allow bash")
+	for _, required := range []string{
+		"group:teams", "group:web", "group:memory",
+		"group:scheduler", "group:vault", "group:skills",
+		"group:media", "group:skill_db", "group:fs",
+		"group:sessions", "group:browser",
+		"bash", "exec", "apply_patch",
+	} {
+		if !allowMap[required] {
+			t.Errorf("team profile should allow %s", required)
+		}
 	}
 
 	denyMap := make(map[string]bool)
@@ -160,11 +159,12 @@ func TestBuiltInProfiles_Team(t *testing.T) {
 		denyMap[item] = true
 	}
 
-	if !denyMap["group:subagents"] {
-		t.Error("team profile should deny group:subagents")
-	}
-	if !denyMap["write_file"] {
-		t.Error("team profile should deny write_file")
+	for _, denied := range []string{
+		"group:subagents", "group:daemon", "ssh", "scp",
+	} {
+		if !denyMap[denied] {
+			t.Errorf("team profile should deny %s", denied)
+		}
 	}
 }
 

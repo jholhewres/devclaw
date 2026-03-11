@@ -91,7 +91,7 @@ var BuiltInProfiles = map[string]ToolProfile{
 	},
 	"messaging": {
 		Name:        "messaging",
-		Description: "Chat channels (WhatsApp, Discord, Telegram, Slack) - web, memory, skills, vault, media, bash",
+		Description: "Chat channels (WhatsApp, Discord, Telegram, Slack) - nearly full access except ssh/daemon",
 		Allow: []string{
 			"group:web",       // web_search, web_fetch
 			"group:memory",    // memory dispatcher + sub-tools
@@ -101,23 +101,24 @@ var BuiltInProfiles = map[string]ToolProfile{
 			"group:sessions",  // sessions
 			"group:media",     // describe_image, transcribe_audio, send_image/audio/document
 			"group:skill_db",  // skill_db_query, skill_db_list_tables, etc.
-			"bash",            // shell access (needed for skills that use curl, jq, etc.)
+			"group:fs",        // read_file, write_file, edit_file, list_files, search_files, glob_files
+			"group:subagents", // spawn, list, wait, stop subagents
+			"group:browser",   // browser automation for skills
+			"bash",            // shell access (curl, jq, etc. for API skills)
 			"exec",            // sandboxed execution
+			"apply_patch",     // multi-file patches
 		},
 		Deny: []string{
-			"ssh",             // no remote access
-			"scp",             // no remote copy
-			"set_env",         // no env modification
-			"group:fs",        // no direct file access
-			"group:subagents", // no subagents
-			"group:daemon",    // no daemon management
-			"group:browser",   // no browser automation
-			"group:teams",     // no team management
+			"ssh",           // no remote access
+			"scp",           // no remote copy
+			"set_env",       // no env modification
+			"group:daemon",  // no daemon management from chat
+			"group:teams",   // no team management from chat
 		},
 	},
 	"team": {
 		Name:        "team",
-		Description: "Team agent - team tools, web, memory, scheduler, vault, skills, read-only FS",
+		Description: "Team agent - team tools, web, memory, scheduler, vault, skills, full FS, bash",
 		Allow: []string{
 			"group:teams",     // team_manage, team_agent, team_task, team_memory, team_comm
 			"group:web",       // web_search, web_fetch
@@ -127,20 +128,18 @@ var BuiltInProfiles = map[string]ToolProfile{
 			"group:skills",    // get_skill_instructions, get_skill_reference, skill_list, etc.
 			"group:media",     // describe_image, transcribe_audio, send_image/audio/document
 			"group:skill_db",  // skill_db_query, skill_db_list_tables, etc.
-			"read_file",       // read-only filesystem
-			"list_files",
-			"search_files",
-			"glob_files",
-			"bash", // shell access (for team task execution)
+			"group:fs",        // full filesystem access
+			"group:sessions",  // sessions
+			"group:browser",   // browser automation
+			"bash",            // shell access (for team task execution)
+			"exec",            // sandboxed execution
+			"apply_patch",     // multi-file patches
 		},
 		Deny: []string{
 			"group:subagents", // no subagents (team agents are agents themselves)
 			"group:daemon",    // no daemon management
 			"ssh",             // no remote access
 			"scp",
-			"exec",       // no sandboxed exec
-			"write_file", // no writes
-			"edit_file",
 		},
 	},
 	"full": {
