@@ -91,9 +91,9 @@ var BuiltInProfiles = map[string]ToolProfile{
 	},
 	"messaging": {
 		Name:        "messaging",
-		Description: "Chat channels (WhatsApp, Discord, Telegram, Slack) - web, memory, skills, vault, media",
+		Description: "Chat channels (WhatsApp, Discord, Telegram, Slack) - web, memory, skills, vault, media, bash",
 		Allow: []string{
-			"group:web",       // web_search, web_fetch (essential for skills that call APIs)
+			"group:web",       // web_search, web_fetch
 			"group:memory",    // memory dispatcher + sub-tools
 			"group:scheduler", // scheduler dispatcher + sub-tools
 			"group:vault",     // vault dispatcher + sub-tools (save/get API keys)
@@ -101,9 +101,13 @@ var BuiltInProfiles = map[string]ToolProfile{
 			"group:sessions",  // sessions
 			"group:media",     // describe_image, transcribe_audio, send_image/audio/document
 			"group:skill_db",  // skill_db_query, skill_db_list_tables, etc.
+			"bash",            // shell access (needed for skills that use curl, jq, etc.)
+			"exec",            // sandboxed execution
 		},
 		Deny: []string{
-			"group:runtime",   // bash, exec, ssh, scp, set_env
+			"ssh",             // no remote access
+			"scp",             // no remote copy
+			"set_env",         // no env modification
 			"group:fs",        // no direct file access
 			"group:subagents", // no subagents
 			"group:daemon",    // no daemon management

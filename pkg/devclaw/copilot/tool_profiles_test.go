@@ -110,6 +110,7 @@ func TestBuiltInProfiles_Messaging(t *testing.T) {
 		"group:web", "group:memory", "group:scheduler",
 		"group:vault", "group:skills", "group:sessions",
 		"group:media", "group:skill_db",
+		"bash", "exec", // shell access for skills that use curl, jq, etc.
 	} {
 		if !allowMap[required] {
 			t.Errorf("messaging profile should allow %s", required)
@@ -121,9 +122,10 @@ func TestBuiltInProfiles_Messaging(t *testing.T) {
 		denyMap[item] = true
 	}
 
-	// Messaging must deny dangerous groups.
+	// Messaging must deny dangerous tools/groups.
 	for _, denied := range []string{
-		"group:runtime", "group:fs", "group:subagents",
+		"ssh", "scp", "set_env",
+		"group:fs", "group:subagents",
 		"group:daemon", "group:browser", "group:teams",
 	} {
 		if !denyMap[denied] {
