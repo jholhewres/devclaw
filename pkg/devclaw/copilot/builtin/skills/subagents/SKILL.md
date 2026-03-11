@@ -1,7 +1,7 @@
 ---
 name: subagents
 description: "Spawn isolated agents and communicate across sessions"
-trigger: automatic
+trigger: on-demand
 ---
 
 # Subagents & Sessions

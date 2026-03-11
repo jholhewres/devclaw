@@ -1,7 +1,7 @@
 ---
 name: preferences
 description: "update user preferences in USER.md (name, language, style, context)"
-trigger: automatic
+trigger: on-demand
 ---
 
 # User Preferences

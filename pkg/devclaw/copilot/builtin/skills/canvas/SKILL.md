@@ -1,7 +1,7 @@
 ---
 name: canvas
 description: "Create and manage persistent interactive workspaces"
-trigger: automatic
+trigger: on-demand
 ---
 
 # Canvas

@@ -172,6 +172,12 @@ type Config struct {
 	// NativeMedia configures the native media handling system.
 	NativeMedia NativeMediaConfig `yaml:"native_media"`
 
+	// Links configures the link understanding pipeline (auto-fetch URLs in messages).
+	Links LinkConfig `yaml:"links"`
+
+	// Sessions configures session lifecycle management.
+	Sessions SessionReaperConfig `yaml:"sessions"`
+
 	// Browser configures browser automation tools.
 	Browser BrowserConfig `yaml:"browser"`
 
@@ -425,6 +431,11 @@ type QueueConfig struct {
 
 	// ByChannel overrides the default mode per channel name.
 	ByChannel map[string]QueueMode `yaml:"by_channel"`
+
+	// ChannelDebounce overrides debounce delay per channel (in ms).
+	// Channels not listed use DebounceMs. Useful for giving WhatsApp a
+	// longer debounce (e.g. 1000ms) while keeping WebUI snappy (100ms).
+	ChannelDebounce map[string]int `yaml:"channel_debounce"`
 
 	// DropPolicy controls what happens when the queue exceeds MaxPending (default: "old").
 	DropPolicy QueueDropPolicy `yaml:"drop_policy"`
@@ -813,8 +824,16 @@ type SkillsConfig struct {
 	// Installed lists installed skill names.
 	Installed []string `yaml:"installed"`
 
-	// ClawdHubDirs lists directories with ClawdHub SKILL.md skills.
+	// ClawdHubDirs lists directories with ClawdHub SKILL.md skills (TierManaged).
 	ClawdHubDirs []string `yaml:"clawdhub_dirs"`
+
+	// PersonalDir is an optional user-global skills directory (TierPersonal).
+	// No default — only activated when explicitly set in config.
+	PersonalDir string `yaml:"personal_dir"`
+
+	// ProjectDir is an optional project-scoped skills directory (TierProject).
+	// No default — only activated when explicitly set in config.
+	ProjectDir string `yaml:"project_dir"`
 
 	// Limits configures resource limits for skill loading.
 	Limits skills.SkillsLimitsConfig `yaml:"limits"`
@@ -869,11 +888,11 @@ func DefaultConfig() *Config {
 				MaxResults:         6,
 				MinScore:           0.1,
 				TemporalDecay: TemporalDecayConfig{
-					Enabled:      false,
+					Enabled:      true,
 					HalfLifeDays: 30,
 				},
 				MMR: MMRConfig{
-					Enabled: false,
+					Enabled: true,
 					Lambda:  0.7,
 				},
 			},

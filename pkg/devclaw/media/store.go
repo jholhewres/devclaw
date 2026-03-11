@@ -25,8 +25,8 @@ type MediaType string
 const (
 	MediaTypeImage    MediaType = "image"
 	MediaTypeAudio    MediaType = "audio"
+	MediaTypeVideo    MediaType = "video"
 	MediaTypeDocument MediaType = "document"
-	// MediaTypeVideo - Futuro: extrair frame + descrever via Vision
 )
 
 // StoredMedia represents persisted media metadata.

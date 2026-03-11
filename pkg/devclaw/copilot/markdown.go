@@ -193,6 +193,23 @@ var internalTagRe = regexp.MustCompile(`</?(?:final|thinking|reasoning|\w+_prove
 // before the user sees the text.
 var toolsUsedRe = regexp.MustCompile(`(?m)^\[Tools used:[^\]]*\]\n?`)
 
+// prevToolCallsRe matches "[Previous tool calls in this turn:]" headers that
+// the LLM may reproduce from conversation history context. These are internal
+// annotations prepended to assistant messages (see agent.go buildHistory) and
+// must be stripped if the LLM echoes them in user-facing output.
+var prevToolCallsRe = regexp.MustCompile(`(?m)^\[Previous tool calls in this turn:\]\n?`)
+
+// toolCallLineRe matches individual tool call lines like "• tool_name → ..."
+// or "- tool_name → ..." that follow the [Previous tool calls] header.
+// These are part of the internal history annotation format.
+var toolCallLineRe = regexp.MustCompile(`(?m)^[•\-\*]\s+\w+\s*→\s*.*\n?`)
+
+// fakeSystemMsgRe matches fake "System:" messages that the LLM may fabricate
+// to mimic internal system notifications. Real system messages are injected as
+// [System Message] blocks in the conversation history — they never appear as
+// bare "System: ..." lines in assistant output.
+var fakeSystemMsgRe = regexp.MustCompile(`(?m)^(?:\[?System\]?:\s+).+\n?`)
+
 // finalTagRe matches <final>...</final> blocks and captures their inner content.
 // The inner content is preserved (it's the user-visible response); only the
 // wrapper tags are stripped. This aligns with the <final> convention where the
@@ -210,6 +227,8 @@ var toolProvenanceRe = regexp.MustCompile(`(?s)<\w+_proven\w+>.*?</\w+_proven\w+
 //   - [[reply_to_*]] delivery tags
 //   - <final>...</final> and <thinking>...</thinking> XML tags
 //   - [Tools used: ...] annotations (LLM may mimic the history format)
+//   - [Previous tool calls in this turn:] + tool call lines (history context leak)
+//   - Fake "System: ..." messages fabricated by the LLM
 //   - NO_REPLY / HEARTBEAT_OK sentinel tokens
 func StripInternalTags(text string) string {
 	// Unwrap <final>...</final> blocks — keep inner content, remove wrapper tags.
@@ -225,6 +244,16 @@ func StripInternalTags(text string) string {
 	// Remove [Tools used: ...] annotations that the LLM may generate
 	// by mimicking the internal conversation history format.
 	text = toolsUsedRe.ReplaceAllString(text, "")
+
+	// Remove [Previous tool calls in this turn:] headers and their tool call
+	// lines (• tool → "result") that the LLM may echo from history context.
+	text = prevToolCallsRe.ReplaceAllString(text, "")
+	text = toolCallLineRe.ReplaceAllString(text, "")
+
+	// Remove fake "System: ..." messages fabricated by the LLM.
+	// Real system messages are delivered via [System Message] blocks in history,
+	// never as bare "System: ..." lines in assistant output.
+	text = fakeSystemMsgRe.ReplaceAllString(text, "")
 
 	// Remove reply tags and sentinel tokens.
 	text = replyTagRe.ReplaceAllString(text, "")

@@ -1,7 +1,7 @@
 ---
 name: teams
 description: "Manage persistent agents and team coordination with shared memory"
-trigger: automatic
+trigger: on-demand
 ---
 
 # Agent Teams

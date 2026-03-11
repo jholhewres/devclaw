@@ -211,6 +211,23 @@ type SubagentRun struct {
 	done chan struct{} `json:"-"`
 }
 
+// closedDoneCh is a pre-closed channel used for DB-loaded runs whose
+// done channel is nil (they completed before this process started).
+var closedDoneCh = func() chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}()
+
+// Done returns a channel that is closed when the subagent run completes.
+// For DB-loaded runs with nil done, returns a pre-closed channel.
+func (r *SubagentRun) Done() <-chan struct{} {
+	if r.done != nil {
+		return r.done
+	}
+	return closedDoneCh
+}
+
 // ─── Subagent Manager ───
 
 // AnnounceCallback is called when a subagent completes, allowing push-style
@@ -424,6 +441,37 @@ func (m *SubagentManager) PruneOldRuns(days int) int {
 		m.logger.Info("pruned old subagent runs", "deleted", affected, "cutoff_days", days)
 	}
 	return int(affected)
+}
+
+// StartPeriodicSweeper launches a background goroutine that prunes old
+// subagent runs every interval. Stops when ctx is cancelled.
+func (m *SubagentManager) StartPeriodicSweeper(ctx context.Context, interval time.Duration, maxAgeDays int) {
+	if m.db == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 6 * time.Hour
+	}
+	if maxAgeDays <= 0 {
+		maxAgeDays = 7
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				m.PruneOldRuns(maxAgeDays)
+				m.cleanupStaleRunning()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	m.logger.Info("subagent periodic sweeper started",
+		"interval", interval, "max_age_days", maxAgeDays)
 }
 
 // SpawnParams holds parameters for spawning a subagent.

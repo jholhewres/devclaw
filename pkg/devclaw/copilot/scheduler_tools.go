@@ -46,6 +46,14 @@ func RegisterSchedulerDispatcher(executor *ToolExecutor, sched *scheduler.Schedu
 						"type":        "string",
 						"description": "Target chat/group ID",
 					},
+					"isolate_session": map[string]any{
+						"type":        "boolean",
+						"description": "Run each execution in its own isolated session (prevents cron output from polluting conversation history)",
+					},
+					"as_subagent": map[string]any{
+						"type":        "boolean",
+						"description": "Run as a subagent for full isolation (own session, filtered tools, won't block user agent runs)",
+					},
 				},
 				"required": []string{"id", "schedule", "command"},
 			}),
@@ -152,15 +160,20 @@ func handleSchedulerAdd(ctx context.Context, sched *scheduler.Scheduler, skillDB
 		}
 	}
 
+	isolateSession, _ := args["isolate_session"].(bool)
+	asSubagent, _ := args["as_subagent"].(bool)
+
 	job := &scheduler.Job{
-		ID:       id,
-		Schedule: schedule,
-		Type:     jobType,
-		Command:  command,
-		Channel:  channel,
-		ChatID:   chatID,
-		Enabled:  true,
-		Announce: true, // always deliver result back to originating channel
+		ID:             id,
+		Schedule:       schedule,
+		Type:           jobType,
+		Command:        command,
+		Channel:        channel,
+		ChatID:         chatID,
+		Enabled:        true,
+		Announce:       true,
+		IsolateSession: isolateSession,
+		AsSubagent:     asSubagent,
 	}
 
 	if err := sched.Add(job); err != nil {
@@ -250,9 +263,6 @@ func handleSchedulerSearch(skillDB *SkillDB, args map[string]any) (any, error) {
 	fmt.Fprintf(&sb, "Reminders found (%d):\n\n", len(reminders))
 	for _, r := range reminders {
 		status := r.Status
-		if status == "removed" {
-			status = "removed"
-		}
 		fmt.Fprintf(&sb, "- **%s** [%s] type=%s\n  Schedule: %s\n  Command: %s\n  Created: %s\n",
 			r.JobID, status, r.JobType, r.Schedule, r.Command, r.CreatedAt)
 		if r.RemovedAt != "" {

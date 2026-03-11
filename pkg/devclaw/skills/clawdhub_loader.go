@@ -32,6 +32,10 @@ type ClawdHubLoader struct {
 	// dirs is the list of directories to scan for skills.
 	dirs []string
 
+	// sourceTier is the tier assigned to all skills loaded by this loader.
+	// Defaults to TierManaged if not set.
+	sourceTier SourceTier
+
 	// logger for operational messages.
 	logger *slog.Logger
 }
@@ -87,11 +91,20 @@ type InstallSpec struct {
 }
 
 // NewClawdHubLoader creates a loader that scans the given directories.
+// Skills loaded by this instance are assigned TierManaged by default.
 func NewClawdHubLoader(dirs []string, logger *slog.Logger) *ClawdHubLoader {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &ClawdHubLoader{dirs: dirs, logger: logger}
+	return &ClawdHubLoader{dirs: dirs, sourceTier: TierManaged, logger: logger}
+}
+
+// NewClawdHubLoaderWithTier creates a loader with an explicit source tier.
+func NewClawdHubLoaderWithTier(dirs []string, tier SourceTier, logger *slog.Logger) *ClawdHubLoader {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &ClawdHubLoader{dirs: dirs, sourceTier: tier, logger: logger}
 }
 
 // Load scans all configured directories and returns found skills.
@@ -115,9 +128,9 @@ func (l *ClawdHubLoader) Load(ctx context.Context) ([]Skill, error) {
 	return skills, nil
 }
 
-// Source returns the loader source identifier.
+// Source returns the loader source identifier including the tier.
 func (l *ClawdHubLoader) Source() string {
-	return "clawdhub"
+	return fmt.Sprintf("clawdhub:%s", l.sourceTier)
 }
 
 // ---------- Parsing ----------
@@ -156,8 +169,9 @@ func (l *ClawdHubLoader) loadDir(_ context.Context, dir string) ([]Skill, error)
 			continue
 		}
 
-		// Convert to DevClaw skill.
+		// Convert to DevClaw skill and assign the loader's source tier.
 		skill := NewScriptSkill(def)
+		skill.meta.SourceTier = l.sourceTier
 		skills = append(skills, skill)
 
 		l.logger.Debug("clawdhub: loaded skill",

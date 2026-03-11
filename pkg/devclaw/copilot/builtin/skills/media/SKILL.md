@@ -1,7 +1,7 @@
 ---
 name: media
 description: "Handle images, audio, and document files for messaging channels"
-trigger: automatic
+trigger: on-demand
 ---
 
 # Media Tools
@@ -12,8 +12,8 @@ Process and send media files (images, audio, documents) through messaging channe
 
 | Regra | Motivo |
 |-------|--------|
-| **SEMPRE** use `send_document` para enviar PDFs | Criar arquivo ≠ enviar |
-| **SEMPRE** use `send_image` para enviar imagens | Não apenas criar |
+| **SEMPRE** use `send_media` para enviar arquivos | Criar arquivo ≠ enviar |
+| Use `type` para forçar tipo (image/audio/document) | Auto-detecta se omitido |
 | Use `caption` para contexto | Ajuda usuário entender o arquivo |
 | Verifique se arquivo existe antes de enviar | Evita erros |
 
@@ -27,10 +27,10 @@ Agente: "O PDF está em /tmp/arquivo.pdf"     ❌ (não enviou!)
 ### ✓ Correto
 ```
 Usuário: "Me envia o PDF"
-Agente: send_document(                        ✓
-  document_path="/tmp/arquivo.pdf",
-  caption="Lista de compras",
-  filename="lista.pdf"
+Agente: send_media(                           ✓
+  file_path="/tmp/arquivo.pdf",
+  type="document",
+  caption="Lista de compras"
 )
 Agente: "Enviado!"                            ✓
 ```
@@ -48,10 +48,9 @@ Agente: "Enviado!"                            ✓
 ┌───────────────┐                    ┌───────────────┐
 │  INPUT MEDIA  │                    │ OUTPUT MEDIA  │
 ├───────────────┤                    ├───────────────┤
-│describe_image │                    │  send_image   │
-│transcribe_audio                    │  send_audio   │
-└───────┬───────┘                    │ send_document │
-        │                            └───────┬───────┘
+│describe_image │                    │  send_media   │
+│transcribe_audio                    │ (unified tool)│
+└───────┬───────┘                    └───────┬───────┘
         │                                    │
         ▼                                    ▼
 ┌───────────────┐                    ┌───────────────┐
@@ -66,16 +65,17 @@ Agente: "Enviado!"                            ✓
 |------|--------|----------|
 | `describe_image` | Analyze image with AI vision | User sends image |
 | `transcribe_audio` | Convert audio to text | User sends voice message |
-| `send_image` | **SEND** image to user | User needs visual response |
-| `send_audio` | **SEND** audio file | User needs audio response |
-| `send_document` | **SEND** PDF/document | User needs document |
+| `send_media` | **SEND** any media to user | User needs file (image, audio, document) |
 
 ## Input Processing
 
 ### Image Analysis
 
+Images sent by the user are automatically analyzed by the media enrichment pipeline.
+The `describe_image` tool accepts `image_base64` (base64-encoded data), not file paths:
+
 ```bash
-describe_image(image_path="/tmp/photo.jpg")
+describe_image(image_base64="<base64 data>", prompt="What is in this image?")
 # Output:
 # The image shows a green fern plant in a white ceramic pot.
 # The plant appears healthy with several fronds.
@@ -83,8 +83,11 @@ describe_image(image_path="/tmp/photo.jpg")
 
 ### Audio Transcription
 
+Audio messages are automatically transcribed by the media enrichment pipeline.
+The `transcribe_audio` tool accepts `audio_base64` (base64-encoded data):
+
 ```bash
-transcribe_audio(audio_path="/tmp/voice.ogg")
+transcribe_audio(audio_base64="<base64 data>", filename="voice.ogg")
 # Output:
 # "Olá, gostaria de saber sobre a entrega."
 ```
@@ -93,15 +96,15 @@ transcribe_audio(audio_path="/tmp/voice.ogg")
 
 ### ⚠️ CRÍTICO: Sempre Envie!
 
-Quando usuário pedir para enviar arquivo, USE a ferramenta de envio:
+Quando usuário pedir para enviar arquivo, USE `send_media`:
 
 ### Send Document (PDF, DOC, etc)
 
 ```bash
-send_document(
-  document_path="/tmp/report.pdf",
-  caption="Relatório Mensal - Fevereiro 2026",
-  filename="relatorio-fev-2026.pdf"
+send_media(
+  file_path="/tmp/report.pdf",
+  type="document",
+  caption="Relatório Mensal - Fevereiro 2026"
 )
 # Output: Document sent successfully
 ```
@@ -109,8 +112,9 @@ send_document(
 ### Send Image
 
 ```bash
-send_image(
-  image_path="/tmp/chart.png",
+send_media(
+  file_path="/tmp/chart.png",
+  type="image",
   caption="Gráfico de vendas do mês"
 )
 # Output: Image sent successfully
@@ -119,11 +123,22 @@ send_image(
 ### Send Audio
 
 ```bash
-send_audio(
-  audio_path="/tmp/response.mp3",
+send_media(
+  file_path="/tmp/response.mp3",
+  type="audio",
   caption="Resposta em áudio"
 )
 # Output: Audio sent successfully
+```
+
+### Auto-detect Type (omit type param)
+
+```bash
+send_media(
+  file_path="/tmp/photo.jpg",
+  caption="Foto da entrega"
+)
+# type auto-detected as "image" from MIME type
 ```
 
 ## Supported Formats
@@ -144,11 +159,11 @@ bash(command="python3 scripts/create_pdf.py --output /tmp/lista.pdf")
 # 2. Verificar se criou
 bash(command="ls -lh /tmp/lista.pdf")
 
-# 3. ENVIAR (não apenas informar que existe!)
-send_document(
-  document_path="/tmp/lista.pdf",
-  caption="Lista de Compras",
-  filename="lista.pdf"
+# 3. ENVIAR (CRÍTICO!)
+send_media(
+  file_path="/tmp/lista.pdf",
+  type="document",
+  caption="Lista de Compras"
 )
 
 # 4. Confirmar
@@ -161,31 +176,28 @@ send_message("PDF enviado!")
 bash(command="python scripts/generate_chart.py --output /tmp/sales.png")
 
 # 2. ENVIAR
-send_image(
-  image_path="/tmp/sales.png",
+send_media(
+  file_path="/tmp/sales.png",
+  type="image",
   caption="Vendas por categoria - Últimos 30 dias"
 )
 ```
 
 ### User Sends Image → Analyze
 ```bash
-# User sends photo
+# User sends photo → automatically enriched by pipeline
+# The image description is added to the message context
 
-# 1. Analyze
-describe_image(image_path="/tmp/plant.jpg")
-
-# 2. Respond based on analysis
+# Agent sees the description and responds:
 send_message("Essa é uma Samambaia! Ela gosta de luz indireta e rega quando o topo da terra estiver seco.")
 ```
 
 ### User Sends Voice → Transcribe
 ```bash
-# User sends voice message
+# User sends voice message → automatically transcribed by pipeline
+# The transcription is added to the message context
 
-# 1. Transcribe
-transcribe_audio(audio_path="/tmp/voice.ogg")
-
-# 2. Process and respond
+# Agent sees the transcription and responds:
 send_message("Entendi! Vou verificar isso para você.")
 ```
 
@@ -213,10 +225,10 @@ bash(command="ls -lh /tmp/lista.pdf")
 # Output: -rw-r--r-- 1 user user 1.7K Feb 24 14:36 /tmp/lista.pdf
 
 # PASSO 3: ENVIAR (CRÍTICO!)
-send_document(
-  document_path="/tmp/lista.pdf",
-  caption="Lista de Compras",
-  filename="lista-compras.pdf"
+send_media(
+  file_path="/tmp/lista.pdf",
+  type="document",
+  caption="Lista de Compras"
 )
 # Output: Document sent successfully
 
@@ -238,7 +250,7 @@ bash(command="ls -la /tmp/arquivo.pdf")
 
 ### Arquivo não chegou no WhatsApp
 
-**Causa:** Não usou `send_document`/`send_image`.
+**Causa:** Não usou `send_media`.
 
 **Solução:**
 ```bash
@@ -246,7 +258,7 @@ bash(command="ls -la /tmp/arquivo.pdf")
 bash(command="ls /tmp/arquivo.pdf")
 
 # ✓ Correto - envia
-send_document(document_path="/tmp/arquivo.pdf", caption="...")
+send_media(file_path="/tmp/arquivo.pdf", type="document", caption="...")
 ```
 
 ### "Unsupported format"
@@ -257,7 +269,7 @@ send_document(document_path="/tmp/arquivo.pdf", caption="...")
 ```bash
 # Converter formato
 bash(command="ffmpeg -i input.wav output.mp3")
-send_audio(audio_path="/tmp/output.mp3")
+send_media(file_path="/tmp/output.mp3", type="audio")
 ```
 
 ### "File too large"
@@ -268,14 +280,14 @@ send_audio(audio_path="/tmp/output.mp3")
 ```bash
 # Comprimir
 bash(command="gs -sDEVICE=pdfwrite -dPDFSETTINGS=/ebook -o small.pdf large.pdf")
-send_document(document_path="/tmp/small.pdf", caption="...")
+send_media(file_path="/tmp/small.pdf", type="document", caption="...")
 ```
 
 ## Tips
 
-- **Sempre use send_* tools**: Criar arquivo não é enviar
+- **Sempre use send_media**: Criar arquivo não é enviar
 - **Adicione caption**: Dá contexto ao arquivo
-- **Use filename claro**: Facilita identificação
+- **Use type quando souber**: Evita erros de auto-detecção
 - **Verifique tamanho**: Arquivos grandes podem falhar
 - **Comprima se necessário**: Envio mais rápido
 
@@ -283,7 +295,7 @@ send_document(document_path="/tmp/small.pdf", caption="...")
 
 | Erro | Correção |
 |------|----------|
-| Apenas criar arquivo, não enviar | Usar `send_document`/`send_image` |
+| Apenas criar arquivo, não enviar | Usar `send_media` |
 | Sem caption | Adicionar descrição no caption |
 | Caminho errado | Verificar com `ls` antes |
 | Formato não suportado | Converter para formato aceito |

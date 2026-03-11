@@ -150,6 +150,8 @@ func DefaultToolGuardConfig() ToolGuardConfig {
 			// Web.
 			"web_search": "user",
 			"web_fetch":  "user",
+			// Media.
+			"send_media": "user",
 		},
 	}
 }
@@ -166,12 +168,18 @@ var ToolGroups = map[string][]string{
 	"group:fs":        {"read_file", "write_file", "edit_file", "list_files", "search_files", "glob_files"},
 	"group:runtime":   {"bash", "exec", "ssh", "scp", "set_env"},
 	"group:subagents": {"spawn_subagent", "list_subagents", "wait_subagent", "stop_subagent"},
-	"group:skills":    {"skill_init", "skill_edit", "skill_add_script", "skill_list", "skill_test", "skill_install", "skill_defaults_list", "skill_defaults_install", "skill_remove"},
+	"group:skills": {
+		"get_skill_instructions", "get_skill_reference",
+		"skill_list", "skill_install", "skill_init",
+		"skill_edit", "skill_add_script", "skill_test",
+		"skill_defaults_list", "skill_defaults_install", "skill_remove",
+	},
 	"group:scheduler": {"scheduler", "scheduler_add", "scheduler_list", "scheduler_remove", "scheduler_search"},
 	"group:vault":     {"vault", "vault_status", "vault_save", "vault_get", "vault_list", "vault_delete"},
 	"group:sessions":  {"sessions"},
 	"group:daemon":    {"daemon"},
-	"group:media":     {"describe_image", "transcribe_audio", "image-gen_generate_image"},
+	"group:media":     {"describe_image", "transcribe_audio", "send_media", "image-gen_generate_image"},
+	"group:skill_db":  {"skill_db_query", "skill_db_list_tables", "skill_db_insert", "skill_db_update", "skill_db_delete", "skill_db_create_table", "skill_db_describe", "skill_db_drop_table"},
 	"group:browser":   {"browser", "browser_navigate", "browser_screenshot", "browser_content", "browser_click", "browser_fill", "browser_snapshot", "browser_tabs", "browser_open_tab", "browser_focus_tab", "browser_close_tab", "browser_act"},
 	"group:teams": {
 		"team_manage",

@@ -31,6 +31,18 @@ func TestStripInternalTags(t *testing.T) {
 		{"tool_provenance tag", "<tool_provenance>cron_list</tool_provenance>\nNo jobs.", "No jobs."},
 		{"tool_provenace typo tag", "<tool_provenace>scheduler_add; web_search,web_fetch</tool_provenace>\nDone!", "Done!"},
 		{"skill_provenance tag", "<skill_provenance>list_capabilities; skill_test; skill_db_query</skill_provenance>\nReady.", "Ready."},
+
+		// Previous tool calls header (LLM echoing history context)
+		{"prev tool calls header", "[Previous tool calls in this turn:]\nHello", "Hello"},
+		{"prev tool calls with lines", "[Previous tool calls in this turn:]\n• get_skill_instructions → \"---\\nname: claw-connect...\"\n• vault → \"ic_abc123\"\nHere is the result.", "Here is the result."},
+		{"tool call line bullet", "• bash → \"curl -s https://example.com\"\nDone", "Done"},
+		{"tool call line dash", "- web_fetch → \"Status: 200\"\nOK", "OK"},
+		{"tool call line star", "* skill_db_query → \"{\\\"count\\\":4}\"\nFound 4.", "Found 4."},
+
+		// Fake system messages fabricated by the LLM
+		{"fake system msg", "System: Quoting is not enabled on this channel.\nHello", "Hello"},
+		{"fake system msg brackets", "[System]: This feature is not available.\nOK", "OK"},
+		{"fake system msg multiword", "System: Quoting functionality should only be used on channels that support it (webui). Using it on a channel that doesn't support it will likely fail.\nResponse here", "Response here"},
 	}
 
 	for _, tt := range tests {

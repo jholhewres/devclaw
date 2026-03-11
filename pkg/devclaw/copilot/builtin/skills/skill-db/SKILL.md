@@ -1,7 +1,7 @@
 ---
 name: skill-db
 description: "Database for skills to store structured data (contacts, tasks, notes, CRM)"
-trigger: automatic
+trigger: on-demand
 ---
 
 # Skill Database
