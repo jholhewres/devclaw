@@ -206,7 +206,7 @@ func RegisterNativeMediaTools(executor *ToolExecutor, mediaSvc *media.MediaServi
 }
 
 func registerSendImageTool(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
-	executor.RegisterHidden(
+	executor.Register(
 		MakeToolDefinition("send_image", "Send an image to the user via media_id, file path, or URL.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -243,7 +243,7 @@ func registerSendImageTool(executor *ToolExecutor, mediaSvc *media.MediaService,
 }
 
 func registerSendAudioTool(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
-	executor.RegisterHidden(
+	executor.Register(
 		MakeToolDefinition("send_audio", "Send an audio file to the user via media_id, file path, or URL.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -276,7 +276,7 @@ func registerSendAudioTool(executor *ToolExecutor, mediaSvc *media.MediaService,
 }
 
 func registerSendDocumentTool(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
-	executor.RegisterHidden(
+	executor.Register(
 		MakeToolDefinition("send_document", "Send a document to the user via media_id, file path, or URL.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
