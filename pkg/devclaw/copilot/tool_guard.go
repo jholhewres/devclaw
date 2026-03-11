@@ -166,7 +166,12 @@ var ToolGroups = map[string][]string{
 	"group:fs":        {"read_file", "write_file", "edit_file", "list_files", "search_files", "glob_files"},
 	"group:runtime":   {"bash", "exec", "ssh", "scp", "set_env"},
 	"group:subagents": {"spawn_subagent", "list_subagents", "wait_subagent", "stop_subagent"},
-	"group:skills":    {"skill_init", "skill_edit", "skill_add_script", "skill_list", "skill_test", "skill_install", "skill_defaults_list", "skill_defaults_install", "skill_remove"},
+	"group:skills": {
+		"get_skill_instructions", "get_skill_reference",
+		"skill_list", "skill_install", "skill_init",
+		"skill_edit", "skill_add_script", "skill_test",
+		"skill_defaults_list", "skill_defaults_install", "skill_remove",
+	},
 	"group:scheduler": {"scheduler", "scheduler_add", "scheduler_list", "scheduler_remove", "scheduler_search"},
 	"group:vault":     {"vault", "vault_status", "vault_save", "vault_get", "vault_list", "vault_delete"},
 	"group:sessions":  {"sessions"},
