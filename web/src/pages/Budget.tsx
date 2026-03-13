@@ -33,10 +33,10 @@ interface UsageData {
   request_count: number
 }
 
-const ACTIONS = [
-  { value: 'warn', label: 'Warn only (continue using)' },
-  { value: 'block', label: 'Block requests' },
-  { value: 'fallback_local', label: 'Fallback to local model' },
+const ACTION_KEYS = [
+  { value: 'warn', key: 'budget.actionWarn' },
+  { value: 'block', key: 'budget.actionBlock' },
+  { value: 'fallback_local', key: 'budget.actionFallback' },
 ]
 
 // Progress bar component
@@ -232,7 +232,7 @@ export function Budget() {
           <ConfigSelect
             value={config.action_at_limit}
             onChange={(v) => setConfig(prev => prev ? { ...prev, action_at_limit: v } : prev)}
-            options={ACTIONS}
+            options={ACTION_KEYS.map(o => ({ value: o.value, label: t(o.key) }))}
           />
         </ConfigField>
       </ConfigSection>

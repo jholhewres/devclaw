@@ -154,7 +154,7 @@ export function useChat(sessionId: string | null) {
         const data = event.data as { tool: string; input: Record<string, unknown> };
         const toolMsg: MessageInfo = {
           role: 'tool',
-          content: `Usando: ${data.tool}`,
+          content: data.tool,
           timestamp: new Date().toISOString(),
           tool_name: data.tool,
           tool_input: JSON.stringify(data.input, null, 2),
@@ -166,12 +166,13 @@ export function useChat(sessionId: string | null) {
         break;
       }
       case 'tool_result': {
-        const data = event.data as { tool: string; output: string };
+        const data = event.data as { tool: string; output: string; is_error?: boolean };
         const resultMsg: MessageInfo = {
           role: 'tool',
           content: data.output,
           timestamp: new Date().toISOString(),
           tool_name: data.tool,
+          is_error: data.is_error,
         };
         setState((s) => ({
           ...s,
@@ -233,7 +234,7 @@ export function useChat(sessionId: string | null) {
     if (streamContentRef.current) {
       const msg: MessageInfo = {
         role: 'assistant',
-        content: `${streamContentRef.current}\n\n*[Abortado]*`,
+        content: `${streamContentRef.current}\n\n*[Aborted]*`,
         timestamp: new Date().toISOString(),
       };
       setState((s) => ({

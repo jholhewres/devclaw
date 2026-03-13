@@ -6,6 +6,7 @@
 import { CheckCircle2 } from 'lucide-react'
 import type { ProviderDef } from '@/lib/providers'
 import { getProviderIcon } from '@/lib/providers'
+import { cn } from '@/lib/utils'
 
 export interface ProviderCardProps {
   provider: ProviderDef
@@ -27,18 +28,15 @@ export function ProviderCard({
   const color = accentColor || provider.color || '#64748b'
   const icon = getProviderIcon(provider.value)
 
-  const sizeClasses = size === 'sm'
-    ? 'p-2.5 gap-1'
-    : 'p-4 gap-2'
-
   return (
     <button
       onClick={onClick}
-      className={`relative flex flex-col items-center justify-center rounded-xl border transition-all cursor-pointer ${sizeClasses} ${
-        isSelected
-          ? ''
-          : 'border-border bg-bg-main hover:border-border-hover hover:bg-bg-surface'
-      }`}
+      className={cn(
+        'relative flex cursor-pointer flex-col items-center justify-center rounded-xl border transition-all',
+        size === 'sm' ? 'gap-1 p-2.5' : 'gap-2 p-4',
+        !isSelected &&
+          'border-border bg-bg-main hover:border-border-hover hover:bg-bg-surface',
+      )}
       style={isSelected ? {
         borderColor: `${color}80`,
         backgroundColor: `${color}15`,
@@ -46,13 +44,16 @@ export function ProviderCard({
       title={provider.description}
     >
       {isSelected && (
-        <div className="absolute top-2 right-2">
+        <div className="absolute right-2 top-2">
           <CheckCircle2 className="h-4 w-4" style={{ color }} />
         </div>
       )}
 
       <div
-        className={`flex items-center justify-center rounded-lg ${size === 'sm' ? 'h-8 w-8' : 'h-10 w-10'}`}
+        className={cn(
+          'flex items-center justify-center rounded-lg',
+          size === 'sm' ? 'h-8 w-8' : 'h-10 w-10',
+        )}
         style={{ backgroundColor: `${color}20` }}
       >
         <div style={{ color }}>
@@ -61,13 +62,17 @@ export function ProviderCard({
       </div>
 
       <span
-        className={`font-medium ${size === 'sm' ? 'text-[10px]' : 'text-sm'} ${isSelected ? 'text-text-primary' : 'text-text-secondary'}`}
+        className={cn(
+          'font-medium',
+          size === 'sm' ? 'text-[10px]' : 'text-sm',
+          isSelected ? 'text-text-primary' : 'text-text-secondary',
+        )}
       >
         {provider.label}
       </span>
 
       {showDescription && size === 'md' && (
-        <span className="text-[10px] text-text-muted text-center line-clamp-1">
+        <span className="line-clamp-1 text-center text-[10px] text-text-muted">
           {provider.description}
         </span>
       )}
@@ -90,21 +95,27 @@ export function ProviderCardCompact({
   return (
     <button
       onClick={onClick}
-      className={`flex cursor-pointer flex-col items-center gap-1 rounded-xl border px-2 py-2.5 text-center transition-all ${
-        isSelected
-          ? ''
-          : 'border-border bg-bg-main hover:border-border-hover hover:bg-bg-surface'
-      }`}
+      className={cn(
+        'flex cursor-pointer flex-col items-center gap-1 rounded-xl border px-2 py-2.5 text-center transition-all',
+        !isSelected &&
+          'border-border bg-bg-main hover:border-border-hover hover:bg-bg-surface',
+      )}
       style={isSelected ? {
         borderColor: `${color}80`,
         backgroundColor: `${color}15`,
       } : undefined}
       title={provider.description}
     >
-      <div style={isSelected ? { color } : undefined} className={isSelected ? '' : 'text-text-muted'}>
+      <div
+        className={cn(!isSelected && 'text-text-muted')}
+        style={isSelected ? { color } : undefined}
+      >
         {icon}
       </div>
-      <span className={`text-[10px] font-medium ${isSelected ? 'text-text-primary' : 'text-text-secondary'}`}>
+      <span className={cn(
+        'text-[10px] font-medium',
+        isSelected ? 'text-text-primary' : 'text-text-secondary',
+      )}>
         {provider.label}
       </span>
     </button>

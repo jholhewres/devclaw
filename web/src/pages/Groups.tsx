@@ -24,10 +24,10 @@ interface GroupsConfig {
   quiet_hours_end: string;
 }
 
-const ACTIVATION_MODES = [
-  { value: 'always', label: 'Always (respond to all messages)' },
-  { value: 'mention', label: 'Mention only (respond when mentioned)' },
-  { value: 'reply', label: 'Reply only (respond when replied to)' },
+const ACTIVATION_MODE_KEYS = [
+  { value: 'always', key: 'groups.modeAlways' },
+  { value: 'mention', key: 'groups.modeMention' },
+  { value: 'reply', key: 'groups.modeReply' },
 ];
 
 export function Groups() {
@@ -45,8 +45,7 @@ export function Groups() {
       .then((data) => {
         const groups = (data as unknown as { groups?: GroupsConfig }).groups || {
           activation_mode: 'mention',
-          intro_message:
-            "Hi! I'm {{name}}, your AI assistant. Mention me with {{trigger}} to get help!",
+          intro_message: t('groups.defaultIntroMessage'),
           max_participants: 100,
           quiet_hours_enabled: false,
           quiet_hours_start: '22:00',
@@ -114,7 +113,7 @@ export function Groups() {
           <ConfigSelect
             value={config.activation_mode}
             onChange={(v) => setConfig((prev) => (prev ? { ...prev, activation_mode: v } : prev))}
-            options={ACTIVATION_MODES}
+            options={ACTIVATION_MODE_KEYS.map(o => ({ value: o.value, label: t(o.key) }))}
           />
         </ConfigField>
 
@@ -139,7 +138,7 @@ export function Groups() {
           <ConfigTextarea
             value={config.intro_message}
             onChange={(v) => setConfig((prev) => (prev ? { ...prev, intro_message: v } : prev))}
-            placeholder="Hi! I'm {{name}}, your AI assistant. Mention me with {{trigger}} to get help!"
+            placeholder={t('groups.defaultIntroMessage')}
             rows={3}
           />
         </ConfigField>

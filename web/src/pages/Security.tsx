@@ -483,7 +483,7 @@ function AuditLogSection({ entryCount }: { entryCount: number }) {
                       </span>
                     )}
                   </td>
-                  <td className="px-5 py-2.5 text-right text-text-muted">{timeAgo(e.created_at)}</td>
+                  <td className="px-5 py-2.5 text-right text-text-muted">{timeAgo(e.created_at, t)}</td>
                 </tr>
               ))}
             </tbody>

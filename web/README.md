@@ -1,90 +1,56 @@
 # Frontend Guidelines
 
-This document provides guidelines for React/TypeScript frontend development.
-
 ## Tech Stack
 
-- React 18+ TypeScript
-- Vite (build tool)
-- Tailwind CSS
-- react-i18next (internationalization)
-- Untitled UI (icons)
+React 19 · TypeScript · Vite · Tailwind CSS 4 · react-i18next · lucide-react · Zustand · Vitest
 
-## Code Quality
+## Commands
 
 ```bash
-npm run lint        # Check for code issues
-npm run lint:fix    # Auto-fix ESLint issues
-npm run format      # Format with Prettier
+npm run dev         # Dev server
+npm run build       # Production build (tsc + vite)
+npm run lint        # ESLint
+npm run test        # Vitest
 ```
 
-Configured with ESLint + Prettier (single quotes, semicolons, 100 char width). Run `lint:fix` to fix and format in one go.
+## Structure
 
-## Tailwind CSS & Styling
-
-- **Semantic colors**: Use configured classes (not `var()`)
-- **Conditional classes**: Use `cx` utility from `@/utils/cx` (not template literals)
-- **Mobile-first**: Use breakpoint prefixes like `sm:flex-row`, `md:p-6`
-
-**Available semantic classes:**
-- Text: `text-primary`, `text-secondary`, `text-muted`, `text-tertiary`, `text-quaternary`
-- Background: `bg-main`, `bg-surface`, `bg-subtle`, `bg-elevated`
-- Border: `border`
-- Brand: `brand`, `brand-hover`
-- Status: `success`, `error`, `warning`, `info`
-- Radius: `radius-sm/md/lg/xl/2xl`
-
-## Components
-
-- **Check existing**: Look in `components/base/` and `components/application/` before creating new
-- **Named exports**: Use `export const ComponentName = ...` (not default exports)
-- **Imports**: Use `@/` alias (not relative paths like `../../components/...`)
-- **Naming**: Files/Components in PascalCase, hooks in camelCase with `use` prefix
-
-**File structure**:
 ```
-components/base/      # UI components (Button, Input, Toggle)
-components/application/  # App components (modals, tabs)
-pages/               # Routes
-lib/                 # API layer
-utils/               # Pure functions
-icons/               # Custom icons
+components/ui/   # Reusable: Button, Card, Modal, Input, Select, Toggle, Badge, etc.
+components/      # App-level: ChatMessage, ChatInput, Sidebar, Navbar
+pages/           # Route pages (Setup/ for wizard)
+layouts/         # AppLayout, SettingsLayout
+hooks/           # useChat, useSSE
+stores/          # Zustand (app.ts)
+lib/             # api.ts, utils.ts (cn, timeAgo, truncate)
+i18n/            # en.json, pt.json, es.json
 ```
 
-## Icons
+## Conventions
 
-- **Untitled UI**: Import directly from `@untitledui/icons` (don't create wrappers)
-- **Custom icons**: Create in `web/src/icons/` for project-specific icons
+- **Icons**: `lucide-react` — `import { Settings } from 'lucide-react'`
+- **Classes**: `cn()` from `@/lib/utils` (clsx + tailwind-merge)
+- **Imports**: `@/` alias, never relative `../../`
+- **i18n**: `t('namespace.key')` — no hardcoded text. Add keys to all 3 files.
+- **API**: `api.*()` from `@/lib/api` — never raw fetch
+- **State**: `useState` local, Zustand (`@/stores/app`) global
+- **Exports**: Named `export function X`, not default
 
-**Untitled UI MCP setup (optional):**
-```bash
-claude mcp add untitledui --transport http https://www.untitledui.com/react/api/mcp
-```
+## Design Tokens
 
-Use MCP for discovering appropriate icons and validating design system components.
+Defined in `index.css` via `@theme`. Always use semantic classes:
 
-## Code Patterns
+- Text: `text-text-primary`, `text-text-secondary`, `text-text-muted`
+- Background: `bg-bg-main`, `bg-bg-surface`, `bg-bg-subtle`
+- Brand: `bg-brand`, `bg-brand-hover`
+- Border: `border-border`
+- Status: `text-success`, `text-error`, `text-warning`
 
-- **State**: Use `useState` for local, lift up when needed
-- **API**: Always use `api.*()` from `@/lib/api` (not direct fetch)
-- **i18n**: Use `useTranslation()` and `t('page.section.key')` (no hardcoded text)
-- **Errors**: Show user feedback via toast (import `useToast` from `@/contexts/ToastContext`)
-- **Loading/Empty**: Use spinners for loading, `EmptyState` component for empty lists
+Dark mode: handled via `.dark` class — tokens switch automatically.
 
-## TypeScript & Comments
+## Don'ts
 
-- **Strict typing**: Always type props and interfaces, use `unknown` instead of `any`
-- **Comments**: Only for complex logic ("why", not "what")
-
-## Anti-patterns
-
-1. Don't recreate existing components - check `components/` first
-2. Don't use native Tailwind colors - use semantic classes
-3. Don't use long relative imports - use `@/` alias
-4. Don't leave hardcoded text - use i18n
-5. Don't use template literals for className - use `cx`
-6. Don't create wrappers for Untitled UI icons - import directly
-
-## Untitled UI MCP
-
-When available, use for discovering icons and validating design system components (optional but recommended).
+- Raw Tailwind colors (`bg-gray-100`) — use tokens (`bg-bg-subtle`)
+- Hardcoded text — use `t()`
+- Template literals in className — use `cn()`
+- New components without checking `components/ui/` first

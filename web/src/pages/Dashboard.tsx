@@ -33,8 +33,11 @@ export function Dashboard() {
   const navigate = useNavigate()
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [fetchError, setFetchError] = useState(false)
 
-  useEffect(() => {
+  const fetchData = () => {
+    setLoading(true)
+    setFetchError(false)
     api.dashboard()
       .then(setData)
       .catch(() => {
@@ -45,9 +48,13 @@ export function Dashboard() {
           api.jobs.list().catch(() => []),
         ]).then(([sessions, usage, channels, jobs]) => {
           setData({ sessions, usage, channels, jobs })
-        })
+        }).catch(() => setFetchError(true))
       })
       .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    fetchData()
   }, [])
 
   if (loading) {
@@ -58,7 +65,20 @@ export function Dashboard() {
     )
   }
 
-  if (!data) return null
+  if (fetchError || !data) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center bg-bg-main">
+        <p className="text-sm text-error">{t('common.loadError.title')}</p>
+        <p className="mt-1 text-xs text-text-muted">{t('common.loadError.description')}</p>
+        <button
+          onClick={fetchData}
+          className="mt-3 cursor-pointer text-xs text-brand transition-colors hover:text-brand-hover"
+        >
+          {t('common.loadError.retry')}
+        </button>
+      </div>
+    )
+  }
 
   const channels = data.channels ?? []
   const jobs = data.jobs ?? []
@@ -210,7 +230,7 @@ export function Dashboard() {
                     <span className="truncate text-sm text-text-primary">{s.id}</span>
                   </div>
                   <span className="shrink-0 text-[11px] text-text-muted">
-                    {s.message_count} {t('common.msgs')} &middot; {timeAgo(s.last_message_at)}
+                    {s.message_count} {t('common.msgs')} &middot; {timeAgo(s.last_message_at, t)}
                   </span>
                 </div>
               </Card>

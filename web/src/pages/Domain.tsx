@@ -138,19 +138,19 @@ export function Domain() {
         {config && (
           <div className="mt-6 grid grid-cols-3 gap-2.5">
             <Endpoint
-              label="WebUI"
+              label={t('domainPage.webui.title')}
               url={config.webui_url}
               active
               secure={config.webui_auth_configured}
             />
             <Endpoint
-              label="Gateway"
+              label={t('domainPage.gateway.title')}
               url={config.gateway_url}
               active={config.gateway_enabled}
               secure={config.gateway_auth_configured}
             />
             <Endpoint
-              label="Tailscale"
+              label={t('domainPage.tailscale.title')}
               url={config.public_url || config.tailscale_url}
               active={config.tailscale_enabled}
               secure
@@ -160,7 +160,7 @@ export function Domain() {
 
         {/* -- WebUI -- */}
         <Card className="mt-8">
-          <CardHeader icon={Globe} title="Web UI" />
+          <CardHeader icon={Globe} title={t('domainPage.webui.title')} />
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <Field label={t('domain.port')}>
               <Input value={webuiAddress} onChange={setWebuiAddress} placeholder=":8090" />
@@ -180,7 +180,7 @@ export function Domain() {
         {/* -- Gateway -- */}
         <Card className="mt-4">
           <div className="flex items-center justify-between">
-            <CardHeader icon={Server} title="Gateway API" />
+            <CardHeader icon={Server} title={t('domainPage.gateway.title')} />
             <Toggle value={gatewayEnabled} onChange={setGatewayEnabled} />
           </div>
 
@@ -190,7 +190,7 @@ export function Domain() {
                 <Field label={t('domain.port')}>
                   <Input value={gatewayAddress} onChange={setGatewayAddress} placeholder=":8085" />
                 </Field>
-                <Field label="Auth Token">
+                <Field label={t('domain.authToken')}>
                   <PasswordInput
                     value={gatewayToken}
                     onChange={setGatewayToken}
@@ -202,7 +202,7 @@ export function Domain() {
               </div>
 
               {/* CORS */}
-              <Field label="CORS Origins">
+              <Field label={t('domain.corsOrigins')}>
                 <div className="flex flex-wrap gap-1.5">
                   {corsOrigins.map((origin) => (
                     <span
@@ -235,20 +235,20 @@ export function Domain() {
         {/* -- Tailscale -- */}
         <Card className="mt-4 mb-10">
           <div className="flex items-center justify-between">
-            <CardHeader icon={Network} title="Tailscale" />
+            <CardHeader icon={Network} title={t('domainPage.tailscale.title')} />
             <Toggle value={tailscaleEnabled} onChange={setTailscaleEnabled} />
           </div>
 
           {tailscaleEnabled && (
             <div className="mt-5 space-y-3">
               <ToggleRow
-                label="Serve"
+                label={t('domain.serve')}
                 description={t('domain.serveDesc')}
                 value={tailscaleServe}
                 onChange={setTailscaleServe}
               />
               <ToggleRow
-                label="Funnel"
+                label={t('domain.funnel')}
                 description={t('domain.funnelDesc')}
                 value={tailscaleFunnel}
                 onChange={setTailscaleFunnel}
@@ -467,7 +467,7 @@ function Endpoint({
           <ExternalLink className="h-2.5 w-2.5 shrink-0" />
         </a>
       ) : (
-        <p className="mt-1 text-[11px] text-text-muted">{active ? t('common.enabled') : 'Off'}</p>
+        <p className="mt-1 text-[11px] text-text-muted">{active ? t('common.enabled') : t('domain.off')}</p>
       )}
     </div>
   )

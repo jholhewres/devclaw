@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp, Save, RotateCcw, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -356,6 +357,7 @@ interface ConfigTagListProps {
   onAdd?: (tag: string) => void;
   onRemove?: (tag: string) => void;
   addPlaceholder?: string;
+  addLabel?: string;
   readOnly?: boolean;
   emptyMessage?: string;
 }
@@ -365,9 +367,12 @@ export function ConfigTagList({
   onAdd,
   onRemove,
   addPlaceholder = 'Add item...',
+  addLabel,
   readOnly = false,
   emptyMessage = 'No items',
 }: ConfigTagListProps) {
+  const { t } = useTranslation();
+  if (!addLabel) addLabel = t('common.add');
   const [inputValue, setInputValue] = useState('');
 
   const handleAdd = () => {
@@ -432,7 +437,7 @@ export function ConfigTagList({
             disabled={!inputValue.trim()}
             className="h-10 rounded-lg bg-brand px-4 text-sm font-medium text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Add
+            {addLabel}
           </button>
         </div>
       )}
@@ -459,10 +464,14 @@ export function ConfigActions({
   onReset,
   saving = false,
   hasChanges = true,
-  saveLabel = 'Save',
-  savingLabel = 'Saving...',
-  resetLabel = 'Reset',
+  saveLabel,
+  savingLabel,
+  resetLabel,
 }: ConfigActionsProps) {
+  const { t } = useTranslation();
+  if (!saveLabel) saveLabel = t('common.save');
+  if (!savingLabel) savingLabel = t('common.saving');
+  if (!resetLabel) resetLabel = t('common.reset');
   return (
     <div className="flex items-center gap-3">
       {onReset && hasChanges && (
@@ -635,7 +644,10 @@ interface ErrorStateProps {
   retryLabel?: string;
 }
 
-export function ErrorState({ message = 'Error', onRetry, retryLabel = 'Retry' }: ErrorStateProps) {
+export function ErrorState({ message, onRetry, retryLabel }: ErrorStateProps) {
+  const { t } = useTranslation();
+  if (!message) message = t('common.error');
+  if (!retryLabel) retryLabel = t('common.retry');
   return (
     <div className="flex flex-1 flex-col items-center justify-center bg-bg-main">
       <p className="text-sm text-error">{message}</p>

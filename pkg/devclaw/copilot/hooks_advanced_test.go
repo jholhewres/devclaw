@@ -159,6 +159,7 @@ func TestHookManager_DispatchAdvancedHook(t *testing.T) {
 		Description: "Inject context into prompt",
 		Source:      "test",
 		Events:      []HookEvent{HookBeforePromptBuild},
+		Enabled:     true,
 		Handler: func(ctx context.Context, payload HookPayload) HookAction {
 			called = true
 			return HookAction{

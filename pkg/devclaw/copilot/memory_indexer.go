@@ -186,11 +186,15 @@ func (m *MemoryIndexer) Start(ctx context.Context) error {
 	var debounceTimer *time.Timer
 
 	// Event channels (nil-safe: select on nil channel never fires).
+	// Re-read fsWatcher under lock to avoid racing with Stop().
 	var fsEvents <-chan fsnotify.Event
 	var fsErrors <-chan error
-	if m.fsWatcher != nil {
-		fsEvents = m.fsWatcher.Events
-		fsErrors = m.fsWatcher.Errors
+	m.mu.Lock()
+	fsw = m.fsWatcher
+	m.mu.Unlock()
+	if fsw != nil {
+		fsEvents = fsw.Events
+		fsErrors = fsw.Errors
 	}
 
 	for {

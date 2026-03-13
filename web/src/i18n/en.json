@@ -15,6 +15,10 @@
     "ok": "Ok",
     "dismiss": "Dismiss",
     "search": "Search",
+    "back": "Back",
+    "copy": "Copy",
+    "copied": "Copied",
+    "extraModels": "+{{count}} extra models",
     "viewAll": "View all",
     "online": "Online",
     "offline": "Offline",
@@ -30,6 +34,12 @@
     "msgs": "msgs",
     "version": "Version",
     "retry": "Retry",
+    "timeAgo": {
+      "justNow": "just now",
+      "minutesAgo": "{{count}}m ago",
+      "hoursAgo": "{{count}}h ago",
+      "daysAgo": "{{count}}d ago"
+    },
     "loadError": {
       "title": "Failed to load",
       "description": "Could not load data. Check your connection and try again.",
@@ -133,7 +143,9 @@
     "telegramDesc": "Exchange messages with your super agent using Telegram.",
     "discordDesc": "Chat with your super agent on Discord servers and channels.",
     "slackDesc": "Call your super agent in Slack conversations and channels.",
-    "backToChannels": "Back to channels"
+    "backToChannels": "Back to channels",
+    "errorCount": "{{count}} error(s)",
+    "supportedChannels": "WhatsApp, Discord, Telegram, Slack"
   },
   "settingsPage": {
     "title": "Settings",
@@ -297,7 +309,8 @@
     "policyAllow": "Allow (allowed by default)",
     "policyAsk": "Ask (pending approval)",
     "warning": "Important",
-    "warningDesc": "Removing all owners may lock you out of the assistant. Make sure at least one owner is configured."
+    "warningDesc": "Removing all owners may lock you out of the assistant. Make sure at least one owner is configured.",
+    "defaultPendingMessage": "You don't have permission to use this assistant. Please contact the administrator."
   },
   "budget": {
     "title": "Budget & Usage",
@@ -354,7 +367,14 @@
     "bm25Weight": "BM25 (Keyword) Weight",
     "weightsHint": "Vector search is semantic, BM25 is keyword-based. Total must be 100%.",
     "maxResults": "Max Results",
-    "maxResultsHint": "Maximum number of results to return"
+    "maxResultsHint": "Maximum number of results to return",
+    "storageSqlite": "SQLite (Recommended)",
+    "storageFile": "File-based",
+    "compressionSummarize": "Summarize old messages",
+    "compressionTruncate": "Truncate old messages",
+    "compressionSemantic": "Semantic pruning",
+    "providerOpenai": "OpenAI",
+    "providerLocal": "Local (Ollama)"
   },
   "database": {
     "title": "Database",
@@ -396,7 +416,23 @@
     "vectorDimensions": "Dimensions",
     "vectorDimensionsHint": "1536 for OpenAI, 768 for local models",
     "vectorIndexType": "Index Type",
-    "vectorIndexTypeHint": "HNSW is faster, IVFFlat uses less memory"
+    "vectorIndexTypeHint": "HNSW is faster, IVFFlat uses less memory",
+    "backendSqlite": "SQLite (Default)",
+    "backendPostgresql": "PostgreSQL + pgvector",
+    "journalWal": "WAL (Recommended)",
+    "journalDelete": "Delete",
+    "journalTruncate": "Truncate",
+    "journalPersist": "Persist",
+    "journalMemory": "Memory",
+    "sslDisable": "Disable",
+    "sslRequire": "Require",
+    "sslVerifyCa": "Verify CA",
+    "sslVerifyFull": "Verify Full",
+    "indexHnsw": "HNSW (Recommended)",
+    "indexIvfflat": "IVFFlat",
+    "connectionStats": "{{inUse}} in use, {{idle}} idle",
+    "waitStats": "{{count}} waits",
+    "loadFailed": "Failed to load database configuration"
   },
   "groups": {
     "title": "Group Settings",
@@ -417,7 +453,11 @@
     "quietHoursEnabled": "Enable quiet hours",
     "quietHoursStart": "Start Time",
     "quietHoursEnd": "End Time",
-    "quietHoursHint": "During quiet hours, the assistant won't proactively respond in groups"
+    "quietHoursHint": "During quiet hours, the assistant won't proactively respond in groups",
+    "modeAlways": "Always (respond to all messages)",
+    "modeMention": "Mention only (respond when mentioned)",
+    "modeReply": "Reply only (respond when replied to)",
+    "defaultIntroMessage": "Hi! I'm {{name}}, your AI assistant. Mention me with {{trigger}} to get help!"
   },
   "mcp": {
     "title": "MCP Servers",
@@ -455,17 +495,21 @@
     "pageTitle": "Fine-tune the intelligence behind your DevClaw.",
     "pageDescription": "These choices define what your agent can do and how it communicates with you.",
     "providerModel": "Main AI provider and model",
+    "providerTitle": "Main AI provider and model",
     "providerDesc": "Manage the model that will drive the reasoning and responses of your agent.",
     "provider": "Provider",
     "model": "Model",
     "baseUrl": "Base URL",
+    "baseUrlHint": "Leave empty to use the provider's default URL",
     "apiKey": "API Key",
     "apiKeyConfigured": "configured",
     "apiKeyPlaceholder": "Your API key",
     "apiKeyHint": "Encrypted with AES-256-GCM and stored in local vault",
     "vision": "Image understanding",
+    "visionTitle": "Image understanding",
     "visionDesc": "Allow your agent to \"see\" and explain photos or videos sent to it.",
     "visionToggle": "Enable visual understanding",
+    "visionEnable": "Enable visual understanding",
     "visionModel": "Vision Model",
     "visionModelHint": "If empty, uses the main model",
     "visionQuality": "Quality",
@@ -473,8 +517,10 @@
     "visionQualityLow": "Low (fast, fewer tokens)",
     "visionQualityHigh": "High (detailed, more tokens)",
     "transcription": "Audio transcription",
+    "transcriptionTitle": "Audio transcription",
     "transcriptionDesc": "Allow your agent to listen to audio and voice messages and turn them into written text.",
     "transcriptionToggle": "Enable audio transcription",
+    "transcriptionEnable": "Enable audio transcription",
     "transcriptionModel": "Transcription Model",
     "transcriptionBaseUrl": "API Base URL",
     "transcriptionBaseUrlHint": "Auto-filled when selecting model",
@@ -584,7 +630,20 @@
     "tailscaleHostname": "Hostname",
     "urls": "URLs",
     "publicUrl": "Public URL",
-    "tailscaleUrl": "Tailscale URL"
+    "tailscaleUrl": "Tailscale URL",
+    "port": "Port",
+    "password": "Password",
+    "noPassword": "No password",
+    "noToken": "No token",
+    "addOrigin": "+ add origin",
+    "serveDesc": "HTTPS within your Tailnet",
+    "funnelDesc": "Public HTTPS on the internet",
+    "localPort": "Local port",
+    "serve": "Serve",
+    "funnel": "Funnel",
+    "authToken": "Auth Token",
+    "corsOrigins": "CORS Origins",
+    "off": "Off"
   },
   "webhooks": {
     "title": "Webhooks",

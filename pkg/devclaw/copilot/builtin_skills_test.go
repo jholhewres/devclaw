@@ -56,12 +56,17 @@ func TestBuiltinSkills_FormatForPrompt(t *testing.T) {
 		t.Error("expected non-empty prompt from FormatForPrompt")
 	}
 
-	// Should contain both skills
+	// Should contain automatic skills (memory is automatic)
 	if !strings.Contains(prompt, "Memory") {
 		t.Error("expected prompt to contain Memory section")
 	}
-	if !strings.Contains(prompt, "Teams") {
-		t.Error("expected prompt to contain Teams section")
+
+	// Teams is on-demand, should NOT be in the automatic prompt
+	teamsSkill := skills.Get("teams")
+	if teamsSkill != nil && teamsSkill.Trigger == "on-demand" {
+		if strings.Contains(prompt, "\n## Teams\n") {
+			t.Error("on-demand teams skill should not appear in FormatForPrompt")
+		}
 	}
 }
 

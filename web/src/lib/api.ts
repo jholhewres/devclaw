@@ -56,6 +56,7 @@ export interface MessageInfo {
   timestamp: string;
   tool_name?: string;
   tool_input?: string;
+  is_error?: boolean;
 }
 
 export interface UsageInfo {

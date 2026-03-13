@@ -15,6 +15,10 @@
     "ok": "Ok",
     "dismiss": "Dispensar",
     "search": "Buscar",
+    "back": "Voltar",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "extraModels": "+{{count}} modelos extras",
     "viewAll": "Ver todas",
     "online": "Online",
     "offline": "Offline",
@@ -30,6 +34,12 @@
     "msgs": "msgs",
     "version": "Versão",
     "retry": "Tentar novamente",
+    "timeAgo": {
+      "justNow": "agora",
+      "minutesAgo": "{{count}}min atrás",
+      "hoursAgo": "{{count}}h atrás",
+      "daysAgo": "{{count}}d atrás"
+    },
     "loadError": {
       "title": "Erro ao carregar",
       "description": "Não foi possível carregar os dados. Verifique sua conexão e tente novamente.",
@@ -133,7 +143,9 @@
     "telegramDesc": "Troque mensagens com o seu super agente usando o Telegram.",
     "discordDesc": "Converse com o seu super agente nos servidores e canais do Discord.",
     "slackDesc": "Chame o seu super agente nas conversas e canais do Slack.",
-    "backToChannels": "Voltar para canais"
+    "backToChannels": "Voltar para canais",
+    "errorCount": "{{count}} erro(s)",
+    "supportedChannels": "WhatsApp, Discord, Telegram, Slack"
   },
   "settingsPage": {
     "title": "Configurações",
@@ -297,7 +309,8 @@
     "policyAllow": "Permitir (liberado por padrão)",
     "policyAsk": "Perguntar (pendente de aprovação)",
     "warning": "Importante",
-    "warningDesc": "Remover todos os proprietários pode bloquear seu acesso ao assistente. Certifique-se de que pelo menos um proprietário esteja configurado."
+    "warningDesc": "Remover todos os proprietários pode bloquear seu acesso ao assistente. Certifique-se de que pelo menos um proprietário esteja configurado.",
+    "defaultPendingMessage": "Você não tem permissão para usar este assistente. Entre em contato com o administrador."
   },
   "budget": {
     "title": "Orçamento & Uso",
@@ -354,7 +367,14 @@
     "bm25Weight": "Peso do BM25 (Palavras-chave)",
     "weightsHint": "Busca vetorial é semântica, BM25 é por palavras-chave. Total deve ser 100%.",
     "maxResults": "Máximo de Resultados",
-    "maxResultsHint": "Número máximo de resultados a retornar"
+    "maxResultsHint": "Número máximo de resultados a retornar",
+    "storageSqlite": "SQLite (Recomendado)",
+    "storageFile": "Baseado em arquivo",
+    "compressionSummarize": "Resumir mensagens antigas",
+    "compressionTruncate": "Truncar mensagens antigas",
+    "compressionSemantic": "Poda semântica",
+    "providerOpenai": "OpenAI",
+    "providerLocal": "Local (Ollama)"
   },
   "database": {
     "title": "Banco de Dados",
@@ -396,7 +416,23 @@
     "vectorDimensions": "Dimensões",
     "vectorDimensionsHint": "1536 para OpenAI, 768 para modelos locais",
     "vectorIndexType": "Tipo de Índice",
-    "vectorIndexTypeHint": "HNSW é mais rápido, IVFFlat usa menos memória"
+    "vectorIndexTypeHint": "HNSW é mais rápido, IVFFlat usa menos memória",
+    "backendSqlite": "SQLite (Padrão)",
+    "backendPostgresql": "PostgreSQL + pgvector",
+    "journalWal": "WAL (Recomendado)",
+    "journalDelete": "Delete",
+    "journalTruncate": "Truncate",
+    "journalPersist": "Persist",
+    "journalMemory": "Memory",
+    "sslDisable": "Desabilitado",
+    "sslRequire": "Obrigatório",
+    "sslVerifyCa": "Verificar CA",
+    "sslVerifyFull": "Verificação Completa",
+    "indexHnsw": "HNSW (Recomendado)",
+    "indexIvfflat": "IVFFlat",
+    "connectionStats": "{{inUse}} em uso, {{idle}} ociosas",
+    "waitStats": "{{count}} esperas",
+    "loadFailed": "Falha ao carregar configuração do banco de dados"
   },
   "groups": {
     "title": "Configurações de Grupo",
@@ -417,7 +453,11 @@
     "quietHoursEnabled": "Habilitar horário silencioso",
     "quietHoursStart": "Início",
     "quietHoursEnd": "Fim",
-    "quietHoursHint": "Durante o horário silencioso, o assistente não responderá proativamente em grupos"
+    "quietHoursHint": "Durante o horário silencioso, o assistente não responderá proativamente em grupos",
+    "modeAlways": "Sempre (responder a todas as mensagens)",
+    "modeMention": "Somente menção (responder quando mencionado)",
+    "modeReply": "Somente resposta (responder quando respondido)",
+    "defaultIntroMessage": "Oi! Eu sou o {{name}}, seu assistente de IA. Me mencione com {{trigger}} para obter ajuda!"
   },
   "mcp": {
     "title": "Servidores MCP",
@@ -455,17 +495,21 @@
     "pageTitle": "Ajuste a inteligência que move o seu DevClaw.",
     "pageDescription": "Essas escolhas definem o que seu agente consegue fazer e como ele conversa com você.",
     "providerModel": "Provedor e modelo de IA principal",
+    "providerTitle": "Provedor e modelo de IA principal",
     "providerDesc": "Gerencie o modelo que vai comandar o raciocínio e as respostas do seu agente.",
     "provider": "Provedor",
     "model": "Modelo",
     "baseUrl": "URL Base",
+    "baseUrlHint": "Deixe vazio para usar a URL padrão do provedor",
     "apiKey": "API Key",
     "apiKeyConfigured": "configurada",
     "apiKeyPlaceholder": "Sua API key",
     "apiKeyHint": "Criptografada com AES-256-GCM e armazenada no vault local",
     "vision": "Compreensão de imagens",
+    "visionTitle": "Compreensão de imagens",
     "visionDesc": "Permita que seu agente consiga \"enxergar\" e explicar fotos ou vídeos enviados.",
     "visionToggle": "Ativar compreensão visual",
+    "visionEnable": "Ativar compreensão visual",
     "visionModel": "Modelo de Visão",
     "visionModelHint": "Se vazio, usa o modelo principal",
     "visionQuality": "Qualidade",
@@ -473,8 +517,10 @@
     "visionQualityLow": "Baixa (rápido, menos tokens)",
     "visionQualityHigh": "Alta (detalhado, mais tokens)",
     "transcription": "Transcrição de áudio",
+    "transcriptionTitle": "Transcrição de áudio",
     "transcriptionDesc": "Permita que seu agente ouça áudios e mensagens de voz e as transforme em texto escrito.",
     "transcriptionToggle": "Ativar transcrição de áudio",
+    "transcriptionEnable": "Ativar transcrição de áudio",
     "transcriptionModel": "Modelo de Transcrição",
     "transcriptionBaseUrl": "URL Base da API",
     "transcriptionBaseUrlHint": "Preenchida automaticamente ao selecionar o modelo",
@@ -584,7 +630,20 @@
     "tailscaleHostname": "Hostname",
     "urls": "URLs",
     "publicUrl": "URL Pública",
-    "tailscaleUrl": "URL Tailscale"
+    "tailscaleUrl": "URL Tailscale",
+    "port": "Porta",
+    "password": "Senha",
+    "noPassword": "Sem senha",
+    "noToken": "Sem token",
+    "addOrigin": "+ adicionar origem",
+    "serveDesc": "HTTPS dentro da sua Tailnet",
+    "funnelDesc": "HTTPS público na internet",
+    "localPort": "Porta local",
+    "serve": "Serve",
+    "funnel": "Funnel",
+    "authToken": "Auth Token",
+    "corsOrigins": "CORS Origins",
+    "off": "Off"
   },
   "webhooks": {
     "title": "Webhooks",

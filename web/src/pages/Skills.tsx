@@ -42,13 +42,19 @@ export function Skills() {
       s.description.toLowerCase().includes(search.toLowerCase()),
   )
 
+  const [toggleError, setToggleError] = useState<string | null>(null)
+
   const handleToggle = async (name: string, currentEnabled: boolean) => {
+    setToggleError(null)
     try {
       await api.skills.toggle(name, !currentEnabled)
       setSkills((prev) =>
         prev.map((s) => (s.name === name ? { ...s, enabled: !currentEnabled } : s)),
       )
-    } catch { /* ignore */ }
+    } catch {
+      setToggleError(name)
+      setTimeout(() => setToggleError(null), 3000)
+    }
   }
 
   const handleInstalled = (name: string) => {
@@ -131,6 +137,10 @@ export function Skills() {
             <h3 className="mt-4 text-lg font-semibold text-text-primary">{skill.name}</h3>
             <p className="mt-2 text-sm leading-relaxed text-text-secondary line-clamp-2">{skill.description}</p>
 
+            {toggleError === skill.name && (
+              <p className="mt-2 text-xs text-error">{t('common.error')}</p>
+            )}
+
             <div className="mt-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="flex items-center gap-1.5 rounded-full bg-bg-subtle px-3 py-1 text-xs font-medium text-text-muted">
@@ -209,13 +219,19 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
       s.category?.toLowerCase().includes(search.toLowerCase()),
   )
 
+  const [installError, setInstallError] = useState<string | null>(null)
+
   const handleInstall = async (name: string) => {
     setInstalling(name)
+    setInstallError(null)
     try {
       await api.skills.install(name)
       setInstalled((prev) => new Set([...prev, name]))
       onInstalled(name)
-    } catch { /* ignore */ }
+    } catch {
+      setInstallError(name)
+      setTimeout(() => setInstallError(null), 5000)
+    }
     setInstalling(null)
   }
 
@@ -387,6 +403,11 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
                               <CheckCircle2 className="h-3.5 w-3.5" />
                               {t('skillsPage.installed')}
                             </span>
+                          ) : installError === skill.name ? (
+                            <span className="flex items-center gap-1 text-xs font-medium text-error">
+                              <X className="h-3.5 w-3.5" />
+                              {t('skillsPage.installError', { name: skill.name })}
+                            </span>
                           ) : (
                             <button
                               onClick={() => handleInstall(skill.name)}
@@ -430,7 +451,7 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
                     value={manualName}
                     onChange={(e) => setManualName(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleManualInstall()}
-                    placeholder="ex: docker-manager, api-tester, aws-tools"
+                    placeholder={t('skillsPage.manualInstallPlaceholder')}
                     className="flex-1 rounded-lg border border-border bg-bg-main px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all focus:border-brand/50 hover:border-border-hover"
                   />
                   <button

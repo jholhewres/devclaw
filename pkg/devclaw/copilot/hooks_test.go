@@ -77,8 +77,9 @@ func TestHookManager_Dispatch(t *testing.T) {
 
 	called := false
 	hook := &RegisteredHook{
-		Name:   "test-dispatch",
-		Events: []HookEvent{HookSessionStart},
+		Name:    "test-dispatch",
+		Events:  []HookEvent{HookSessionStart},
+		Enabled: true,
 		Handler: func(ctx context.Context, p HookPayload) HookAction {
 			called = true
 			return HookAction{}
@@ -108,6 +109,7 @@ func TestHookManager_Dispatch_Blocking(t *testing.T) {
 		Name:     "blocking-hook",
 		Events:   []HookEvent{HookPreToolUse},
 		Priority: 10, // Run first
+		Enabled:  true,
 		Handler: func(ctx context.Context, p HookPayload) HookAction {
 			return HookAction{Block: true, Reason: "blocked for testing"}
 		},
@@ -119,6 +121,7 @@ func TestHookManager_Dispatch_Blocking(t *testing.T) {
 		Name:     "second-hook",
 		Events:   []HookEvent{HookPreToolUse},
 		Priority: 20, // Run second
+		Enabled:  true,
 		Handler: func(ctx context.Context, p HookPayload) HookAction {
 			secondHookCalled = true
 			return HookAction{}
@@ -150,8 +153,9 @@ func TestHookManager_Dispatch_ModifyArgs(t *testing.T) {
 	hm := NewHookManager(logger)
 
 	modifyingHook := &RegisteredHook{
-		Name:   "modifying-hook",
-		Events: []HookEvent{HookPreToolUse},
+		Name:    "modifying-hook",
+		Events:  []HookEvent{HookPreToolUse},
+		Enabled: true,
 		Handler: func(ctx context.Context, p HookPayload) HookAction {
 			return HookAction{
 				ModifiedArgs: map[string]any{"modified": true},
@@ -349,6 +353,10 @@ func TestAllHookEvents(t *testing.T) {
 		HookLLMInput,
 		HookLLMOutput,
 		HookToolResultPersist,
+		// Message pipeline hooks
+		HookMessageTranscribed,
+		HookMessagePreprocessed,
+		HookBeforeReset,
 	}
 
 	if len(AllHookEvents) != len(expectedEvents) {

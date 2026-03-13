@@ -92,7 +92,7 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
         {/* Content */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
-            <h3 className="text-base font-semibold text-text-primary">WhatsApp</h3>
+            <h3 className="text-base font-semibold text-text-primary">{t('channels.whatsapp')}</h3>
             <StatusDot
               status={connected ? 'online' : 'offline'}
               label={connected ? t('common.online') : t('common.offline')}
@@ -102,7 +102,7 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
           <p className="mt-1 text-sm text-text-muted">
             {connected
               ? hasLastMsg
-                ? `${t('channelsPage.manage')} - ${timeAgo(channel.last_msg_at)}`
+                ? `${t('channelsPage.manage')} - ${timeAgo(channel.last_msg_at, t)}`
                 : t('common.connected')
               : t('channelsPage.connect')}
           </p>
@@ -135,7 +135,7 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
             {channel.error_count > 0 && (
               <Badge variant="warning" className="flex items-center gap-1.5 px-3 py-2">
                 <AlertTriangle className="h-3.5 w-3.5" />
-                {channel.error_count} {channel.error_count === 1 ? 'error' : 'errors'}
+                {t('channelsPage.errorCount', { count: channel.error_count })}
               </Badge>
             )}
           </div>
@@ -152,13 +152,13 @@ function ChannelCard({ channel }: { channel: ChannelHealth }) {
   const connected = channel.connected
   const hasLastMsg = channel.last_msg_at && channel.last_msg_at !== '0001-01-01T00:00:00Z'
 
-  const channelConfig: Record<string, { name: string }> = {
-    discord: { name: 'Discord' },
-    telegram: { name: 'Telegram' },
-    slack: { name: 'Slack' },
+  const channelNameKeys: Record<string, string> = {
+    discord: 'channels.discord',
+    telegram: 'channels.telegram',
+    slack: 'channels.slack',
   }
 
-  const config = channelConfig[channel.name] || { name: channel.name }
+  const displayName = channelNameKeys[channel.name] ? t(channelNameKeys[channel.name]) : channel.name
 
   return (
     <Card
@@ -184,7 +184,7 @@ function ChannelCard({ channel }: { channel: ChannelHealth }) {
         {/* Content */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
-            <h3 className="text-sm font-semibold text-text-primary">{config.name}</h3>
+            <h3 className="text-sm font-semibold text-text-primary">{displayName}</h3>
             <StatusDot
               status={connected ? 'online' : 'offline'}
               label={connected ? t('common.online') : t('common.offline')}
@@ -193,7 +193,7 @@ function ChannelCard({ channel }: { channel: ChannelHealth }) {
           <p className="mt-0.5 text-xs text-text-muted">
             {connected
               ? hasLastMsg
-                ? timeAgo(channel.last_msg_at)
+                ? timeAgo(channel.last_msg_at, t)
                 : t('common.connected')
               : t('common.disconnected')}
           </p>
@@ -210,7 +210,7 @@ function ChannelCard({ channel }: { channel: ChannelHealth }) {
           {hasLastMsg && (
             <span className="flex items-center gap-1.5 text-xs text-text-muted">
               <Clock className="h-3.5 w-3.5" />
-              {timeAgo(channel.last_msg_at)}
+              {timeAgo(channel.last_msg_at, t)}
             </span>
           )}
         </div>
@@ -247,7 +247,7 @@ function EmptyChannels() {
       <div className="mt-5 flex items-center justify-center gap-6 text-xs text-text-muted">
         <span className="flex items-center gap-2">
           <MessageCircle className="h-3.5 w-3.5" />
-          WhatsApp, Discord, Telegram, Slack
+          {t('channelsPage.supportedChannels')}
         </span>
       </div>
     </Card>

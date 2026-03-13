@@ -102,13 +102,14 @@ interface ChatMessageProps {
   toolName?: string
   toolInput?: string
   isStreaming?: boolean
+  isError?: boolean
 }
 
 export const ChatMessage = memo(function ChatMessage({
-  role, content, toolName, toolInput, isStreaming,
+  role, content, toolName, toolInput, isStreaming, isError,
 }: ChatMessageProps) {
   if (role === 'tool') {
-    return <ToolMessage toolName={toolName} toolInput={toolInput} content={content} />
+    return <ToolMessage toolName={toolName} toolInput={toolInput} content={content} isError={isError} />
   }
 
   if (role === 'user') {
@@ -188,6 +189,7 @@ export const ChatMessage = memo(function ChatMessage({
 
 /** Copy button that appears on hover */
 function CopyMessageButton({ content }: { content: string }) {
+  const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
@@ -208,17 +210,17 @@ function CopyMessageButton({ content }: { content: string }) {
         'text-text-muted hover:text-text-primary hover:bg-bg-hover',
         'opacity-0 group-hover:opacity-100'
       )}
-      aria-label="Copy message"
+      aria-label={t('common.copy')}
     >
       {copied ? (
         <>
           <Check className="h-3 w-3 text-success" />
-          <span className="text-success">Copied</span>
+          <span className="text-success">{t('common.copied')}</span>
         </>
       ) : (
         <>
           <Copy className="h-3 w-3" />
-          <span>Copy</span>
+          <span>{t('common.copy')}</span>
         </>
       )}
     </button>
@@ -239,7 +241,7 @@ function TypingDots() {
   )
 }
 
-function ToolMessage({ toolName, toolInput, content }: { toolName?: string; toolInput?: string; content: string }) {
+function ToolMessage({ toolName, toolInput, content, isError }: { toolName?: string; toolInput?: string; content: string; isError?: boolean }) {
   const [expanded, setExpanded] = useState(false)
   const [activeTab, setActiveTab] = useState<'input' | 'output'>('output')
   const { summary, icon: Icon } = useMemo(
@@ -269,7 +271,7 @@ function ToolMessage({ toolName, toolInput, content }: { toolName?: string; tool
             {summary}
           </span>
           {/* Status indicator */}
-          <span className="flex h-1.5 w-1.5 shrink-0 rounded-full bg-success" />
+          <span className={cn('flex h-1.5 w-1.5 shrink-0 rounded-full', isError ? 'bg-error' : 'bg-success')} />
           {hasContent && (
             expanded
               ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" />

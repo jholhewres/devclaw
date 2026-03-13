@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app'
 import { LanguageSwitcher } from '@/components/LanguageSwitcher'
+import { version } from '../../package.json'
 
 export function Navbar() {
   const { t } = useTranslation()
@@ -66,7 +67,7 @@ export function Navbar() {
               {/* User info header */}
               <div className="border-b border-border bg-bg-surface px-4 py-3">
                 <p className="text-sm font-medium text-text-primary">DevClaw</p>
-                <p className="text-xs text-text-muted">v1.6.0</p>
+                <p className="text-xs text-text-muted">v{version}</p>
               </div>
 
               {/* Menu items */}

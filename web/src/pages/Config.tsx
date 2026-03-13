@@ -158,7 +158,7 @@ export function Config() {
         title={t('config.providerTitle')}
         description={t('config.providerDesc')}
       >
-        <ConfigField label="Provider">
+        <ConfigField label={t('config.provider')}>
           <ConfigInput
             value={config.provider}
             onChange={(v) => setConfig((prev) => prev ? { ...prev, provider: v } : prev)}
@@ -174,7 +174,7 @@ export function Config() {
           />
         </ConfigField>
 
-        <ConfigField label="Base URL" hint={t('config.baseUrlHint')}>
+        <ConfigField label={t('config.baseUrl')} hint={t('config.baseUrlHint')}>
           <ConfigInput
             value={config.base_url}
             onChange={(v) => setConfig((prev) => prev ? { ...prev, base_url: v } : prev)}
@@ -182,11 +182,11 @@ export function Config() {
           />
         </ConfigField>
 
-        <ConfigField label="API Key" hint={t('config.apiKeyHint')}>
+        <ConfigField label={t('config.apiKey')} hint={t('config.apiKeyHint')}>
           <PasswordInput
             value={mainApiKey}
             onChange={setMainApiKey}
-            placeholder={config.api_key_configured ? '••••••• (configured)' : t('config.apiKeyPlaceholder')}
+            placeholder={config.api_key_configured ? `••••••• (${t('config.apiKeyConfigured')})` : t('config.apiKeyPlaceholder')}
           />
         </ConfigField>
       </ConfigSection>
@@ -218,9 +218,9 @@ export function Config() {
                 value={config.media.vision_detail}
                 onChange={(v) => updateMedia('vision_detail', v)}
                 options={[
-                  { value: 'auto', label: 'Auto' },
-                  { value: 'low', label: 'Low' },
-                  { value: 'high', label: 'High' },
+                  { value: 'auto', label: t('config.visionQualityAuto') },
+                  { value: 'low', label: t('config.visionQualityLow') },
+                  { value: 'high', label: t('config.visionQualityHigh') },
                 ]}
               />
             </ConfigField>
@@ -246,7 +246,7 @@ export function Config() {
               <ConfigInput
                 value={config.media.transcription_model}
                 onChange={(v) => updateMedia('transcription_model', v)}
-                placeholder="ex: whisper-1, gpt-4o-transcribe"
+                placeholder={t('config.transcriptionModelPlaceholder')}
               />
             </ConfigField>
 
@@ -254,7 +254,7 @@ export function Config() {
               <ConfigInput
                 value={config.media.transcription_base_url}
                 onChange={(v) => updateMedia('transcription_base_url', v)}
-                placeholder="https://api.openai.com/v1"
+                placeholder={t('config.transcriptionBaseUrlPlaceholder')}
               />
             </ConfigField>
 
@@ -281,7 +281,7 @@ export function Config() {
               <PasswordInput
                 value={transcriptionApiKey}
                 onChange={setTranscriptionApiKey}
-                placeholder={config.media.transcription_api_key ? '••••••• (configured)' : t('config.transcriptionApiKeyPlaceholder')}
+                placeholder={config.media.transcription_api_key ? `••••••• (${t('config.apiKeyConfigured')})` : t('config.transcriptionApiKeyPlaceholder')}
               />
             </ConfigField>
           </>

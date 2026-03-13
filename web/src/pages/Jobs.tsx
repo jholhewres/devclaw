@@ -141,7 +141,7 @@ function JobCard({ job }: { job: JobInfo }) {
             {hasRun && (
               <span className="flex items-center gap-1">
                 <Timer className="h-3 w-3" />
-                {t('jobs.lastRun', { time: timeAgo(job.last_run_at) })}
+                {t('jobs.lastRun', { time: timeAgo(job.last_run_at, t) })}
               </span>
             )}
             {job.last_error && (

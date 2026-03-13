@@ -3,7 +3,9 @@
  * Used by: ApiConfig.tsx, Setup/StepProvider.tsx
  */
 
+import { useTranslation } from 'react-i18next'
 import type { BaseUrlOption } from '@/lib/providers'
+import { cn } from '@/lib/utils'
 
 export interface EndpointSelectorProps {
   endpoints: BaseUrlOption[]
@@ -20,6 +22,8 @@ export function EndpointSelector({
   accentColor = '#3b82f6',
   layout = 'grid',
 }: EndpointSelectorProps) {
+  const { t } = useTranslation()
+
   if (endpoints.length === 0) return null
 
   if (layout === 'list') {
@@ -29,17 +33,20 @@ export function EndpointSelector({
           <button
             key={ep.value}
             onClick={() => onChange(ep.value)}
-            className={`w-full cursor-pointer rounded-xl border px-4 py-3 text-left transition-all ${
-              value === ep.value
-                ? ''
-                : 'border-border bg-bg-main hover:border-border-hover hover:bg-bg-surface'
-            }`}
+            className={cn(
+              'w-full cursor-pointer rounded-xl border px-4 py-3 text-left transition-all',
+              value !== ep.value &&
+                'border-border bg-bg-main hover:border-border-hover hover:bg-bg-surface',
+            )}
             style={value === ep.value ? {
               borderColor: `${accentColor}80`,
               backgroundColor: `${accentColor}15`,
             } : undefined}
           >
-            <span className={`text-sm font-medium ${value === ep.value ? 'text-text-primary' : 'text-text-secondary'}`}>
+            <span className={cn(
+              'text-sm font-medium',
+              value === ep.value ? 'text-text-primary' : 'text-text-secondary',
+            )}>
               {ep.label}
             </span>
             {ep.value && (
@@ -49,7 +56,7 @@ export function EndpointSelector({
             )}
             {ep.extraModels && ep.extraModels.length > 0 && (
               <p className="mt-1 text-[10px] text-success">
-                +{ep.extraModels.length} extra models
+                {t('common.extraModels', { count: ep.extraModels.length })}
               </p>
             )}
           </button>
@@ -64,17 +71,20 @@ export function EndpointSelector({
         <button
           key={ep.value}
           onClick={() => onChange(ep.value)}
-          className={`cursor-pointer rounded-xl border px-3 py-2.5 text-left transition-all ${
-            value === ep.value
-              ? ''
-              : 'border-border bg-bg-main hover:border-border-hover hover:bg-bg-surface'
-          }`}
+          className={cn(
+            'cursor-pointer rounded-xl border px-3 py-2.5 text-left transition-all',
+            value !== ep.value &&
+              'border-border bg-bg-main hover:border-border-hover hover:bg-bg-surface',
+          )}
           style={value === ep.value ? {
             borderColor: `${accentColor}80`,
             backgroundColor: `${accentColor}15`,
           } : undefined}
         >
-          <span className={`text-xs font-medium ${value === ep.value ? 'text-text-primary' : 'text-text-secondary'}`}>
+          <span className={cn(
+            'text-xs font-medium',
+            value === ep.value ? 'text-text-primary' : 'text-text-secondary',
+          )}>
             {ep.label}
           </span>
           {ep.value && (

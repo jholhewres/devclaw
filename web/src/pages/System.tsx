@@ -21,34 +21,34 @@ interface SystemConfig {
   timezone: string
 }
 
-const LANGUAGES = [
-  { value: 'pt-BR', label: 'Português (Brasil)' },
-  { value: 'pt-PT', label: 'Português (Portugal)' },
-  { value: 'en-US', label: 'English (US)' },
-  { value: 'en-GB', label: 'English (UK)' },
-  { value: 'es-ES', label: 'Español (España)' },
-  { value: 'es-MX', label: 'Español (México)' },
-  { value: 'fr-FR', label: 'Français' },
-  { value: 'de-DE', label: 'Deutsch' },
-  { value: 'it-IT', label: 'Italiano' },
-  { value: 'ja-JP', label: '日本語' },
-  { value: 'ko-KR', label: '한국어' },
-  { value: 'zh-CN', label: '中文 (简体)' },
-  { value: 'zh-TW', label: '中文 (繁體)' },
+const LANGUAGE_KEYS = [
+  { value: 'pt-BR', key: 'languages.ptBR' },
+  { value: 'pt-PT', key: 'languages.ptPT' },
+  { value: 'en-US', key: 'languages.enUS' },
+  { value: 'en-GB', key: 'languages.enGB' },
+  { value: 'es-ES', key: 'languages.esES' },
+  { value: 'es-MX', key: 'languages.esMX' },
+  { value: 'fr-FR', key: 'languages.frFR' },
+  { value: 'de-DE', key: 'languages.deDE' },
+  { value: 'it-IT', key: 'languages.itIT' },
+  { value: 'ja-JP', key: 'languages.jaJP' },
+  { value: 'ko-KR', key: 'languages.koKR' },
+  { value: 'zh-CN', key: 'languages.zhCN' },
+  { value: 'zh-TW', key: 'languages.zhTW' },
 ]
 
-const TIMEZONES = [
-  { value: 'America/Sao_Paulo', label: 'Brasília (GMT-3)' },
-  { value: 'America/New_York', label: 'New York (GMT-5)' },
-  { value: 'America/Los_Angeles', label: 'Los Angeles (GMT-8)' },
-  { value: 'Europe/London', label: 'London (GMT+0)' },
-  { value: 'Europe/Paris', label: 'Paris (GMT+1)' },
-  { value: 'Europe/Berlin', label: 'Berlin (GMT+1)' },
-  { value: 'Asia/Tokyo', label: 'Tokyo (GMT+9)' },
-  { value: 'Asia/Shanghai', label: 'Shanghai (GMT+8)' },
-  { value: 'Asia/Dubai', label: 'Dubai (GMT+4)' },
-  { value: 'Australia/Sydney', label: 'Sydney (GMT+10)' },
-  { value: 'UTC', label: 'UTC (GMT+0)' },
+const TIMEZONE_KEYS = [
+  { value: 'America/Sao_Paulo', key: 'timezones.brasilia' },
+  { value: 'America/New_York', key: 'timezones.newYork' },
+  { value: 'America/Los_Angeles', key: 'timezones.losAngeles' },
+  { value: 'Europe/London', key: 'timezones.london' },
+  { value: 'Europe/Paris', key: 'timezones.paris' },
+  { value: 'Europe/Berlin', key: 'timezones.berlin' },
+  { value: 'Asia/Tokyo', key: 'timezones.tokyo' },
+  { value: 'Asia/Shanghai', key: 'timezones.shanghai' },
+  { value: 'Asia/Dubai', key: 'timezones.dubai' },
+  { value: 'Australia/Sydney', key: 'timezones.sydney' },
+  { value: 'UTC', key: 'timezones.utc' },
 ]
 
 export function System() {
@@ -154,7 +154,7 @@ export function System() {
           <ConfigSelect
             value={config.language}
             onChange={(v) => setConfig((prev) => prev ? { ...prev, language: v } : prev)}
-            options={LANGUAGES}
+            options={LANGUAGE_KEYS.map(l => ({ value: l.value, label: t(l.key) }))}
           />
         </ConfigField>
 
@@ -162,7 +162,7 @@ export function System() {
           <ConfigSelect
             value={config.timezone}
             onChange={(v) => setConfig((prev) => prev ? { ...prev, timezone: v } : prev)}
-            options={TIMEZONES}
+            options={TIMEZONE_KEYS.map(tz => ({ value: tz.value, label: t(tz.key) }))}
           />
         </ConfigField>
       </ConfigSection>

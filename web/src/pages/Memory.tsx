@@ -31,20 +31,20 @@ interface MemoryConfig {
   search_max_results: number
 }
 
-const MEMORY_TYPES = [
-  { value: 'sqlite', label: 'SQLite (Recommended)' },
-  { value: 'file', label: 'File-based' },
+const MEMORY_TYPE_KEYS = [
+  { value: 'sqlite', key: 'memory.storageSqlite' },
+  { value: 'file', key: 'memory.storageFile' },
 ]
 
-const COMPRESSION_STRATEGIES = [
-  { value: 'summarize', label: 'Summarize old messages' },
-  { value: 'truncate', label: 'Truncate old messages' },
-  { value: 'semantic', label: 'Semantic pruning' },
+const COMPRESSION_STRATEGY_KEYS = [
+  { value: 'summarize', key: 'memory.compressionSummarize' },
+  { value: 'truncate', key: 'memory.compressionTruncate' },
+  { value: 'semantic', key: 'memory.compressionSemantic' },
 ]
 
-const EMBEDDING_PROVIDERS = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'local', label: 'Local (Ollama)' },
+const EMBEDDING_PROVIDER_KEYS = [
+  { value: 'openai', key: 'memory.providerOpenai' },
+  { value: 'local', key: 'memory.providerLocal' },
 ]
 
 // Slider component for hybrid search weights
@@ -181,7 +181,7 @@ export function Memory() {
           <ConfigSelect
             value={config.type}
             onChange={(v) => setConfig(prev => prev ? { ...prev, type: v } : prev)}
-            options={MEMORY_TYPES}
+            options={MEMORY_TYPE_KEYS.map(o => ({ value: o.value, label: t(o.key) }))}
           />
         </ConfigField>
 
@@ -198,7 +198,7 @@ export function Memory() {
           <ConfigSelect
             value={config.compression_strategy}
             onChange={(v) => setConfig(prev => prev ? { ...prev, compression_strategy: v } : prev)}
-            options={COMPRESSION_STRATEGIES}
+            options={COMPRESSION_STRATEGY_KEYS.map(o => ({ value: o.value, label: t(o.key) }))}
           />
         </ConfigField>
       </ConfigSection>
@@ -221,7 +221,7 @@ export function Memory() {
               <ConfigSelect
                 value={config.embedding_provider}
                 onChange={(v) => setConfig(prev => prev ? { ...prev, embedding_provider: v } : prev)}
-                options={EMBEDDING_PROVIDERS}
+                options={EMBEDDING_PROVIDER_KEYS.map(o => ({ value: o.value, label: t(o.key) }))}
               />
             </ConfigField>
 

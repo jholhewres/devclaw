@@ -61,29 +61,29 @@ interface DatabaseConfig {
   };
 }
 
-const BACKENDS = [
-  { value: 'sqlite', label: 'SQLite (Default)' },
-  { value: 'postgresql', label: 'PostgreSQL + pgvector' },
+const BACKEND_KEYS = [
+  { value: 'sqlite', key: 'database.backendSqlite' },
+  { value: 'postgresql', key: 'database.backendPostgresql' },
 ];
 
-const JOURNAL_MODES = [
-  { value: 'WAL', label: 'WAL (Recommended)' },
-  { value: 'DELETE', label: 'Delete' },
-  { value: 'TRUNCATE', label: 'Truncate' },
-  { value: 'PERSIST', label: 'Persist' },
-  { value: 'MEMORY', label: 'Memory' },
+const JOURNAL_MODE_KEYS = [
+  { value: 'WAL', key: 'database.journalWal' },
+  { value: 'DELETE', key: 'database.journalDelete' },
+  { value: 'TRUNCATE', key: 'database.journalTruncate' },
+  { value: 'PERSIST', key: 'database.journalPersist' },
+  { value: 'MEMORY', key: 'database.journalMemory' },
 ];
 
-const SSL_MODES = [
-  { value: 'disable', label: 'Disable' },
-  { value: 'require', label: 'Require' },
-  { value: 'verify-ca', label: 'Verify CA' },
-  { value: 'verify-full', label: 'Verify Full' },
+const SSL_MODE_KEYS = [
+  { value: 'disable', key: 'database.sslDisable' },
+  { value: 'require', key: 'database.sslRequire' },
+  { value: 'verify-ca', key: 'database.sslVerifyCa' },
+  { value: 'verify-full', key: 'database.sslVerifyFull' },
 ];
 
-const INDEX_TYPES = [
-  { value: 'hnsw', label: 'HNSW (Recommended)' },
-  { value: 'ivfflat', label: 'IVFFlat' },
+const INDEX_TYPE_KEYS = [
+  { value: 'hnsw', key: 'database.indexHnsw' },
+  { value: 'ivfflat', key: 'database.indexIvfflat' },
 ];
 
 // Status card component
@@ -180,7 +180,7 @@ export function DatabasePage() {
       setConfig(dbConfig);
       setOriginal(JSON.parse(JSON.stringify(dbConfig)));
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Failed to load database configuration');
+      setLoadError(err instanceof Error ? err.message : t('database.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -265,13 +265,13 @@ export function DatabasePage() {
             <StatusCard
               label={t('database.connections')}
               value={status.open_connections}
-              subtext={`${status.in_use} in use, ${status.idle} idle`}
+              subtext={t('database.connectionStats', { inUse: status.in_use, idle: status.idle })}
               icon={Server}
             />
             <StatusCard
               label={t('database.poolSize')}
               value={status.max_open_conns}
-              subtext={`${status.wait_count} waits`}
+              subtext={t('database.waitStats', { count: status.wait_count })}
               icon={HardDrive}
             />
           </div>
@@ -294,7 +294,7 @@ export function DatabasePage() {
           <ConfigSelect
             value={config.backend}
             onChange={(v) => setConfig((prev) => (prev ? { ...prev, backend: v } : prev))}
-            options={BACKENDS}
+            options={BACKEND_KEYS.map(o => ({ value: o.value, label: t(o.key) }))}
           />
         </ConfigField>
       </ConfigSection>
@@ -326,7 +326,7 @@ export function DatabasePage() {
                   prev ? { ...prev, sqlite: { ...prev.sqlite, journal_mode: v } } : prev
                 )
               }
-              options={JOURNAL_MODES}
+              options={JOURNAL_MODE_KEYS.map(o => ({ value: o.value, label: t(o.key) }))}
             />
           </ConfigField>
 
@@ -427,7 +427,7 @@ export function DatabasePage() {
                   prev ? { ...prev, postgresql: { ...prev.postgresql, ssl_mode: v } } : prev
                 )
               }
-              options={SSL_MODES}
+              options={SSL_MODE_KEYS.map(o => ({ value: o.value, label: t(o.key) }))}
             />
           </ConfigField>
 
@@ -542,7 +542,7 @@ export function DatabasePage() {
                         : prev
                     )
                   }
-                  options={INDEX_TYPES}
+                  options={INDEX_TYPE_KEYS.map(o => ({ value: o.value, label: t(o.key) }))}
                 />
               </ConfigField>
             </div>

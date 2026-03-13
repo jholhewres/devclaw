@@ -30,10 +30,10 @@ interface AccessConfig {
   pending_message: string
 }
 
-const POLICIES = [
-  { value: 'deny', label: 'Deny (blocked by default)' },
-  { value: 'allow', label: 'Allow (allowed by default)' },
-  { value: 'ask', label: 'Ask (pending approval)' },
+const POLICY_KEYS = [
+  { value: 'deny', key: 'access.policyDeny' },
+  { value: 'allow', key: 'access.policyAllow' },
+  { value: 'ask', key: 'access.policyAsk' },
 ]
 
 // Colored tag list for access control
@@ -42,6 +42,7 @@ function ColoredTagList({ tags, onRemove, color = 'blue' }: {
   onRemove: (tag: string) => void
   color?: 'blue' | 'green' | 'red' | 'yellow'
 }) {
+  const { t } = useTranslation()
   const colorClasses = {
     blue: 'bg-brand-subtle text-brand border-brand/20',
     green: 'bg-success-subtle text-success border-success/20',
@@ -50,7 +51,7 @@ function ColoredTagList({ tags, onRemove, color = 'blue' }: {
   }
 
   if (tags.length === 0) {
-    return <p className="text-sm text-text-muted">None</p>
+    return <p className="text-sm text-text-muted">{t('access.noUsers')}</p>
   }
 
   return (
@@ -135,7 +136,7 @@ export function Access() {
         admins: rawData.admins || [],
         allowed_users: rawData.allowed_users || [],
         blocked_users: rawData.blocked_users || [],
-        pending_message: rawData.pending_message || "You don't have permission to use this assistant. Please contact the administrator.",
+        pending_message: rawData.pending_message || t('access.defaultPendingMessage'),
       }
       setConfig(data)
       setOriginal(JSON.parse(JSON.stringify(data)))
@@ -224,7 +225,7 @@ export function Access() {
           <ConfigSelect
             value={config.default_policy}
             onChange={(v) => setConfig(prev => prev ? { ...prev, default_policy: v } : prev)}
-            options={POLICIES}
+            options={POLICY_KEYS.map(p => ({ value: p.value, label: t(p.key) }))}
           />
         </ConfigField>
 
@@ -232,7 +233,7 @@ export function Access() {
           <ConfigTextarea
             value={config.pending_message}
             onChange={(v) => setConfig(prev => prev ? { ...prev, pending_message: v } : prev)}
-            placeholder="You don't have permission to use this assistant. Please contact the administrator."
+            placeholder={t('access.defaultPendingMessage')}
             rows={3}
           />
         </ConfigField>

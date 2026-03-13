@@ -5,6 +5,7 @@ import { Lock, ArrowRight, Loader2, Eye, EyeOff } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Logo } from '@/components/Logo'
 import { cn } from '@/lib/utils'
+import { version } from '../../package.json'
 
 export function Login() {
   const { t } = useTranslation()
@@ -147,7 +148,7 @@ export function Login() {
 
         {/* Footer */}
         <p className="mt-6 text-center text-xs text-text-muted">
-          DevClaw v1.6.0
+          DevClaw v{version}
         </p>
       </div>
     </div>

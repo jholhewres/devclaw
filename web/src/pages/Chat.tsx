@@ -13,6 +13,7 @@ import {
 import { ChatMessage } from '@/components/ChatMessage'
 import { ChatInput } from '@/components/ChatInput'
 import { useChat } from '@/hooks/useChat'
+import { useAppStore } from '@/stores/app'
 import { cn } from '@/lib/utils'
 
 /** Generate a unique session ID */
@@ -100,6 +101,26 @@ export function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamingContent])
 
+  /* Escape key aborts streaming */
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isStreaming) {
+        abort()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isStreaming, abort])
+
+  /* Invalidate sidebar sessions when a new session gets messages */
+  const hasInvalidatedRef = useRef(false)
+  useEffect(() => {
+    if (localSessionId && messages.length > 0 && !hasInvalidatedRef.current) {
+      hasInvalidatedRef.current = true
+      useAppStore.getState().invalidateSessions()
+    }
+  }, [localSessionId, messages.length])
+
   const hasMessages = messages.length > 0 || streamingContent || isStreaming
   const showChatView = hasMessages || !!resolvedId
 
@@ -133,7 +154,7 @@ export function Chat() {
             {!showChatView ? (
               /* ---- Empty state / Hero ---- */
               <div className="flex h-full flex-col items-center justify-center px-6">
-                <div className="w-full max-w-2xl space-y-8">
+                <div className="w-full max-w-3xl space-y-8">
                   <div className="space-y-3 text-center">
                     <h1 className="text-3xl font-bold tracking-tight text-text-primary md:text-[40px] md:leading-tight">
                       {t('chatPage.howCanHelp')}
@@ -185,6 +206,7 @@ export function Chat() {
                       content={msg.content}
                       toolName={msg.tool_name}
                       toolInput={msg.tool_input}
+                      isError={msg.is_error}
                     />
                   ))}
                   {isStreaming && (

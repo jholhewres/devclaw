@@ -6,8 +6,14 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Translator function type for timeAgo */
+type TFn = (key: string, opts?: Record<string, unknown>) => string;
+
 /** Format a timestamp into a human-readable relative time */
-export function timeAgo(date: string | Date | null | undefined): string {
+export function timeAgo(
+  date: string | Date | null | undefined,
+  t?: TFn,
+): string {
   if (!date) return '';
   const d = typeof date === 'string' ? new Date(date) : date;
   if (isNaN(d.getTime())) return '';
@@ -17,6 +23,14 @@ export function timeAgo(date: string | Date | null | undefined): string {
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
   const days = Math.floor(hours / 24);
+
+  if (t) {
+    if (seconds < 60) return t('common.timeAgo.justNow');
+    if (minutes < 60) return t('common.timeAgo.minutesAgo', { count: minutes });
+    if (hours < 24) return t('common.timeAgo.hoursAgo', { count: hours });
+    if (days < 7) return t('common.timeAgo.daysAgo', { count: days });
+    return d.toLocaleDateString();
+  }
 
   if (seconds < 60) return 'just now';
   if (minutes < 60) return `${minutes}m ago`;

@@ -248,38 +248,38 @@ describe('ConfigActions', () => {
   it('should render save button', () => {
     render(<ConfigActions onSave={() => {}} />);
 
-    expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'common.save' })).toBeInTheDocument();
   });
 
   it('should render reset button when hasChanges is true', () => {
     render(<ConfigActions onSave={() => {}} onReset={() => {}} hasChanges />);
 
-    expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'common.reset' })).toBeInTheDocument();
   });
 
   it('should not render reset button when hasChanges is false', () => {
     render(<ConfigActions onSave={() => {}} onReset={() => {}} hasChanges={false} />);
 
-    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'common.reset' })).not.toBeInTheDocument();
   });
 
   it('should disable save button when hasChanges is false', () => {
     render(<ConfigActions onSave={() => {}} hasChanges={false} />);
 
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'common.save' })).toBeDisabled();
   });
 
   it('should show saving state', () => {
     render(<ConfigActions onSave={() => {}} saving />);
 
-    expect(screen.getByText('Saving...')).toBeInTheDocument();
+    expect(screen.getByText('common.saving')).toBeInTheDocument();
   });
 
   it('should call onSave when save button is clicked', async () => {
     const handleSave = vi.fn();
     render(<ConfigActions onSave={handleSave} hasChanges />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await userEvent.click(screen.getByRole('button', { name: 'common.save' }));
 
     expect(handleSave).toHaveBeenCalled();
   });
@@ -288,7 +288,7 @@ describe('ConfigActions', () => {
     const handleReset = vi.fn();
     render(<ConfigActions onSave={() => {}} onReset={handleReset} hasChanges />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    await userEvent.click(screen.getByRole('button', { name: 'common.reset' }));
 
     expect(handleReset).toHaveBeenCalled();
   });
@@ -387,14 +387,14 @@ describe('ErrorState', () => {
   it('should render retry button when onRetry is provided', () => {
     render(<ErrorState onRetry={() => {}} />);
 
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'common.retry' })).toBeInTheDocument();
   });
 
   it('should call onRetry when retry button is clicked', async () => {
     const handleRetry = vi.fn();
     render(<ErrorState onRetry={handleRetry} />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await userEvent.click(screen.getByRole('button', { name: 'common.retry' }));
 
     expect(handleRetry).toHaveBeenCalled();
   });

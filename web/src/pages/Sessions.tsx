@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Trash2 } from 'lucide-react';
+import { Trash2, MessageSquare } from 'lucide-react';
 import { api, type SessionInfo } from '@/lib/api';
 import { timeAgo } from '@/lib/utils';
 import { useAppStore } from '@/stores/app';
-import { MessageTextCircle02 } from '@untitledui/icons';
 import { PageContainer } from '@/components/PageContainer';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { SearchInput } from '@/components/ui/SearchInput';
@@ -109,7 +108,7 @@ export function Sessions() {
                 className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-3 text-left"
               >
                 <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-bg-subtle text-text-muted">
-                  <MessageTextCircle02 className="size-4" />
+                  <MessageSquare className="size-4" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -122,7 +121,7 @@ export function Sessions() {
                   </div>
                   <p className="mt-0.5 text-xs text-text-muted">
                     {session.message_count} {t('sessions.messages')} ·{' '}
-                    {timeAgo(session.last_message_at)}
+                    {timeAgo(session.last_message_at, t)}
                   </p>
                 </div>
               </button>
@@ -156,7 +155,7 @@ export function Sessions() {
 
         {filtered.length === 0 && (
           <EmptyState
-            icon={<MessageTextCircle02 className="size-6" />}
+            icon={<MessageSquare className="size-6" />}
             title={search ? t('sessions.noResults') : t('sessions.noSessions')}
           />
         )}

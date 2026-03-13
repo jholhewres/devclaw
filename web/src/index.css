@@ -289,3 +289,60 @@ input:focus-visible {
   background: rgba(0, 129, 242, 0.2);
   color: #34322d;
 }
+
+/* ── Dark Mode ── */
+.dark {
+  --color-text-primary: #e8e6e3;
+  --color-text-secondary: #a8a29e;
+  --color-text-muted: #78716c;
+  --color-text-inverse: #1c1917;
+
+  --color-bg-main: #0c0a09;
+  --color-bg-surface: #1c1917;
+  --color-bg-subtle: #292524;
+  --color-bg-elevated: #1c1917;
+  --color-bg-hover: rgba(255, 255, 255, 0.06);
+  --color-bg-active: rgba(255, 255, 255, 0.1);
+
+  --color-brand: #3b9dff;
+  --color-brand-hover: #60b0ff;
+  --color-brand-subtle: rgba(59, 157, 255, 0.12);
+
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-border-hover: rgba(255, 255, 255, 0.2);
+  --color-border-focus: #3b9dff;
+
+  --color-success-subtle: rgba(37, 186, 59, 0.12);
+  --color-error-subtle: rgba(242, 90, 90, 0.12);
+  --color-warning-subtle: rgba(255, 201, 71, 0.12);
+  --color-info-subtle: rgba(0, 129, 242, 0.12);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  color-scheme: dark;
+}
+
+.dark ::selection {
+  background: rgba(59, 157, 255, 0.3);
+  color: #e8e6e3;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.dark .stream-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(59, 157, 255, 0.06) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+}

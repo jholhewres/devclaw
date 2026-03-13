@@ -12,6 +12,9 @@ import {
   LogOut,
   Plus,
   Settings,
+  Sun,
+  Moon,
+  Monitor,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app'
@@ -47,6 +50,7 @@ export function Sidebar() {
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen)
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed)
   const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed)
+  const sessionVersion = useAppStore((s) => s.sessionVersion)
 
   const [recentSessions, setRecentSessions] = useState<SessionInfo[]>([])
 
@@ -67,7 +71,7 @@ export function Sidebar() {
         setRecentSessions(webuiSessions)
       })
       .catch(() => {})
-  }, [location.pathname])
+  }, [location.pathname, sessionVersion])
 
   useEffect(() => {
     const onResize = () => {
@@ -236,10 +240,10 @@ export function Sidebar() {
                       <MessageSquare className="h-3.5 w-3.5 shrink-0 text-text-muted" />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs">
-                          {session.id.replace('webui:', '')}
+                          {session.title || session.id.replace('webui:', '')}
                         </p>
                         <p className="text-[10px] text-text-muted">
-                          {timeAgo(session.last_message_at)}
+                          {timeAgo(session.last_message_at, t)}
                         </p>
                       </div>
                     </button>
@@ -266,8 +270,9 @@ export function Sidebar() {
             activeRoutes: ['/system', '/channels', '/security', '/dev', '/config', '/webhooks', '/hooks', '/memory', '/database', '/budget', '/domain', '/mcp', '/access', '/groups'],
           })}
 
-          {/* Language + Logout */}
+          {/* Theme + Language + Logout */}
           <div className={cn('mt-1 flex items-center gap-1', !showFullText && 'flex-col')}>
+            <ThemeToggle compact={!showFullText} />
             <LanguageSwitcher compact={!showFullText} />
             <Tooltip content={t('userMenu.logout')} side="right">
               <button
@@ -318,4 +323,48 @@ export function Sidebar() {
       </button>
     </>
   )
+}
+
+/** Theme toggle button: cycles light → dark → system */
+function ThemeToggle({ compact }: { compact: boolean }) {
+  const { t } = useTranslation()
+  const theme = useAppStore((s) => s.theme)
+  const setTheme = useAppStore((s) => s.setTheme)
+
+  const next = () => {
+    if (theme === 'light') setTheme('dark')
+    else if (theme === 'dark') setTheme('system')
+    else setTheme('light')
+  }
+
+  const Icon = theme === 'dark' ? Moon : theme === 'system' ? Monitor : Sun
+  const label =
+    theme === 'dark'
+      ? t('userMenu.themeDark')
+      : theme === 'system'
+        ? t('userMenu.themeSystem')
+        : t('userMenu.themeLight')
+
+  const button = (
+    <button
+      onClick={next}
+      className={cn(
+        'flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary cursor-pointer',
+        compact && 'justify-center px-2',
+      )}
+      aria-label={label}
+    >
+      <Icon className="h-4 w-4" />
+    </button>
+  )
+
+  if (compact) {
+    return (
+      <Tooltip content={label} side="right">
+        {button}
+      </Tooltip>
+    )
+  }
+
+  return button
 }

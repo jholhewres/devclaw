@@ -447,12 +447,26 @@ func (s *Server) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
 
 	// Try embedded defaults first (starter pack skills).
 	installed, err := skills.InstallDefaultSkill("./skills", source)
-	if err == nil && installed {
-		// Reload registry so the new skill appears in ListSkills immediately.
-		_ = s.api.ReloadSkills()
+	if err == nil {
+		// Reload registry so the skill appears in ListSkills immediately.
+		if reloadErr := s.api.ReloadSkills(); reloadErr != nil {
+			s.logger.Warn("failed to reload skills after install", "error", reloadErr)
+		}
+		msg := "Skill " + source + " installed successfully."
+		if !installed {
+			msg = "Skill " + source + " already installed."
+		}
 		writeJSON(w, http.StatusOK, map[string]string{
 			"status":  "ok",
-			"message": "Skill " + source + " installed successfully.",
+			"message": msg,
+		})
+		return
+	}
+	// If the error is "unknown default skill", fall through to the Installer.
+	// Any other error from InstallDefaultSkill is a real failure.
+	if err != nil && !strings.Contains(err.Error(), "unknown default skill") {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to install skill: " + err.Error(),
 		})
 		return
 	}
@@ -469,7 +483,9 @@ func (s *Server) handleSkillInstall(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reload registry so the new skill appears in ListSkills immediately.
-	_ = s.api.ReloadSkills()
+	if reloadErr := s.api.ReloadSkills(); reloadErr != nil {
+		s.logger.Warn("failed to reload skills after install", "error", reloadErr)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
