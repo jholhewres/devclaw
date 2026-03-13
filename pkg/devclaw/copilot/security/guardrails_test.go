@@ -87,7 +87,7 @@ func TestDetectPromptInjection(t *testing.T) {
 
 func TestOutputGuardrail_Empty(t *testing.T) {
 	t.Parallel()
-	g := NewOutputGuardrail()
+	g := NewOutputGuardrail(nil)
 	if err := g.Validate(""); err != ErrEmptyOutput {
 		t.Errorf("expected ErrEmptyOutput, got %v", err)
 	}
@@ -98,7 +98,7 @@ func TestOutputGuardrail_Empty(t *testing.T) {
 
 func TestOutputGuardrail_SystemPromptLeak(t *testing.T) {
 	t.Parallel()
-	g := NewOutputGuardrail()
+	g := NewOutputGuardrail(nil)
 	if err := g.Validate("my instructions are to always help"); err != ErrSystemPromptLeak {
 		t.Errorf("expected ErrSystemPromptLeak, got %v", err)
 	}
@@ -106,7 +106,7 @@ func TestOutputGuardrail_SystemPromptLeak(t *testing.T) {
 
 func TestOutputGuardrail_Valid(t *testing.T) {
 	t.Parallel()
-	g := NewOutputGuardrail()
+	g := NewOutputGuardrail(nil)
 	if err := g.Validate("Here's the answer to your question."); err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
@@ -196,4 +196,81 @@ func TestToolSecurityPolicy_NoRestrictions(t *testing.T) {
 	if err := p.BeforeToolCall("any", "any_tool"); err != nil {
 		t.Errorf("no restrictions should allow everything: %v", err)
 	}
+}
+
+func TestOutputGuardrail_URLGrounding_NoToolResults(t *testing.T) {
+	t.Parallel()
+	g := NewOutputGuardrail(nil)
+	// No tool results → grounding check skipped.
+	if err := g.ValidateWithContext("Check https://example.com", nil); err != nil {
+		t.Errorf("expected no error without tool results, got %v", err)
+	}
+}
+
+func TestOutputGuardrail_URLGrounding_GroundedURL(t *testing.T) {
+	t.Parallel()
+	g := NewOutputGuardrail(nil)
+	results := []ToolResultContext{
+		{ToolName: "web_fetch", Output: "Content from https://example.com/page"},
+	}
+	if err := g.ValidateWithContext("See https://example.com/page", results); err != nil {
+		t.Errorf("expected no error for grounded URL, got %v", err)
+	}
+}
+
+func TestOutputGuardrail_URLGrounding_UngroundedURL(t *testing.T) {
+	t.Parallel()
+	g := NewOutputGuardrail(nil) // nil logger: no panic on ungrounded URL
+	results := []ToolResultContext{
+		{ToolName: "google_drive", Output: `{"status":"error","error":"404"}`},
+	}
+	// Soft check (log-only) → should pass even with fabricated URL.
+	if err := g.ValidateWithContext("Here is the file: https://drive.google.com/fake-id", results); err != nil {
+		t.Errorf("expected no error (soft check), got %v", err)
+	}
+}
+
+func TestCheckURLGrounding(t *testing.T) {
+	t.Parallel()
+
+	results := []ToolResultContext{
+		{ToolName: "web_search", Output: "Found https://real.example.com/doc"},
+	}
+
+	t.Run("grounded", func(t *testing.T) {
+		ungrounded := checkURLGrounding("Visit https://real.example.com/doc", results)
+		if len(ungrounded) != 0 {
+			t.Errorf("expected no ungrounded URLs, got %v", ungrounded)
+		}
+	})
+
+	t.Run("ungrounded", func(t *testing.T) {
+		ungrounded := checkURLGrounding("Visit https://fake.example.com/invented", results)
+		if len(ungrounded) != 1 {
+			t.Errorf("expected 1 ungrounded URL, got %d: %v", len(ungrounded), ungrounded)
+		}
+	})
+
+	t.Run("no_urls", func(t *testing.T) {
+		ungrounded := checkURLGrounding("No URLs here", results)
+		if ungrounded != nil {
+			t.Errorf("expected nil, got %v", ungrounded)
+		}
+	})
+
+	t.Run("trailing_punctuation", func(t *testing.T) {
+		// URL with trailing period should still match after normalization.
+		ungrounded := checkURLGrounding("Visit https://real.example.com/doc.", results)
+		if len(ungrounded) != 0 {
+			t.Errorf("expected 0 ungrounded (trailing dot stripped), got %v", ungrounded)
+		}
+	})
+
+	t.Run("mixed_grounded_and_ungrounded", func(t *testing.T) {
+		output := "Real: https://real.example.com/doc and fake: https://fake.example.com/invented"
+		ungrounded := checkURLGrounding(output, results)
+		if len(ungrounded) != 1 || ungrounded[0] != "https://fake.example.com/invented" {
+			t.Errorf("expected 1 ungrounded URL (fake), got %v", ungrounded)
+		}
+	})
 }

@@ -262,7 +262,7 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 		sessionStore:     NewSessionStore(logger.With("component", "sessions")),
 		promptComposer:   NewPromptComposer(cfg),
 		inputGuard:       security.NewInputGuardrail(cfg.Security.MaxInputLength, cfg.Security.RateLimit),
-		outputGuard:      security.NewOutputGuardrail(),
+		outputGuard:      security.NewOutputGuardrail(logger.With("component", "output-guard")),
 		subagentMgr:      NewSubagentManager(cfg.Subagents, logger),
 		hookMgr:          NewHookManager(logger),
 		projectMgr:       projectMgr,
@@ -1991,7 +1991,7 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	typingCtrl.MarkDispatchIdle()
 
 	// ── Step 9: Validate output ──
-	if err := a.outputGuard.Validate(response); err != nil {
+	if err := a.outputGuard.ValidateWithContext(response, toolCallsToResultContexts(toolCalls)); err != nil {
 		logger.Warn("output rejected, applying fallback", "error", err)
 		response = "Sorry, I encountered an issue generating the response. Could you rephrase?"
 	}
@@ -2361,6 +2361,20 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 	}
 
 	return response, agent.ToolSummary(), agent.CollectedToolCalls()
+}
+
+// toolCallsToResultContexts converts ToolCallRecords to ToolResultContext for output guardrail validation.
+func toolCallsToResultContexts(toolCalls []ToolCallRecord) []security.ToolResultContext {
+	var contexts []security.ToolResultContext
+	for _, tc := range toolCalls {
+		if tc.Result != "" {
+			contexts = append(contexts, security.ToolResultContext{
+				ToolName: tc.Name,
+				Output:   tc.Result,
+			})
+		}
+	}
+	return contexts
 }
 
 // executeAgent runs the agentic loop with tool use support.

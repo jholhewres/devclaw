@@ -902,6 +902,29 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 			}
 		}
 
+		// Inject anti-hallucination reminder when tools returned errors.
+		// Placed after tool results (valid message order: assistant→tool→user).
+		{
+			var errorTools []string
+			for _, result := range results {
+				if result.Error != nil {
+					errorTools = append(errorTools, result.Name)
+				}
+			}
+			if len(errorTools) > 0 {
+				toolList := strings.Join(errorTools, ", ")
+				messages = append(messages, chatMessage{
+					Role: "user",
+					Content: fmt.Sprintf(
+						"[System] Tools returned errors: %s. "+
+							"Report the exact error to the user. "+
+							"Do NOT fabricate results, file names, IDs, or URLs that were not in the tool output.",
+						toolList,
+					),
+				})
+			}
+		}
+
 		// Accumulate tool names for provenance tracking + collect ToolCallRecords.
 		if len(resp.ToolCalls) > 0 {
 			names := make([]string, len(resp.ToolCalls))

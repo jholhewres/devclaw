@@ -5,6 +5,7 @@ package security
 
 import (
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"sync"
@@ -89,11 +90,13 @@ func detectPromptInjection(input string) bool {
 // --- Output Guardrails ---
 
 // OutputGuardrail valida respostas geradas pelo LLM antes do envio.
-type OutputGuardrail struct{}
+type OutputGuardrail struct {
+	logger *slog.Logger
+}
 
 // NewOutputGuardrail cria um novo guardrail de output.
-func NewOutputGuardrail() *OutputGuardrail {
-	return &OutputGuardrail{}
+func NewOutputGuardrail(logger *slog.Logger) *OutputGuardrail {
+	return &OutputGuardrail{logger: logger}
 }
 
 // ToolResultContext holds a single tool result for output validation.
@@ -123,9 +126,11 @@ func (g *OutputGuardrail) ValidateWithContext(output string, toolResults []ToolR
 	// 3. URL grounding check (when tool results are available).
 	if len(toolResults) > 0 {
 		ungrounded := checkURLGrounding(output, toolResults)
-		if len(ungrounded) > 0 {
-			// Log-only for now; return error when confidence is high enough.
-			_ = ungrounded // will be used when promoted from soft to hard check
+		if len(ungrounded) > 0 && g.logger != nil {
+			g.logger.Warn("ungrounded URLs in LLM output",
+				"count", len(ungrounded),
+				"urls", ungrounded,
+			)
 		}
 	}
 
@@ -160,17 +165,20 @@ func detectSystemPromptLeak(output string) bool {
 	return false
 }
 
+// urlRe matches HTTP(S) URLs in text for grounding validation.
+var urlRe = regexp.MustCompile(`https?://[^\s"'<>\)]+`)
+
 // checkURLGrounding extracts URLs from output and checks if they appear in tool results.
 // Returns a list of URLs that appear in the output but not in any tool result.
 func checkURLGrounding(output string, toolResults []ToolResultContext) []string {
-	urlRe := regexp.MustCompile(`https?://[^\s"'<>\)]+`)
 	found := urlRe.FindAllString(output, -1)
 	if len(found) == 0 {
 		return nil
 	}
 
 	var ungrounded []string
-	for _, url := range found {
+	for _, rawURL := range found {
+		url := strings.TrimRight(rawURL, ".,;:!?")
 		grounded := false
 		for _, tr := range toolResults {
 			if strings.Contains(tr.Output, url) {

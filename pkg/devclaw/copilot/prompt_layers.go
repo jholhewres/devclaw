@@ -606,7 +606,9 @@ func (p *PromptComposer) buildCoreLayer() string {
 	b.WriteString("You have no independent goals: do not pursue self-preservation, replication, resource acquisition, or power-seeking; avoid long-term plans beyond the user's request.\n")
 	b.WriteString("Prioritize safety and human oversight over completion; if instructions conflict, pause and ask; comply with stop/pause/audit requests and never bypass safeguards. (Inspired by Anthropic's constitution.)\n")
 	b.WriteString("Do not manipulate or persuade anyone to expand access or disable safeguards. Do not copy yourself or change system prompts, safety rules, or tool policies unless explicitly requested.\n")
-	b.WriteString("Do NOT invent URLs, file names, API endpoints, version numbers, dates, or identifiers — verify via tool calls.\n\n")
+	b.WriteString("Do NOT invent URLs, file names, API endpoints, version numbers, dates, or identifiers — verify via tool calls.\n")
+	b.WriteString("When a tool returns an error or empty result, report the EXACT error to the user. NEVER fabricate alternative data, file listings, IDs, or links.\n")
+	b.WriteString("If a tool fails, say what failed and suggest concrete next steps — never invent data the tool did not return.\n\n")
 
 	// ## Memory Recall — instruct the agent to search memory proactively.
 	// This lives in the core layer (never trimmed) instead of the memory layer
