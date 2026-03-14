@@ -13,8 +13,10 @@ package copilot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 )
@@ -479,6 +481,7 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 	// Terminate the run early to avoid wasting tokens.
 	const maxConsecutiveBlockedTurns = 3
 	var consecutiveBlockedTurns int
+	var thinkingFallbackApplied bool
 
 	// ── Main agent loop ──
 	// Loop until: (1) LLM produces no tool calls, (2) run timeout fires, or
@@ -610,23 +613,38 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 					a.runTimeout, totalTurns, runCtx.Err())
 			}
 
-			// Timeout or transient error on a later turn: try compacting
-			// the context and retrying once before giving up.
-			errStr := err.Error()
-			isTimeout := strings.Contains(errStr, "deadline exceeded") || strings.Contains(errStr, "context canceled") || strings.Contains(errStr, "rate limit")
+			// Thinking level fallback: if the model doesn't support extended
+			// thinking, strip thinking instructions from system prompt and retry.
+			// Aligned with OpenClaw's pickFallbackThinkingLevel pattern.
+			if isThinkingError(err) && !thinkingFallbackApplied {
+				a.logger.Warn("thinking level unsupported, stripping thinking instructions and retrying")
+				messages = stripThinkingInstructions(messages)
+				thinkingFallbackApplied = true
 
-			if isTimeout && totalTurns > 2 && len(messages) > 10 {
-				a.logger.Warn("LLM call timed out or rate limited, aggressive compaction and retry",
-					"turn", totalTurns,
-					"messages_before", len(messages),
-					"llm_ms", llmDuration.Milliseconds(),
-				)
-				messages = a.aggressiveCompaction(runCtx, messages)
-
-				// Retry the LLM call with compacted context.
 				llmStart = time.Now()
 				resp, err = a.doLLMCallWithOverflowRetry(runCtx, messages, tools)
 				llmDuration = time.Since(llmStart)
+			}
+
+			// Timeout or transient error on a later turn: try compacting
+			// the context and retrying once before giving up.
+			if err != nil {
+				errStr := err.Error()
+				isTimeout := strings.Contains(errStr, "deadline exceeded") || strings.Contains(errStr, "context canceled") || strings.Contains(errStr, "rate limit")
+
+					if isTimeout && totalTurns > 2 && len(messages) > 10 {
+					a.logger.Warn("LLM call timed out or rate limited, aggressive compaction and retry",
+						"turn", totalTurns,
+						"messages_before", len(messages),
+						"llm_ms", llmDuration.Milliseconds(),
+					)
+					messages = a.aggressiveCompaction(runCtx, messages)
+
+					// Retry the LLM call with compacted context.
+					llmStart = time.Now()
+					resp, err = a.doLLMCallWithOverflowRetry(runCtx, messages, tools)
+					llmDuration = time.Since(llmStart)
+				}
 			}
 
 			if err != nil {
@@ -1375,7 +1393,7 @@ func (a *AgentRun) buildMessages(systemPrompt string, history []ConversationEntr
 	for _, entry := range history {
 		messages = append(messages, chatMessage{
 			Role:    "user",
-			Content: entry.UserMessage,
+			Content: scrubAnthropicRefusalMagic(entry.UserMessage),
 		})
 		if entry.AssistantResponse != "" {
 			content := entry.AssistantResponse
@@ -1408,10 +1426,68 @@ func (a *AgentRun) buildMessages(systemPrompt string, history []ConversationEntr
 
 	messages = append(messages, chatMessage{
 		Role:    "user",
-		Content: userMessage,
+		Content: scrubAnthropicRefusalMagic(userMessage),
 	})
 
 	return messages
+}
+
+// anthropicRefusalMagicString is the exact token that Anthropic uses in
+// internal refusal testing. If this string appears verbatim in user input
+// or session transcripts, it can trigger unexpected model refusals.
+// Aligned with OpenClaw's scrubAnthropicRefusalMagic.
+const anthropicRefusalMagicString = "ANTHROPIC_MAGIC_STRING_TRIGGER_REFUSAL"
+
+// scrubAnthropicRefusalMagic replaces the Anthropic refusal test token with
+// a harmless redacted version, preventing it from poisoning sessions.
+func scrubAnthropicRefusalMagic(s string) string {
+	if !strings.Contains(s, anthropicRefusalMagicString) {
+		return s
+	}
+	return strings.ReplaceAll(s, anthropicRefusalMagicString, "ANTHROPIC MAGIC STRING TRIGGER REFUSAL (redacted)")
+}
+
+// isThinkingError checks if an error indicates the model does not support
+// the requested thinking/reasoning level. Used to trigger graceful fallback.
+func isThinkingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var apierr *apiError
+	if !errors.As(err, &apierr) {
+		return false
+	}
+	return classifyAPIError(apierr.statusCode, apierr.body) == LLMErrorThinking
+}
+
+// stripThinkingInstructions removes thinking-related instructions from the
+// system prompt in messages. This is the fallback when a model does not
+// support extended thinking — the agent retries without thinking instructions.
+func stripThinkingInstructions(messages []chatMessage) []chatMessage {
+	result := make([]chatMessage, len(messages))
+	copy(result, messages)
+
+	for i, m := range result {
+		if m.Role != "system" {
+			continue
+		}
+		s, ok := m.Content.(string)
+		if !ok {
+			continue
+		}
+		// Remove the ## Thinking Mode section from the system prompt.
+		if idx := strings.Index(s, "## Thinking Mode"); idx >= 0 {
+			// Find the next section heading or end of string.
+			rest := s[idx:]
+			endIdx := len(rest)
+			// Look for the next ## heading after the first line.
+			if nextSection := strings.Index(rest[1:], "\n## "); nextSection >= 0 {
+				endIdx = nextSection + 1
+			}
+			result[i].Content = s[:idx] + s[idx+endIdx:]
+		}
+	}
+	return result
 }
 
 // isContextOverflow checks if an error indicates context length exceeded.
@@ -1662,6 +1738,10 @@ func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []ch
 	ctxTokens := ResolveContextWindowTokens(a.cfg.ContextTokens, a.modelOverride)
 	messages = GuardToolResultContext(messages, ctxTokens)
 
+	// Ratio-based context pruning (soft trim / hard clear tool results).
+	pcfg := resolvedCompactionConfig(a.cfg.Compaction).ContextPruning
+	messages = pruneByContextRatio(messages, a.estimateTokens(messages), ctxTokens, pcfg)
+
 	// Prune old images to prevent token accumulation from multimodal content.
 	messages = pruneOldImages(messages, DefaultImagePruneAfterTurns)
 
@@ -1734,7 +1814,7 @@ func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []ch
 			}
 			// Final attempt: emergency compression
 			a.logger.Warn("using emergency compression as last resort")
-			messages = a.emergencyCompression(messages)
+			messages = a.emergencyCompression(ctx, messages)
 		}
 	}
 
@@ -1971,15 +2051,6 @@ func (a *AgentRun) managedCompaction(ctx context.Context, messages []chatMessage
 		summary = "Compaction timed out. Earlier conversation context was discarded."
 	}
 
-	// Enrich summary with structured context (tool failures, file operations).
-	summary = a.buildStructuredCompactionSummary(summary, middle)
-
-	// Add identifier preservation instruction.
-	ccfg := resolvedCompactionConfig(a.cfg.Compaction)
-	if instr := compactionIdentifierInstruction(ccfg.IdentifierPolicy); instr != "" {
-		summary += instr
-	}
-
 	var compacted []chatMessage
 	compacted = append(compacted, header...)
 	compacted = append(compacted, goal)
@@ -2049,56 +2120,6 @@ func (a *AgentRun) collectToolFailures(messages []chatMessage, maxCount int) []s
 		failures = failures[len(failures)-maxCount:]
 	}
 	return failures
-}
-
-// collectFileOperations extracts file paths from tool calls (read_file, write_file, edit_file).
-func (a *AgentRun) collectFileOperations(messages []chatMessage) []string {
-	seen := make(map[string]bool)
-	var files []string
-	for _, m := range messages {
-		for _, tc := range m.ToolCalls {
-			switch tc.Function.Name {
-			case "read_file", "write_file", "edit_file", "create_file":
-				args, err := parseToolArgs(tc.Function.Arguments)
-				if err != nil {
-					continue
-				}
-				for _, key := range []string{"path", "file_path"} {
-					if path, ok := args[key]; ok {
-						if p, ok := path.(string); ok && !seen[p] {
-							seen[p] = true
-							files = append(files, p)
-						}
-					}
-				}
-			}
-		}
-	}
-	return files
-}
-
-// buildStructuredCompactionSummary enriches a base summary with tool failure and file operation context.
-func (a *AgentRun) buildStructuredCompactionSummary(baseSummary string, messages []chatMessage) string {
-	var b strings.Builder
-	b.WriteString(baseSummary)
-
-	failures := a.collectToolFailures(messages, 8)
-	if len(failures) > 0 {
-		b.WriteString("\n[Tool Failures] ")
-		b.WriteString(strings.Join(failures, "; "))
-	}
-
-	files := a.collectFileOperations(messages)
-	if len(files) > 0 {
-		b.WriteString("\n[Files Touched] ")
-		// Limit to 15 most recent files to avoid bloat.
-		if len(files) > 15 {
-			files = files[len(files)-15:]
-		}
-		b.WriteString(strings.Join(files, ", "))
-	}
-
-	return b.String()
 }
 
 // persistCompactionSummary saves the compaction summary to session persistence.
@@ -2179,54 +2200,84 @@ func (a *AgentRun) aggressiveCompaction(ctx context.Context, messages []chatMess
 }
 
 // emergencyCompression is the last resort when all other compaction methods fail.
-// It keeps only the system prompt and the most recent user message, discarding
-// everything in between. This is inspired by PicoClaw's approach.
+// Instead of discarding all history, it attempts a fast LLM summarization with
+// aggressive truncation (200 chars per message) and a short timeout. If the LLM
+// fails, it falls back to buildMinimalFallbackSummary() which preserves metadata
+// (message counts, tool names, identifiers) instead of discarding everything.
 //
 // This function should only be called when:
 // 1. Managed compaction failed
 // 2. Aggressive compaction failed
 // 3. Context still overflows
-func (a *AgentRun) emergencyCompression(messages []chatMessage) []chatMessage {
+func (a *AgentRun) emergencyCompression(ctx context.Context, messages []chatMessage) []chatMessage {
 	var header []chatMessage
-	var lastUserMsg *chatMessage
-	var lastAssistantMsg *chatMessage
+	var body []chatMessage
 
-	// Find system messages and the last user message
-	for i := len(messages) - 1; i >= 0; i-- {
-		m := messages[i]
+	for _, m := range messages {
 		if m.Role == "system" {
-			header = append([]chatMessage{m}, header...)
-		} else if lastUserMsg == nil && m.Role == "user" {
-			lastUserMsg = &messages[i]
-		} else if lastAssistantMsg == nil && m.Role == "assistant" && lastUserMsg != nil {
-			lastAssistantMsg = &messages[i]
+			header = append(header, m)
+		} else {
+			body = append(body, m)
 		}
 	}
 
-	// If no user message found, just return the header
-	if lastUserMsg == nil {
-		a.logger.Warn("emergency compression: no user message found")
+	if len(body) == 0 {
 		return header
+	}
+
+	goal := body[0]
+
+	// Keep the last 2 messages for continuity.
+	keepLast := 2
+	if keepLast > len(body)-1 {
+		keepLast = len(body) - 1
+	}
+	var recent []chatMessage
+	if keepLast > 0 {
+		recent = body[len(body)-keepLast:]
+	}
+
+	// Try to summarize the middle with aggressive truncation.
+	middle := body[1:]
+	if keepLast > 0 && len(body)-1-keepLast > 0 {
+		middle = body[1 : len(body)-keepLast]
+	}
+
+	var summary string
+	if len(middle) > 0 {
+		// Aggressively truncate all messages to 200 chars for the summarizer.
+		truncated := make([]chatMessage, len(middle))
+		for i, m := range middle {
+			truncated[i] = m
+			if s, ok := m.Content.(string); ok && len(s) > 200 {
+				truncated[i].Content = s[:200] + "...(truncated)"
+			}
+		}
+
+		// Short timeout for emergency summarization.
+		emergCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		summary = a.summarizeMiddle(emergCtx, truncated)
+		cancel()
+
+		if summary == "" || strings.HasPrefix(summary, "Failed to summarize") {
+			a.logger.Warn("emergency LLM summarization failed, using metadata fallback")
+			summary = buildMinimalFallbackSummary(messages)
+		}
+	} else {
+		summary = buildMinimalFallbackSummary(messages)
 	}
 
 	var compacted []chatMessage
 	compacted = append(compacted, header...)
-
-	// Add compression notice
+	compacted = append(compacted, goal)
 	compacted = append(compacted, chatMessage{
-		Role: "system",
-		Content: "[System: Emergency context compression applied. " +
-			"Previous conversation history was discarded to prevent context overflow. " +
-			"The user's last message is preserved below. Please continue assisting.]",
+		Role:    "user",
+		Content: "[System: Emergency context compression applied. " + summary + "]",
 	})
+	compacted = append(compacted, recent...)
 
-	// Add the last assistant message if available (provides context)
-	if lastAssistantMsg != nil {
-		compacted = append(compacted, *lastAssistantMsg)
-	}
-
-	// Add the last user message
-	compacted = append(compacted, *lastUserMsg)
+	// Repair orphan tool use/result pairs.
+	compacted = RepairToolUseResultPairing(compacted)
 
 	a.logger.Warn("emergency compression applied",
 		"original_len", len(messages),
@@ -2234,10 +2285,7 @@ func (a *AgentRun) emergencyCompression(messages []chatMessage) []chatMessage {
 	)
 
 	// Persist emergency compression summary
-	a.persistCompactionSummary(
-		"Emergency context compression applied. Previous conversation history was discarded.",
-		len(messages), len(compacted),
-	)
+	a.persistCompactionSummary(summary, len(messages), len(compacted))
 
 	return compacted
 }
@@ -2311,13 +2359,16 @@ func (a *AgentRun) summarizeInStages(ctx context.Context, messages []chatMessage
 	}
 
 	// Merge pass: combine partial summaries into final.
+	ccfg := resolvedCompactionConfig(a.cfg.Compaction)
 	mergePrompt := []chatMessage{
 		{
 			Role: "system",
 			Content: "You are a summarizing assistant. Combine these partial conversation summaries " +
-				"into a single coherent summary. Keep it concise (max 5-6 sentences). " +
+				"into a single coherent summary preserving all section headings " +
+				"(## Decisions, ## Open TODOs, ## Constraints/Rules, ## Pending user asks, ## Exact identifiers). " +
+				"Merge entries under the same heading. Keep it concise. " +
 				"Preserve key facts, tool results, and current status. " +
-				"NEVER use text formatting like bold or headers.",
+				"NEVER use text formatting like bold.",
 		},
 		{
 			Role:    "user",
@@ -2328,7 +2379,7 @@ func (a *AgentRun) summarizeInStages(ctx context.Context, messages []chatMessage
 	mergeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	resp, err := a.llm.CompleteWithFallbackUsingModel(mergeCtx, "", mergePrompt, nil)
+	resp, err := a.llm.CompleteWithFallbackUsingModel(mergeCtx, ccfg.CompactionModel, mergePrompt, nil)
 	if err != nil {
 		a.logger.Warn("merge pass failed, concatenating partials", "error", err)
 		return strings.Join(partialSummaries, " ")
@@ -2411,7 +2462,7 @@ func (a *AgentRun) summarizeChunkWithRetry(ctx context.Context, chunk []chatMess
 			}
 		}
 
-		summary := a.summarizeMiddle(ctx, chunk)
+		summary := a.summarizeWithQualityGuard(ctx, chunk)
 		if summary != "" && !strings.HasPrefix(summary, "Failed to summarize") {
 			return summary, nil
 		}
@@ -2445,16 +2496,27 @@ func (a *AgentRun) fallbackTruncateSummary(messages []chatMessage) string {
 }
 
 func (a *AgentRun) summarizeMiddle(ctx context.Context, middle []chatMessage) string {
-	// Build a fast summary prompt
+	return a.summarizeMiddleWithFeedback(ctx, middle, "")
+}
+
+// summarizeMiddleWithFeedback summarizes a chunk of messages using the structured
+// compaction prompt. If qualityFeedback is non-empty, it is appended to the user
+// prompt to guide the LLM on a retry attempt.
+func (a *AgentRun) summarizeMiddleWithFeedback(ctx context.Context, middle []chatMessage, qualityFeedback string) string {
+	ccfg := resolvedCompactionConfig(a.cfg.Compaction)
+
+	// Collect tool failures and file operations from the middle section.
+	toolFailures := a.collectToolFailures(middle, ccfg.MaxToolFailures)
+	readFiles, modifiedFiles := a.collectFileOperationsSeparated(middle)
+
+	// Build structured compaction prompt.
+	systemPrompt := buildStructuredCompactionPrompt(ccfg, toolFailures, readFiles, modifiedFiles)
+
+	// Build transcript for the LLM.
 	var textBuilder strings.Builder
 	for _, m := range middle {
-		role := m.Role
 		content := ""
 		if s, ok := m.Content.(string); ok {
-			// Truncate content going into summarizer to avoid inception loops.
-			// Tool results get tighter truncation (500 chars) to reduce token
-			// usage and avoid leaking verbose/untrusted tool output into the
-			// compaction summary (aligned with OpenClaw's stripToolResultDetails).
 			maxLen := 1000
 			if m.Role == "tool" {
 				maxLen = 500
@@ -2474,36 +2536,143 @@ func (a *AgentRun) summarizeMiddle(ctx context.Context, middle []chatMessage) st
 			content += " " + info
 		}
 
-		textBuilder.WriteString(fmt.Sprintf("[%s]: %s\n", role, content))
+		textBuilder.WriteString(fmt.Sprintf("[%s]: %s\n", m.Role, content))
+	}
+
+	userContent := "Summarize this history:\n\n" + textBuilder.String()
+	if qualityFeedback != "" {
+		userContent += "\n\n[Quality feedback from previous attempt]\n" + qualityFeedback
 	}
 
 	prompt := []chatMessage{
-		{
-			Role:    "system",
-			Content: "You are a summarizing assistant. Your job is to read a truncated transcript of an agent's past actions " +
-				"and summarize what was attempted, what the results were, and what the current status is. " +
-				"Keep your summary extremely concise (max 3-4 sentences). " +
-				"Focus on CONFIRMED facts from tool results — do NOT speculate or invent outcomes. " +
-				"If a tool result was ambiguous or errored, say so explicitly. " +
-				"Do NOT assert that something was done successfully unless the tool result confirmed it. " +
-				"NEVER use text formatting like bold or headers.",
-		},
-		{
-			Role:    "user",
-			Content: "Summarize this history:\n\n" + textBuilder.String(),
-		},
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userContent},
 	}
 
-	// Make a quick call using the fast model (e.g., flash/haiku equivalent) if available
-	// For now we use the standard model but without tools
 	sumCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	resp, err := a.llm.CompleteWithFallbackUsingModel(sumCtx, "", prompt, nil)
+	resp, err := a.llm.CompleteWithFallbackUsingModel(sumCtx, ccfg.CompactionModel, prompt, nil)
 	if err != nil {
 		a.logger.Warn("compaction summary failed", "error", err)
 		return "Failed to summarize earlier steps due to error."
 	}
 
 	return resp.Content
+}
+
+// summarizeWithQualityGuard wraps summarizeMiddle with quality auditing and retry.
+// If quality guard is disabled, it falls through to summarizeMiddle directly.
+func (a *AgentRun) summarizeWithQualityGuard(ctx context.Context, chunk []chatMessage) string {
+	ccfg := resolvedCompactionConfig(a.cfg.Compaction)
+
+	summary := a.summarizeMiddle(ctx, chunk)
+	if summary == "" || strings.HasPrefix(summary, "Failed to summarize") {
+		return summary
+	}
+
+	if !ccfg.QualityGuard.qualityGuardEnabled() {
+		return summary
+	}
+
+	// Extract identifiers and last user ask for quality audit.
+	identifiers := extractIdentifiers(chunk, 20)
+	lastUserAsk := ""
+	recentUserTurns := collectRecentUserTurns(chunk, 1)
+	if len(recentUserTurns) > 0 {
+		if s, ok := recentUserTurns[0].Content.(string); ok {
+			lastUserAsk = s
+		}
+	}
+
+	audit := auditSummaryQuality(summary, identifiers, lastUserAsk, ccfg.QualityGuard.StrictIdentifiers)
+	if audit.Passed {
+		return summary
+	}
+
+	a.logger.Info("compaction quality audit failed, retrying",
+		"failures", audit.Failures,
+		"max_retries", ccfg.QualityGuard.MaxRetries,
+	)
+
+	// Retry with feedback.
+	for attempt := 0; attempt < ccfg.QualityGuard.MaxRetries; attempt++ {
+		if ctx.Err() != nil {
+			break
+		}
+
+		feedback := "Your previous summary had these issues:\n"
+		for _, f := range audit.Failures {
+			feedback += "- " + f + "\n"
+		}
+		feedback += "Please fix these issues and produce a corrected summary."
+
+		summary = a.summarizeMiddleWithFeedback(ctx, chunk, feedback)
+		if summary == "" || strings.HasPrefix(summary, "Failed to summarize") {
+			break
+		}
+
+		audit = auditSummaryQuality(summary, identifiers, lastUserAsk, ccfg.QualityGuard.StrictIdentifiers)
+		if audit.Passed {
+			a.logger.Info("compaction quality audit passed on retry", "attempt", attempt+1)
+			return summary
+		}
+	}
+
+	// Return best effort summary even if audit still fails.
+	a.logger.Warn("compaction quality audit still failing after retries, using best-effort summary",
+		"remaining_failures", audit.Failures,
+	)
+	return summary
+}
+
+// collectFileOperationsSeparated extracts file paths from tool calls, separating
+// read operations from write/edit/create operations. Files that were both read and
+// modified only appear in the modified list.
+func (a *AgentRun) collectFileOperationsSeparated(messages []chatMessage) (readFiles []string, modifiedFiles []string) {
+	readSet := make(map[string]bool)
+	modifiedSet := make(map[string]bool)
+
+	for _, m := range messages {
+		for _, tc := range m.ToolCalls {
+			args, err := parseToolArgs(tc.Function.Arguments)
+			if err != nil {
+				continue
+			}
+
+			var path string
+			for _, key := range []string{"path", "file_path"} {
+				if p, ok := args[key]; ok {
+					if s, ok := p.(string); ok {
+						path = s
+						break
+					}
+				}
+			}
+			if path == "" {
+				continue
+			}
+
+			switch tc.Function.Name {
+			case "read_file":
+				readSet[path] = true
+			case "write_file", "edit_file", "create_file":
+				modifiedSet[path] = true
+			}
+		}
+	}
+
+	// Files that were read and then modified only appear in modified.
+	for path := range readSet {
+		if !modifiedSet[path] {
+			readFiles = append(readFiles, path)
+		}
+	}
+	for path := range modifiedSet {
+		modifiedFiles = append(modifiedFiles, path)
+	}
+
+	sort.Strings(readFiles)
+	sort.Strings(modifiedFiles)
+	return readFiles, modifiedFiles
 }

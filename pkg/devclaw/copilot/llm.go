@@ -1208,6 +1208,7 @@ const (
 	LLMErrorAuth                           // 401, 403 — invalid/expired API key
 	LLMErrorBilling                        // 402 or billing-related in body
 	LLMErrorContext                        // context_length_exceeded
+	LLMErrorThinking                       // unsupported extended thinking level
 	LLMErrorBadRequest                     // 400 — malformed request
 	LLMErrorFatal                          // everything else
 )
@@ -1229,6 +1230,8 @@ func (k LLMErrorKind) String() string {
 		return "billing"
 	case LLMErrorContext:
 		return "context"
+	case LLMErrorThinking:
+		return "thinking"
 	case LLMErrorBadRequest:
 		return "bad_request"
 	case LLMErrorFatal:
@@ -1280,6 +1283,16 @@ func classifyAPIError(statusCode int, body string) LLMErrorKind {
 	// Delegates to the comprehensive heuristic to catch all provider patterns.
 	if IsLikelyContextOverflowError(body) {
 		return LLMErrorContext
+	}
+
+	// Thinking level unsupported (e.g., extended_thinking not available for model).
+	// Aligned with OpenClaw's pickFallbackThinkingLevel pattern.
+	if statusCode == 400 &&
+		(strings.Contains(bodyLower, "extended_thinking") ||
+			(strings.Contains(bodyLower, "thinking") && strings.Contains(bodyLower, "not supported")) ||
+			(strings.Contains(bodyLower, "thinking") && strings.Contains(bodyLower, "not available")) ||
+			(strings.Contains(bodyLower, "budget_tokens") && strings.Contains(bodyLower, "not supported"))) {
+		return LLMErrorThinking
 	}
 
 	// Billing / quota exhausted.
