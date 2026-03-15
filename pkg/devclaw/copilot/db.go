@@ -472,6 +472,80 @@ func OpenDatabase(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
 
+	// LCM table migrations: executed individually to ensure they're created on
+	// existing databases where the multi-statement schema exec may not reach them.
+	// Each uses CREATE TABLE/INDEX IF NOT EXISTS so they're idempotent.
+	lcmMigrations := []string{
+		`CREATE TABLE IF NOT EXISTS lcm_conversations (
+			id              TEXT PRIMARY KEY,
+			session_id      TEXT NOT NULL UNIQUE,
+			created_at      TEXT NOT NULL,
+			next_seq        INTEGER DEFAULT 1,
+			last_compact_at TEXT DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_lcm_conv_sid ON lcm_conversations(session_id)`,
+		`CREATE TABLE IF NOT EXISTS lcm_messages (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT NOT NULL,
+			seq             INTEGER NOT NULL,
+			role            TEXT NOT NULL,
+			content         TEXT NOT NULL,
+			token_count     INTEGER DEFAULT 0,
+			created_at      TEXT NOT NULL,
+			FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_lcm_msg_conv_seq ON lcm_messages(conversation_id, seq)`,
+		`CREATE TABLE IF NOT EXISTS lcm_summaries (
+			id                          TEXT PRIMARY KEY,
+			conversation_id             TEXT NOT NULL,
+			kind                        TEXT NOT NULL,
+			depth                       INTEGER NOT NULL,
+			content                     TEXT NOT NULL,
+			token_count                 INTEGER DEFAULT 0,
+			source_message_token_count  INTEGER DEFAULT 0,
+			descendant_count            INTEGER DEFAULT 0,
+			descendant_token_count      INTEGER DEFAULT 0,
+			earliest_at                 TEXT NOT NULL,
+			latest_at                   TEXT NOT NULL,
+			created_at                  TEXT NOT NULL,
+			FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_lcm_sum_conv ON lcm_summaries(conversation_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_lcm_sum_depth ON lcm_summaries(conversation_id, depth)`,
+		`CREATE TABLE IF NOT EXISTS lcm_summary_messages (
+			summary_id  TEXT NOT NULL,
+			message_id  INTEGER NOT NULL,
+			PRIMARY KEY (summary_id, message_id),
+			FOREIGN KEY (summary_id) REFERENCES lcm_summaries(id) ON DELETE CASCADE,
+			FOREIGN KEY (message_id) REFERENCES lcm_messages(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_lcm_sm_msg ON lcm_summary_messages(message_id)`,
+		`CREATE TABLE IF NOT EXISTS lcm_summary_parents (
+			parent_id TEXT NOT NULL,
+			child_id  TEXT NOT NULL,
+			PRIMARY KEY (parent_id, child_id),
+			FOREIGN KEY (parent_id) REFERENCES lcm_summaries(id) ON DELETE CASCADE,
+			FOREIGN KEY (child_id) REFERENCES lcm_summaries(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_lcm_sp_child ON lcm_summary_parents(child_id)`,
+		`CREATE TABLE IF NOT EXISTS lcm_context_items (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			conversation_id TEXT NOT NULL,
+			ordinal         INTEGER NOT NULL,
+			item_type       TEXT NOT NULL,
+			message_id      INTEGER,
+			summary_id      TEXT,
+			FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_lcm_ci_conv ON lcm_context_items(conversation_id, ordinal)`,
+	}
+	for _, m := range lcmMigrations {
+		if _, err := db.Exec(m); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("lcm migration: %w", err)
+		}
+	}
+
 	// LCM FTS5 table: best-effort, degrades gracefully if FTS5 is unavailable.
 	_, _ = db.Exec(lcmFTSSchema)
 
