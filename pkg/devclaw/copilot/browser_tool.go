@@ -24,7 +24,6 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -595,7 +594,7 @@ func (bm *BrowserManager) startChrome(ctx context.Context) error {
 	args = append(args, "about:blank")
 
 	bm.cmd = exec.CommandContext(ctx, chromePath, args...)
-	bm.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setSysProcAttr(bm.cmd)
 
 	if err := bm.cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start Chrome: %w", err)
@@ -869,14 +868,7 @@ func (bm *BrowserManager) killProcessGroup() {
 	if bm.cmd == nil || bm.cmd.Process == nil {
 		return
 	}
-	// Kill the entire process group (Chrome + children)
-	pgid, err := syscall.Getpgid(bm.cmd.Process.Pid)
-	if err == nil {
-		syscall.Kill(-pgid, syscall.SIGKILL)
-	} else {
-		// Fallback to killing just the process
-		bm.cmd.Process.Kill()
-	}
+	killProcessGroupByCmd(bm.cmd)
 	bm.cmd.Wait()
 	bm.cmd = nil
 }
@@ -886,9 +878,7 @@ func (bm *BrowserManager) isAlive() bool {
 	if bm.cmd == nil || bm.cmd.Process == nil {
 		return false
 	}
-	// Send signal 0 to check if process exists
-	err := bm.cmd.Process.Signal(syscall.Signal(0))
-	return err == nil
+	return processIsAlive(bm.cmd)
 }
 
 // ─── Tool Registration ───

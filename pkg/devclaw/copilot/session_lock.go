@@ -17,7 +17,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -79,7 +78,7 @@ func AcquireSessionLock(sessionsDir, sessionID string, logger *slog.Logger) (*Se
 	}
 
 	// Try non-blocking advisory lock.
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := flockExclusive(f); err != nil {
 		f.Close()
 		// Read existing lock info for a better error message.
 		holder := readLockHolder(lockPath)
@@ -115,7 +114,7 @@ func AcquireSessionLock(sessionsDir, sessionID string, logger *slog.Logger) (*Se
 func (sl *SessionLock) Release() {
 	sl.stopped.Do(func() {
 		close(sl.stopCh)
-		_ = syscall.Flock(int(sl.file.Fd()), syscall.LOCK_UN)
+		_ = flockUnlock(sl.file)
 		sl.file.Close()
 		_ = os.Remove(sl.path)
 		sl.logger.Debug("session lock released", "session", sl.sessionID)
