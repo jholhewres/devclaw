@@ -45,7 +45,7 @@ export function Security() {
   const authOk = overview?.webui_auth_configured
 
   return (
-    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-screen-2xl mx-auto">
+    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
       {/* Header */}
       <div>
         <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-text-muted">{t('security.subtitle')}</p>
@@ -78,7 +78,7 @@ function StatusPill({ label, ok, text }: { label: string; ok: boolean; text: str
   return (
     <div className={cn(
       'rounded-xl px-3.5 py-2.5 border',
-      ok ? 'bg-bg-surface border-border' : 'bg-bg-surface border-border'
+      ok ? 'bg-bg-surface border-brand/30' : 'bg-bg-surface border-border'
     )}>
       <span className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">{label}</span>
       <div className="mt-0.5 flex items-center gap-1.5">
@@ -125,7 +125,7 @@ function Accordion({
         aria-expanded={open}
         className="flex w-full cursor-pointer items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-bg-hover"
       >
-        <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', iconColor)}>
+        <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', iconColor)}>
           {icon}
         </div>
         <div className="min-w-0 flex-1">

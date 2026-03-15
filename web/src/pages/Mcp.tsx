@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, Trash2, Play, Square, RefreshCw, Server, Cable, AlertTriangle } from 'lucide-react';
 import { api } from '@/lib/api';
+import { Button } from '@/components/ui/Button';
 import {
   ConfigPage,
   ConfigSection,
@@ -143,20 +144,14 @@ export function Mcp() {
       message={message}
       actions={
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => loadServers()}
-            className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-bg-surface px-4 py-3 text-sm font-medium text-text-secondary transition-all hover:border-border-hover hover:text-text-primary"
-          >
+          <Button size="lg" variant="outline" onClick={() => loadServers()}>
             <RefreshCw className="h-4 w-4" />
             {t('mcp.refresh')}
-          </button>
-          <button
-            onClick={() => setShowAddForm(!showAddForm)}
-            className="flex cursor-pointer items-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-semibold text-white transition-all hover:bg-brand-hover"
-          >
+          </Button>
+          <Button size="lg" onClick={() => setShowAddForm(!showAddForm)}>
             <Plus className="h-4 w-4" />
             {t('mcp.addServer')}
-          </button>
+          </Button>
         </div>
       }
     >
@@ -180,19 +175,13 @@ export function Mcp() {
           </ConfigField>
 
           <div className="flex gap-3 pt-2">
-            <button
-              onClick={handleAddServer}
-              className="flex cursor-pointer items-center gap-2 rounded-xl bg-success px-4 py-2.5 text-sm font-semibold text-white transition-all hover:opacity-90"
-            >
+            <Button className="bg-success hover:opacity-90" onClick={handleAddServer}>
               <Plus className="h-4 w-4" />
               {t('mcp.createServer')}
-            </button>
-            <button
-              onClick={() => setShowAddForm(false)}
-              className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-bg-surface px-4 py-2.5 text-sm font-medium text-text-secondary transition-all hover:border-border-hover hover:text-text-primary"
-            >
+            </Button>
+            <Button variant="outline" onClick={() => setShowAddForm(false)}>
               {t('common.cancel')}
-            </button>
+            </Button>
           </div>
         </ConfigSection>
       )}
@@ -225,34 +214,38 @@ export function Mcp() {
                 actions={
                   <div className="flex items-center gap-2">
                     {server.status === 'running' ? (
-                      <button
+                      <Button
+                        size="xs"
+                        variant="destructive-subtle"
                         onClick={() => handleStopServer(server.name)}
-                        className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-error-subtle px-3 py-1.5 text-xs font-medium text-error transition-all hover:bg-error/20"
                       >
                         <Square className="h-3.5 w-3.5" />
                         {t('mcp.stop')}
-                      </button>
+                      </Button>
                     ) : (
-                      <button
+                      <Button
+                        size="xs"
+                        className="bg-success-subtle text-success hover:bg-success/20"
                         onClick={() => handleStartServer(server.name)}
-                        className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-success-subtle px-3 py-1.5 text-xs font-medium text-success transition-all hover:bg-success/20"
                       >
                         <Play className="h-3.5 w-3.5" />
                         {t('mcp.start')}
-                      </button>
+                      </Button>
                     )}
-                    <button
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      className="hover:text-error"
                       onClick={() => handleDeleteServer(server.name)}
-                      className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-bg-subtle px-3 py-1.5 text-xs font-medium text-text-secondary transition-all hover:text-error"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                       {t('common.delete')}
-                    </button>
+                    </Button>
                   </div>
                 }
               >
                 {server.error && (
-                  <div className="-mt-2 mb-4 flex items-start gap-2 rounded-lg border border-error/10 bg-error-subtle p-3">
+                  <div className="-mt-2 mb-4 flex items-start gap-2 rounded-xl border border-error/10 bg-error-subtle p-3">
                     <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-error" />
                     <p className="text-xs text-error">{server.error}</p>
                   </div>

@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/Button'
 import {
   ConfigPage,
   ConfigSection,
@@ -100,15 +101,12 @@ function AddTagInput({ onAdd, placeholder }: {
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAdd())}
         placeholder={placeholder}
-        className="h-10 flex-1 rounded-lg border border-border bg-bg-surface px-3 text-sm text-text-primary outline-none transition-all placeholder:text-text-muted hover:border-border-hover focus:border-brand/50"
+        className="h-11 flex-1 rounded-xl border border-border bg-bg-surface px-4 text-sm text-text-primary outline-none transition-all placeholder:text-text-muted hover:border-border-hover focus:border-brand/50"
       />
-      <button
-        onClick={handleAdd}
-        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-bg-subtle border border-border text-sm text-text-secondary hover:text-text-primary hover:border-border-hover transition-all cursor-pointer"
-      >
+      <Button variant="outline" onClick={handleAdd}>
         <UserPlus className="h-4 w-4" />
         {t('common.add')}
-      </button>
+      </Button>
     </div>
   )
 }

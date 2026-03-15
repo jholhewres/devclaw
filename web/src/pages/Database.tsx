@@ -11,6 +11,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import {
   ConfigPage,
@@ -107,7 +108,7 @@ function StatusCard({
   };
 
   return (
-    <Card padding="md" className="rounded-xl">
+    <Card padding="md">
       <div className="mb-2 flex items-center justify-between">
         <span className="text-xs tracking-wide text-text-muted uppercase">{label}</span>
         {Icon && (
@@ -222,13 +223,10 @@ export function DatabasePage() {
       message={message}
       actions={
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => loadData()}
-            className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-bg-surface px-4 py-3 text-sm font-medium text-text-secondary transition-all hover:border-border-hover hover:text-text-primary"
-          >
+          <Button size="lg" variant="outline" onClick={() => loadData()}>
             <RefreshCw className="h-4 w-4" />
             {t('database.refresh')}
-          </button>
+          </Button>
           <ConfigActions
             onSave={handleSave}
             onReset={handleReset}
@@ -276,7 +274,7 @@ export function DatabasePage() {
             />
           </div>
           {status.error && (
-            <div className="mt-4 flex items-start gap-2 rounded-lg border border-error/10 bg-error-subtle p-3">
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-error/10 bg-error-subtle p-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-error" />
               <p className="text-xs text-error">{status.error}</p>
             </div>

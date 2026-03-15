@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Lock, ArrowRight, Loader2, Eye, EyeOff } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { Logo } from '@/components/Logo'
+import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
 import { version } from '../../package.json'
 
@@ -125,15 +126,7 @@ export function Login() {
               </div>
             )}
 
-            <button
-              type="submit"
-              disabled={loading || !password}
-              className={cn(
-                'flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white transition-all',
-                'bg-brand hover:bg-brand-hover',
-                'disabled:cursor-not-allowed disabled:opacity-50'
-              )}
-            >
+            <Button type="submit" size="lg" className="w-full" disabled={loading || !password}>
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -142,7 +135,7 @@ export function Login() {
                   <ArrowRight className="h-4 w-4" />
                 </>
               )}
-            </button>
+            </Button>
           </form>
         </div>
 

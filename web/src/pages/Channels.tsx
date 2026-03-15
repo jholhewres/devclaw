@@ -13,6 +13,7 @@ import {
   Clock,
 } from 'lucide-react'
 import { api, type ChannelHealth } from '@/lib/api'
+import { Button } from '@/components/ui/Button'
 import { timeAgo, cn } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
@@ -76,7 +77,7 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
     <Card
       padding="lg"
       className={cn(
-        'rounded-2xl transition-all',
+        'transition-all',
         connected ? 'border-success/20' : ''
       )}
     >
@@ -109,15 +110,7 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
 
           {/* Actions */}
           <div className="mt-4 flex items-center gap-3">
-            <button
-              onClick={onNavigate}
-              className={cn(
-                'flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all cursor-pointer',
-                connected
-                  ? 'bg-bg-subtle text-text-secondary border border-border hover:bg-bg-hover hover:text-text-primary'
-                  : 'bg-brand text-white hover:bg-brand-hover'
-              )}
-            >
+            <Button size="md" variant={connected ? 'outline' : 'default'} onClick={onNavigate}>
               {connected ? (
                 <>
                   <Smartphone className="h-4 w-4" />
@@ -130,7 +123,7 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
                   <ArrowRight className="h-4 w-4" />
                 </>
               )}
-            </button>
+            </Button>
 
             {channel.error_count > 0 && (
               <Badge variant="warning" className="flex items-center gap-1.5 px-3 py-2">
@@ -164,7 +157,7 @@ function ChannelCard({ channel }: { channel: ChannelHealth }) {
     <Card
       padding="md"
       className={cn(
-        'rounded-xl transition-all',
+        'transition-all',
         !connected && 'opacity-60'
       )}
     >
@@ -224,7 +217,7 @@ function ChannelCard({ channel }: { channel: ChannelHealth }) {
 function EmptyChannels() {
   const { t } = useTranslation()
   return (
-    <Card padding="lg" className="mt-8 rounded-2xl">
+    <Card padding="lg" className="mt-8">
       <EmptyState
         icon={<Radio className="h-6 w-6" />}
         title={t('channelsPage.title')}

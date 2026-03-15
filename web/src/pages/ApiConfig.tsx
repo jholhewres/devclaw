@@ -14,6 +14,7 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { api } from '@/lib/api'
+import { Button } from '@/components/ui/Button'
 import {
   ConfigPage,
   ConfigSection,
@@ -349,7 +350,7 @@ export function ApiConfig() {
       >
         {/* Provider info with link */}
         {provider && provider.freeUrl && (
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-main px-3 py-2 mb-4">
+          <div className="flex items-center gap-2 rounded-xl border border-border bg-bg-main px-3 py-2 mb-4">
             <div className="flex-1">
               <p className="text-xs text-text-secondary">
                 {provider.freeNote || provider.description}
@@ -474,10 +475,10 @@ export function ApiConfig() {
         {/* Connection Test */}
         <div className="pt-4 border-t border-border">
           <div className="flex items-center justify-between">
-            <button
+            <Button
+              variant="outline"
               onClick={handleTestConnection}
               disabled={testingConnection || !config.base_url}
-              className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-bg-subtle px-4 py-2.5 text-sm font-medium text-text-secondary transition-all hover:border-border-hover hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {testingConnection ? (
                 <>
@@ -490,7 +491,7 @@ export function ApiConfig() {
                   {t('apiConfig.testConnection')}
                 </>
               )}
-            </button>
+            </Button>
 
             {/* Test Result */}
             {testResult && (
@@ -518,7 +519,7 @@ export function ApiConfig() {
 
           {/* Error Message */}
           {testResult && !testResult.success && testResult.error && (
-            <div className="mt-3 flex items-start gap-2 rounded-lg bg-error-subtle border border-error/10 p-3">
+            <div className="mt-3 flex items-start gap-2 rounded-xl bg-error-subtle border border-error/10 p-3">
               <AlertTriangle className="h-4 w-4 text-error flex-shrink-0 mt-0.5" />
               <p className="text-xs text-error">{testResult.error}</p>
             </div>

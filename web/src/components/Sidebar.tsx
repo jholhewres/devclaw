@@ -135,7 +135,7 @@ export function Sidebar() {
           }
         }}
         className={cn(
-          'group relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 cursor-pointer',
+          'group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 cursor-pointer',
           active
             ? 'bg-bg-active text-brand'
             : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary',
@@ -191,7 +191,7 @@ export function Sidebar() {
           </button>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary lg:hidden"
+            className="flex h-8 w-8 items-center justify-center rounded-xl text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary lg:hidden"
           >
             <X className="h-5 w-5" />
           </button>
@@ -231,7 +231,7 @@ export function Sidebar() {
                         handleNavigate(`/chat/${encodeURIComponent(session.id)}`)
                       }
                       className={cn(
-                        'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-all duration-200 cursor-pointer',
+                        'flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left transition-all duration-200 cursor-pointer',
                         sessionActive
                           ? 'bg-brand-subtle text-text-primary'
                           : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary',
@@ -278,7 +278,7 @@ export function Sidebar() {
               <button
                 onClick={handleLogout}
                 className={cn(
-                  'flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary cursor-pointer',
+                  'flex items-center gap-2 rounded-xl px-2.5 py-2 text-sm text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary cursor-pointer',
                   !showFullText && 'justify-center px-2',
                 )}
               >
@@ -291,7 +291,7 @@ export function Sidebar() {
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className={cn(
-              'mt-1 hidden w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-text-muted transition-all duration-200 hover:bg-bg-hover hover:text-text-primary lg:flex cursor-pointer',
+              'mt-1 hidden w-full items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium text-text-muted transition-all duration-200 hover:bg-bg-hover hover:text-text-primary lg:flex cursor-pointer',
               !showFullText && 'justify-center',
             )}
             title={
@@ -314,7 +314,7 @@ export function Sidebar() {
       <button
         onClick={() => setSidebarOpen(true)}
         className={cn(
-          'fixed left-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-bg-surface text-text-primary shadow-md transition-opacity duration-200 lg:hidden cursor-pointer',
+          'fixed left-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-bg-surface text-text-primary shadow-md transition-opacity duration-200 lg:hidden cursor-pointer',
           sidebarOpen ? 'pointer-events-none opacity-0' : 'opacity-100',
         )}
         aria-label={t('sidebar.menu')}
@@ -349,7 +349,7 @@ function ThemeToggle({ compact }: { compact: boolean }) {
     <button
       onClick={next}
       className={cn(
-        'flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary cursor-pointer',
+        'flex items-center gap-2 rounded-xl px-2.5 py-2 text-sm text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary cursor-pointer',
         compact && 'justify-center px-2',
       )}
       aria-label={label}

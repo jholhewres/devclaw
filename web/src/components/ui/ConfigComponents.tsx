@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp, Save, RotateCcw, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/Button';
 
 // ============================================
 // Config Page Wrapper
@@ -26,7 +27,7 @@ export function ConfigPage({
 }: ConfigPageProps) {
   return (
     <div className="flex flex-1 flex-col overflow-hidden bg-bg-main">
-      <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
+      <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
         {/* Header */}
         <div className="flex items-start justify-between">
           <div>
@@ -56,7 +57,7 @@ export function ConfigPage({
         )}
 
         {/* Content */}
-        <div className="mt-10">{children}</div>
+        <div className="mt-8">{children}</div>
       </div>
     </div>
   );
@@ -97,9 +98,10 @@ export function ConfigSection({
 
   if (collapsible) {
     return (
-      <section className="mb-10">
+      <section className="mb-8">
         <button
           onClick={() => setIsCollapsed(!isCollapsed)}
+          aria-expanded={!isCollapsed}
           className="group mb-6 flex w-full items-center gap-3 text-left"
         >
           {Icon && (
@@ -123,7 +125,7 @@ export function ConfigSection({
   }
 
   return (
-    <section className="mb-10">
+    <section className="mb-8">
       {(Icon || title) && (
         <div className="mb-6 flex items-center gap-3">
           {Icon && (
@@ -430,15 +432,11 @@ export function ConfigTagList({
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={addPlaceholder}
-            className="h-10 flex-1 rounded-lg border border-border bg-bg-surface px-3 text-sm text-text-primary transition-all outline-none placeholder:text-text-muted hover:border-border-hover focus:border-brand/50"
+            className="h-11 flex-1 rounded-xl border border-border bg-bg-surface px-4 text-sm text-text-primary transition-all outline-none placeholder:text-text-muted hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
           />
-          <button
-            onClick={handleAdd}
-            disabled={!inputValue.trim()}
-            className="h-10 rounded-lg bg-brand px-4 text-sm font-medium text-white transition-colors hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
-          >
+          <Button size="lg" onClick={handleAdd} disabled={!inputValue.trim()}>
             {addLabel}
-          </button>
+          </Button>
         </div>
       )}
     </div>
@@ -475,20 +473,12 @@ export function ConfigActions({
   return (
     <div className="flex items-center gap-3">
       {onReset && hasChanges && (
-        <button
-          onClick={onReset}
-          disabled={saving}
-          className="flex cursor-pointer items-center gap-2 rounded-xl border border-border bg-bg-surface px-5 py-3 text-sm font-medium text-text-secondary transition-all hover:border-border-hover hover:text-text-primary disabled:opacity-50"
-        >
+        <Button size="lg" variant="outline" onClick={onReset} disabled={saving}>
           <RotateCcw className="h-4 w-4" />
           {resetLabel}
-        </button>
+        </Button>
       )}
-      <button
-        onClick={onSave}
-        disabled={!hasChanges || saving}
-        className="flex cursor-pointer items-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-semibold text-white transition-all hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <Button size="lg" onClick={onSave} disabled={!hasChanges || saving}>
         {saving ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -500,7 +490,7 @@ export function ConfigActions({
             {saveLabel}
           </>
         )}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -611,7 +601,7 @@ interface ConfigInfoBoxProps {
 
 export function ConfigInfoBox({ title, items }: ConfigInfoBoxProps) {
   return (
-    <div className="mb-10 rounded-2xl border border-border bg-bg-surface/50 p-6">
+    <div className="mb-8 rounded-2xl border border-border bg-bg-surface/50 p-6">
       {title && <h3 className="mb-3 text-sm font-semibold text-text-muted">{title}</h3>}
       <ul className="space-y-2 text-xs text-text-muted">
         {items.map((item, index) => (
@@ -652,12 +642,9 @@ export function ErrorState({ message, onRetry, retryLabel }: ErrorStateProps) {
     <div className="flex flex-1 flex-col items-center justify-center bg-bg-main">
       <p className="text-sm text-error">{message}</p>
       {onRetry && (
-        <button
-          onClick={onRetry}
-          className="mt-3 cursor-pointer text-xs text-text-muted transition-colors hover:text-text-primary"
-        >
+        <Button variant="ghost" size="sm" onClick={onRetry} className="mt-3">
           {retryLabel}
-        </button>
+        </Button>
       )}
     </div>
   );

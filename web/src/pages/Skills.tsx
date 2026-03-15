@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Tabs } from '@/components/ui/Tabs'
+import { Button } from '@/components/ui/Button'
 import { LoadingSpinner, ErrorState } from '@/components/ui/ConfigComponents'
 
 interface AvailableSkill {
@@ -80,19 +81,16 @@ export function Skills() {
   }
 
   return (
-    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-screen-2xl mx-auto">
+    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto">
       {/* Header */}
       <PageHeader
         title={t('skills.title')}
         description={`${enabledCount} ${t('skills.enabled').toLowerCase()} / ${skills.length}`}
         actions={
-          <button
-            onClick={() => setShowInstall(true)}
-            className="flex cursor-pointer items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-medium text-white transition-all hover:bg-brand-hover"
-          >
+          <Button onClick={() => setShowInstall(true)}>
             <Plus className="h-4 w-4" />
             {t('skillsPage.install')}
-          </button>
+          </Button>
         }
       />
 
@@ -111,7 +109,7 @@ export function Skills() {
             key={skill.name}
             padding="lg"
             className={cn(
-              'group relative overflow-hidden rounded-2xl transition-all',
+              'group relative overflow-hidden transition-all',
               skill.enabled
                 ? 'border-brand/30'
                 : 'hover:border-border-hover'
@@ -277,7 +275,7 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
           <div className="flex items-center gap-4">
             <h2 className="text-lg font-semibold text-text-primary">{t('skillsPage.manualInstallTitle')}</h2>
           </div>
-          <button onClick={onClose} className="cursor-pointer rounded-lg p-1.5 text-text-muted hover:bg-bg-hover hover:text-text-primary transition-colors">
+          <button onClick={onClose} className="cursor-pointer rounded-xl p-1.5 text-text-muted hover:bg-bg-hover hover:text-text-primary transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -409,10 +407,10 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
                               {t('skillsPage.installError', { name: skill.name })}
                             </span>
                           ) : (
-                            <button
+                            <Button
+                              size="xs"
                               onClick={() => handleInstall(skill.name)}
                               disabled={isInstalling}
-                              className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-brand-hover disabled:opacity-50"
                             >
                               {isInstalling ? (
                                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -420,7 +418,7 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
                                 <Download className="h-3 w-3" />
                               )}
                               {isInstalling ? t('common.loading') : t('skillsPage.install')}
-                            </button>
+                            </Button>
                           )}
                         </div>
                       </div>
@@ -452,16 +450,15 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
                     onChange={(e) => setManualName(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleManualInstall()}
                     placeholder={t('skillsPage.manualInstallPlaceholder')}
-                    className="flex-1 rounded-lg border border-border bg-bg-main px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all focus:border-brand/50 hover:border-border-hover"
+                    className="h-11 flex-1 rounded-xl border border-border bg-bg-main px-4 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all focus:border-brand/50 hover:border-border-hover"
                   />
-                  <button
+                  <Button
                     onClick={handleManualInstall}
                     disabled={!manualName.trim() || installing !== null}
-                    className="flex cursor-pointer items-center gap-2 rounded-lg bg-brand px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {installing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                     {t('skillsPage.install')}
-                  </button>
+                  </Button>
                 </div>
               </div>
 
@@ -477,7 +474,7 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
                 </div>
               )}
 
-              <Card className="rounded-xl bg-bg-main">
+              <Card className="bg-bg-main">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">{t('skillsPage.browseClawHub')}</p>
                 <ul className="mt-2 space-y-1.5 text-xs text-text-secondary">
                   <li className="flex items-start gap-2">

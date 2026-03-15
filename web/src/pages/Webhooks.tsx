@@ -19,7 +19,8 @@ import { cn } from '@/lib/utils'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { LoadingSpinner } from '@/components/ui/ConfigComponents'
+import { Button } from '@/components/ui/Button'
+import { ConfigPage, LoadingSpinner } from '@/components/ui/ConfigComponents'
 
 /**
  * Webhook management page.
@@ -121,45 +122,21 @@ export function Webhooks() {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-bg-main">
-      <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
-        {/* Header */}
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-text-muted">
-              {t('webhooks.subtitle')}
-            </p>
-            <h1 className="mt-1 text-2xl font-bold text-text-primary tracking-tight">{t('webhooks.title')}</h1>
-            <p className="mt-2 text-base text-text-muted">
-              {t('webhooks.desc')}
-            </p>
-          </div>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="flex cursor-pointer items-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-semibold text-white transition-all hover:bg-brand-hover"
-          >
-            <Plus className="h-4 w-4" />
-            {t('webhooks.addWebhook')}
-          </button>
-        </div>
-
-        {/* Message */}
-        {message && (
-          <div
-            className={cn(
-              'mt-6 rounded-xl px-5 py-4 text-sm border',
-              message.type === 'success'
-                ? 'bg-success-subtle text-success border-success/20'
-                : 'bg-error-subtle text-error border-error/20'
-            )}
-          >
-            {message.text}
-          </div>
-        )}
-
+    <ConfigPage
+      title={t('webhooks.title')}
+      subtitle={t('webhooks.subtitle')}
+      description={t('webhooks.desc')}
+      actions={
+        <Button size="lg" onClick={() => setShowForm(!showForm)}>
+          <Plus className="h-4 w-4" />
+          {t('webhooks.addWebhook')}
+        </Button>
+      }
+      message={message}
+    >
         {/* Create form */}
         {showForm && (
-          <Card padding="lg" className="mt-6 rounded-2xl">
+          <Card padding="lg" className="mb-6">
             <h3 className="text-base font-semibold text-text-primary mb-5">{t('webhooks.newWebhook')}</h3>
 
             <div className="space-y-5">
@@ -210,20 +187,19 @@ export function Webhooks() {
 
               {/* Actions */}
               <div className="flex items-center justify-end gap-3 pt-2">
-                <button
+                <Button
+                  variant="ghost"
                   onClick={() => {
                     setShowForm(false)
                     setNewUrl('')
                     setSelectedEvents([])
                   }}
-                  className="cursor-pointer rounded-xl px-4 py-2.5 text-sm font-medium text-text-muted transition-colors hover:text-text-primary"
                 >
                   {t('common.cancel')}
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={handleCreate}
                   disabled={creating || !newUrl.trim()}
-                  className="flex cursor-pointer items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {creating ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -231,14 +207,14 @@ export function Webhooks() {
                     <Webhook className="h-4 w-4" />
                   )}
                   {creating ? t('common.loading') : t('webhooks.createWebhook')}
-                </button>
+                </Button>
               </div>
             </div>
           </Card>
         )}
 
         {/* Webhook list */}
-        <div className="mt-8">
+        <div>
           <div className="mb-5 flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-bg-subtle">
               <Webhook className="h-4 w-4 text-text-muted" />
@@ -259,12 +235,13 @@ export function Webhooks() {
               title={t('webhooks.noWebhooks')}
               description={t('webhooks.noWebhooksHint')}
               action={
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setShowForm(true)}
-                  className="cursor-pointer text-sm font-medium text-text-muted hover:text-text-primary transition-colors"
                 >
                   {t('webhooks.addWebhook')}
-                </button>
+                </Button>
               }
               className="rounded-2xl border border-dashed border-border bg-bg-surface"
             />
@@ -285,7 +262,7 @@ export function Webhooks() {
         </div>
 
         {/* Quick documentation */}
-        <Card padding="lg" className="mt-10 mb-6 rounded-2xl">
+        <Card padding="lg" className="mt-10 mb-6">
           <h3 className="text-sm font-semibold text-text-secondary mb-3">{t('webhooks.availableEvents')}</h3>
           <div className="grid grid-cols-2 gap-y-2 gap-x-4">
             {validEvents.map((event) => (
@@ -299,8 +276,7 @@ export function Webhooks() {
             {t('webhooks.payloadHint')}
           </p>
         </Card>
-      </div>
-    </div>
+    </ConfigPage>
   )
 }
 
@@ -326,7 +302,7 @@ function WebhookCard({
     <Card
       padding="md"
       className={cn(
-        'rounded-2xl p-5 transition-all',
+        'p-5 transition-all',
         !webhook.active && 'opacity-60'
       )}
     >
@@ -350,53 +326,58 @@ function WebhookCard({
 
         <div className="flex items-center gap-1 shrink-0">
           {/* Toggle active/inactive */}
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => onToggle(webhook.id, !webhook.active)}
             title={webhook.active ? t('common.disabled') : t('common.enabled')}
-            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
           >
             {webhook.active ? (
               <PowerOff className="h-4 w-4" />
             ) : (
               <Power className="h-4 w-4" />
             )}
-          </button>
+          </Button>
 
           {/* Copy ID */}
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => onCopyId(webhook.id)}
             title={t('webhooks.copyId')}
-            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
           >
             {copiedId === webhook.id ? (
               <Check className="h-4 w-4 text-success" />
             ) : (
               <Copy className="h-4 w-4" />
             )}
-          </button>
+          </Button>
 
           {/* Delete */}
           {confirming ? (
-            <button
+            <Button
+              variant="destructive-subtle"
+              size="xs"
               onClick={() => {
                 onDelete(webhook.id)
                 setConfirming(false)
               }}
-              className="flex h-8 cursor-pointer items-center gap-1 rounded-lg bg-error-subtle px-2 text-xs font-medium text-error transition-colors hover:bg-error/20"
             >
               {t('common.confirm')}
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => {
                 setConfirming(true)
                 setTimeout(() => setConfirming(false), 3000)
               }}
               title={t('common.delete')}
-              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-error-subtle hover:text-error"
+              className="hover:bg-error-subtle hover:text-error"
             >
               <Trash2 className="h-4 w-4" />
-            </button>
+            </Button>
           )}
         </div>
       </div>

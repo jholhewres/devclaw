@@ -19,7 +19,7 @@ export const Card = forwardRef<HTMLDivElement, CardProps>(
     <div
       ref={ref}
       className={cn(
-        'rounded-lg border border-border bg-bg-surface',
+        'rounded-2xl border border-border bg-bg-surface',
         paddingSizes[padding],
         interactive && [
           'cursor-pointer',

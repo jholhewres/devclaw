@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Trash2, MessageSquare } from 'lucide-react';
 import { api, type SessionInfo } from '@/lib/api';
+import { Button } from '@/components/ui/Button';
 import { timeAgo } from '@/lib/utils';
 import { useAppStore } from '@/stores/app';
 import { PageContainer } from '@/components/PageContainer';
@@ -101,13 +102,13 @@ export function Sessions() {
           return (
             <div
               key={session.id}
-              className="group flex items-center rounded-lg transition-all duration-200 hover:bg-bg-hover"
+              className="group flex items-center rounded-xl transition-all duration-200 hover:bg-bg-hover"
             >
               <button
                 onClick={() => navigate(`/chat/${encodeURIComponent(chatId)}`)}
                 className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-3 text-left"
               >
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-bg-subtle text-text-muted">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-bg-subtle text-text-muted">
                   <MessageSquare className="size-4" />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -127,15 +128,17 @@ export function Sessions() {
               </button>
 
               {confirmingDelete === session.id ? (
-                <button
+                <Button
+                  variant="destructive-subtle"
+                  size="xs"
+                  className="mr-3 shrink-0"
                   onClick={(e) => {
                     e.stopPropagation();
                     handleDelete(session.id);
                   }}
-                  className="mr-3 shrink-0 cursor-pointer rounded-md bg-error-subtle px-2.5 py-1.5 text-xs font-medium text-error transition-colors hover:bg-error/20"
                 >
                   {t('common.confirm')}
-                </button>
+                </Button>
               ) : (
                 <button
                   onClick={(e) => {
@@ -144,7 +147,7 @@ export function Sessions() {
                     setTimeout(() => setConfirmingDelete(null), 3000);
                   }}
                   aria-label="Delete session"
-                  className="mr-3 shrink-0 cursor-pointer rounded-md p-1.5 text-text-muted opacity-0 transition-all group-hover:opacity-100 hover:bg-error-subtle hover:text-error"
+                  className="mr-3 shrink-0 cursor-pointer rounded-xl p-1.5 text-text-muted opacity-0 transition-all group-hover:opacity-100 hover:bg-error-subtle hover:text-error"
                 >
                   <Trash2 className="size-4" />
                 </button>

@@ -6,7 +6,6 @@ import {
   Save,
   Loader2,
   CheckCircle2,
-  XCircle,
   ExternalLink,
   Network,
   Eye,
@@ -19,7 +18,11 @@ import {
 import { api } from '@/lib/api'
 import type { DomainConfig } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
 import {
+  ConfigField,
+  ConfigPage,
   LoadingSpinner,
 } from '@/components/ui/ConfigComponents'
 
@@ -103,36 +106,17 @@ export function Domain() {
   if (loading) return <LoadingSpinner />
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-bg-main">
-      <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
-        {/* Header */}
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-text-muted">{t('domain.subtitle')}</p>
-            <h1 className="mt-1 text-2xl font-bold text-text-primary tracking-tight">{t('domain.title')}</h1>
-          </div>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="flex cursor-pointer items-center gap-2 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white transition-all hover:bg-brand-hover disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {saving ? t('common.saving') : t('common.save')}
-          </button>
-        </div>
-
-        {/* Toast */}
-        {message && (
-          <div className={cn(
-            'mt-5 flex items-center gap-2.5 rounded-xl px-4 py-3 text-sm border',
-            message.type === 'success'
-              ? 'bg-success-subtle text-success border-success/20'
-              : 'bg-error-subtle text-error border-error/20'
-          )}>
-            {message.type === 'success' ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
-            {message.text}
-          </div>
-        )}
+    <ConfigPage
+      title={t('domain.title')}
+      subtitle={t('domain.subtitle')}
+      actions={
+        <Button size="lg" onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          {saving ? t('common.saving') : t('common.save')}
+        </Button>
+      }
+      message={message}
+    >
 
         {/* Status overview */}
         {config && (
@@ -159,13 +143,13 @@ export function Domain() {
         )}
 
         {/* -- WebUI -- */}
-        <Card className="mt-8">
+        <Card className="mt-8 p-5">
           <CardHeader icon={Globe} title={t('domainPage.webui.title')} />
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <Field label={t('domain.port')}>
+            <ConfigField label={t('domain.port')}>
               <Input value={webuiAddress} onChange={setWebuiAddress} placeholder=":8090" />
-            </Field>
-            <Field label={t('domain.password')}>
+            </ConfigField>
+            <ConfigField label={t('domain.password')}>
               <PasswordInput
                 value={webuiToken}
                 onChange={setWebuiToken}
@@ -173,12 +157,12 @@ export function Domain() {
                 onToggle={() => setShowWebuiToken(!showWebuiToken)}
                 placeholder={config?.webui_auth_configured ? '--------' : t('domain.noPassword')}
               />
-            </Field>
+            </ConfigField>
           </div>
         </Card>
 
         {/* -- Gateway -- */}
-        <Card className="mt-4">
+        <Card className="mt-4 p-5">
           <div className="flex items-center justify-between">
             <CardHeader icon={Server} title={t('domainPage.gateway.title')} />
             <Toggle value={gatewayEnabled} onChange={setGatewayEnabled} />
@@ -187,10 +171,10 @@ export function Domain() {
           {gatewayEnabled && (
             <div className="mt-5 space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label={t('domain.port')}>
+                <ConfigField label={t('domain.port')}>
                   <Input value={gatewayAddress} onChange={setGatewayAddress} placeholder=":8085" />
-                </Field>
-                <Field label={t('domain.authToken')}>
+                </ConfigField>
+                <ConfigField label={t('domain.authToken')}>
                   <PasswordInput
                     value={gatewayToken}
                     onChange={setGatewayToken}
@@ -198,11 +182,11 @@ export function Domain() {
                     onToggle={() => setShowGatewayToken(!showGatewayToken)}
                     placeholder={config?.gateway_auth_configured ? '--------' : t('domain.noToken')}
                   />
-                </Field>
+                </ConfigField>
               </div>
 
               {/* CORS */}
-              <Field label={t('domain.corsOrigins')}>
+              <ConfigField label={t('domain.corsOrigins')}>
                 <div className="flex flex-wrap gap-1.5">
                   {corsOrigins.map((origin) => (
                     <span
@@ -227,13 +211,13 @@ export function Domain() {
                     className="min-w-[140px] flex-1 rounded-lg bg-transparent px-2 py-1.5 text-xs text-text-secondary outline-none placeholder:text-text-muted"
                   />
                 </div>
-              </Field>
+              </ConfigField>
             </div>
           )}
         </Card>
 
         {/* -- Tailscale -- */}
-        <Card className="mt-4 mb-10">
+        <Card className="mt-4 mb-10 p-5">
           <div className="flex items-center justify-between">
             <CardHeader icon={Network} title={t('domainPage.tailscale.title')} />
             <Toggle value={tailscaleEnabled} onChange={setTailscaleEnabled} />
@@ -255,14 +239,14 @@ export function Domain() {
               />
 
               <div className="pt-1">
-                <Field label={t('domain.localPort')}>
+                <ConfigField label={t('domain.localPort')}>
                   <Input
                     value={String(tailscalePort)}
                     onChange={(v) => setTailscalePort(parseInt(v) || 8085)}
                     placeholder="8085"
                     type="number"
                   />
-                </Field>
+                </ConfigField>
               </div>
 
               {config?.tailscale_hostname && (
@@ -287,37 +271,19 @@ export function Domain() {
             </div>
           )}
         </Card>
-      </div>
-    </div>
+    </ConfigPage>
   )
 }
 
 /* -- Components -- */
 
-function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div className={cn('rounded-2xl border border-border bg-bg-surface p-5', className)}>
-      {children}
-    </div>
-  )
-}
-
 function CardHeader({ icon: Icon, title }: { icon: React.FC<{ className?: string }>; title: string }) {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-bg-subtle">
+      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-bg-subtle">
         <Icon className="h-4 w-4 text-text-muted" />
       </div>
       <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
-    </div>
-  )
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-text-muted">{label}</label>
-      {children}
     </div>
   )
 }
@@ -339,7 +305,7 @@ function Input({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="flex h-10 w-full rounded-lg border border-border bg-bg-main px-3 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
+      className="flex h-11 w-full rounded-xl border border-border bg-bg-main px-4 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
     />
   )
 }
@@ -364,7 +330,7 @@ function PasswordInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="flex h-10 w-full rounded-lg border border-border bg-bg-main px-3 pr-9 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
+        className="flex h-11 w-full rounded-xl border border-border bg-bg-main px-4 pr-9 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
       />
       <button
         type="button"
@@ -438,7 +404,7 @@ function Endpoint({
     <div className={cn(
       'rounded-xl px-3.5 py-2.5 border transition-colors',
       active
-        ? 'bg-bg-surface border-border'
+        ? 'bg-bg-surface border-brand/30'
         : 'bg-bg-surface border-border'
     )}>
       <div className="flex items-center justify-between">

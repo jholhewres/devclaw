@@ -386,7 +386,7 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
           onClick={handleCopy}
           aria-label="Copy code"
           className={cn(
-            'absolute right-2 top-2 cursor-pointer rounded-lg p-1.5 transition-all',
+            'absolute right-2 top-2 cursor-pointer rounded-xl p-1.5 transition-all',
             'text-text-muted hover:bg-bg-hover hover:text-text-primary',
             'opacity-0 group-hover/code:opacity-100'
           )}

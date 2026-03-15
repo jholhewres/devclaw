@@ -19,7 +19,8 @@ import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Tabs } from '@/components/ui/Tabs'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { LoadingSpinner } from '@/components/ui/ConfigComponents'
+import { Button } from '@/components/ui/Button'
+import { ConfigPage, LoadingSpinner } from '@/components/ui/ConfigComponents'
 
 /**
  * Lifecycle hooks management page.
@@ -85,58 +86,33 @@ export function Hooks() {
   }
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-bg-main">
-      <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
-        {/* Header */}
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-text-muted">
-              {t('hooks.subtitle')}
-            </p>
-            <h1 className="mt-1 text-2xl font-bold text-text-primary tracking-tight">
-              {t('hooks.title')}
-            </h1>
-            <p className="mt-2 text-base text-text-muted">
-              {hooks.length} · {activeCount} {t('hooks.active')}
-            </p>
-          </div>
-
-          {/* View toggle */}
-          <Tabs
-            tabs={[
-              { id: 'hooks', label: t('hooks.tabHooks') },
-              { id: 'events', label: t('hooks.tabEvents') },
-            ]}
-            activeTab={view}
-            onChange={setView}
-          />
-        </div>
-
-        {/* Message */}
-        {message && (
-          <div
-            className={cn(
-              'mt-6 rounded-xl px-5 py-4 text-sm border',
-              message.type === 'success'
-                ? 'bg-success-subtle text-success border-success/20'
-                : 'bg-error-subtle text-error border-error/20'
-            )}
-          >
-            {message.text}
-          </div>
-        )}
-
+    <ConfigPage
+      title={t('hooks.title')}
+      subtitle={t('hooks.subtitle')}
+      description={`${hooks.length} · ${activeCount} ${t('hooks.active')}`}
+      actions={
+        <Tabs
+          tabs={[
+            { id: 'hooks', label: t('hooks.tabHooks') },
+            { id: 'events', label: t('hooks.tabEvents') },
+          ]}
+          activeTab={view}
+          onChange={setView}
+        />
+      }
+      message={message}
+    >
         {view === 'hooks' ? (
           <>
             {/* Filter by event */}
             {hooks.length > 0 && (
-              <div className="mt-6 flex items-center gap-3">
+              <div className="flex items-center gap-3">
                 <Filter className="h-4 w-4 text-text-muted" />
                 <select
                   value={filterEvent}
                   onChange={(e) => setFilterEvent(e.target.value)}
                   aria-label={t('hooks.allEvents')}
-                  className="h-9 cursor-pointer rounded-lg border border-border bg-bg-surface px-3 text-xs text-text-primary outline-none transition-all hover:border-border-hover focus:border-brand/50"
+                  className="h-11 cursor-pointer rounded-xl border border-border bg-bg-surface px-3 text-xs text-text-primary outline-none transition-all hover:border-border-hover focus:border-brand/50"
                 >
                   <option value="">{t('hooks.allEvents')}</option>
                   {events
@@ -212,20 +188,19 @@ export function Hooks() {
         )}
 
         {/* Info card */}
-        <Card padding="lg" className="mt-10 mb-6 rounded-2xl">
+        <Card padding="lg" className="mt-10 mb-6">
           <h3 className="text-sm font-semibold text-text-secondary mb-3">{t('hooks.aboutTitle')}</h3>
           <p className="text-xs text-text-muted leading-relaxed">
             {t('hooks.aboutTip1')} {t('hooks.aboutTip2')} {t('hooks.aboutTip3')}
           </p>
-          <div className="mt-3 flex items-start gap-2 rounded-lg bg-bg-subtle px-3 py-2">
+          <div className="mt-3 flex items-start gap-2 rounded-xl bg-bg-subtle px-3 py-2">
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
             <p className="text-xs text-warning">
               {t('hooks.aboutWarning')}
             </p>
           </div>
         </Card>
-      </div>
-    </div>
+    </ConfigPage>
   )
 }
 
@@ -254,7 +229,7 @@ function HookCard({
     <Card
       padding="md"
       className={cn(
-        'rounded-2xl p-5 transition-all',
+        'p-5 transition-all',
         !hook.enabled && 'opacity-60'
       )}
     >
@@ -279,47 +254,51 @@ function HookCard({
         <div className="flex items-center gap-1 shrink-0">
           {/* Priority */}
           <span
-            className="flex h-8 items-center rounded-lg px-2 text-[11px] font-mono text-text-muted"
+            className="flex h-8 items-center rounded-xl px-2 text-[11px] font-mono text-text-muted"
             title={t('hooks.priority')}
           >
             P{hook.priority}
           </span>
 
           {/* Toggle */}
-          <button
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={() => onToggle(hook.name, !hook.enabled)}
             title={hook.enabled ? t('common.disabled') : t('common.enabled')}
-            className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
           >
             {hook.enabled ? (
               <PowerOff className="h-4 w-4" />
             ) : (
               <Power className="h-4 w-4" />
             )}
-          </button>
+          </Button>
 
           {/* Delete */}
           {confirming ? (
-            <button
+            <Button
+              variant="destructive-subtle"
+              size="xs"
               onClick={() => {
                 onDelete(hook.name)
                 setConfirming(false)
               }}
-              className="flex h-8 cursor-pointer items-center gap-1 rounded-lg bg-error-subtle px-2 text-xs font-medium text-error transition-colors hover:bg-error/20"
             >
               {t('common.confirm')}
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => {
                 setConfirming(true)
                 setTimeout(() => setConfirming(false), 3000)
               }}
               title={t('common.delete')}
-              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-error-subtle hover:text-error"
+              className="hover:bg-error-subtle hover:text-error"
             >
               <Trash2 className="h-4 w-4" />
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -353,7 +332,7 @@ function EventCard({
   const hasHooks = event.hooks.length > 0
 
   return (
-    <Card padding="sm" className="rounded-2xl transition-all p-0">
+    <Card padding="sm" className="transition-all p-0">
       <button
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
@@ -388,7 +367,7 @@ function EventCard({
             {event.hooks.map((hookName) => (
               <div
                 key={hookName}
-                className="flex items-center justify-between rounded-lg bg-bg-main px-3 py-2"
+                className="flex items-center justify-between rounded-xl bg-bg-main px-3 py-2"
               >
                 <span className="text-xs font-mono text-text-primary">{hookName}</span>
                 <button

@@ -29,7 +29,7 @@ export function Jobs() {
   const inactive = jobs.filter((j) => !j.enabled)
 
   return (
-    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-screen-2xl mx-auto">
+    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
       {/* Header */}
       <PageHeader
         title={t('jobs.title')}
@@ -64,7 +64,7 @@ export function Jobs() {
 function EmptyJobs() {
   const { t } = useTranslation()
   return (
-    <Card padding="lg" className="mt-8 rounded-2xl">
+    <Card padding="lg" className="mt-8">
       <EmptyState
         icon={<CalendarClock className="h-6 w-6" />}
         title={t('jobs.noJobs')}
