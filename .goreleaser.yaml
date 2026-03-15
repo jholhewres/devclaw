@@ -25,6 +25,14 @@ builds:
         goarch: arm64
         env:
           - CC=aarch64-linux-gnu-gcc
+      - goos: darwin
+        goarch: amd64
+        env:
+          - CGO_ENABLED=0
+      - goos: darwin
+        goarch: arm64
+        env:
+          - CGO_ENABLED=0
     ignore:
       - goos: windows
         goarch: arm64
