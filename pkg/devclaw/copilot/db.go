@@ -348,6 +348,97 @@ CREATE TABLE IF NOT EXISTS team_notifications (
 CREATE INDEX IF NOT EXISTS idx_notifications_team ON team_notifications(team_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_timestamp ON team_notifications(timestamp);
 CREATE INDEX IF NOT EXISTS idx_notifications_read ON team_notifications(read);
+
+-- ═══════════════════════════════════════════════════════════════════
+-- LCM (LOSSLESS COMPACTION MODULE) — DAG-BASED MEMORY
+-- ═══════════════════════════════════════════════════════════════════
+
+-- LCM conversations (one per session)
+CREATE TABLE IF NOT EXISTS lcm_conversations (
+    id              TEXT PRIMARY KEY,
+    session_id      TEXT NOT NULL UNIQUE,
+    created_at      TEXT NOT NULL,
+    next_seq        INTEGER DEFAULT 1,
+    last_compact_at TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_lcm_conv_sid ON lcm_conversations(session_id);
+
+-- LCM messages (every message persisted verbatim for lossless recall)
+CREATE TABLE IF NOT EXISTS lcm_messages (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL,
+    seq             INTEGER NOT NULL,
+    role            TEXT NOT NULL,
+    content         TEXT NOT NULL,
+    token_count     INTEGER DEFAULT 0,
+    created_at      TEXT NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id)
+);
+CREATE INDEX IF NOT EXISTS idx_lcm_msg_conv_seq ON lcm_messages(conversation_id, seq);
+
+-- LCM summaries (DAG nodes: leaf = summarized messages, condensed = summarized summaries)
+CREATE TABLE IF NOT EXISTS lcm_summaries (
+    id                          TEXT PRIMARY KEY,
+    conversation_id             TEXT NOT NULL,
+    kind                        TEXT NOT NULL,
+    depth                       INTEGER NOT NULL,
+    content                     TEXT NOT NULL,
+    token_count                 INTEGER DEFAULT 0,
+    source_message_token_count  INTEGER DEFAULT 0,
+    descendant_count            INTEGER DEFAULT 0,
+    descendant_token_count      INTEGER DEFAULT 0,
+    earliest_at                 TEXT NOT NULL,
+    latest_at                   TEXT NOT NULL,
+    created_at                  TEXT NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id)
+);
+CREATE INDEX IF NOT EXISTS idx_lcm_sum_conv ON lcm_summaries(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_lcm_sum_depth ON lcm_summaries(conversation_id, depth);
+
+-- LCM summary-to-message links (leaf summaries → source messages)
+CREATE TABLE IF NOT EXISTS lcm_summary_messages (
+    summary_id  TEXT NOT NULL,
+    message_id  INTEGER NOT NULL,
+    PRIMARY KEY (summary_id, message_id),
+    FOREIGN KEY (summary_id) REFERENCES lcm_summaries(id),
+    FOREIGN KEY (message_id) REFERENCES lcm_messages(id)
+);
+CREATE INDEX IF NOT EXISTS idx_lcm_sm_msg ON lcm_summary_messages(message_id);
+
+-- LCM summary-to-summary links (condensed → children)
+CREATE TABLE IF NOT EXISTS lcm_summary_parents (
+    parent_id TEXT NOT NULL,
+    child_id  TEXT NOT NULL,
+    PRIMARY KEY (parent_id, child_id),
+    FOREIGN KEY (parent_id) REFERENCES lcm_summaries(id),
+    FOREIGN KEY (child_id) REFERENCES lcm_summaries(id)
+);
+CREATE INDEX IF NOT EXISTS idx_lcm_sp_child ON lcm_summary_parents(child_id);
+
+-- LCM context items (ordered list of what the model sees: summaries + fresh messages)
+CREATE TABLE IF NOT EXISTS lcm_context_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id TEXT NOT NULL,
+    ordinal         INTEGER NOT NULL,
+    item_type       TEXT NOT NULL,
+    message_id      INTEGER,
+    summary_id      TEXT,
+    FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id)
+);
+CREATE INDEX IF NOT EXISTS idx_lcm_ci_conv ON lcm_context_items(conversation_id, ordinal);
+
+`
+
+// lcmFTSSchema is created separately because FTS5 may not be available in all
+// SQLite builds (e.g. test environments). The LCM degrades gracefully without it.
+const lcmFTSSchema = `
+CREATE VIRTUAL TABLE IF NOT EXISTS lcm_fts USING fts5(
+    content,
+    entity_type UNINDEXED,
+    entity_id UNINDEXED,
+    conversation_id UNINDEXED,
+    tokenize = 'porter unicode61'
+);
 `
 
 // OpenDatabase opens (or creates) the central devclaw.db at the given path.
@@ -380,6 +471,9 @@ func OpenDatabase(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
+
+	// LCM FTS5 table: best-effort, degrades gracefully if FTS5 is unavailable.
+	_, _ = db.Exec(lcmFTSSchema)
 
 	// Column migrations: add new columns to existing tables without dropping data.
 	// Each ALTER is best-effort; errors are ignored because SQLite returns an error

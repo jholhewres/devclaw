@@ -142,6 +142,9 @@ type Assistant struct {
 	// dbHub.DB() returns the same connection as devclawDB.
 	dbHub *database.Hub
 
+	// lcmEngine is the Lossless Compaction Module engine (nil when LCM is disabled).
+	lcmEngine *LCMEngine
+
 	// ttsProvider handles text-to-speech synthesis (nil if TTS is disabled).
 	ttsProvider tts.Provider
 
@@ -632,6 +635,18 @@ func (a *Assistant) Start(ctx context.Context) error {
 	// (WhatsApp, Telegram, etc.) survive container restarts.
 	if sessPersister != nil && a.workspaceMgr != nil {
 		a.workspaceMgr.SetPersistence(sessPersister)
+	}
+
+	// 0c-1b. LCM engine: initialize if enabled and database is available.
+	ccfg := resolvedCompactionConfig(a.config.Agent.Compaction)
+	if ccfg.lcmEnabled() && a.devclawDB != nil {
+		lcmCfg := resolvedLCMConfig(ccfg.LCM)
+		a.lcmEngine = NewLCMEngine(a.devclawDB, lcmCfg, ccfg, a.logger.With("component", "lcm"))
+		a.logger.Info("LCM engine initialized",
+			"fresh_tail", lcmCfg.FreshTailCount,
+			"soft_trigger", lcmCfg.SoftTriggerRatio,
+			"hard_trigger", lcmCfg.HardTriggerRatio,
+		)
 	}
 
 	// 0c-2. Audit logger: prefer SQLite, fall back to file-based.
@@ -2319,6 +2334,16 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 	}
 	agent.SetSession(session)
 
+	// Wire LCM engine for lossless compaction.
+	if a.lcmEngine != nil {
+		convID, err := a.lcmEngine.Bootstrap(sessionID)
+		if err != nil {
+			a.logger.Warn("lcm bootstrap failed", "session", sessionID, "err", err)
+		} else {
+			agent.SetLCMEngine(a.lcmEngine, convID)
+		}
+	}
+
 	// Wire memory indexer for post-compaction sync.
 	if a.memoryIndexer != nil {
 		agent.SetMemoryIndexer(a.memoryIndexer)
@@ -3043,6 +3068,11 @@ func (a *Assistant) registerSystemTools() {
 
 	// Register sessions_yield for cooperative turn-ending in subagent orchestration.
 	RegisterSessionsYieldTool(a.toolExecutor)
+
+	// Register LCM tool for lossless memory retrieval (grep, describe, expand).
+	if a.lcmEngine != nil {
+		RegisterLCMDispatcher(a.toolExecutor, a.lcmEngine)
+	}
 
 	// Register team tools for persistent agents and team memory.
 	if a.teamMgr != nil {

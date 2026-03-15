@@ -1,0 +1,353 @@
+// Package copilot – lcm_compaction.go implements the DAG-based compaction
+// engine for the Lossless Compaction Module. Two passes: leaf (messages → summaries)
+// and condensed (summaries → higher-level summaries), cascading until stable.
+package copilot
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+)
+
+// LCMSummarizeFn is the function signature for LLM-based summarization.
+// aggressive=true requests a shorter, more compressed output.
+type LCMSummarizeFn func(ctx context.Context, text string, aggressive bool) (string, error)
+
+// LCMCompactor runs leaf and condensed compaction passes.
+type LCMCompactor struct {
+	store  *LCMStore
+	cfg    LCMConfig
+	logger *slog.Logger
+}
+
+// NewLCMCompactor creates a new compactor.
+func NewLCMCompactor(store *LCMStore, cfg LCMConfig, logger *slog.Logger) *LCMCompactor {
+	return &LCMCompactor{store: store, cfg: cfg, logger: logger}
+}
+
+// ShouldCompact checks whether compaction is needed based on unsummarized token count.
+// Returns (shouldCompact, triggerReason).
+func (c *LCMCompactor) ShouldCompact(convID string, contextWindowTokens int) (bool, string) {
+	unsummarized, err := c.store.CountUnsummarizedTokens(convID, c.cfg.FreshTailCount)
+	if err != nil {
+		c.logger.Warn("lcm: failed to count unsummarized tokens", "err", err)
+		return false, ""
+	}
+
+	hardThreshold := int(float64(contextWindowTokens) * c.cfg.HardTriggerRatio)
+	softThreshold := int(float64(contextWindowTokens) * c.cfg.SoftTriggerRatio)
+
+	if unsummarized >= hardThreshold {
+		return true, "hard_trigger"
+	}
+	if unsummarized >= softThreshold {
+		return true, "soft_trigger"
+	}
+	return false, ""
+}
+
+// LeafPass groups unsummarized messages into chunks and summarizes each into
+// depth-0 leaf summary nodes.
+func (c *LCMCompactor) LeafPass(ctx context.Context, convID string, summarizeFn LCMSummarizeFn) ([]*LCMSummary, error) {
+	msgs, err := c.store.GetUnsummarizedMessages(convID, c.cfg.FreshTailCount)
+	if err != nil {
+		return nil, fmt.Errorf("lcm leaf pass: get unsummarized: %w", err)
+	}
+	if len(msgs) < 4 {
+		return nil, nil // Too few to summarize.
+	}
+
+	chunks := c.chunkMessages(msgs)
+	var summaries []*LCMSummary
+
+	for i, chunk := range chunks {
+		if ctx.Err() != nil {
+			return summaries, ctx.Err()
+		}
+
+		text := formatMessagesForSummary(chunk)
+		summary, err := c.trySummarize(ctx, summarizeFn, text)
+		if err != nil {
+			c.logger.Warn("lcm leaf: summarization failed, using fallback",
+				"chunk", i, "msgs", len(chunk), "err", err)
+			summary = deterministicFallback(chunk)
+		}
+
+		now := time.Now().UTC()
+		var totalMsgTokens int
+		var msgIDs []int64
+		for _, m := range chunk {
+			totalMsgTokens += m.TokenCount
+			msgIDs = append(msgIDs, m.ID)
+		}
+
+		sum := &LCMSummary{
+			ID:                      GenerateSummaryID(summary, now),
+			ConversationID:          convID,
+			Kind:                    "leaf",
+			Depth:                   0,
+			Content:                 summary,
+			TokenCount:              EstimateTokens(summary),
+			SourceMessageTokenCount: totalMsgTokens,
+			EarliestAt:              chunk[0].CreatedAt,
+			LatestAt:                chunk[len(chunk)-1].CreatedAt,
+			CreatedAt:               now,
+		}
+
+		if err := c.store.InsertSummary(sum); err != nil {
+			return summaries, fmt.Errorf("lcm leaf: insert summary: %w", err)
+		}
+		if err := c.store.LinkSummaryMessages(sum.ID, msgIDs); err != nil {
+			return summaries, fmt.Errorf("lcm leaf: link messages: %w", err)
+		}
+		summaries = append(summaries, sum)
+	}
+
+	return summaries, nil
+}
+
+// CondensedPass groups orphan summaries at each depth into higher-level condensed nodes.
+func (c *LCMCompactor) CondensedPass(ctx context.Context, convID string, summarizeFn LCMSummarizeFn) ([]*LCMSummary, error) {
+	// Wrap the summarize function to prepend the condensed-specific prompt.
+	// This ensures the LLM knows it's condensing summaries, not raw messages.
+	condensedFn := func(ctx context.Context, text string, aggressive bool) (string, error) {
+		prefixed := lcmCondensedPrompt + "\n\n" + text
+		return summarizeFn(ctx, prefixed, aggressive)
+	}
+
+	maxDepth, err := c.store.GetMaxDepth(convID)
+	if err != nil {
+		return nil, fmt.Errorf("lcm condensed pass: get max depth: %w", err)
+	}
+
+	var created []*LCMSummary
+
+	for depth := 0; depth <= maxDepth; depth++ {
+		if ctx.Err() != nil {
+			return created, ctx.Err()
+		}
+
+		orphans, err := c.store.GetOrphanSummaries(convID, depth)
+		if err != nil {
+			return created, fmt.Errorf("lcm condensed: get orphans at depth %d: %w", depth, err)
+		}
+		if len(orphans) < c.cfg.CondensedMinChildren {
+			continue
+		}
+
+		// Batch orphans into groups of CondensedMaxChildren.
+		for batchStart := 0; batchStart < len(orphans); batchStart += c.cfg.CondensedMaxChildren {
+			batchEnd := batchStart + c.cfg.CondensedMaxChildren
+			if batchEnd > len(orphans) {
+				batchEnd = len(orphans)
+			}
+			batch := orphans[batchStart:batchEnd]
+			if len(batch) < c.cfg.CondensedMinChildren {
+				break // Remaining batch too small.
+			}
+
+			text := formatSummariesForCondensation(batch)
+			summary, err := c.trySummarize(ctx, condensedFn, text)
+			if err != nil {
+				c.logger.Warn("lcm condensed: summarization failed, skipping batch",
+					"depth", depth, "batch_size", len(batch), "err", err)
+				continue
+			}
+
+			now := time.Now().UTC()
+			var descCount, descTokens, srcMsgTokens int
+			var childIDs []string
+			earliest := batch[0].EarliestAt
+			latest := batch[0].LatestAt
+			for _, child := range batch {
+				childIDs = append(childIDs, child.ID)
+				descCount += child.DescendantCount + 1
+				descTokens += child.TokenCount + child.DescendantTokenCount
+				srcMsgTokens += child.SourceMessageTokenCount
+				if child.EarliestAt.Before(earliest) {
+					earliest = child.EarliestAt
+				}
+				if child.LatestAt.After(latest) {
+					latest = child.LatestAt
+				}
+			}
+
+			sum := &LCMSummary{
+				ID:                      GenerateSummaryID(summary, now),
+				ConversationID:          convID,
+				Kind:                    "condensed",
+				Depth:                   depth + 1,
+				Content:                 summary,
+				TokenCount:              EstimateTokens(summary),
+				SourceMessageTokenCount: srcMsgTokens,
+				DescendantCount:         descCount,
+				DescendantTokenCount:    descTokens,
+				EarliestAt:              earliest,
+				LatestAt:                latest,
+				CreatedAt:               now,
+			}
+
+			if err := c.store.InsertSummary(sum); err != nil {
+				return created, fmt.Errorf("lcm condensed: insert summary: %w", err)
+			}
+			if err := c.store.LinkSummaryChildren(sum.ID, childIDs); err != nil {
+				return created, fmt.Errorf("lcm condensed: link children: %w", err)
+			}
+			created = append(created, sum)
+		}
+	}
+
+	return created, nil
+}
+
+// FullSweep runs leaf pass then cascading condensed passes until stable.
+func (c *LCMCompactor) FullSweep(ctx context.Context, convID string, summarizeFn LCMSummarizeFn) ([]*LCMSummary, error) {
+	var allNew []*LCMSummary
+
+	leaves, err := c.LeafPass(ctx, convID, summarizeFn)
+	if err != nil {
+		return allNew, fmt.Errorf("lcm full sweep: leaf pass: %w", err)
+	}
+	allNew = append(allNew, leaves...)
+
+	// Cascade condensed passes until no more grouping is possible.
+	for {
+		if ctx.Err() != nil {
+			return allNew, ctx.Err()
+		}
+		condensed, err := c.CondensedPass(ctx, convID, summarizeFn)
+		if err != nil {
+			return allNew, fmt.Errorf("lcm full sweep: condensed pass: %w", err)
+		}
+		if len(condensed) == 0 {
+			break
+		}
+		allNew = append(allNew, condensed...)
+	}
+
+	return allNew, nil
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+// trySummarize attempts normal then aggressive summarization.
+func (c *LCMCompactor) trySummarize(ctx context.Context, fn LCMSummarizeFn, text string) (string, error) {
+	result, err := fn(ctx, text, false)
+	if err == nil && result != "" {
+		return result, nil
+	}
+	c.logger.Debug("lcm: normal summarization failed, trying aggressive", "err", err)
+	result, err = fn(ctx, text, true)
+	if err == nil && result != "" {
+		return result, nil
+	}
+	return "", fmt.Errorf("summarization failed (both normal and aggressive): %w", err)
+}
+
+// chunkMessages groups messages into chunks respecting the max token limit.
+// Avoids splitting tool_call/tool_result pairs.
+func (c *LCMCompactor) chunkMessages(msgs []*LCMMessage) [][]*LCMMessage {
+	maxTokens := c.cfg.LeafChunkMaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 20000
+	}
+
+	var chunks [][]*LCMMessage
+	var current []*LCMMessage
+	currentTokens := 0
+
+	for _, m := range msgs {
+		if currentTokens+m.TokenCount > maxTokens && len(current) > 0 {
+			// Find safe cut point: don't split tool results from their calls.
+			cutIdx := findSafeChunkCut(current)
+			chunks = append(chunks, current[:cutIdx])
+			remaining := current[cutIdx:]
+			current = make([]*LCMMessage, len(remaining))
+			copy(current, remaining)
+			currentTokens = 0
+			for _, r := range current {
+				currentTokens += r.TokenCount
+			}
+		}
+		current = append(current, m)
+		currentTokens += m.TokenCount
+	}
+	if len(current) > 0 {
+		chunks = append(chunks, current)
+	}
+	return chunks
+}
+
+// findSafeChunkCut finds a cut point that doesn't orphan tool results.
+// It walks backward from the end looking for a point where the next message
+// is not a "tool" role (which would be orphaned from its assistant call).
+func findSafeChunkCut(msgs []*LCMMessage) int {
+	n := len(msgs)
+	if n <= 1 {
+		return n
+	}
+	// Start from the end and walk back until we find a safe cut.
+	for i := n; i > 1; i-- {
+		if msgs[i-1].Role != "tool" {
+			return i
+		}
+	}
+	return n // Can't find safe cut; include all.
+}
+
+// formatMessagesForSummary concatenates messages with timestamps for LLM input.
+func formatMessagesForSummary(msgs []*LCMMessage) string {
+	var b strings.Builder
+	for _, m := range msgs {
+		fmt.Fprintf(&b, "[%s %s] %s\n\n", m.CreatedAt.Format("2006-01-02 15:04"), m.Role, m.Content)
+	}
+	return b.String()
+}
+
+// formatSummariesForCondensation concatenates summaries for the condensed pass.
+func formatSummariesForCondensation(sums []*LCMSummary) string {
+	var b strings.Builder
+	for _, s := range sums {
+		fmt.Fprintf(&b, "[%s depth=%d %s→%s]\n%s\n\n",
+			s.ID, s.Depth,
+			s.EarliestAt.Format("2006-01-02 15:04"),
+			s.LatestAt.Format("2006-01-02 15:04"),
+			s.Content)
+	}
+	return b.String()
+}
+
+// deterministicFallback creates a minimal summary when LLM summarization fails.
+func deterministicFallback(msgs []*LCMMessage) string {
+	var b strings.Builder
+	b.WriteString("## Decisions\n(summarization failed — metadata only)\n\n")
+	b.WriteString("## Open TODOs\n(unknown)\n\n")
+	b.WriteString("## Constraints/Rules\n(unknown)\n\n")
+	b.WriteString("## Pending user asks\n")
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" {
+			preview := msgs[i].Content
+			if len(preview) > 200 {
+				preview = preview[:200] + "..."
+			}
+			b.WriteString(preview)
+			break
+		}
+	}
+	b.WriteString("\n\n## Exact identifiers\n")
+	fmt.Fprintf(&b, "(%d messages, seq %d→%d)\n", len(msgs), msgs[0].Seq, msgs[len(msgs)-1].Seq)
+	return b.String()
+}
+
+// lcmCondensedPrompt is the system prompt for condensed pass summarization.
+const lcmCondensedPrompt = `You are condensing multiple conversation summaries into a higher-level summary.
+Preserve all key decisions, identifiers, constraints, and pending items.
+Each input section is a prior summary covering a time range.
+Output a single cohesive summary following the same structure:
+## Decisions
+## Open TODOs
+## Constraints/Rules
+## Pending user asks
+## Exact identifiers`

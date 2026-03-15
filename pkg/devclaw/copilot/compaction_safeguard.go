@@ -48,6 +48,39 @@ type CompactionConfig struct {
 	// compaction completes. Values: "off" (default), "async" (fire-and-forget),
 	// "await" (block until indexing completes, not yet implemented — treated as async).
 	PostIndexSync string `yaml:"post_index_sync"`
+
+	// LCMEnabled enables the Lossless Compaction Module (DAG-based memory).
+	// When enabled, messages are persisted verbatim and compaction builds a
+	// hierarchical summary DAG instead of a flat summary string.
+	// Default: true (nil pointer = true).
+	LCMEnabled *bool `yaml:"lcm_enabled"`
+
+	// LCM holds configuration for the Lossless Compaction Module.
+	LCM LCMConfig `yaml:"lcm"`
+}
+
+// LCMConfig controls the Lossless Compaction Module behavior.
+type LCMConfig struct {
+	// FreshTailCount is how many recent messages to keep unsummarized. Default: 32.
+	FreshTailCount int `yaml:"fresh_tail_count"`
+
+	// LeafChunkMaxTokens is the max tokens per leaf chunk. Default: 20000.
+	LeafChunkMaxTokens int `yaml:"leaf_chunk_max_tokens"`
+
+	// CondensedMinChildren is the minimum orphan summaries to trigger condensation. Default: 4.
+	CondensedMinChildren int `yaml:"condensed_min_children"`
+
+	// CondensedMaxChildren is the max summaries per condensed batch. Default: 8.
+	CondensedMaxChildren int `yaml:"condensed_max_children"`
+
+	// SoftTriggerRatio is the context usage fraction for soft compaction trigger. Default: 0.6.
+	SoftTriggerRatio float64 `yaml:"soft_trigger_ratio"`
+
+	// HardTriggerRatio is the context usage fraction for hard compaction trigger. Default: 0.85.
+	HardTriggerRatio float64 `yaml:"hard_trigger_ratio"`
+
+	// MaxSummaryTokens is the max tokens per individual summary. Default: 2000.
+	MaxSummaryTokens int `yaml:"max_summary_tokens"`
 }
 
 // QualityGuardConfig controls the post-summarization audit and retry mechanism.
@@ -107,6 +140,40 @@ func DefaultCompactionConfig() CompactionConfig {
 		},
 		TimeoutSeconds: 900,
 	}
+}
+
+// lcmEnabled returns whether the LCM is enabled (default true when nil).
+func (c CompactionConfig) lcmEnabled() bool {
+	if c.LCMEnabled == nil {
+		return true
+	}
+	return *c.LCMEnabled
+}
+
+// resolvedLCMConfig returns the LCM config with defaults applied for zero values.
+func resolvedLCMConfig(cfg LCMConfig) LCMConfig {
+	if cfg.FreshTailCount <= 0 {
+		cfg.FreshTailCount = 32
+	}
+	if cfg.LeafChunkMaxTokens <= 0 {
+		cfg.LeafChunkMaxTokens = 20000
+	}
+	if cfg.CondensedMinChildren <= 0 {
+		cfg.CondensedMinChildren = 4
+	}
+	if cfg.CondensedMaxChildren <= 0 {
+		cfg.CondensedMaxChildren = 8
+	}
+	if cfg.SoftTriggerRatio <= 0 {
+		cfg.SoftTriggerRatio = 0.6
+	}
+	if cfg.HardTriggerRatio <= 0 {
+		cfg.HardTriggerRatio = 0.85
+	}
+	if cfg.MaxSummaryTokens <= 0 {
+		cfg.MaxSummaryTokens = 2000
+	}
+	return cfg
 }
 
 // resolvedCompactionConfig returns the config with defaults applied for zero values.

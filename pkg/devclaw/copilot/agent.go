@@ -241,6 +241,13 @@ type AgentRun struct {
 	// Atomic because tool execution may run in parallel goroutines.
 	yieldRequested atomic.Bool
 
+	// lcmEngine is the Lossless Compaction Module engine (nil when LCM is disabled).
+	lcmEngine *LCMEngine
+	// lcmConversationID is the LCM conversation tied to this agent run's session.
+	lcmConversationID string
+	// lcmIngestedSeq tracks the last ingested message index to avoid double-ingest.
+	lcmIngestedSeq int
+
 	// loopDetector tracks tool call history and detects repetitive patterns.
 	loopDetector *ToolLoopDetector
 
@@ -1430,6 +1437,18 @@ func (a *AgentRun) accumulateUsage(total *LLMUsage, resp *LLMResponse) {
 
 // buildMessages converts conversation history into the chat message format.
 func (a *AgentRun) buildMessages(systemPrompt string, history []ConversationEntry, userMessage string) []chatMessage {
+	// LCM path: assemble context from DAG summaries + fresh tail.
+	if a.lcmEngine != nil && a.lcmConversationID != "" {
+		tokenBudget := a.getModelContextWindow()
+		msgs, err := a.lcmEngine.Assemble(context.Background(), a.lcmConversationID, systemPrompt, userMessage, tokenBudget)
+		if err != nil {
+			a.logger.Warn("lcm assembly failed, using legacy path", "err", err)
+		} else {
+			return msgs
+		}
+	}
+
+	// Legacy path.
 	messages := make([]chatMessage, 0, len(history)*2+2)
 
 	if systemPrompt != "" {
@@ -2063,6 +2082,39 @@ func getModelContextWindowByName(modelName string) int {
 }
 
 func (a *AgentRun) managedCompaction(ctx context.Context, messages []chatMessage) []chatMessage {
+	// LCM path: ingest + compact + reassemble.
+	if a.lcmEngine != nil && a.lcmConversationID != "" {
+		if err := a.lcmIngestNew(ctx, messages); err != nil {
+			a.logger.Warn("lcm ingest failed, falling back to legacy compaction", "err", err)
+		} else {
+			summarizeFn := buildLCMSummarizeFn(a.llm, a.cfg.Compaction, a.modelOverride, a.logger)
+			ctxWindow := a.getModelContextWindow()
+			compacted, err := a.lcmEngine.Compact(ctx, a.lcmConversationID, ctxWindow, summarizeFn)
+			if err != nil {
+				a.logger.Warn("lcm compaction failed, falling back to legacy", "err", err)
+			} else if compacted {
+				// Extract system prompt from the current messages so the
+				// reassembled context preserves it.
+				sysPrompt := ""
+				if len(messages) > 0 && messages[0].Role == "system" {
+					if s, ok := messages[0].Content.(string); ok {
+						sysPrompt = s
+					}
+				}
+				assembled, err := a.lcmEngine.Assemble(ctx, a.lcmConversationID, sysPrompt, "", ctxWindow)
+				if err != nil {
+					a.logger.Warn("lcm assembly after compaction failed, falling back to legacy", "err", err)
+				} else {
+					a.persistCompactionSummary("[LCM DAG compaction]", len(messages), len(assembled))
+					return assembled
+				}
+			} else {
+				return messages // No compaction needed.
+			}
+		}
+	}
+
+	// Legacy path.
 	if len(messages) < 10 {
 		return messages
 	}
