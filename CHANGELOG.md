@@ -22,7 +22,7 @@ All notable changes to DevClaw are documented in this file.
 - Removed hardcoded API keys from example configs
 - Vault now injects all secrets as env vars at runtime (no plaintext in config files)
 
-## [Unreleased]
+## [1.14.0] - 2026-03-15
 
 ### Lossless Compaction Module (LCM) — DAG-Based Memory
 
@@ -108,6 +108,13 @@ Three-layer defense against LLM fabricating data when tool calls fail:
 
 ### Bug Fixes
 
+- **LCM Hub schema (critical)**: LCM tables were missing from the production `GetSQLiteSchema()` in `backends/sqlite.go`, causing `no such table: lcm_conversations` on every request. Added all 7 LCM tables + indexes + FTS5 best-effort to the Hub migration path
+- **LCM legacy migrations**: Added individual CREATE TABLE/INDEX migrations in `copilot/db.go` as belt-and-suspenders for the legacy `OpenDatabase()` path
+- **LCM ON DELETE CASCADE**: All 7 LCM foreign keys now cascade deletes through the DAG hierarchy
+- **LCM ingestion sequence reset**: Fixed `lcmIngestedSeq` reset from 0 to `len(messages)` — prevented re-ingesting assembled context after compaction
+- **LCM aggressive compaction**: Added missing `UpdateLastCompactAt` call when `aggressiveCompaction` bypasses `LCMEngine.Compact()`
+- **LCM summarization error**: Fixed `trySummarize` wrapping a nil error when both normal and aggressive summarization return empty responses
+- **LCM grep logging**: `grepSubstring` now logs errors instead of silently swallowing them
 - Fixed hook tests missing `Enabled: true` (Go bool zero value = false)
 - Fixed `TestAllHookEvents` to include message pipeline hooks
 - Fixed `TestBuiltinSkills_FormatForPrompt` for on-demand teams skill
