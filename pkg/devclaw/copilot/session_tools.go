@@ -166,3 +166,27 @@ func handleSessionsSend(wm *WorkspaceManager, args map[string]any) (any, error) 
 
 	return fmt.Sprintf("Message delivered to session %s (channel: %s).", sessionID, channel), nil
 }
+
+// RegisterSessionsYieldTool registers the sessions_yield tool that allows an
+// agent to end its current turn and receive pending subagent results. The tool
+// signals the agent loop via the AgentRun's yieldRequested flag.
+func RegisterSessionsYieldTool(executor *ToolExecutor) {
+	schema := map[string]any{
+		"type":       "object",
+		"properties": map[string]any{},
+	}
+
+	executor.Register(
+		MakeToolDefinition("sessions_yield",
+			"End current turn to receive pending subagent results. Call this when you have spawned subagents and want to wait for their results before continuing.",
+			schema),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			agent := AgentRunFromCtx(ctx)
+			if agent == nil {
+				return nil, fmt.Errorf("sessions_yield: agent context not available")
+			}
+			agent.yieldRequested.Store(true)
+			return "Yielding turn. Pending subagent results will be injected on resume.", nil
+		},
+	)
+}

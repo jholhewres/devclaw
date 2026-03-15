@@ -817,3 +817,74 @@ func TestConcurrentAccessWaitGroup(t *testing.T) {
 		t.Errorf("Expected 10 results, got %d", len(results))
 	}
 }
+
+// TestTableNotFoundIncludesAvailableTables verifies that "table not found"
+// errors include the list of available tables for the skill, so the LLM
+// agent can self-correct in a single turn.
+func TestTableNotFoundIncludesAvailableTables(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Create a table for skill "crm".
+	err := db.CreateTable("crm", "contacts", "Contacts", "CRM contacts", map[string]string{
+		"name":  "TEXT",
+		"email": "TEXT",
+	})
+	if err != nil {
+		t.Fatalf("CreateTable failed: %v", err)
+	}
+
+	// Create a second table for the same skill.
+	err = db.CreateTable("crm", "deals", "Deals", "CRM deals", map[string]string{
+		"title": "TEXT",
+		"value": "REAL",
+	})
+	if err != nil {
+		t.Fatalf("CreateTable failed: %v", err)
+	}
+
+	// Query a nonexistent table — error should list available tables.
+	_, err = db.QueryWithOptions("crm", "data", QueryOptions{})
+	if err == nil {
+		t.Fatal("Expected error for nonexistent table")
+	}
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "available tables:") {
+		t.Errorf("Error should include available tables, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "contacts") {
+		t.Errorf("Error should list 'contacts' as available, got: %s", errMsg)
+	}
+	if !strings.Contains(errMsg, "deals") {
+		t.Errorf("Error should list 'deals' as available, got: %s", errMsg)
+	}
+
+	// Query a nonexistent table for a skill with no tables.
+	_, err = db.QueryWithOptions("unknown", "data", QueryOptions{})
+	if err == nil {
+		t.Fatal("Expected error for nonexistent skill table")
+	}
+	errMsg = err.Error()
+	if !strings.Contains(errMsg, "skill has no tables") {
+		t.Errorf("Error for skill with no tables should say so, got: %s", errMsg)
+	}
+
+	// Insert to nonexistent table should also include available tables.
+	_, err = db.Insert("crm", "nonexistent", map[string]any{"name": "test"})
+	if err == nil {
+		t.Fatal("Expected error for insert to nonexistent table")
+	}
+	errMsg = err.Error()
+	if !strings.Contains(errMsg, "available tables:") {
+		t.Errorf("Insert error should include available tables, got: %s", errMsg)
+	}
+
+	// Update nonexistent table.
+	err = db.Update("crm", "nonexistent", "fake-id", map[string]any{"name": "test"})
+	if err == nil {
+		t.Fatal("Expected error for update on nonexistent table")
+	}
+	if !strings.Contains(err.Error(), "available tables:") {
+		t.Errorf("Update error should include available tables, got: %s", err.Error())
+	}
+}

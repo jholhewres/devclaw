@@ -47,6 +47,22 @@ type DeliveryTarget struct {
 	ChatID  string
 }
 
+// ctxKeyMessageID is the context key for the triggering message ID.
+type ctxKeyMessageID struct{}
+
+// ContextWithMessageID returns a context carrying the triggering message ID.
+func ContextWithMessageID(ctx context.Context, msgID string) context.Context {
+	return context.WithValue(ctx, ctxKeyMessageID{}, msgID)
+}
+
+// MessageIDFromCtx extracts the triggering message ID from context.
+func MessageIDFromCtx(ctx context.Context) string {
+	if v, ok := ctx.Value(ctxKeyMessageID{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // ContextWithSession returns a new context carrying the given session ID.
 func ContextWithSession(ctx context.Context, sessionID string) context.Context {
 	return context.WithValue(ctx, ctxKeySessionID{}, sessionID)

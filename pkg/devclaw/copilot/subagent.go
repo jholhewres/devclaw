@@ -52,6 +52,7 @@ var subagentDenyLeaf = []string{
 	"sessions_list",    // Session management
 	"sessions_history", // Session history access
 	"sessions_spawn",   // Session spawning
+	"sessions_yield",   // Yield only meaningful for parent agents
 }
 
 // contextKeySpawnDepth is the context key for spawn depth tracking.

@@ -160,6 +160,35 @@ func (s *SkillDB) Path() string {
 	return s.dbPath
 }
 
+// tableNotFoundError builds an enriched error when a table is not found.
+// It queries the registry for available tables so the agent can self-correct
+// in a single turn instead of needing to call skill_db_list_tables.
+// Uses s.db directly (WAL read) which is safe even when the caller holds a tx.
+func (s *SkillDB) tableNotFoundError(skillName, tableName string) error {
+	rows, err := s.db.Query(
+		"SELECT table_name FROM _skill_tables_registry WHERE skill_name = ? ORDER BY table_name",
+		skillName,
+	)
+	if err != nil {
+		// Fallback to basic error if registry query fails.
+		return fmt.Errorf("table %q not found for skill %q", tableName, skillName)
+	}
+	defer rows.Close()
+
+	var tables []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err == nil {
+			tables = append(tables, t)
+		}
+	}
+	if len(tables) == 0 {
+		return fmt.Errorf("table %q not found for skill %q (skill has no tables)", tableName, skillName)
+	}
+	return fmt.Errorf("table %q not found for skill %q; available tables: [%s]",
+		tableName, skillName, strings.Join(tables, ", "))
+}
+
 // validateName checks if a name is valid for tables/columns.
 func validateName(name string) error {
 	if name == "" {
@@ -336,7 +365,7 @@ func (s *SkillDB) Insert(skillName, tableName string, data map[string]any) (stri
 		skillName, tableName,
 	).Scan(&schemaJSON)
 	if err == sql.ErrNoRows {
-		return "", fmt.Errorf("table %q not found for skill %q", tableName, skillName)
+		return "", s.tableNotFoundError(skillName, tableName)
 	}
 	if err != nil {
 		return "", fmt.Errorf("check table: %w", err)
@@ -428,7 +457,7 @@ func (s *SkillDB) QueryWithOptions(skillName, tableName string, opts QueryOption
 		skillName, tableName,
 	).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("table %q not found for skill %q", tableName, skillName)
+		return nil, s.tableNotFoundError(skillName, tableName)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("check table: %w", err)
@@ -568,7 +597,7 @@ func (s *SkillDB) Update(skillName, tableName, rowID string, data map[string]any
 		skillName, tableName,
 	).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("table %q not found for skill %q", tableName, skillName)
+		return s.tableNotFoundError(skillName, tableName)
 	}
 	if err != nil {
 		return fmt.Errorf("check table: %w", err)
@@ -659,7 +688,7 @@ func (s *SkillDB) Delete(skillName, tableName, rowID string) error {
 		skillName, tableName,
 	).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("table %q not found for skill %q", tableName, skillName)
+		return s.tableNotFoundError(skillName, tableName)
 	}
 	if err != nil {
 		return fmt.Errorf("check table: %w", err)
@@ -715,7 +744,7 @@ func (s *SkillDB) DropTable(skillName, tableName string) error {
 		skillName, tableName,
 	).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("table %q not found for skill %q", tableName, skillName)
+		return s.tableNotFoundError(skillName, tableName)
 	}
 	if err != nil {
 		return fmt.Errorf("check table: %w", err)
@@ -816,7 +845,7 @@ func (s *SkillDB) DescribeTable(skillName, tableName string) (*TableInfo, error)
 	).Scan(&t.SkillName, &t.TableName, &t.DisplayName, &t.Description, &schemaJSON, &t.RowCount, &t.CreatedAt, &t.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("table %q not found for skill %q", tableName, skillName)
+		return nil, s.tableNotFoundError(skillName, tableName)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query table: %w", err)

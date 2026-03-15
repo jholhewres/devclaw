@@ -1,6 +1,7 @@
 package copilot
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -179,4 +180,97 @@ func TestNormalizeGeminiModelID(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNonNativeOpenAIStripStrict(t *testing.T) {
+	nonNativeProviders := []string{"ollama", "lmstudio", "vllm", "huggingface"}
+	nativeProviders := []string{"openai", "zai", "zai-coding", "anthropic", "openrouter"}
+
+	for _, p := range nonNativeProviders {
+		t.Run(p+"_isNonNative", func(t *testing.T) {
+			client := &LLMClient{provider: p}
+			if !client.isNonNativeOpenAICompat() {
+				t.Errorf("isNonNativeOpenAICompat() for %q = false, want true", p)
+			}
+		})
+		t.Run(p+"_needsSchemaStrip", func(t *testing.T) {
+			client := &LLMClient{provider: p}
+			if !client.needsSchemaStrip("some-model") {
+				t.Errorf("needsSchemaStrip() for %q = false, want true", p)
+			}
+		})
+	}
+
+	for _, p := range nativeProviders {
+		t.Run(p+"_isNative", func(t *testing.T) {
+			client := &LLMClient{provider: p}
+			if client.isNonNativeOpenAICompat() {
+				t.Errorf("isNonNativeOpenAICompat() for %q = true, want false", p)
+			}
+		})
+	}
+
+	// xAI still needs schema strip even though it's not "non-native"
+	t.Run("xai_needsSchemaStrip", func(t *testing.T) {
+		client := &LLMClient{provider: "xai"}
+		if !client.needsSchemaStrip("grok-3") {
+			t.Error("needsSchemaStrip() for xai should be true")
+		}
+	})
+}
+
+func TestFastModePayload(t *testing.T) {
+	t.Run("context_roundtrip", func(t *testing.T) {
+		ctx := context.Background()
+		if fastModeFromCtx(ctx) {
+			t.Error("expected fast mode to be false by default")
+		}
+		ctx = ContextWithFastMode(ctx, true)
+		if !fastModeFromCtx(ctx) {
+			t.Error("expected fast mode to be true after setting")
+		}
+		ctx = ContextWithFastMode(ctx, false)
+		if fastModeFromCtx(ctx) {
+			t.Error("expected fast mode to be false after unsetting")
+		}
+	})
+
+	t.Run("openai_fast_mode_sets_fields", func(t *testing.T) {
+		client := &LLMClient{provider: "openai"}
+		ctx := ContextWithFastMode(context.Background(), true)
+		req := &chatRequest{}
+		client.applyFastMode(ctx, req)
+		if req.ServiceTier != "priority" {
+			t.Errorf("ServiceTier = %q, want %q", req.ServiceTier, "priority")
+		}
+		if req.ReasoningEffort != "low" {
+			t.Errorf("ReasoningEffort = %q, want %q", req.ReasoningEffort, "low")
+		}
+	})
+
+	t.Run("openai_no_fast_mode_leaves_empty", func(t *testing.T) {
+		client := &LLMClient{provider: "openai"}
+		ctx := context.Background()
+		req := &chatRequest{}
+		client.applyFastMode(ctx, req)
+		if req.ServiceTier != "" {
+			t.Errorf("ServiceTier should be empty, got %q", req.ServiceTier)
+		}
+		if req.ReasoningEffort != "" {
+			t.Errorf("ReasoningEffort should be empty, got %q", req.ReasoningEffort)
+		}
+	})
+
+	t.Run("non_native_skips_fast_mode", func(t *testing.T) {
+		for _, p := range []string{"ollama", "lmstudio", "vllm", "huggingface"} {
+			client := &LLMClient{provider: p}
+			ctx := ContextWithFastMode(context.Background(), true)
+			req := &chatRequest{}
+			client.applyFastMode(ctx, req)
+			if req.ServiceTier != "" || req.ReasoningEffort != "" {
+				t.Errorf("provider %q: fast mode should be skipped for non-native, got tier=%q effort=%q",
+					p, req.ServiceTier, req.ReasoningEffort)
+			}
+		}
+	})
 }

@@ -38,6 +38,11 @@ type HeartbeatConfig struct {
 
 	// WorkspaceDir is the workspace directory where HEARTBEAT.md is located.
 	WorkspaceDir string `yaml:"workspace_dir"`
+
+	// IsolateSession creates a fresh session for each heartbeat tick.
+	// This prevents the heartbeat session from growing large over time
+	// at the cost of losing inter-heartbeat context. Default: false.
+	IsolateSession bool `yaml:"isolate_session"`
 }
 
 // DefaultHeartbeatConfig returns sensible defaults for the heartbeat.
@@ -148,7 +153,13 @@ func (h *Heartbeat) tick(ctx context.Context) {
 	prompt := h.buildHeartbeatPrompt(now)
 
 	// Run an agent turn with the heartbeat prompt.
-	session := h.assistant.sessionStore.GetOrCreate("heartbeat", "main")
+	// When IsolateSession is enabled, each tick gets a unique session to keep
+	// token usage low (~2-5K vs ~100K for a long-lived shared session).
+	chatID := "main"
+	if h.config.IsolateSession {
+		chatID = fmt.Sprintf("main-%d", now.UnixMilli())
+	}
+	session := h.assistant.sessionStore.GetOrCreate("heartbeat", chatID)
 	systemPrompt := h.assistant.promptComposer.Compose(session, prompt)
 
 	agent := NewAgentRun(h.assistant.llmClient, h.assistant.toolExecutor, h.logger)

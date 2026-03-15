@@ -45,10 +45,10 @@ type compactionEntryJSONL struct {
 
 // metaFile represents session metadata stored in .meta.json.
 type metaFile struct {
-	Channel      string       `json:"channel"`
-	ChatID       string       `json:"chat_id"`
+	Channel      string        `json:"channel"`
+	ChatID       string        `json:"chat_id"`
 	Config       SessionConfig `json:"config"`
-	ActiveSkills []string     `json:"active_skills"`
+	ActiveSkills []string      `json:"active_skills"`
 }
 
 // SessionData holds all data needed to restore a session from disk.

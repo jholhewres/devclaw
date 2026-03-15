@@ -430,6 +430,8 @@ type chatRequest struct {
 	MaxCompletionTokens *int             `json:"max_completion_tokens,omitempty"` // OpenAI o1/o3/o4/gpt-5 models
 	ToolStream          *bool            `json:"tool_stream,omitempty"`           // Z.AI: real-time tool call streaming
 	Options             map[string]any   `json:"options,omitempty"`               // Ollama: runtime options (num_ctx, etc.)
+	ServiceTier         string           `json:"service_tier,omitempty"`          // OpenAI: "auto", "priority", "standard_only"
+	ReasoningEffort     string           `json:"reasoning_effort,omitempty"`      // OpenAI o-series: "low", "medium", "high"
 }
 
 // modelDefaults holds per-model/provider behavior overrides.
@@ -618,6 +620,21 @@ func (c *LLMClient) applyModelDefaults(req *chatRequest) {
 			req.ToolStream = &enabled
 		}
 	}
+}
+
+// applyFastMode sets fast-mode fields on an OpenAI chatRequest when fast mode
+// is enabled in the context. Anthropic fast mode is handled directly on the
+// anthropicRequest.ServiceTier field at the callsite.
+func (c *LLMClient) applyFastMode(ctx context.Context, req *chatRequest) {
+	if !fastModeFromCtx(ctx) {
+		return
+	}
+	// Only apply to native OpenAI endpoints to avoid breaking non-native providers.
+	if c.isNonNativeOpenAICompat() {
+		return
+	}
+	req.ServiceTier = "priority"
+	req.ReasoningEffort = "low"
 }
 
 // supportsCacheControl returns true if the provider supports prompt caching
@@ -823,6 +840,7 @@ type anthropicRequest struct {
 	Tools       []anthropicTool    `json:"tools,omitempty"`
 	Stream      bool               `json:"stream,omitempty"`
 	Temperature *float64           `json:"temperature,omitempty"`
+	ServiceTier string             `json:"service_tier,omitempty"` // "auto" for fast mode
 }
 
 // anthropicMessage is a message in the Anthropic format.
@@ -1129,6 +1147,39 @@ func (c *LLMClient) needsSchemaStrip(model string) bool {
 		if strings.HasPrefix(lower, "grok") || strings.HasPrefix(lower, "xai/") {
 			return true
 		}
+	}
+	// Non-native OpenAI-compat providers may reject strict schemas.
+	if c.isNonNativeOpenAICompat() {
+		return true
+	}
+	return false
+}
+
+// isNonNativeOpenAICompat returns true for providers that use the OpenAI-compat
+// API but do not support all OpenAI-native features (strict tool schemas,
+// developer role, usage in streaming). These providers need compatibility
+// fixups applied before sending requests.
+func (c *LLMClient) isNonNativeOpenAICompat() bool {
+	switch c.provider {
+	case "ollama", "lmstudio", "vllm", "huggingface":
+		return true
+	default:
+		return false
+	}
+}
+
+// ctxKeyFastMode is the context key for fast mode.
+type ctxKeyFastMode struct{}
+
+// ContextWithFastMode returns a context with fast mode enabled/disabled.
+func ContextWithFastMode(ctx context.Context, fast bool) context.Context {
+	return context.WithValue(ctx, ctxKeyFastMode{}, fast)
+}
+
+// fastModeFromCtx returns whether fast mode is enabled in the context.
+func fastModeFromCtx(ctx context.Context) bool {
+	if v, ok := ctx.Value(ctxKeyFastMode{}).(bool); ok {
+		return v
 	}
 	return false
 }
@@ -1645,6 +1696,9 @@ func (c *LLMClient) completeOnceAnthropic(ctx context.Context, model string, mes
 	}
 
 	reqBody := convertToAnthropicRequest(model, messages, tools, temp, &maxTok)
+	if fastModeFromCtx(ctx) {
+		reqBody.ServiceTier = "auto"
+	}
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -1747,6 +1801,7 @@ func (c *LLMClient) completeOnceOpenAI(ctx context.Context, model string, messag
 		reqBody.Tools = tools
 	}
 	c.applyModelDefaults(&reqBody)
+	c.applyFastMode(ctx, &reqBody)
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -1973,6 +2028,9 @@ func (c *LLMClient) completeOnceStreamAnthropic(ctx context.Context, model strin
 
 	reqBody := convertToAnthropicRequest(model, messages, tools, temp, &maxTok)
 	reqBody.Stream = true
+	if fastModeFromCtx(ctx) {
+		reqBody.ServiceTier = "auto"
+	}
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -2217,6 +2275,7 @@ func (c *LLMClient) completeOnceStreamOpenAI(ctx context.Context, model string, 
 		reqBody.Tools = tools
 	}
 	c.applyModelDefaults(&reqBody)
+	c.applyFastMode(ctx, &reqBody)
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {

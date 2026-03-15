@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -40,10 +41,27 @@ const (
 	// DefaultMaxCompactionAttempts is how many times to retry after context overflow compaction.
 	DefaultMaxCompactionAttempts = 3
 
-	// compactionSafetyTimeout is the maximum time allowed for the summarization
-	// step during compaction. If the LLM hangs, we fall back to trim-by-count.
-	compactionSafetyTimeout = 5 * time.Minute
 )
+
+// ErrAgentYield is returned when the agent's sessions_yield tool is invoked.
+// The caller should collect pending subagent results and re-invoke the agent.
+var ErrAgentYield = errors.New("agent yielded turn")
+
+// ctxKeyAgentRun is the context key for passing the AgentRun to tools.
+type ctxKeyAgentRun struct{}
+
+// ContextWithAgentRun returns a context carrying the AgentRun.
+func ContextWithAgentRun(ctx context.Context, a *AgentRun) context.Context {
+	return context.WithValue(ctx, ctxKeyAgentRun{}, a)
+}
+
+// AgentRunFromCtx extracts the AgentRun from context.
+func AgentRunFromCtx(ctx context.Context) *AgentRun {
+	if v, ok := ctx.Value(ctxKeyAgentRun{}).(*AgentRun); ok {
+		return v
+	}
+	return nil
+}
 
 // ScaledMaxRetries computes a retry budget scaled by the number of available
 // auth profiles. More profiles = more credential rotation capacity, so the
@@ -207,6 +225,22 @@ type AgentRun struct {
 	// Injected at run start from session state so buildMessages() can restore context.
 	compactionSummaries []CompactionEntry
 
+	// session is the active session, used for persisting compaction count.
+	session *Session
+
+	// memoryIndexer is used for post-compaction memory sync.
+	memoryIndexer *MemoryIndexer
+
+	// reactionSender sends/removes emoji reactions on the triggering message.
+	// Used during compaction to show status (e.g. ✍ while compacting).
+	reactionSender func(emoji string, remove bool)
+
+	// yieldRequested is set by the sessions_yield tool to signal the agent
+	// should end its current turn and return control so pending subagent
+	// results can be collected and re-injected.
+	// Atomic because tool execution may run in parallel goroutines.
+	yieldRequested atomic.Bool
+
 	// loopDetector tracks tool call history and detects repetitive patterns.
 	loopDetector *ToolLoopDetector
 
@@ -330,6 +364,21 @@ func (a *AgentRun) SetSessionPersistence(p SessionPersister, sessionID string) {
 	a.sessionID = sessionID
 }
 
+// SetSession sets the active session for compaction count tracking.
+func (a *AgentRun) SetSession(s *Session) {
+	a.session = s
+}
+
+// SetMemoryIndexer sets the memory indexer for post-compaction sync.
+func (a *AgentRun) SetMemoryIndexer(m *MemoryIndexer) {
+	a.memoryIndexer = m
+}
+
+// SetReactionSender sets the function used to send/remove emoji reactions.
+func (a *AgentRun) SetReactionSender(fn func(emoji string, remove bool)) {
+	a.reactionSender = fn
+}
+
 // SetModelOverride sets the model to use instead of the default.
 // Empty string means use the LLM client's default.
 func (a *AgentRun) SetModelOverride(model string) {
@@ -399,6 +448,9 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 	// ── Run-level timeout (single timer for the whole run) ──
 	runCtx, runCancel := context.WithTimeout(ctx, a.runTimeout)
 	defer runCancel()
+
+	// Inject AgentRun into context so tools (e.g. sessions_yield) can access it.
+	runCtx = ContextWithAgentRun(runCtx, a)
 
 	runStart := time.Now()
 
@@ -967,6 +1019,15 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 				}
 				a.collectedToolCalls = append(a.collectedToolCalls, rec)
 			}
+		}
+
+		// ── Yield check ──
+		// If sessions_yield was called during tool execution, exit the loop.
+		// The caller (assistant) will collect pending subagent results and
+		// re-invoke the agent with those results injected.
+		if a.yieldRequested.Load() {
+			a.logger.Info("agent yielding turn", "total_turns", totalTurns)
+			return resp.Content, &totalUsage, ErrAgentYield
 		}
 
 		// Track consecutive turns where ALL tool calls were blocked.
@@ -2040,9 +2101,29 @@ func (a *AgentRun) managedCompaction(ctx context.Context, messages []chatMessage
 	}
 	recent := body[cutIdx:]
 
-	// Wrap summarization with a safety timeout (5 min) to prevent hung compactions.
+	// Send "writing" reaction while compaction is in progress.
+	if a.reactionSender != nil {
+		a.reactionSender("\u270d", false) // ✍
+		defer a.reactionSender("\u270d", true)
+
+		// Stall detection: send ⏳ if compaction takes longer than 30s.
+		var stallFired atomic.Bool
+		stallTimer := time.AfterFunc(30*time.Second, func() {
+			stallFired.Store(true)
+			a.reactionSender("\u23f3", false) // ⏳
+		})
+		defer func() {
+			stallTimer.Stop()
+			if stallFired.Load() {
+				a.reactionSender("\u23f3", true) // remove ⏳
+			}
+		}()
+	}
+
+	// Wrap summarization with a configurable safety timeout to prevent hung compactions.
 	// If the LLM summarization hangs, fall back to a simple trim-by-count strategy.
-	compactionCtx, compactionCancel := context.WithTimeout(ctx, compactionSafetyTimeout)
+	compactionTimeout := time.Duration(resolvedCompactionConfig(a.cfg.Compaction).TimeoutSeconds) * time.Second
+	compactionCtx, compactionCancel := context.WithTimeout(ctx, compactionTimeout)
 	summary := a.summarizeInStages(compactionCtx, middle)
 	compactionCancel()
 
@@ -2124,22 +2205,36 @@ func (a *AgentRun) collectToolFailures(messages []chatMessage, maxCount int) []s
 
 // persistCompactionSummary saves the compaction summary to session persistence.
 func (a *AgentRun) persistCompactionSummary(summary string, before, after int) {
-	if a.sessionPersistence == nil || a.sessionID == "" || summary == "" {
+	if summary == "" {
 		return
 	}
 
-	entry := CompactionEntry{
-		Type:           "compaction_summary",
-		Summary:        summary,
-		CompactedAt:    time.Now(),
-		MessagesBefore: before,
-		MessagesAfter:  after,
+	if a.sessionPersistence != nil && a.sessionID != "" {
+		entry := CompactionEntry{
+			Type:           "compaction_summary",
+			Summary:        summary,
+			CompactedAt:    time.Now(),
+			MessagesBefore: before,
+			MessagesAfter:  after,
+		}
+
+		if err := a.sessionPersistence.SaveCompaction(a.sessionID, entry); err != nil {
+			a.logger.Warn("failed to persist compaction summary", "session", a.sessionID, "err", err)
+		} else {
+			a.logger.Debug("compaction summary persisted", "session", a.sessionID, "summary_len", len(summary), "before", before, "after", after)
+		}
 	}
 
-	if err := a.sessionPersistence.SaveCompaction(a.sessionID, entry); err != nil {
-		a.logger.Warn("failed to persist compaction summary", "session", a.sessionID, "err", err)
-	} else {
-		a.logger.Debug("compaction summary persisted", "session", a.sessionID, "summary_len", len(summary), "before", before, "after", after)
+	// Increment in-memory compaction count on the session.
+	if a.session != nil {
+		a.session.IncrementCompactionCount()
+	}
+
+	// Post-compaction memory sync: trigger indexer if configured.
+	syncMode := resolvedCompactionConfig(a.cfg.Compaction).PostIndexSync
+	if a.memoryIndexer != nil && (syncMode == "async" || syncMode == "await") {
+		a.logger.Debug("post-compaction memory sync triggered", "mode", syncMode)
+		go a.memoryIndexer.IndexNow()
 	}
 }
 

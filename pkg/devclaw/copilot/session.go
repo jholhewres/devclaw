@@ -67,6 +67,9 @@ type Session struct {
 	lastCacheRead    int
 	lastCacheWrite   int
 
+	// CompactionCount tracks the total number of compactions performed.
+	compactionCount int
+
 	// CreatedAt é o timestamp de criação da sessão.
 	CreatedAt time.Time
 
@@ -118,6 +121,10 @@ type SessionConfig struct {
 	// Empty = inherit from workspace/global config. Options: "minimal", "coding",
 	// "messaging", "team", "full", or a custom profile name.
 	ToolProfile string `yaml:"tool_profile"`
+
+	// FastMode enables faster processing with reduced quality.
+	// Anthropic: service_tier="auto". OpenAI: service_tier="priority", reasoning_effort="low".
+	FastMode bool `yaml:"fast_mode"`
 }
 
 // ToolCallRecord stores a single tool invocation for session history fidelity.
@@ -395,6 +402,27 @@ func (s *Session) GetCompactionSummaries() []CompactionEntry {
 	out := make([]CompactionEntry, len(s.compactionSummaries))
 	copy(out, s.compactionSummaries)
 	return out
+}
+
+// GetCompactionCount returns the total number of compactions performed.
+func (s *Session) GetCompactionCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.compactionCount
+}
+
+// GetFastMode returns whether fast mode is enabled for this session.
+func (s *Session) GetFastMode() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.config.FastMode
+}
+
+// IncrementCompactionCount atomically increments the compaction counter.
+func (s *Session) IncrementCompactionCount() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.compactionCount++
 }
 
 // AddCompactionSummary appends a compaction entry to the session. Thread-safe.

@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -1912,6 +1913,7 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	// tools get per-request security context without shared mutable state.
 	agentCtx := ContextWithSession(a.ctx, sessionID)
 	agentCtx = ContextWithDelivery(agentCtx, msg.Channel, msg.ChatID)
+	agentCtx = ContextWithMessageID(agentCtx, msg.ID)
 	agentCtx = ContextWithCaller(agentCtx, accessLevel, msg.From)
 
 	// Resolve tool profile: session > workspace > channel inference > global.
@@ -2273,6 +2275,11 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 
 	runCtx, cancel := context.WithCancel(ctx)
 
+	// Inject fast mode into the context if the session has it enabled.
+	if session.GetFastMode() {
+		runCtx = ContextWithFastMode(runCtx, true)
+	}
+
 	// ── Persist active run for restart recovery ──
 	channel, chatID, _ := strings.Cut(sessionID, ":")
 	a.markRunActive(sessionID, channel, chatID, userMessage)
@@ -2310,6 +2317,12 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 	if a.sessPersister != nil {
 		agent.SetSessionPersistence(a.sessPersister, sessionID)
 	}
+	agent.SetSession(session)
+
+	// Wire memory indexer for post-compaction sync.
+	if a.memoryIndexer != nil {
+		agent.SetMemoryIndexer(a.memoryIndexer)
+	}
 
 	// Restore compaction summaries from session for context reconstruction.
 	if summaries := session.GetCompactionSummaries(); len(summaries) > 0 {
@@ -2333,6 +2346,19 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 		agent.SetOnToolResult(a.makeToolResultHook(dt.Channel, dt.ChatID))
 	}
 
+	// Wire reaction sender for compaction status (e.g. ✍ while compacting).
+	if msgID := MessageIDFromCtx(ctx); msgID != "" && dt.Channel != "" {
+		agent.SetReactionSender(func(emoji string, remove bool) {
+			if remove {
+				// Remove reaction by sending empty emoji (channel-specific behavior).
+				// Most channels interpret sending the same emoji as a toggle/remove.
+				a.channelMgr.SendReaction(a.ctx, dt.Channel, dt.ChatID, msgID, "")
+				return
+			}
+			a.channelMgr.SendReaction(a.ctx, dt.Channel, dt.ChatID, msgID, emoji)
+		})
+	}
+
 	// Wire tool loop detector (new instance per-run to avoid cross-session races).
 	if a.loopDetectorConfig.Enabled {
 		detector := NewToolLoopDetector(a.loopDetectorConfig, a.logger.With("component", "loop-detect"))
@@ -2347,11 +2373,32 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 
 	response, usage, err := agent.RunWithUsage(runCtx, systemPrompt, history, userMessage)
 	if err != nil {
-		if runCtx.Err() != nil {
+		if errors.Is(err, ErrAgentYield) {
+			// Agent yielded turn — collect pending subagent results and re-invoke.
+			a.logger.Info("agent yielded, collecting subagent results", "session", sessionID)
+			yieldResults := a.collectPendingSubagentResults(runCtx)
+			if yieldResults != "" {
+				// Reset yield flag before re-invoking to prevent immediate re-yield.
+				agent.yieldRequested.Store(false)
+				// Re-invoke with subagent results injected as follow-up.
+				resumeMsg := "[System: Subagent results received after yield]\n" + yieldResults
+				history = session.RecentHistory(historySize)
+				response, usage, err = agent.RunWithUsage(runCtx, systemPrompt, history, resumeMsg)
+				if err != nil && !errors.Is(err, ErrAgentYield) {
+					if runCtx.Err() != nil {
+						return "Agent stopped.", "", nil
+					}
+					a.logger.Error("agent failed after yield resume", "error", err)
+					return fmt.Sprintf("Sorry, I encountered an error: %v", err), "", nil
+				}
+			}
+			// If no pending results or second yield, use whatever response we have.
+		} else if runCtx.Err() != nil {
 			return "Agent stopped.", "", nil
+		} else {
+			a.logger.Error("agent failed", "error", err)
+			return fmt.Sprintf("Sorry, I encountered an error: %v", err), "", nil
 		}
-		a.logger.Error("agent failed", "error", err)
-		return fmt.Sprintf("Sorry, I encountered an error: %v", err), "", nil
 	}
 
 	if usage != nil {
@@ -2361,6 +2408,49 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 	}
 
 	return response, agent.ToolSummary(), agent.CollectedToolCalls()
+}
+
+// collectPendingSubagentResults waits for any running subagents to complete
+// (with a 60s timeout) and returns their results as a formatted string.
+func (a *Assistant) collectPendingSubagentResults(ctx context.Context) string {
+	if a.subagentMgr == nil {
+		return ""
+	}
+
+	runs := a.subagentMgr.List()
+	var pending []*SubagentRun
+	for _, run := range runs {
+		if run.Status == SubagentStatusRunning {
+			pending = append(pending, run)
+		}
+	}
+	if len(pending) == 0 {
+		return ""
+	}
+
+	// Wait up to 60s for pending subagents.
+	waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	var results []string
+	for _, run := range pending {
+		completed, err := a.subagentMgr.Wait(waitCtx, run.ID)
+		if err != nil {
+			results = append(results, fmt.Sprintf("- Subagent %s (%s): timed out or error: %v", run.ID, run.Task, err))
+			continue
+		}
+		status := "completed"
+		if completed.Error != "" {
+			status = "failed: " + completed.Error
+		}
+		result := completed.Result
+		if len(result) > 2000 {
+			result = result[:2000] + "..."
+		}
+		results = append(results, fmt.Sprintf("- Subagent %s (%s) [%s]: %s", run.ID, run.Task, status, result))
+	}
+
+	return strings.Join(results, "\n")
 }
 
 // toolCallsToResultContexts converts ToolCallRecords to ToolResultContext for output guardrail validation.
@@ -2950,6 +3040,9 @@ func (a *Assistant) registerSystemTools() {
 
 	// Register session management dispatcher (list, delete, export, send).
 	RegisterSessionsDispatcher(a.toolExecutor, a.workspaceMgr)
+
+	// Register sessions_yield for cooperative turn-ending in subagent orchestration.
+	RegisterSessionsYieldTool(a.toolExecutor)
 
 	// Register team tools for persistent agents and team memory.
 	if a.teamMgr != nil {

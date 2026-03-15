@@ -38,6 +38,16 @@ type CompactionConfig struct {
 
 	// ContextPruning configures ratio-based in-memory context pruning.
 	ContextPruning ContextPruningConfig `yaml:"context_pruning"`
+
+	// TimeoutSeconds is the maximum time (in seconds) allowed for the LLM
+	// summarization step during compaction. If exceeded, falls back to
+	// trim-by-count. Default: 900 (15 minutes).
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+
+	// PostIndexSync controls whether a memory indexer sync is triggered after
+	// compaction completes. Values: "off" (default), "async" (fire-and-forget),
+	// "await" (block until indexing completes, not yet implemented — treated as async).
+	PostIndexSync string `yaml:"post_index_sync"`
 }
 
 // QualityGuardConfig controls the post-summarization audit and retry mechanism.
@@ -95,6 +105,7 @@ func DefaultCompactionConfig() CompactionConfig {
 			SoftTrimMaxChars:   4096,
 			ProtectRecentTurns: 3,
 		},
+		TimeoutSeconds: 900,
 	}
 }
 
@@ -134,6 +145,10 @@ func resolvedCompactionConfig(cfg CompactionConfig) CompactionConfig {
 	}
 	if cfg.ContextPruning.ProtectRecentTurns <= 0 {
 		cfg.ContextPruning.ProtectRecentTurns = 3
+	}
+	// Compaction timeout defaults.
+	if cfg.TimeoutSeconds <= 0 {
+		cfg.TimeoutSeconds = 900
 	}
 	return cfg
 }

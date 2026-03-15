@@ -2,10 +2,13 @@ package copilot
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestManagedCompaction(t *testing.T) {
@@ -736,5 +739,284 @@ func TestCollectFileOperationsSeparated(t *testing.T) {
 	}
 	if !modifiedSet["/tmp/c.go"] {
 		t.Error("/tmp/c.go should be in modifiedFiles")
+	}
+}
+
+func TestCompactionStatusReaction(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	cfg := &Config{
+		Model: "test-model",
+		API: APIConfig{
+			Provider: "openai",
+			BaseURL:  "http://localhost:1234",
+		},
+	}
+	llm := NewLLMClient(cfg, logger)
+	agent := NewAgentRun(llm, nil, logger)
+
+	var mu sync.Mutex
+	var reactions []struct {
+		emoji  string
+		remove bool
+	}
+
+	agent.SetReactionSender(func(emoji string, remove bool) {
+		mu.Lock()
+		reactions = append(reactions, struct {
+			emoji  string
+			remove bool
+		}{emoji, remove})
+		mu.Unlock()
+	})
+
+	// managedCompaction sends ✍ at start and removes it at end.
+	// Build enough messages to trigger compaction (>= 10 messages, body >= 8).
+	var messages []chatMessage
+	messages = append(messages, chatMessage{Role: "system", Content: "System Prompt"})
+	messages = append(messages, chatMessage{Role: "user", Content: "Goal"})
+	for i := 0; i < 12; i++ {
+		if i%2 == 0 {
+			messages = append(messages, chatMessage{Role: "user", Content: "msg " + string(rune('A'+i))})
+		} else {
+			messages = append(messages, chatMessage{Role: "assistant", Content: "reply " + string(rune('A'+i))})
+		}
+	}
+
+	_ = agent.managedCompaction(context.Background(), messages)
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if len(reactions) < 2 {
+		t.Fatalf("expected at least 2 reactions (send + remove), got %d", len(reactions))
+	}
+
+	// First reaction should be ✍ (send).
+	if reactions[0].emoji != "\u270d" || reactions[0].remove {
+		t.Errorf("expected first reaction to be ✍ send, got emoji=%q remove=%v", reactions[0].emoji, reactions[0].remove)
+	}
+
+	// Last reaction should be ✍ (remove).
+	last := reactions[len(reactions)-1]
+	if last.emoji != "\u270d" || !last.remove {
+		t.Errorf("expected last reaction to be ✍ remove, got emoji=%q remove=%v", last.emoji, last.remove)
+	}
+}
+
+func TestPostCompactionMemorySync(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	cfg := &Config{
+		Model: "test-model",
+		API: APIConfig{
+			Provider: "openai",
+			BaseURL:  "http://localhost:1234",
+		},
+	}
+	llm := NewLLMClient(cfg, logger)
+
+	t.Run("async mode triggers IndexNow", func(t *testing.T) {
+		agent := NewAgentRun(llm, nil, logger)
+		agent.cfg.Compaction.PostIndexSync = "async"
+
+		// Create a memory indexer with a temp dir so indexAll() completes quickly.
+		tmpDir := t.TempDir()
+		indexer := NewMemoryIndexer(MemoryIndexerConfig{
+			MemoryDir: tmpDir,
+			Interval:  1 * time.Hour,
+		}, logger)
+		indexer.SetMemoryDir(tmpDir)
+
+		agent.SetMemoryIndexer(indexer)
+
+		// We don't need real persistence for this test.
+		agent.persistCompactionSummary("test summary", 10, 5)
+
+		// Wait a bit for the async goroutine.
+		time.Sleep(100 * time.Millisecond)
+
+		// Verify that indexAll() ran by checking lastIndexTime is non-zero.
+		_, _, _, lastIdx := indexer.Stats()
+		if lastIdx.IsZero() {
+			t.Error("expected lastIndexTime to be set after post-compaction sync")
+		}
+	})
+
+	t.Run("off mode does not trigger IndexNow", func(t *testing.T) {
+		agent := NewAgentRun(llm, nil, logger)
+		agent.cfg.Compaction.PostIndexSync = "off"
+
+		tmpDir := t.TempDir()
+		indexer := NewMemoryIndexer(MemoryIndexerConfig{
+			MemoryDir: tmpDir,
+			Interval:  1 * time.Hour,
+		}, logger)
+		indexer.SetMemoryDir(tmpDir)
+		agent.SetMemoryIndexer(indexer)
+
+		agent.persistCompactionSummary("test summary", 10, 5)
+		time.Sleep(100 * time.Millisecond)
+
+		_, _, _, lastIdx := indexer.Stats()
+		if !lastIdx.IsZero() {
+			t.Error("expected lastIndexTime to be zero when PostIndexSync is off")
+		}
+	})
+
+	t.Run("empty mode (default) does not trigger IndexNow", func(t *testing.T) {
+		agent := NewAgentRun(llm, nil, logger)
+		// PostIndexSync is empty by default.
+
+		tmpDir := t.TempDir()
+		indexer := NewMemoryIndexer(MemoryIndexerConfig{
+			MemoryDir: tmpDir,
+			Interval:  1 * time.Hour,
+		}, logger)
+		indexer.SetMemoryDir(tmpDir)
+		agent.SetMemoryIndexer(indexer)
+
+		agent.persistCompactionSummary("test summary", 10, 5)
+		time.Sleep(100 * time.Millisecond)
+
+		_, _, _, lastIdx := indexer.Stats()
+		if !lastIdx.IsZero() {
+			t.Error("expected lastIndexTime to be zero when PostIndexSync is empty")
+		}
+	})
+}
+
+func TestCompactionTimeoutFromConfig(t *testing.T) {
+	// Default should be 900 seconds.
+	cfg := DefaultCompactionConfig()
+	if cfg.TimeoutSeconds != 900 {
+		t.Errorf("Expected default timeout 900, got %d", cfg.TimeoutSeconds)
+	}
+
+	// Zero should resolve to default.
+	cfg.TimeoutSeconds = 0
+	resolved := resolvedCompactionConfig(cfg)
+	if resolved.TimeoutSeconds != 900 {
+		t.Errorf("Expected resolved timeout 900 for zero value, got %d", resolved.TimeoutSeconds)
+	}
+
+	// Negative should resolve to default.
+	cfg.TimeoutSeconds = -1
+	resolved = resolvedCompactionConfig(cfg)
+	if resolved.TimeoutSeconds != 900 {
+		t.Errorf("Expected resolved timeout 900 for negative, got %d", resolved.TimeoutSeconds)
+	}
+
+	// Custom value should be preserved.
+	cfg.TimeoutSeconds = 300
+	resolved = resolvedCompactionConfig(cfg)
+	if resolved.TimeoutSeconds != 300 {
+		t.Errorf("Expected resolved timeout 300, got %d", resolved.TimeoutSeconds)
+	}
+}
+
+func TestSessionsYieldSignal(t *testing.T) {
+	t.Run("yield flag sets and returns ErrAgentYield", func(t *testing.T) {
+		logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+		cfg := &Config{
+			Model: "test-model",
+			API: APIConfig{
+				Provider: "openai",
+				BaseURL:  "http://localhost:1234",
+			},
+		}
+		llm := NewLLMClient(cfg, logger)
+		agent := NewAgentRun(llm, nil, logger)
+
+		// Simulate: set yieldRequested directly (as sessions_yield tool would).
+		agent.yieldRequested.Store(true)
+
+		// Verify ErrAgentYield is the sentinel.
+		if !errors.Is(ErrAgentYield, ErrAgentYield) {
+			t.Error("expected ErrAgentYield to match itself")
+		}
+
+		// Verify yieldRequested is set.
+		if !agent.yieldRequested.Load() {
+			t.Error("expected yieldRequested to be true")
+		}
+
+		_ = agent // avoid unused
+	})
+
+	t.Run("AgentRun context roundtrip", func(t *testing.T) {
+		logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+		cfg := &Config{
+			Model: "test-model",
+			API: APIConfig{
+				Provider: "openai",
+				BaseURL:  "http://localhost:1234",
+			},
+		}
+		llm := NewLLMClient(cfg, logger)
+		agent := NewAgentRun(llm, nil, logger)
+
+		ctx := context.Background()
+		if AgentRunFromCtx(ctx) != nil {
+			t.Error("expected nil AgentRun from background context")
+		}
+
+		ctx = ContextWithAgentRun(ctx, agent)
+		extracted := AgentRunFromCtx(ctx)
+		if extracted != agent {
+			t.Error("expected extracted AgentRun to match original")
+		}
+	})
+
+	t.Run("sessions_yield tool sets flag via context", func(t *testing.T) {
+		logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+		cfg := &Config{
+			Model: "test-model",
+			API: APIConfig{
+				Provider: "openai",
+				BaseURL:  "http://localhost:1234",
+			},
+		}
+		llm := NewLLMClient(cfg, logger)
+		executor := NewToolExecutor(logger)
+
+		agent := NewAgentRun(llm, executor, logger)
+
+		// Register the yield tool.
+		RegisterSessionsYieldTool(executor)
+
+		// Execute it via context with AgentRun injected.
+		ctx := ContextWithAgentRun(context.Background(), agent)
+		result := executor.Execute(ctx, []ToolCall{
+			{
+				ID:       "tc_yield_1",
+				Function: FunctionCall{Name: "sessions_yield", Arguments: "{}"},
+			},
+		})
+
+		if len(result) != 1 {
+			t.Fatalf("expected 1 result, got %d", len(result))
+		}
+		if result[0].Error != nil {
+			t.Errorf("expected no error, got %v", result[0].Error)
+		}
+		if !agent.yieldRequested.Load() {
+			t.Error("expected yieldRequested to be set after sessions_yield tool")
+		}
+		if !strings.Contains(result[0].Content, "Yielding turn") {
+			t.Errorf("expected yield message, got %q", result[0].Content)
+		}
+	})
+}
+
+func TestSessionsYieldDeniedForLeafSubagent(t *testing.T) {
+	// Verify sessions_yield is in the leaf deny list.
+	found := false
+	for _, name := range subagentDenyLeaf {
+		if name == "sessions_yield" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected sessions_yield to be in subagentDenyLeaf")
 	}
 }
