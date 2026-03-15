@@ -187,9 +187,14 @@ func (a *AgentRun) lcmIngestNew(ctx context.Context, messages []chatMessage) err
 		return nil
 	}
 	// Guard against slice out-of-bounds: if the messages slice was rebuilt
-	// (e.g. after a legacy compaction fallback), reset the ingested seq.
+	// (e.g. after compaction reassembly), the old seq no longer applies.
+	// Skip all current messages rather than resetting to 0 — re-ingesting
+	// the assembled context would create duplicates (summaries as messages).
 	if a.lcmIngestedSeq > len(messages) {
-		a.lcmIngestedSeq = 0
+		a.logger.Warn("lcm: lcmIngestedSeq exceeds message count, skipping ingest",
+			"seq", a.lcmIngestedSeq, "len", len(messages))
+		a.lcmIngestedSeq = len(messages)
+		return nil
 	}
 	newMsgs := messages[a.lcmIngestedSeq:]
 	if len(newMsgs) == 0 {

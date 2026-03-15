@@ -372,7 +372,7 @@ CREATE TABLE IF NOT EXISTS lcm_messages (
     content         TEXT NOT NULL,
     token_count     INTEGER DEFAULT 0,
     created_at      TEXT NOT NULL,
-    FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id)
+    FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_lcm_msg_conv_seq ON lcm_messages(conversation_id, seq);
 
@@ -390,7 +390,7 @@ CREATE TABLE IF NOT EXISTS lcm_summaries (
     earliest_at                 TEXT NOT NULL,
     latest_at                   TEXT NOT NULL,
     created_at                  TEXT NOT NULL,
-    FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id)
+    FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_lcm_sum_conv ON lcm_summaries(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_lcm_sum_depth ON lcm_summaries(conversation_id, depth);
@@ -400,8 +400,8 @@ CREATE TABLE IF NOT EXISTS lcm_summary_messages (
     summary_id  TEXT NOT NULL,
     message_id  INTEGER NOT NULL,
     PRIMARY KEY (summary_id, message_id),
-    FOREIGN KEY (summary_id) REFERENCES lcm_summaries(id),
-    FOREIGN KEY (message_id) REFERENCES lcm_messages(id)
+    FOREIGN KEY (summary_id) REFERENCES lcm_summaries(id) ON DELETE CASCADE,
+    FOREIGN KEY (message_id) REFERENCES lcm_messages(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_lcm_sm_msg ON lcm_summary_messages(message_id);
 
@@ -410,8 +410,8 @@ CREATE TABLE IF NOT EXISTS lcm_summary_parents (
     parent_id TEXT NOT NULL,
     child_id  TEXT NOT NULL,
     PRIMARY KEY (parent_id, child_id),
-    FOREIGN KEY (parent_id) REFERENCES lcm_summaries(id),
-    FOREIGN KEY (child_id) REFERENCES lcm_summaries(id)
+    FOREIGN KEY (parent_id) REFERENCES lcm_summaries(id) ON DELETE CASCADE,
+    FOREIGN KEY (child_id) REFERENCES lcm_summaries(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_lcm_sp_child ON lcm_summary_parents(child_id);
 
@@ -423,7 +423,7 @@ CREATE TABLE IF NOT EXISTS lcm_context_items (
     item_type       TEXT NOT NULL,
     message_id      INTEGER,
     summary_id      TEXT,
-    FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id)
+    FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_lcm_ci_conv ON lcm_context_items(conversation_id, ordinal);
 

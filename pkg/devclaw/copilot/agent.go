@@ -247,6 +247,9 @@ type AgentRun struct {
 	lcmConversationID string
 	// lcmIngestedSeq tracks the last ingested message index to avoid double-ingest.
 	lcmIngestedSeq int
+	// lcmRunCtx holds the run-level context for LCM operations that need
+	// cancellation support (e.g. Assemble in buildMessages).
+	lcmRunCtx context.Context
 
 	// loopDetector tracks tool call history and detects repetitive patterns.
 	loopDetector *ToolLoopDetector
@@ -461,8 +464,25 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 
 	runStart := time.Now()
 
+	// Store run context for LCM operations that need cancellation support.
+	a.lcmRunCtx = runCtx
+
 	// Build initial messages from history.
 	messages := a.buildMessages(systemPrompt, history, userMessage)
+
+	// LCM: ingest the new user message and mark the assembled context as already
+	// ingested. This prevents double-ingestion of summaries and tail messages that
+	// the assembler pulled from the store (they're already persisted there).
+	if a.lcmEngine != nil && a.lcmConversationID != "" && userMessage != "" {
+		content := userMessage
+		tokenCount := EstimateTokens(content)
+		if _, err := a.lcmEngine.Store().IngestMessage(a.lcmConversationID, "user", content, tokenCount); err != nil {
+			a.logger.Warn("lcm: failed to ingest initial user message", "err", err)
+		}
+		// Mark everything in the assembled context as already ingested so
+		// managedCompaction only processes messages added during the loop.
+		a.lcmIngestedSeq = len(messages)
+	}
 
 	// Collect tool definitions from the executor, filtered by profile if present.
 	allTools := a.executor.Tools()
@@ -776,6 +796,16 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 				"finish_reason", resp.FinishReason,
 				"run_elapsed_ms", time.Since(runStart).Milliseconds(),
 			)
+
+			// LCM: ingest the final assistant response so it's available
+			// for future sessions' context assembly.
+			if a.lcmEngine != nil && a.lcmConversationID != "" && resp.Content != "" {
+				tokenCount := EstimateTokens(resp.Content)
+				if _, err := a.lcmEngine.Store().IngestMessage(a.lcmConversationID, "assistant", resp.Content, tokenCount); err != nil {
+					a.logger.Warn("lcm: failed to ingest final response", "err", err)
+				}
+			}
+
 			return resp.Content, &totalUsage, nil
 		}
 
@@ -1025,6 +1055,16 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 					rec.Result = truncateStr(res, 500)
 				}
 				a.collectedToolCalls = append(a.collectedToolCalls, rec)
+			}
+		}
+
+		// ── LCM incremental ingestion ──
+		// Ingest new messages (assistant response + tool results) that were
+		// appended during this turn. This ensures the LCM store stays current
+		// even when compaction doesn't trigger.
+		if a.lcmEngine != nil && a.lcmConversationID != "" {
+			if err := a.lcmIngestNew(runCtx, messages); err != nil {
+				a.logger.Warn("lcm incremental ingest failed", "turn", totalTurns, "err", err)
 			}
 		}
 
@@ -1440,7 +1480,11 @@ func (a *AgentRun) buildMessages(systemPrompt string, history []ConversationEntr
 	// LCM path: assemble context from DAG summaries + fresh tail.
 	if a.lcmEngine != nil && a.lcmConversationID != "" {
 		tokenBudget := a.getModelContextWindow()
-		msgs, err := a.lcmEngine.Assemble(context.Background(), a.lcmConversationID, systemPrompt, userMessage, tokenBudget)
+		assembleCtx := a.lcmRunCtx
+		if assembleCtx == nil {
+			assembleCtx = context.Background()
+		}
+		msgs, err := a.lcmEngine.Assemble(assembleCtx, a.lcmConversationID, systemPrompt, userMessage, tokenBudget)
 		if err != nil {
 			a.logger.Warn("lcm assembly failed, using legacy path", "err", err)
 		} else {
@@ -2105,6 +2149,7 @@ func (a *AgentRun) managedCompaction(ctx context.Context, messages []chatMessage
 				if err != nil {
 					a.logger.Warn("lcm assembly after compaction failed, falling back to legacy", "err", err)
 				} else {
+					a.lcmIngestedSeq = len(assembled)
 					a.persistCompactionSummary("[LCM DAG compaction]", len(messages), len(assembled))
 					return assembled
 				}
@@ -2293,6 +2338,40 @@ func (a *AgentRun) persistCompactionSummary(summary string, before, after int) {
 // aggressiveCompaction is used when the context still overflows despite managed compaction.
 // It cuts the recent context even shorter and truncates large text heavily.
 func (a *AgentRun) aggressiveCompaction(ctx context.Context, messages []chatMessage) []chatMessage {
+	// LCM path: ingest pending messages and trigger a forced compaction sweep.
+	if a.lcmEngine != nil && a.lcmConversationID != "" {
+		if err := a.lcmIngestNew(ctx, messages); err != nil {
+			a.logger.Warn("lcm aggressive: ingest failed, falling back to legacy", "err", err)
+		} else {
+			summarizeFn := buildLCMSummarizeFn(a.llm, a.cfg.Compaction, a.modelOverride, a.logger)
+			ctxWindow := a.getModelContextWindow()
+			// Force a sweep even if ShouldCompact says no.
+			if _, err := a.lcmEngine.compactor.FullSweep(ctx, a.lcmConversationID, summarizeFn); err != nil {
+				a.logger.Warn("lcm aggressive: sweep failed, falling back to legacy", "err", err)
+			} else {
+				// Update last_compact_at since we bypassed LCMEngine.Compact().
+				if err := a.lcmEngine.Store().UpdateLastCompactAt(a.lcmConversationID); err != nil {
+					a.logger.Warn("lcm aggressive: failed to update last_compact_at", "err", err)
+				}
+				sysPrompt := ""
+				if len(messages) > 0 && messages[0].Role == "system" {
+					if s, ok := messages[0].Content.(string); ok {
+						sysPrompt = s
+					}
+				}
+				assembled, err := a.lcmEngine.Assemble(ctx, a.lcmConversationID, sysPrompt, "", ctxWindow)
+				if err != nil {
+					a.logger.Warn("lcm aggressive: assembly failed, falling back to legacy", "err", err)
+				} else {
+					a.lcmIngestedSeq = len(assembled)
+					a.persistCompactionSummary("[LCM aggressive compaction]", len(messages), len(assembled))
+					return assembled
+				}
+			}
+		}
+	}
+
+	// Legacy path.
 	// First run standard truncation on tool results
 	truncated := a.truncateToolResults(messages, 1500)
 

@@ -284,6 +284,30 @@ func (s *LCMStore) GetFreshTailMessages(convID string, count int) ([]*LCMMessage
 	return msgs, nil
 }
 
+// GetRecentMessages returns the most recent N messages (by seq DESC, reversed to chronological).
+// Use this instead of GetMessageRange for grep searches to prioritize recent messages.
+func (s *LCMStore) GetRecentMessages(convID string, limit int) ([]*LCMMessage, error) {
+	rows, err := s.db.Query(
+		`SELECT id, conversation_id, seq, role, content, token_count, created_at
+		 FROM lcm_messages WHERE conversation_id = ?
+		 ORDER BY seq DESC LIMIT ?`,
+		convID, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("lcm get recent messages: %w", err)
+	}
+	defer rows.Close()
+	msgs, err := scanMessages(rows)
+	if err != nil {
+		return nil, err
+	}
+	// Reverse to chronological order.
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
+}
+
 // MessageCount returns the total number of messages in a conversation.
 func (s *LCMStore) MessageCount(convID string) (int, error) {
 	var count int
@@ -581,11 +605,14 @@ func (s *LCMStore) SearchFTS(convID, query string, limit int) ([]LCMFTSResult, e
 	if limit <= 0 {
 		limit = 20
 	}
+	// Sanitize query for FTS5 MATCH syntax: wrap in double quotes for literal
+	// matching, escaping any embedded double quotes to prevent FTS operator injection.
+	safeQuery := "\"" + strings.ReplaceAll(query, "\"", "\"\"") + "\""
 	rows, err := s.db.Query(
 		`SELECT content, entity_type, entity_id, rank
 		 FROM lcm_fts WHERE lcm_fts MATCH ? AND conversation_id = ?
 		 ORDER BY rank LIMIT ?`,
-		query, convID, limit,
+		safeQuery, convID, limit,
 	)
 	if err != nil {
 		// FTS5 table may not exist — degrade gracefully.

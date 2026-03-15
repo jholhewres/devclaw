@@ -202,6 +202,10 @@ func (c *LCMCompactor) CondensedPass(ctx context.Context, convID string, summari
 	return created, nil
 }
 
+// maxCondensedIterations caps the cascading condensed passes to prevent
+// infinite loops in pathological cases.
+const maxCondensedIterations = 20
+
 // FullSweep runs leaf pass then cascading condensed passes until stable.
 func (c *LCMCompactor) FullSweep(ctx context.Context, convID string, summarizeFn LCMSummarizeFn) ([]*LCMSummary, error) {
 	var allNew []*LCMSummary
@@ -213,7 +217,7 @@ func (c *LCMCompactor) FullSweep(ctx context.Context, convID string, summarizeFn
 	allNew = append(allNew, leaves...)
 
 	// Cascade condensed passes until no more grouping is possible.
-	for {
+	for i := 0; i < maxCondensedIterations; i++ {
 		if ctx.Err() != nil {
 			return allNew, ctx.Err()
 		}
@@ -225,6 +229,9 @@ func (c *LCMCompactor) FullSweep(ctx context.Context, convID string, summarizeFn
 			break
 		}
 		allNew = append(allNew, condensed...)
+		if i == maxCondensedIterations-1 {
+			c.logger.Warn("lcm full sweep: hit condensed iteration limit", "limit", maxCondensedIterations)
+		}
 	}
 
 	return allNew, nil
@@ -242,6 +249,9 @@ func (c *LCMCompactor) trySummarize(ctx context.Context, fn LCMSummarizeFn, text
 	result, err = fn(ctx, text, true)
 	if err == nil && result != "" {
 		return result, nil
+	}
+	if err == nil {
+		err = fmt.Errorf("empty response")
 	}
 	return "", fmt.Errorf("summarization failed (both normal and aggressive): %w", err)
 }
@@ -321,6 +331,10 @@ func formatSummariesForCondensation(sums []*LCMSummary) string {
 
 // deterministicFallback creates a minimal summary when LLM summarization fails.
 func deterministicFallback(msgs []*LCMMessage) string {
+	if len(msgs) == 0 {
+		return "## Decisions\n(no messages)\n## Open TODOs\n(none)\n## Constraints/Rules\n(none)\n## Pending user asks\n(none)\n## Exact identifiers\n(none)\n"
+	}
+
 	var b strings.Builder
 	b.WriteString("## Decisions\n(summarization failed — metadata only)\n\n")
 	b.WriteString("## Open TODOs\n(unknown)\n\n")

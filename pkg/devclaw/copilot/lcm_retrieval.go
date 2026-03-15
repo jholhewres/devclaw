@@ -72,7 +72,10 @@ func (r *LCMRetrieval) grepSubstring(convID, query string, limit int) (string, e
 	var b strings.Builder
 	matchCount := 0
 
-	msgs, _ := r.store.GetMessageRange(convID, 0, maxGrepMessages)
+	msgs, err := r.store.GetRecentMessages(convID, maxGrepMessages)
+	if err != nil {
+		r.logger.Warn("lcm grep substring: failed to load messages", "err", err)
+	}
 	for _, m := range msgs {
 		if matchCount >= limit {
 			break
@@ -88,7 +91,10 @@ func (r *LCMRetrieval) grepSubstring(convID, query string, limit int) (string, e
 		}
 	}
 
-	sums, _ := r.store.GetAllSummaries(convID)
+	sums, err := r.store.GetAllSummaries(convID)
+	if err != nil {
+		r.logger.Warn("lcm grep substring: failed to load summaries", "err", err)
+	}
 	for _, s := range sums {
 		if matchCount >= limit {
 			break
@@ -121,8 +127,8 @@ func (r *LCMRetrieval) grepRegex(convID, pattern string, limit int) (string, err
 	var b strings.Builder
 	matchCount := 0
 
-	// Search messages.
-	msgs, err := r.store.GetMessageRange(convID, 0, maxGrepMessages)
+	// Search messages (most recent first to prioritize relevant results).
+	msgs, err := r.store.GetRecentMessages(convID, maxGrepMessages)
 	if err == nil {
 		for _, m := range msgs {
 			if matchCount >= limit {
@@ -178,6 +184,10 @@ func (r *LCMRetrieval) Describe(convID, summaryID string) (string, error) {
 	sum, err := r.store.GetSummary(summaryID)
 	if err != nil {
 		return "", fmt.Errorf("lcm describe: %w", err)
+	}
+	// Validate that the summary belongs to this conversation.
+	if sum.ConversationID != convID {
+		return "", fmt.Errorf("lcm describe: summary %q does not belong to this conversation", summaryID)
 	}
 
 	var b strings.Builder
@@ -278,6 +288,10 @@ func (r *LCMRetrieval) Expand(convID, summaryID string, depth int) (string, erro
 	sum, err := r.store.GetSummary(summaryID)
 	if err != nil {
 		return "", fmt.Errorf("lcm expand: %w", err)
+	}
+	// Validate that the summary belongs to this conversation.
+	if sum.ConversationID != convID {
+		return "", fmt.Errorf("lcm expand: summary %q does not belong to this conversation", summaryID)
 	}
 
 	result := r.expandRecursive(sum, depth, 0)
