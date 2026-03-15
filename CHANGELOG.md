@@ -24,6 +24,96 @@ All notable changes to DevClaw are documented in this file.
 
 ## [Unreleased]
 
+### Lossless Compaction Module (LCM) — DAG-Based Memory
+
+Complete port of the lossless-claw compaction system from OpenClaw (TypeScript) to Go, integrated directly into the DevClaw agent. Instead of flat summary strings that discard detail, LCM builds a hierarchical DAG of summaries where every message is persisted verbatim and recoverable on demand.
+
+**Architecture:**
+- **DAG structure**: Leaf summaries (depth 0) compress raw messages; condensed summaries (depth 1+) compress groups of summaries, cascading until stable
+- **Lossless guarantee**: Every message persisted verbatim in SQLite; summaries link back to source messages via join tables
+- **Fresh tail**: Last N messages (default 32) always included raw, never summarized
+- **FTS5 graceful degradation**: Full-text search when available, falls back to substring search
+- **Feature flag**: `lcm_enabled` (default true) with `LCMConfig` struct for all parameters
+
+**New `lcm` tool** (single dispatcher, 3 actions):
+- `lcm grep query="search term"` — search across all messages and summaries (FTS5 + regex + substring)
+- `lcm describe summary_id="tree"` — inspect the full DAG structure and metadata
+- `lcm expand summary_id="sum_xxx"` — recover original messages behind any summary
+
+**Integration:**
+- `buildMessages()` assembles context from DAG (root summaries + fresh tail), falls back to legacy on error
+- `managedCompaction()` ingests new messages, evaluates soft/hard triggers, runs leaf + condensed passes
+- System prompt automatically includes LCM tool guidance when summaries exist
+- Budget-aware assembly: reserves 20% for response, evicts oldest summaries when over budget
+
+**New files:** `lcm.go`, `lcm_store.go`, `lcm_compaction.go`, `lcm_assembler.go`, `lcm_retrieval.go`, `lcm_tools.go`, `lcm_test.go` (22 unit tests)
+
+**Modified files:** `db.go` (7 new tables), `compaction_safeguard.go`, `agent.go`, `assistant.go`
+
+**Configuration:**
+```yaml
+compaction:
+  lcm_enabled: true
+  lcm:
+    fresh_tail_count: 32
+    leaf_chunk_max_tokens: 20000
+    condensed_min_children: 4
+    condensed_max_children: 8
+    soft_trigger_ratio: 0.6
+    hard_trigger_ratio: 0.85
+    max_summary_tokens: 2000
+```
+
+### OpenClaw Feature Alignment (9 Features)
+
+Ported 9 features from OpenClaw to align the Go agent with the TypeScript reference implementation:
+
+- **Configurable compaction timeout**: `CompactionConfig.TimeoutSeconds` (default 900s / 15min)
+- **Isolated heartbeat sessions**: `IsolateSession` option gives each heartbeat tick a unique session ID
+- **Auto-compaction counter**: Persisted in session metadata for observability
+- **Smart strict mode**: Disabled for non-native OpenAI-compat providers (ollama, lmstudio, vllm, huggingface)
+- **Fast mode**: Anthropic `service_tier: auto`, OpenAI priority + low reasoning effort
+- **Post-compaction memory sync**: Async/await/off modes for memory indexer after compaction
+- **Compaction status reactions**: ✍ on start, ⏳ on stall detection (30s), cleaned up on completion
+- **`sessions_yield` tool**: Cooperative turn-ending for subagent orchestration (denied for leaf subagents)
+- **Skill DB error enrichment**: "table not found" errors now list available tables
+
+### Agent Safeguards & Compaction Hardening
+
+- **Structured compaction**: 5 mandatory sections (Decisions, Open TODOs, Constraints/Rules, Pending user asks, Exact identifiers) with quality guard audit and retry loop
+- **Identifier preservation audit**: Post-summarization check that extracted identifiers appear in the summary
+- **Ratio-based context pruning**: Soft trim tool results at 30% context usage, hard clear at 50%
+- **Emergency compression**: Preserves goal + summary + recent turns instead of discarding all history
+- **Anthropic refusal scrubbing**: Removes magic refusal strings from user messages
+- **Thinking-level fallback**: Gracefully retries with extended thinking stripped on thinking errors
+- **Safety constitution**: `buildSafetyLayer` now populates the safety constitution (was returning empty)
+- **Deterministic output**: Sorted map iteration in `buildMinimalFallbackSummary` and `collectFileOperationsSeparated`
+
+### Anti-Hallucination Defense
+
+Three-layer defense against LLM fabricating data when tool calls fail:
+
+- System prompt explicitly forbids inventing tool results
+- `[System]` reminder injected into conversation after tool errors
+- URL grounding check activated in output guardrail (log-only mode)
+
+### Frontend & i18n
+
+- Complete i18n coverage for Config, Domain, Channels, Access, Groups, Skills pages
+- All hardcoded dropdown labels/placeholders replaced with `t()` calls
+- Skill toggle/install failure feedback UI
+- Dark mode support improvements
+- Session management and dashboard error handling improvements
+- `web/README.md` updated to match actual codebase (React 19, lucide-react, cn)
+
+### Bug Fixes
+
+- Fixed hook tests missing `Enabled: true` (Go bool zero value = false)
+- Fixed `TestAllHookEvents` to include message pipeline hooks
+- Fixed `TestBuiltinSkills_FormatForPrompt` for on-demand teams skill
+- Fixed `MemoryIndexer` data race on `fsWatcher` field access
+- Fixed skills backend handler logic for already-installed skills
+
 ### Team Tools — Dispatcher Pattern Refactor
 
 Reduced team tool count from 34 to 5 to stay under OpenAI's 128 tool limit:
