@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build linux
 
 // Package sandbox – exec_restricted.go implements the restricted executor
 // using Linux namespaces for lightweight process isolation.
