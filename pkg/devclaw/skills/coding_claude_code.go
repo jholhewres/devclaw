@@ -85,19 +85,12 @@ type claudeCodeSkill struct {
 	skipPermissions bool
 	timeout         time.Duration
 
-	// apiKey and baseURL are injected from DevClaw's main LLM config.
-	// When set, they are passed as ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL
-	// to the Claude Code CLI, allowing it to use the same provider (e.g. Z.AI).
-	apiKey  string
-	baseURL string
 }
 
 // NewClaudeCodeSkill creates the claude-code skill.
 // provider may be nil if project management is not configured.
-// apiKey, baseURL, and defaultModelName are the LLM provider credentials from DevClaw's config;
-// when non-empty, they are injected as env vars so Claude Code CLI authenticates
-// through the same provider (Z.AI, Anthropic, etc.).
-func NewClaudeCodeSkill(provider ProjectProvider, apiKey, baseURL, defaultModelName string) Skill {
+// defaultModelName is the model name passed to Claude Code CLI via --model.
+func NewClaudeCodeSkill(provider ProjectProvider, defaultModelName string) Skill {
 	// Model: env var override takes precedence over config.
 	model := os.Getenv("DEVCLAW_CLAUDE_CODE_MODEL")
 	if model == "" {
@@ -126,8 +119,6 @@ func NewClaudeCodeSkill(provider ProjectProvider, apiKey, baseURL, defaultModelN
 		defaultBudget:   budget,
 		skipPermissions: true,
 		timeout:         time.Duration(timeoutMin) * time.Minute,
-		apiKey:          apiKey,
-		baseURL:         baseURL,
 	}
 }
 
@@ -348,44 +339,23 @@ func (s *claudeCodeSkill) handleExecute(ctx context.Context, args map[string]any
 		cmd.Dir = workDir
 	}
 
-	// Log the CLI invocation for debugging (mask the API key).
-	maskedKey := ""
-	if s.apiKey != "" {
-		if len(s.apiKey) > 8 {
-			maskedKey = s.apiKey[:4] + "..." + s.apiKey[len(s.apiKey)-4:]
-		} else {
-			maskedKey = "***"
-		}
-	}
 	slog.Info("claude-code: executing",
 		"bin", claudeBin,
 		"args_count", len(cliArgs),
 		"work_dir", workDir,
-		"has_api_key", s.apiKey != "",
-		"api_key_masked", maskedKey,
-		"base_url", s.baseURL,
 		"model", s.defaultModel,
 	)
 
-	// Environment: inject API credentials so Claude Code CLI uses the same
-	// provider as DevClaw (e.g. Z.AI). This mirrors how OpenClaw passes
-	// ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL to the CLI.
+	// Environment: clear ANTHROPIC_* vars so Claude Code CLI uses the user's
+	// own OAuth/configuration (e.g., Max subscription). This prevents conflicts
+	// with DevClaw's provider credentials.
 	env := os.Environ()
 	env = clearEnvKeys(env, "ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY_OLD",
 		"ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
 		"ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL")
 
-	if s.apiKey != "" {
-		env = append(env, "ANTHROPIC_API_KEY="+s.apiKey)
-		env = append(env, "ANTHROPIC_AUTH_TOKEN="+s.apiKey)
-	}
-	if s.baseURL != "" {
-		env = append(env, "ANTHROPIC_BASE_URL="+s.baseURL)
-	}
-	if s.defaultModel != "" {
-		env = append(env, "ANTHROPIC_DEFAULT_SONNET_MODEL="+s.defaultModel)
-		env = append(env, "ANTHROPIC_DEFAULT_OPUS_MODEL="+s.defaultModel)
-	}
+	// NOTE: We intentionally do NOT inject DevClaw's API credentials here.
+	// Claude Code should use the user's own authentication (OAuth, setup-token, etc.)
 
 	// Increase internal Claude Code timeouts for BashTool pre-flight checks.
 	env = append(env, "API_TIMEOUT_MS=600000")

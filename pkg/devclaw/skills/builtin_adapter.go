@@ -27,9 +27,7 @@ type BuiltinLoader struct {
 	enabled  []string
 	logger   *slog.Logger
 	projProv ProjectProvider // optional, for coding skills (claude-code, project-manager)
-	apiKey   string         // LLM API key (injected as ANTHROPIC_API_KEY for Claude Code)
-	baseURL  string         // LLM API base URL (injected as ANTHROPIC_BASE_URL for Claude Code)
-	model    string         // LLM model name (injected as ANTHROPIC_DEFAULT_*_MODEL)
+	model    string         // LLM model name passed to Claude Code CLI via --model
 }
 
 // NewBuiltinLoader creates a loader for built-in skills.
@@ -46,13 +44,8 @@ func (l *BuiltinLoader) SetProjectProvider(p ProjectProvider) {
 	l.projProv = p
 }
 
-// SetAPIConfig injects the LLM API configuration for skills that need it (e.g. claude-code).
-// The API key is injected as ANTHROPIC_API_KEY and base URL as ANTHROPIC_BASE_URL
-// so that Claude Code CLI uses the same provider (e.g. Z.AI) as DevClaw.
-// model is the default LLM model name (e.g. "glm-5") used to set ANTHROPIC_DEFAULT_*_MODEL.
-func (l *BuiltinLoader) SetAPIConfig(apiKey, baseURL, model string) {
-	l.apiKey = apiKey
-	l.baseURL = baseURL
+// SetModel sets the default LLM model name for skills that need it (e.g. claude-code).
+func (l *BuiltinLoader) SetModel(model string) {
 	l.model = model
 }
 
@@ -64,7 +57,7 @@ func (l *BuiltinLoader) Load(_ context.Context) ([]Skill, error) {
 		"datetime":        newDatetimeSkill,
 		"image-gen":       newImageGenSkill,
 		"skill-db":        newSkillDBSkill,
-		"claude-code":     func() Skill { return NewClaudeCodeSkill(l.projProv, l.apiKey, l.baseURL, l.model) },
+		"claude-code":     func() Skill { return NewClaudeCodeSkill(l.projProv, l.model) },
 		"project-manager": func() Skill { return NewProjectManagerSkill(l.projProv) },
 	}
 

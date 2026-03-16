@@ -2879,9 +2879,7 @@ func (a *Assistant) registerSkillLoaders() {
 			builtinLoader.SetProjectProvider(NewProjectProviderAdapter(a.projectMgr))
 		}
 
-		// Inject API credentials so skills like claude-code can authenticate
-		// through the same LLM provider (e.g. Z.AI) as DevClaw itself.
-		builtinLoader.SetAPIConfig(a.config.API.APIKey, a.config.API.BaseURL, a.config.Model)
+		builtinLoader.SetModel(a.config.Model)
 
 		a.skillRegistry.AddLoader(builtinLoader)
 	}
