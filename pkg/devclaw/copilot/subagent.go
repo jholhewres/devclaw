@@ -87,7 +87,7 @@ type SubagentConfig struct {
 	// MaxTurns is the max agent loop turns for each subagent (default: 15).
 	MaxTurns int `yaml:"max_turns"`
 
-	// TimeoutSeconds is the max execution time per subagent (default: 300 = 5min).
+	// TimeoutSeconds is the max execution time per subagent (default: 900 = 15min).
 	TimeoutSeconds int `yaml:"timeout_seconds"`
 
 	// MaxSpawnDepth controls nested subagent spawning (default: 1 = no nesting).
@@ -127,7 +127,7 @@ func DefaultSubagentConfig() SubagentConfig {
 		Enabled:             true,
 		MaxConcurrent:       8,
 		MaxTurns:            0,   // Unlimited (aligned with agent loop)
-		TimeoutSeconds:      600, // 10 minutes — enough for research tasks that do many web searches
+		TimeoutSeconds:      900, // 15 minutes — enough for research tasks that do many web searches
 		MaxSpawnDepth:       1,   // No nesting by default (subagents cannot spawn children)
 		MaxChildrenPerAgent: 5,   // Each agent can spawn up to 5 children
 		DeniedTools:         DefaultSubagentDeniedTools,
@@ -270,7 +270,7 @@ func NewSubagentManager(cfg SubagentConfig, logger *slog.Logger) *SubagentManage
 		cfg.MaxTurns = 15
 	}
 	if cfg.TimeoutSeconds <= 0 {
-		cfg.TimeoutSeconds = 300
+		cfg.TimeoutSeconds = 900
 	}
 
 	return &SubagentManager{
