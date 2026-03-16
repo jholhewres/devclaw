@@ -509,6 +509,9 @@ func getModelDefaults(model, provider string) modelDefaults {
 		d.MaxOutputTokens = 8192
 
 	// ── GLM models (Z.AI) ──
+	case strings.HasPrefix(model, "glm-5-turbo"):
+		d.DefaultTemperature = 0.7
+		d.MaxOutputTokens = 16384
 	case strings.HasPrefix(model, "glm-5"):
 		d.DefaultTemperature = 0.7
 		d.MaxOutputTokens = 8192
@@ -1965,7 +1968,7 @@ func (c *LLMClient) CompleteWithToolsStreamUsingModel(ctx context.Context, model
 			// Check if streaming returned empty content (some providers like Z.AI
 			// may have SSE format incompatibilities that result in empty responses)
 			if resp.Content == "" && len(resp.ToolCalls) == 0 && resp.Usage.CompletionTokens == 0 {
-				c.logger.Warn("streaming returned empty response, falling back to non-streaming",
+				c.logger.Debug("streaming returned empty response, falling back to non-streaming",
 					"model", model,
 					"provider", c.provider,
 				)

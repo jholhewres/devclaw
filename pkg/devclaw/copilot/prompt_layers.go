@@ -1387,7 +1387,7 @@ func (p *PromptComposer) buildRuntimeLayer(session *Session) string {
 		}
 	}
 
-	return fmt.Sprintf("---\nRuntime: agent=%s | model=%s | os=%s/%s | host=%s | channel=%s | cwd=%s | lang=%s | thinking=%s",
+	return fmt.Sprintf("---\nRuntime: agent=%s | model=%s | os=%s/%s | host=%s | channel=%s | cwd=%s | lang=%s | thinking=%s | process_mgr=%s",
 		name,
 		p.config.Model,
 		runtime.GOOS,
@@ -1397,7 +1397,29 @@ func (p *PromptComposer) buildRuntimeLayer(session *Session) string {
 		cwd,
 		p.config.Language,
 		thinkingLevel,
+		detectProcessManager(),
 	)
+}
+
+// detectProcessManager identifies the process manager running the current process.
+// Returns "systemd", "pm2", "docker", "kubernetes", or "standalone".
+// Cross-platform safe: Linux-only paths simply fail on other OSes and fall through.
+func detectProcessManager() string {
+	if _, err := os.Stat("/run/systemd/system"); err == nil {
+		return "systemd"
+	}
+	if os.Getenv("PM2_HOME") != "" {
+		return "pm2"
+	}
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return "docker"
+	}
+	if data, err := os.ReadFile("/proc/1/cgroup"); err == nil {
+		if strings.Contains(string(data), "kubepods") {
+			return "kubernetes"
+		}
+	}
+	return "standalone"
 }
 
 // estimateTokens approximates the token count for a string.

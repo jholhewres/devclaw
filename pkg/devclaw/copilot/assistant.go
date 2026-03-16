@@ -2414,7 +2414,7 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 						return "Agent stopped.", "", nil
 					}
 					a.logger.Error("agent failed after yield resume", "error", err)
-					return fmt.Sprintf("Sorry, I encountered an error: %v", err), "", nil
+					return friendlyAgentError(err), "", nil
 				}
 			}
 			// If no pending results or second yield, use whatever response we have.
@@ -2422,7 +2422,7 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 			return "Agent stopped.", "", nil
 		} else {
 			a.logger.Error("agent failed", "error", err)
-			return fmt.Sprintf("Sorry, I encountered an error: %v", err), "", nil
+			return friendlyAgentError(err), "", nil
 		}
 	}
 
@@ -2433,6 +2433,31 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 	}
 
 	return response, agent.ToolSummary(), agent.CollectedToolCalls()
+}
+
+// friendlyAgentError maps technical LLM/agent errors to user-friendly messages.
+// The raw error is already logged at the call site — this returns a short,
+// actionable string that can be shown directly to the end user.
+func friendlyAgentError(err error) string {
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+
+	switch {
+	case strings.Contains(lower, "429") || strings.Contains(lower, "rate limit") || strings.Contains(lower, "rate_limit"):
+		return "I'm temporarily unavailable due to high demand. Please try again in a moment."
+	case strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline"):
+		return "The request took too long. Please try again or simplify your request."
+	case strings.Contains(lower, "billing") || strings.Contains(lower, "quota") || strings.Contains(lower, "insufficient_quota"):
+		return "The AI service quota has been reached. Contact the administrator."
+	case strings.Contains(lower, "context") && (strings.Contains(lower, "overflow") || strings.Contains(lower, "too long") || strings.Contains(lower, "too large") || strings.Contains(lower, "maximum")):
+		return "The conversation has grown too long. Please start a new session."
+	case strings.Contains(lower, "401") || strings.Contains(lower, "403") || strings.Contains(lower, "unauthorized") || strings.Contains(lower, "forbidden"):
+		return "Configuration issue with the AI service. Contact the administrator."
+	case strings.Contains(lower, "all models") && strings.Contains(lower, "exhausted"):
+		return "All AI models are currently unavailable. Please try again shortly."
+	default:
+		return "Sorry, I encountered an unexpected error. Please try again."
+	}
 }
 
 // collectPendingSubagentResults waits for any running subagents to complete
@@ -2534,7 +2559,7 @@ func (a *Assistant) executeAgent(ctx context.Context, workspaceID string, sessio
 			return "Agent stopped."
 		}
 		a.logger.Error("agent failed", "error", err)
-		return fmt.Sprintf("Sorry, I encountered an error: %v", err)
+		return friendlyAgentError(err)
 	}
 
 	if usage != nil {

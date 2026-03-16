@@ -69,7 +69,7 @@ func RegisterSkillCreatorTools(executor *ToolExecutor, registry *skills.Registry
 					"with_database": map[string]any{"type": "boolean", "description": "Create a database table for structured data storage"},
 					"database_table": map[string]any{"type": "string", "description": "Database table name (default: 'data')"},
 					"database_schema": map[string]any{
-						"type": "object", "description": "Column definitions as {name: type} pairs",
+						"type": "object", "description": "Column definitions as {name: type} pairs. Valid types: TEXT, INTEGER, REAL, BLOB, NUMERIC, BOOLEAN, DATE, DATETIME. Append NOT NULL for required columns. Use DEFAULT for defaults (e.g. \"TEXT NOT NULL\", \"INTEGER DEFAULT 0\", \"TEXT DEFAULT 'pending'\", \"BOOLEAN DEFAULT false\"). An 'id' column is auto-created — do not include it.",
 						"additionalProperties": map[string]any{"type": "string"},
 					},
 				},

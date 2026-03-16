@@ -314,8 +314,6 @@ func TestTableNameSanitization(t *testing.T) {
 	invalidNames := []string{
 		"",               // empty
 		"123abc",         // starts with number
-		"ABC",            // uppercase
-		"my-table",       // hyphen
 		"my table",       // space
 		"sqlite_test",    // sqlite_ prefix (now blocked)
 		"_test",          // starts with underscore
@@ -326,6 +324,18 @@ func TestTableNameSanitization(t *testing.T) {
 		err := db.CreateTable(name, "test", "", "", map[string]string{"col": "TEXT"})
 		if err == nil {
 			t.Errorf("Expected error for invalid skill name %q", name)
+		}
+	}
+
+	// Hyphens and uppercase are auto-normalized, so they should succeed.
+	normalizedNames := []string{
+		"my-table", // hyphen → underscore
+		"ABC",      // uppercase → lowercase
+	}
+	for _, name := range normalizedNames {
+		err := db.CreateTable(name, "normtest", "", "", map[string]string{"col": "TEXT"})
+		if err != nil {
+			t.Errorf("Expected success for normalizable skill name %q, got: %v", name, err)
 		}
 	}
 }

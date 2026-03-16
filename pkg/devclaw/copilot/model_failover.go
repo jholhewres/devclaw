@@ -84,6 +84,10 @@ func NewModelFailoverManager(config ModelFallbackConfig, logger *slog.Logger) *M
 	if config.Cooldowns == (CooldownConfig{}) {
 		config.Cooldowns = DefaultCooldownConfig()
 	}
+	if len(config.Fallbacks) == 0 {
+		logger.Warn("no fallback models configured — rate limits will cause downtime", "primary", config.Primary)
+	}
+
 	return &ModelFailoverManager{
 		config:      config,
 		cooldowns:   make(map[string]*ModelCooldown),

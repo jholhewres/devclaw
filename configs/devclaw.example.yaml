@@ -29,6 +29,7 @@ api:
   #   glm-4.7-flashx   — fast with extended context
   #   glm-4.7          — balanced capability
   #   glm-5            — most capable GLM
+  #   glm-5-turbo      — optimized for agents/tool use, 200K context
   #
   # OpenAI:
   #   gpt-5            — latest flagship

@@ -207,6 +207,13 @@ func validateName(name string) error {
 	return nil
 }
 
+// normalizeSkillName converts a skill name to the canonical form expected by the database.
+// Lowercases the name and replaces hyphens with underscores so that skill names like
+// "my-skill" are transparently mapped to "my_skill".
+func normalizeSkillName(name string) string {
+	return strings.ToLower(strings.ReplaceAll(name, "-", "_"))
+}
+
 // validateFullName checks if the combined skill_table name is valid.
 func validateFullName(skillName, tableName string) error {
 	fullName := fullTableName(skillName, tableName)
@@ -254,6 +261,7 @@ func fullTableName(skillName, tableName string) string {
 // Columns is a map of column name to SQL type definition (e.g., "TEXT NOT NULL").
 // Automatic columns: id (TEXT PRIMARY KEY), created_at, updated_at.
 func (s *SkillDB) CreateTable(skillName, tableName, displayName, description string, columns map[string]string) error {
+	skillName = normalizeSkillName(skillName)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -338,6 +346,7 @@ func (s *SkillDB) CreateTable(skillName, tableName, displayName, description str
 
 // Insert inserts a new row into a skill's table and returns the generated ID.
 func (s *SkillDB) Insert(skillName, tableName string, data map[string]any) (string, error) {
+	skillName = normalizeSkillName(skillName)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -428,6 +437,7 @@ func (s *SkillDB) Insert(skillName, tableName string, data map[string]any) (stri
 
 // Query retrieves rows from a skill's table with optional filters and pagination.
 func (s *SkillDB) Query(skillName, tableName string, filters map[string]any, limit int) ([]map[string]any, error) {
+	skillName = normalizeSkillName(skillName)
 	opts := QueryOptions{
 		Where: filters,
 		Limit: limit,
@@ -437,6 +447,7 @@ func (s *SkillDB) Query(skillName, tableName string, filters map[string]any, lim
 
 // QueryWithOptions retrieves rows with full query options including pagination and ordering.
 func (s *SkillDB) QueryWithOptions(skillName, tableName string, opts QueryOptions) ([]map[string]any, error) {
+	skillName = normalizeSkillName(skillName)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -556,6 +567,7 @@ func (s *SkillDB) QueryWithOptions(skillName, tableName string, opts QueryOption
 
 // GetByID retrieves a single row by ID.
 func (s *SkillDB) GetByID(skillName, tableName, rowID string) (map[string]any, error) {
+	skillName = normalizeSkillName(skillName)
 	// Validate row ID.
 	if err := validateRowID(rowID); err != nil {
 		return nil, err
@@ -572,6 +584,7 @@ func (s *SkillDB) GetByID(skillName, tableName, rowID string) (map[string]any, e
 
 // Update modifies a row in a skill's table.
 func (s *SkillDB) Update(skillName, tableName, rowID string, data map[string]any) error {
+	skillName = normalizeSkillName(skillName)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -656,6 +669,7 @@ func (s *SkillDB) Update(skillName, tableName, rowID string, data map[string]any
 
 // Delete removes a row from a skill's table.
 func (s *SkillDB) Delete(skillName, tableName, rowID string) error {
+	skillName = normalizeSkillName(skillName)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -724,6 +738,7 @@ func (s *SkillDB) Delete(skillName, tableName, rowID string) error {
 
 // DropTable removes a table and all its data.
 func (s *SkillDB) DropTable(skillName, tableName string) error {
+	skillName = normalizeSkillName(skillName)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -775,6 +790,9 @@ func (s *SkillDB) DropTable(skillName, tableName string) error {
 // ListTables returns all tables for a skill.
 // If skillName is empty, returns all tables from all skills.
 func (s *SkillDB) ListTables(skillName string) ([]TableInfo, error) {
+	if skillName != "" {
+		skillName = normalizeSkillName(skillName)
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -826,6 +844,7 @@ func (s *SkillDB) ListTables(skillName string) ([]TableInfo, error) {
 
 // DescribeTable returns detailed information about a table.
 func (s *SkillDB) DescribeTable(skillName, tableName string) (*TableInfo, error) {
+	skillName = normalizeSkillName(skillName)
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

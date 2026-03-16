@@ -2118,6 +2118,8 @@ func getModelContextWindowByName(modelName string) int {
 		return 200000
 	case strings.Contains(model, "claude-3"):
 		return 200000
+	case strings.Contains(model, "glm-5"):
+		return 202752
 	case strings.Contains(model, "glm-4"):
 		return 128000
 	default:
