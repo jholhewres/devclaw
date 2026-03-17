@@ -23,11 +23,14 @@ export interface SSEEvent {
   data: unknown;
 }
 
+import type { MediaAttachment } from '@/lib/api';
+
 /** Chat-specific SSE event types */
 export type ChatSSEEvent =
   | { type: 'delta'; data: { content: string } }
   | { type: 'tool_use'; data: { tool: string; input: Record<string, unknown> } }
   | { type: 'tool_result'; data: { tool: string; output: string; is_error: boolean } }
+  | { type: 'media'; data: MediaAttachment }
   | { type: 'done'; data: { usage: { input_tokens: number; output_tokens: number } } }
   | { type: 'error'; data: { message: string } };
 
@@ -67,11 +70,12 @@ export function createSSEConnection(options: SSEOptions): () => void {
       }
     };
 
-    // Handle named events (delta, tool_use, tool_result, done, error)
+    // Handle named events (delta, tool_use, tool_result, media, done, error)
     for (const eventType of [
       'delta',
       'tool_use',
       'tool_result',
+      'media',
       'done',
       'error',
       'channel.status',

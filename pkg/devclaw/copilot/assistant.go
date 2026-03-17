@@ -2367,8 +2367,9 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 
 	// Wire auto-send media hook for tools that produce files (e.g. generate_image).
 	dt := DeliveryTargetFromContext(ctx)
+	emitter := MediaEmitterFromContext(ctx)
 	if dt.Channel != "" {
-		agent.SetOnToolResult(a.makeToolResultHook(dt.Channel, dt.ChatID))
+		agent.SetOnToolResult(a.makeToolResultHook(dt.Channel, dt.ChatID, emitter))
 	}
 
 	// Wire reaction sender for compaction status (e.g. ✍ while compacting).
@@ -3964,7 +3965,8 @@ func (a *Assistant) maybeSendTTS(msg *channels.IncomingMessage, response string)
 // makeToolResultHook returns a callback that auto-sends media files produced by
 // tools (e.g. generate_image) to the channel. This avoids the LLM having to
 // describe "image saved to /tmp/..." — the user sees the actual image.
-func (a *Assistant) makeToolResultHook(channel, chatID string) func(string, ToolResult) {
+// The optional emitter is used for web UI delivery instead of the channel manager.
+func (a *Assistant) makeToolResultHook(channel, chatID string, emitter MediaEmitter) func(string, ToolResult) {
 	return func(toolName string, result ToolResult) {
 		if toolName != "generate_image" && toolName != "image-gen_generate_image" {
 			return
@@ -3985,19 +3987,51 @@ func (a *Assistant) makeToolResultHook(channel, chatID string) func(string, Tool
 			return
 		}
 		caption, _ := parsed["revised_prompt"].(string)
-		media := &channels.MediaMessage{
+
+		// Web UI path: save to media store and emit via SSE.
+		if channel == "webui" && emitter != nil && a.mediaSvc != nil {
+			stored, uploadErr := a.mediaSvc.Upload(a.ctx, media.UploadRequest{
+				Data:      data,
+				Filename:  filepath.Base(imgPath),
+				MimeType:  "image/png",
+				Channel:   "webui",
+				SessionID: chatID,
+				Temporary: true,
+			})
+			if uploadErr != nil {
+				a.logger.Warn("failed to store generated image for web UI", "error", uploadErr)
+				return
+			}
+			emitter(MediaEvent{
+				ID:       stored.ID,
+				URL:      a.mediaSvc.URL(stored.ID),
+				Type:     "image",
+				MimeType: "image/png",
+				Filename: filepath.Base(imgPath),
+				Size:     stored.Size,
+				Caption:  caption,
+			})
+			a.logger.Info("auto-emitted generated image to web UI", "media_id", stored.ID)
+			if rmErr := os.Remove(imgPath); rmErr != nil {
+				a.logger.Debug("failed to clean up temp image", "path", imgPath, "error", rmErr)
+			}
+			return
+		}
+
+		mediaMsg := &channels.MediaMessage{
 			Type:     channels.MessageImage,
 			Data:     data,
 			MimeType: "image/png",
 			Filename: filepath.Base(imgPath),
 			Caption:  caption,
 		}
-		if err := a.channelMgr.SendMedia(a.ctx, channel, chatID, media); err != nil {
+		if err := a.channelMgr.SendMedia(a.ctx, channel, chatID, mediaMsg); err != nil {
 			a.logger.Warn("failed to send generated image", "error", err)
 		} else {
 			a.logger.Info("auto-sent generated image to channel", "path", imgPath)
-			// Clean up temp file.
-			os.Remove(imgPath)
+			if rmErr := os.Remove(imgPath); rmErr != nil {
+				a.logger.Debug("failed to clean up temp image", "path", imgPath, "error", rmErr)
+			}
 		}
 	}
 }

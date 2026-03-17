@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { api, type MessageInfo } from '@/lib/api';
+import { api, type MessageInfo, type MediaAttachment } from '@/lib/api';
 import { createPOSTSSEConnection, type SSEEvent } from '@/lib/sse';
 
 /**
@@ -177,6 +177,20 @@ export function useChat(sessionId: string | null) {
         setState((s) => ({
           ...s,
           messages: [...s.messages, resultMsg],
+        }));
+        break;
+      }
+      case 'media': {
+        const data = event.data as MediaAttachment;
+        const mediaMsg: MessageInfo = {
+          role: 'assistant',
+          content: data.caption || '',
+          timestamp: new Date().toISOString(),
+          media: data,
+        };
+        setState((s) => ({
+          ...s,
+          messages: [...s.messages, mediaMsg],
         }));
         break;
       }

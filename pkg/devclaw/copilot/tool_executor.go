@@ -150,6 +150,40 @@ func DeliveryTargetFromContext(ctx context.Context) DeliveryTarget {
 	return DeliveryTarget{}
 }
 
+// ── Media Emitter ──
+
+// ctxKeyMediaEmitter is the context key for passing a media emitter callback.
+type ctxKeyMediaEmitter struct{}
+
+// MediaEvent represents a media attachment emitted during an agent run.
+// Used to push media to the Web UI via SSE or other non-channel delivery paths.
+type MediaEvent struct {
+	ID       string `json:"id"`
+	URL      string `json:"url"`
+	Type     string `json:"type"`               // image, audio, video, document
+	MimeType string `json:"mime_type"`
+	Filename string `json:"filename"`
+	Size     int64  `json:"size"`
+	Caption  string `json:"caption,omitempty"`
+}
+
+// MediaEmitter is a callback that pushes media events to the client.
+type MediaEmitter func(MediaEvent)
+
+// ContextWithMediaEmitter returns a new context carrying a media emitter callback.
+func ContextWithMediaEmitter(ctx context.Context, fn MediaEmitter) context.Context {
+	return context.WithValue(ctx, ctxKeyMediaEmitter{}, fn)
+}
+
+// MediaEmitterFromContext extracts the media emitter from a context.
+// Returns nil if not set.
+func MediaEmitterFromContext(ctx context.Context) MediaEmitter {
+	if fn, ok := ctx.Value(ctxKeyMediaEmitter{}).(MediaEmitter); ok {
+		return fn
+	}
+	return nil
+}
+
 // ProgressSender sends intermediate progress messages to the user during
 // long-running tool execution (e.g. claude-code). Called by tools that want
 // to give real-time feedback without waiting for the full result.

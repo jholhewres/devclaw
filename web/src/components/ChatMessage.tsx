@@ -17,10 +17,14 @@ import {
   Database,
   Lock,
   Wrench,
+  Download,
+  Music,
+  Video,
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ThinkingBlock, extractThinkingContent } from '@/components/ThinkingBlock'
+import type { MediaAttachment } from '@/lib/api'
 
 const MAX_PREVIEW = 50
 
@@ -103,10 +107,11 @@ interface ChatMessageProps {
   toolInput?: string
   isStreaming?: boolean
   isError?: boolean
+  media?: MediaAttachment
 }
 
 export const ChatMessage = memo(function ChatMessage({
-  role, content, toolName, toolInput, isStreaming, isError,
+  role, content, toolName, toolInput, isStreaming, isError, media,
 }: ChatMessageProps) {
   if (role === 'tool') {
     return <ToolMessage toolName={toolName} toolInput={toolInput} content={content} isError={isError} />
@@ -130,7 +135,8 @@ export const ChatMessage = memo(function ChatMessage({
   }
 
   // Assistant message
-  const isEmpty = !content || content.trim() === ''
+  const hasText = !!content && content.trim() !== ''
+  const isEmpty = !hasText && !media
   const { thinkingContent, cleanContent } = useMemo(
     () => extractThinkingContent(content || ''),
     [content]
@@ -162,24 +168,29 @@ export const ChatMessage = memo(function ChatMessage({
             {thinkingContent && <ThinkingBlock content={thinkingContent} />}
 
             {/* Message body */}
-            <div
-              className={cn(
-                'copilot-markdown text-[15px] leading-[1.7] text-text-primary',
-                isStreaming && 'stream-shimmer',
-              )}
-            >
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
-                {cleanContent}
-              </ReactMarkdown>
-              {isStreaming && (
-                <span className="ml-0.5 inline-block h-[18px] w-[2px] rounded-full bg-brand align-text-bottom animate-pulse" />
-              )}
-            </div>
+            {hasText && (
+              <div
+                className={cn(
+                  'copilot-markdown text-[15px] leading-[1.7] text-text-primary',
+                  isStreaming && 'stream-shimmer',
+                )}
+              >
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
+                  {cleanContent}
+                </ReactMarkdown>
+                {isStreaming && (
+                  <span className="ml-0.5 inline-block h-[18px] w-[2px] rounded-full bg-brand align-text-bottom animate-pulse" />
+                )}
+              </div>
+            )}
+
+            {/* Media attachment */}
+            {media && <MediaBlock media={media} />}
           </>
         )}
 
         {/* Copy button on hover for assistant messages */}
-        {!isStreaming && !isEmpty && (
+        {!isStreaming && !isEmpty && hasText && (
           <CopyMessageButton content={cleanContent} />
         )}
       </div>
@@ -224,6 +235,102 @@ function CopyMessageButton({ content }: { content: string }) {
         </>
       )}
     </button>
+  )
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function isSafeURL(url: string): boolean {
+  return url.startsWith('/') || url.startsWith('https://') || url.startsWith('http://')
+}
+
+function MediaBlock({ media }: { media: MediaAttachment }) {
+  const mediaType = media.type || media.mime_type?.split('/')[0] || 'document'
+  const safeUrl = isSafeURL(media.url) ? media.url : ''
+
+  if (!safeUrl) return null
+
+  if (mediaType === 'image') {
+    return (
+      <div className="mt-2">
+        <a href={safeUrl} target="_blank" rel="noopener noreferrer">
+          <img
+            src={safeUrl}
+            alt={media.filename || 'Image'}
+            className="max-w-sm rounded-xl border border-border shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+            loading="lazy"
+          />
+        </a>
+        {media.caption && (
+          <p className="mt-1 text-xs text-text-muted">{media.caption}</p>
+        )}
+      </div>
+    )
+  }
+
+  if (mediaType === 'audio') {
+    return (
+      <div className="mt-2">
+        <audio controls className="max-w-sm" preload="metadata">
+          <source src={safeUrl} type={media.mime_type} />
+        </audio>
+        {media.caption && (
+          <p className="mt-1 text-xs text-text-muted">{media.caption}</p>
+        )}
+      </div>
+    )
+  }
+
+  if (mediaType === 'video') {
+    return (
+      <div className="mt-2">
+        <video
+          controls
+          className="max-w-sm rounded-xl border border-border"
+          preload="metadata"
+        >
+          <source src={safeUrl} type={media.mime_type} />
+        </video>
+        {media.caption && (
+          <p className="mt-1 text-xs text-text-muted">{media.caption}</p>
+        )}
+      </div>
+    )
+  }
+
+  // Document / fallback: download card
+  const Icon = mediaType === 'audio' ? Music : mediaType === 'video' ? Video : FileText
+  return (
+    <div className="mt-2">
+      <a
+        href={safeUrl}
+        download={media.filename}
+        className={cn(
+          'inline-flex items-center gap-3 rounded-xl border border-border bg-bg-subtle px-4 py-3',
+          'hover:bg-bg-hover transition-colors'
+        )}
+      >
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-subtle">
+          <Icon className="h-5 w-5 text-brand" />
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-text-primary">
+            {media.filename || 'Download'}
+          </p>
+          <p className="text-xs text-text-muted">
+            {formatFileSize(media.size)}
+          </p>
+        </div>
+        <Download className="h-4 w-4 shrink-0 text-text-muted" />
+      </a>
+      {media.caption && (
+        <p className="mt-1 text-xs text-text-muted">{media.caption}</p>
+      )}
+    </div>
   )
 }
 

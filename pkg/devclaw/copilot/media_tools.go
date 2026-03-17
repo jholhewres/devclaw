@@ -214,7 +214,7 @@ var validMediaTypes = map[string]channels.MessageType{
 
 func registerSendMediaTool(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
 	executor.Register(
-		MakeToolDefinition("send_media", "Send media (image, audio, video, or document) to the user via media_id, file path, or URL. The type is auto-detected from the file content when not specified.", map[string]any{
+		MakeToolDefinition("send_media", "Send media (image, audio, video, or document) to the current user via media_id, file path, or URL. Channel and recipient are auto-detected from the conversation context. The media type is auto-detected from the file content when not specified.", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"type": map[string]any{
@@ -240,14 +240,13 @@ func registerSendMediaTool(executor *ToolExecutor, mediaSvc *media.MediaService,
 				},
 				"channel": map[string]any{
 					"type":        "string",
-					"description": "Target channel (e.g., whatsapp, telegram)",
+					"description": "Target channel (e.g., whatsapp, telegram). Auto-detected from context if omitted.",
 				},
 				"to": map[string]any{
 					"type":        "string",
-					"description": "Recipient phone number or chat ID",
+					"description": "Recipient phone number or chat ID. Auto-detected from context if omitted.",
 				},
 			},
-			"required": []string{"channel", "to"},
 		}),
 		func(ctx context.Context, args map[string]any) (any, error) {
 			// Resolve media source
@@ -274,11 +273,70 @@ func registerSendMediaTool(executor *ToolExecutor, mediaSvc *media.MediaService,
 			channelName, _ := args["channel"].(string)
 			to, _ := args["to"].(string)
 
+			// Auto-resolve channel and recipient from delivery context.
+			if channelName == "" || to == "" {
+				dt := DeliveryTargetFromContext(ctx)
+				if channelName == "" {
+					channelName = dt.Channel
+				}
+				if to == "" {
+					to = dt.ChatID
+				}
+			}
+
 			if channelName == "" {
-				return nil, fmt.Errorf("channel parameter is required")
+				return nil, fmt.Errorf("could not determine target channel — provide 'channel' parameter or ensure delivery context is set")
 			}
 			if to == "" {
-				return nil, fmt.Errorf("to parameter is required (recipient)")
+				return nil, fmt.Errorf("could not determine recipient — provide 'to' parameter or ensure delivery context is set")
+			}
+
+			// Web UI path: save to media store and emit SSE event.
+			if channelName == "webui" {
+				stored, uploadErr := mediaSvc.Upload(ctx, media.UploadRequest{
+					Data:      data,
+					Filename:  filename,
+					MimeType:  mimeType,
+					Channel:   "webui",
+					SessionID: to,
+					Temporary: true,
+				})
+				if uploadErr != nil {
+					return nil, fmt.Errorf("storing media for web UI: %w", uploadErr)
+				}
+
+				if emitter := MediaEmitterFromContext(ctx); emitter != nil {
+					emitter(MediaEvent{
+						ID:       stored.ID,
+						URL:      mediaSvc.URL(stored.ID),
+						Type:     string(msgType),
+						MimeType: mimeType,
+						Filename: filename,
+						Size:     stored.Size,
+						Caption:  caption,
+					})
+				} else {
+					logger.Warn("media stored but no emitter available for web UI delivery",
+						"media_id", stored.ID,
+						"session", to,
+					)
+				}
+
+				logger.Info("media emitted to web UI",
+					"media_id", stored.ID,
+					"type", msgType,
+					"filename", filename,
+					"size", stored.Size,
+				)
+
+				return map[string]any{
+					"status":   "sent",
+					"type":     string(msgType),
+					"filename": filename,
+					"size":     stored.Size,
+					"channel":  channelName,
+					"media_id": stored.ID,
+				}, nil
 			}
 
 			// Build MediaMessage

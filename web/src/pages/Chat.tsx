@@ -207,6 +207,7 @@ export function Chat() {
                       toolName={msg.tool_name}
                       toolInput={msg.tool_input}
                       isError={msg.is_error}
+                      media={msg.media}
                     />
                   ))}
                   {isStreaming && (

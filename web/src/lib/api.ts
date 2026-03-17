@@ -50,6 +50,16 @@ export interface SessionInfo {
   created_at: string;
 }
 
+export interface MediaAttachment {
+  id: string;
+  url: string;
+  type: string;       // image, audio, video, document
+  mime_type: string;
+  filename: string;
+  size: number;
+  caption?: string;
+}
+
 export interface MessageInfo {
   role: 'user' | 'assistant' | 'tool';
   content: string;
@@ -57,6 +67,7 @@ export interface MessageInfo {
   tool_name?: string;
   tool_input?: string;
   is_error?: boolean;
+  media?: MediaAttachment;
 }
 
 export interface UsageInfo {

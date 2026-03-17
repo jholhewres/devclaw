@@ -1115,7 +1115,8 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 		SendChatMessageFn: func(sessionID, content string) (string, error) {
 			session := assistant.SessionStore().GetOrCreate("webui", sessionID)
 			prompt := assistant.ComposePrompt(session, content)
-			resp := assistant.ExecuteAgent(context.Background(), prompt, session, content)
+			ctx := copilot.ContextWithDelivery(context.Background(), "webui", sessionID)
+			resp := assistant.ExecuteAgent(ctx, prompt, session, content)
 			session.AddMessage(content, resp)
 			return resp, nil
 		},
@@ -1154,6 +1155,15 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 				// Propagate caller context via context.Context (goroutine-safe).
 				runCtx = copilot.ContextWithCaller(runCtx, copilot.AccessOwner, "webui")
 				runCtx = copilot.ContextWithSession(runCtx, sessionID)
+				runCtx = copilot.ContextWithDelivery(runCtx, "webui", sessionID)
+
+				// Media emitter: pushes media events to the SSE stream.
+				runCtx = copilot.ContextWithMediaEmitter(runCtx, func(evt copilot.MediaEvent) {
+					select {
+					case events <- webui.StreamEvent{Type: "media", Data: evt}:
+					case <-runCtx.Done():
+					}
+				})
 
 				// Stream text tokens to the SSE channel.
 				agent.SetStreamCallback(func(chunk string) {
