@@ -1,43 +1,56 @@
 import { useEffect, useState, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
+  ArrowLeft,
   Eye,
   EyeOff,
-  Key,
+  Sparkles,
   CheckCircle2,
-  XCircle,
-  Loader2,
-  Zap,
-  Cpu,
-  AlertTriangle,
   ExternalLink,
-  AlertCircle,
+  Zap,
+  Loader2,
+  Image,
+  Mic,
+  Plus,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import {
-  ConfigPage,
   ConfigSection,
   ConfigField,
   ConfigInput,
   ConfigSelect,
-  ConfigActions,
-  ConfigCard,
+  ConfigToggle,
   LoadingSpinner,
   ErrorState,
 } from '@/components/ui/ConfigComponents'
-import { ProviderCard } from '@/components/ui/ProviderCard'
-import { EndpointSelector } from '@/components/ui/EndpointSelector'
 import { ModelCombobox } from '@/components/ui/ModelCombobox'
+import { UnsavedChangesBar } from '@/components/ui/UnsavedChangesBar'
 import {
-  categorizeProviders,
+  DEFAULT_PROVIDER_IDS,
+  EXPANDED_PROVIDER_IDS,
   getProviderByValue,
   getVisibleModels,
   getDefaultBaseUrl,
-  PROVIDER_CATEGORIES,
+  getProviderIcon,
 } from '@/lib/providers'
 
-interface APIConfigData {
+/* ── Types ── */
+
+interface MediaConfig {
+  vision_enabled: boolean
+  vision_model: string
+  vision_detail: string
+  transcription_enabled: boolean
+  transcription_model: string
+  transcription_base_url: string
+  transcription_api_key: boolean | string
+  transcription_language: string
+}
+
+interface ConfigData {
   provider: string
   base_url: string
   api_key_configured: boolean
@@ -48,23 +61,23 @@ interface APIConfigData {
     context1m?: boolean
     tool_stream?: boolean
   }
+  media: MediaConfig
 }
 
 interface ConnectionTestResult {
   success: boolean
   latency?: number
   error?: string
-  models?: string[]
 }
 
-// Password input with toggle
+/* ── Helpers ── */
+
 function PasswordInput({ value, onChange, placeholder }: {
   value: string
   onChange: (v: string) => void
   placeholder?: string
 }) {
   const [show, setShow] = useState(false)
-
   return (
     <div className="relative">
       <input
@@ -77,7 +90,7 @@ function PasswordInput({ value, onChange, placeholder }: {
       <button
         type="button"
         onClick={() => setShow(!show)}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer"
+        className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-text-muted hover:text-text-primary"
       >
         {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
       </button>
@@ -85,22 +98,42 @@ function PasswordInput({ value, onChange, placeholder }: {
   )
 }
 
+function Radio({ checked }: { checked: boolean }) {
+  return (
+    <div
+      className={cn(
+        'flex h-4 w-4 items-center justify-center rounded-full border-2 transition-colors',
+        checked
+          ? 'border-brand bg-brand'
+          : 'border-border-hover',
+      )}
+    >
+      {checked && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
+    </div>
+  )
+}
+
+/* ── Component ── */
+
 export function ApiConfig() {
   const { t } = useTranslation()
-  const [config, setConfig] = useState<APIConfigData | null>(null)
-  const [original, setOriginal] = useState<APIConfigData | null>(null)
+  const navigate = useNavigate()
+  const [config, setConfig] = useState<ConfigData | null>(null)
+  const [original, setOriginal] = useState<ConfigData | null>(null)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(false)
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [apiKey, setApiKey] = useState('')
+  const [transcriptionApiKey, setTranscriptionApiKey] = useState('')
   const [testingConnection, setTestingConnection] = useState(false)
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(null)
-  const [selectedEndpoint, setSelectedEndpoint] = useState<string>('')
+  const [selectedEndpoint, setSelectedEndpoint] = useState('')
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
+  const [expandedGrid, setExpandedGrid] = useState(false)
 
-  // Categorized providers
-  const { free, paid, local } = categorizeProviders()
+  const findProvider = (id: string) => getProviderByValue(id)
+  const gridIds = expandedGrid ? EXPANDED_PROVIDER_IDS : DEFAULT_PROVIDER_IDS
+  const allCards = gridIds.map((id) => findProvider(id)!).filter(Boolean)
 
   useEffect(() => {
     loadConfig()
@@ -108,16 +141,25 @@ export function ApiConfig() {
 
   const loadConfig = async () => {
     try {
-      const data = await api.config.get() as unknown as APIConfigData
+      const data = await api.config.get() as unknown as ConfigData
+      if (!data.media) {
+        data.media = {
+          vision_enabled: false,
+          vision_model: '',
+          vision_detail: 'auto',
+          transcription_enabled: false,
+          transcription_model: '',
+          transcription_base_url: '',
+          transcription_api_key: false,
+          transcription_language: '',
+        }
+      }
       setConfig(data)
       setOriginal(JSON.parse(JSON.stringify(data)))
-      // Set selected endpoint from base_url if matches a provider's baseUrls
-      const provider = getProviderByValue(data.provider)
-      if (provider?.baseUrls) {
-        const matchingEndpoint = provider.baseUrls.find(ep => ep.value === data.base_url)
-        if (matchingEndpoint) {
-          setSelectedEndpoint(matchingEndpoint.value)
-        }
+      const prov = findProvider(data.provider)
+      if (prov?.baseUrls) {
+        const match = prov.baseUrls.find(ep => ep.value === data.base_url)
+        if (match) setSelectedEndpoint(match.value)
       }
     } catch {
       setLoadError(true)
@@ -126,111 +168,114 @@ export function ApiConfig() {
     }
   }
 
-  const hasChanges = JSON.stringify(config) !== JSON.stringify(original) || apiKey !== ''
+  const hasChanges =
+    JSON.stringify(config) !== JSON.stringify(original) ||
+    apiKey !== '' ||
+    transcriptionApiKey !== ''
 
-  // Get current provider definition
-  const provider = config ? getProviderByValue(config.provider) : undefined
+  const provider = config ? findProvider(config.provider) : undefined
   const visibleModels = getVisibleModels(provider, selectedEndpoint)
 
   const handleProviderChange = useCallback((providerId: string) => {
-    const newProvider = getProviderByValue(providerId)
+    const newProvider = findProvider(providerId)
     const defaultUrl = newProvider ? getDefaultBaseUrl(newProvider) : ''
-
     setConfig(prev => prev ? {
       ...prev,
       provider: providerId,
       base_url: defaultUrl,
       model: '',
     } : prev)
-    setSelectedEndpoint('')
+    setSelectedEndpoint(defaultUrl)
     setTestResult(null)
     setValidationErrors({})
   }, [])
 
   const handleEndpointChange = useCallback((endpoint: string) => {
-    setConfig(prev => prev ? {
-      ...prev,
-      base_url: endpoint,
-    } : prev)
+    setConfig(prev => prev ? { ...prev, base_url: endpoint, model: '' } : prev)
     setSelectedEndpoint(endpoint)
     setTestResult(null)
   }, [])
 
-  const handleTestConnection = async () => {
-    if (!config) return
+  const updateMedia = useCallback((key: keyof MediaConfig, value: unknown) => {
+    setConfig(prev => prev ? { ...prev, media: { ...prev.media, [key]: value } } : prev)
+  }, [])
 
-    // Validate before testing
+  const validate = (): Record<string, string> => {
+    if (!config) return {}
     const errors: Record<string, string> = {}
     if (!config.provider) errors.provider = t('apiConfig.validation.providerRequired')
     if (!config.model) errors.model = t('apiConfig.validation.modelRequired')
     if (!provider?.noKey && !config.api_key_configured && !apiKey) {
       errors.apiKey = t('apiConfig.validation.apiKeyRequired')
     }
+    return errors
+  }
+
+  const scrollToFirstError = (errors: Record<string, string>) => {
+    const firstKey = Object.keys(errors)[0]
+    const el = document.querySelector(`[data-field="${firstKey}"]`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
+  const handleTestConnection = async () => {
+    if (!config) return
+    const errors = validate()
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors)
+      scrollToFirstError(errors)
       return
     }
-
     setTestingConnection(true)
     setTestResult(null)
-    setMessage(null)
-
     try {
       const result = await api.setup.testProvider(
         config.provider,
         apiKey || 'test',
         config.model,
-        config.base_url
+        config.base_url,
       )
-      setTestResult({
-        success: result.success,
-        error: result.error,
-      })
+      setTestResult({ success: result.success, error: result.error })
     } catch (error) {
       setTestResult({
         success: false,
-        error: error instanceof Error ? error.message : 'Connection test failed',
+        error: error instanceof Error ? error.message : t('apiConfig.connectionFailed'),
       })
     } finally {
       setTestingConnection(false)
     }
   }
 
-  const handleSave = async () => {
-    if (!config) return
-
-    // Validate before saving
-    const errors: Record<string, string> = {}
-    if (!config.provider) errors.provider = t('apiConfig.validation.providerRequired')
-    if (!config.model) errors.model = t('apiConfig.validation.modelRequired')
-    if (!provider?.noKey && !config.api_key_configured && !apiKey) {
-      errors.apiKey = t('apiConfig.validation.apiKeyRequired')
-    }
+  const handleSave = async (): Promise<boolean> => {
+    if (!config) return false
+    const errors = validate()
     if (Object.keys(errors).length > 0) {
       setValidationErrors(errors)
-      return
+      scrollToFirstError(errors)
+      return false
     }
-
     setSaving(true)
-    setMessage(null)
     try {
       const payload: Record<string, unknown> = {
         provider: config.provider,
         model: config.model,
         base_url: config.base_url,
         params: config.params,
+        media: {
+          ...config.media,
+          transcription_api_key: transcriptionApiKey || undefined,
+        },
       }
-      if (apiKey) {
-        payload.api_key = apiKey
-      }
-      const result = await api.config.update(payload) as unknown as APIConfigData
+      if (apiKey) payload.api_key = apiKey
+      const result = await api.config.update(payload) as unknown as ConfigData
+      if (!result.media) result.media = config.media
       setConfig(result)
       setOriginal(JSON.parse(JSON.stringify(result)))
       setApiKey('')
+      setTranscriptionApiKey('')
       setValidationErrors({})
-      setMessage({ type: 'success', text: t('common.success') })
+      return true
     } catch {
-      setMessage({ type: 'error', text: t('common.error') })
+      return false
     } finally {
       setSaving(false)
     }
@@ -240,16 +285,15 @@ export function ApiConfig() {
     if (original) {
       setConfig(JSON.parse(JSON.stringify(original)))
       setApiKey('')
-      // Reset selected endpoint
-      const prov = getProviderByValue(original.provider)
+      setTranscriptionApiKey('')
+      const prov = findProvider(original.provider)
       if (prov?.baseUrls) {
-        const matchingEndpoint = prov.baseUrls.find(ep => ep.value === original.base_url)
-        setSelectedEndpoint(matchingEndpoint?.value || '')
+        const match = prov.baseUrls.find(ep => ep.value === original.base_url)
+        setSelectedEndpoint(match?.value || '')
       } else {
         setSelectedEndpoint('')
       }
     }
-    setMessage(null)
     setTestResult(null)
     setValidationErrors({})
   }
@@ -258,303 +302,377 @@ export function ApiConfig() {
   if (loadError || !config) return <ErrorState onRetry={() => window.location.reload()} />
 
   return (
-    <ConfigPage
-      title={t('apiConfig.title')}
-      subtitle={t('apiConfig.subtitle')}
-      description={t('apiConfig.description')}
-      message={message}
-      actions={
-        <ConfigActions
-          onSave={handleSave}
-          onReset={handleReset}
-          saving={saving}
-          hasChanges={hasChanges}
-          saveLabel={t('common.save')}
-          savingLabel={t('common.saving')}
-          resetLabel={t('common.reset')}
-        />
-      }
-    >
-      {/* Restart Warning */}
-      {hasChanges && (
-        <div className="mb-6 flex items-center gap-2 rounded-xl border border-warning/20 bg-warning-subtle px-4 py-3">
-          <AlertCircle className="h-4 w-4 text-warning flex-shrink-0" />
-          <p className="text-sm text-warning">{t('apiConfig.restartWarning')}</p>
-        </div>
-      )}
-
-      {/* Provider Selection - Free */}
-      <ConfigSection
-        icon={Cpu}
-        title={t('apiConfig.freeProviders')}
-        description=""
+    <div className="flex flex-col gap-4">
+      {/* Back button */}
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => navigate('/dev')}
+        className="mb-2 self-start"
       >
-        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2 -mt-2">
-          {free.map((p) => (
-            <ProviderCard
-              key={p.value}
-              provider={p}
-              isSelected={config.provider === p.value}
-              onClick={() => handleProviderChange(p.value)}
-              accentColor={PROVIDER_CATEGORIES.free.accentColor}
-              size="sm"
-            />
-          ))}
-        </div>
-      </ConfigSection>
+        <ArrowLeft className="h-4 w-4" />
+        {t('common.backToSettings')}
+      </Button>
 
-      {/* Provider Selection - Paid */}
+      {/* Page header */}
+      <div className="flex flex-col gap-1 mb-2">
+        <h1 className="text-lg font-medium text-text-primary">{t('config.pageTitle')}</h1>
+        <p className="text-sm text-text-muted">{t('config.pageDescription')}</p>
+      </div>
+
+      {/* ═══ Provider & Model ═══ */}
       <ConfigSection
-        icon={Cpu}
-        title={t('apiConfig.paidProviders')}
-        description=""
+        icon={Sparkles}
+        title={t('config.providerModel')}
+        description={t('config.providerDesc')}
+        defaultOpen
       >
-        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2 -mt-2">
-          {paid.map((p) => (
-            <ProviderCard
-              key={p.value}
-              provider={p}
-              isSelected={config.provider === p.value}
-              onClick={() => handleProviderChange(p.value)}
-              accentColor={PROVIDER_CATEGORIES.paid.accentColor}
-              size="sm"
-            />
-          ))}
-        </div>
-      </ConfigSection>
+        <div className="flex flex-col gap-6">
+          {/* Provider grid */}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
+            {allCards.map((p) => {
+              const isSelected = config.provider === p.value
+              const icon = getProviderIcon(p.value)
+              return (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => handleProviderChange(p.value)}
+                  className={cn(
+                    'flex cursor-pointer flex-col items-start gap-3 rounded-xl border p-4 transition-colors',
+                    isSelected
+                      ? 'border-brand ring-1 ring-brand ring-inset'
+                      : 'border-border hover:border-border-hover',
+                  )}
+                >
+                  <div className="flex w-full items-start justify-between">
+                    <div className="flex h-7 w-7 items-center justify-center text-text-muted">
+                      {icon}
+                    </div>
+                    <Radio checked={isSelected} />
+                  </div>
+                  <span className="text-sm font-medium text-text-primary">{p.label}</span>
+                </button>
+              )
+            })}
 
-      {/* Provider Selection - Local */}
-      <ConfigSection
-        icon={Cpu}
-        title={t('apiConfig.localProviders')}
-        description=""
-      >
-        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2 -mt-2">
-          {local.map((p) => (
-            <ProviderCard
-              key={p.value}
-              provider={p}
-              isSelected={config.provider === p.value}
-              onClick={() => handleProviderChange(p.value)}
-              accentColor={PROVIDER_CATEGORIES.local.accentColor}
-              size="sm"
-            />
-          ))}
-        </div>
-      </ConfigSection>
-
-      {/* API Configuration */}
-      <ConfigSection
-        icon={Key}
-        title={t('apiConfig.connectionSection')}
-        description={t('apiConfig.connectionSectionDesc')}
-      >
-        {/* Provider info with link */}
-        {provider && provider.freeUrl && (
-          <div className="flex items-center gap-2 rounded-xl border border-border bg-bg-main px-3 py-2 mb-4">
-            <div className="flex-1">
-              <p className="text-xs text-text-secondary">
-                {provider.freeNote || provider.description}
-              </p>
-            </div>
-            <a
-              href={provider.freeUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs text-brand hover:text-brand-hover transition-colors"
-            >
-              {t('apiConfig.getApiKey')}
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          </div>
-        )}
-
-        {/* Endpoint selector */}
-        {provider?.baseUrls && (
-          <ConfigField label={t('apiConfig.endpoint')} hint={t('apiConfig.endpointHint')}>
-            <EndpointSelector
-              endpoints={provider.baseUrls}
-              value={selectedEndpoint}
-              onChange={handleEndpointChange}
-            />
-          </ConfigField>
-        )}
-
-        {/* Custom base URL */}
-        {provider?.customBaseUrl && (
-          <ConfigField label={t('apiConfig.baseUrl')} hint={t('apiConfig.baseUrlHint')}>
-            <ConfigInput
-              value={config.base_url}
-              onChange={(v) => setConfig(prev => prev ? { ...prev, base_url: v } : prev)}
-              placeholder="https://api.example.com/v1"
-            />
-          </ConfigField>
-        )}
-
-        {/* API Key */}
-        {!provider?.noKey && (
-          <div className="space-y-2">
-            <ConfigField
-              label={t('apiConfig.apiKey')}
-              hint={t('apiConfig.apiKeyHint')}
-            >
-              <PasswordInput
-                value={apiKey}
-                onChange={setApiKey}
-                placeholder={config.api_key_configured ? (config.api_key_masked || '••••••• (configured)') : provider?.keyPlaceholder || t('apiConfig.apiKeyPlaceholder')}
-              />
-            </ConfigField>
-            {validationErrors.apiKey && (
-              <p className="text-xs text-error">{validationErrors.apiKey}</p>
+            {/* "See more" card */}
+            {!expandedGrid && EXPANDED_PROVIDER_IDS.length > DEFAULT_PROVIDER_IDS.length && (
+              <button
+                type="button"
+                onClick={() => setExpandedGrid(true)}
+                className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border p-4 transition-colors hover:border-border-hover hover:bg-bg-subtle"
+              >
+                <Plus className="h-5 w-5 text-text-muted" />
+                <span className="text-sm font-medium text-text-muted">{t('config.seeMore')}</span>
+              </button>
             )}
           </div>
-        )}
 
-        {/* Model */}
-        <div className="space-y-2">
-          <ConfigField
-            label={t('apiConfig.model')}
-            hint={t('apiConfig.modelHint')}
-          >
-          {provider?.allowCustomModel ? (
-            <ModelCombobox
-              value={config.model}
-              onChange={(v) => setConfig(prev => prev ? { ...prev, model: v } : prev)}
-              suggestions={visibleModels}
-              placeholder={t('apiConfig.selectOrTypeModel')}
-            />
-          ) : visibleModels.length > 0 ? (
-            <ConfigSelect
-              value={config.model}
-              onChange={(v) => setConfig(prev => prev ? { ...prev, model: v } : prev)}
-              options={visibleModels.map(m => ({ value: m, label: m }))}
-              placeholder={t('apiConfig.selectModel')}
-            />
-          ) : (
-            <ConfigInput
-              value={config.model}
-              onChange={(v) => setConfig(prev => prev ? { ...prev, model: v } : prev)}
-              placeholder="gpt-4o-mini, claude-sonnet-4-20250514, gemini-2.5-pro"
+          {/* Divider */}
+          <div className="h-px w-full bg-border" />
+
+          {/* Endpoint selector */}
+          {provider?.baseUrls && (
+            <div className="flex flex-col gap-1.5">
+              <p className="text-sm font-medium text-text-secondary">{t('apiConfig.endpoint')}</p>
+              <div className="grid grid-cols-2 gap-3">
+                {provider.baseUrls.map((ep) => {
+                  const isActive = selectedEndpoint === ep.value
+                  return (
+                    <button
+                      key={ep.value}
+                      type="button"
+                      onClick={() => handleEndpointChange(ep.value)}
+                      className={cn(
+                        'cursor-pointer rounded-xl border px-4 py-3 text-left transition-colors',
+                        isActive
+                          ? 'border-brand ring-1 ring-brand ring-inset'
+                          : 'border-border hover:border-border-hover',
+                      )}
+                    >
+                      <span className={cn(
+                        'text-sm font-medium',
+                        isActive ? 'text-text-primary' : 'text-text-secondary',
+                      )}>
+                        {ep.label}
+                      </span>
+                      {ep.value && (
+                        <p className="mt-0.5 truncate font-mono text-xs text-text-muted">
+                          {ep.value.replace('https://', '')}
+                        </p>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Model */}
+          <div data-field="model">
+            {provider?.allowCustomModel ? (
+              <ConfigField
+                label={t('apiConfig.model')}
+                hint={validationErrors.model}
+              >
+                <ModelCombobox
+                  value={config.model}
+                  onChange={(v) => {
+                    setConfig(prev => prev ? { ...prev, model: v } : prev)
+                    setValidationErrors(prev => { const n = { ...prev }; delete n.model; return n })
+                  }}
+                  suggestions={visibleModels}
+                  placeholder={t('apiConfig.selectOrTypeModel')}
+                />
+              </ConfigField>
+            ) : visibleModels.length > 0 ? (
+              <ConfigField
+                label={t('apiConfig.model')}
+                hint={validationErrors.model}
+              >
+                <ConfigSelect
+                  value={config.model}
+                  onChange={(v) => {
+                    setConfig(prev => prev ? { ...prev, model: v } : prev)
+                    setValidationErrors(prev => { const n = { ...prev }; delete n.model; return n })
+                  }}
+                  options={visibleModels.map(m => ({ value: m, label: m }))}
+                  placeholder={t('apiConfig.selectModel')}
+                />
+              </ConfigField>
+            ) : (
+              <ConfigField
+                label={t('apiConfig.model')}
+                hint={validationErrors.model}
+              >
+                <ConfigInput
+                  value={config.model}
+                  onChange={(v) => {
+                    setConfig(prev => prev ? { ...prev, model: v } : prev)
+                    setValidationErrors(prev => { const n = { ...prev }; delete n.model; return n })
+                  }}
+                  placeholder={t('setupPage.modelName')}
+                />
+              </ConfigField>
+            )}
+          </div>
+
+          {/* Custom base URL */}
+          {provider?.customBaseUrl && (
+            <ConfigField label={t('apiConfig.baseUrl')} hint={t('apiConfig.baseUrlHint')}>
+              <ConfigInput
+                value={config.base_url}
+                onChange={(v) => setConfig(prev => prev ? { ...prev, base_url: v } : prev)}
+                placeholder="https://api.example.com/v1"
+              />
+            </ConfigField>
+          )}
+
+          {/* API Key */}
+          {!provider?.noKey && (
+            <div data-field="apiKey">
+              <ConfigField
+                label={t('apiConfig.apiKey')}
+                hint={validationErrors.apiKey || t('apiConfig.apiKeyHint')}
+              >
+                <PasswordInput
+                  value={apiKey}
+                  onChange={(v) => {
+                    setApiKey(v)
+                    setValidationErrors(prev => { const n = { ...prev }; delete n.apiKey; return n })
+                  }}
+                  placeholder={
+                    config.api_key_configured
+                      ? (config.api_key_masked || `••••••• (${t('config.apiKeyConfigured')})`)
+                      : provider?.keyPlaceholder || t('apiConfig.apiKeyPlaceholder')
+                  }
+                />
+              </ConfigField>
+            </div>
+          )}
+
+          {/* Provider-specific params */}
+          {provider?.value === 'anthropic' && (
+            <ConfigToggle
+              enabled={config.params?.context1m || false}
+              onChange={(v) => setConfig(prev => prev ? {
+                ...prev, params: { ...prev.params, context1m: v }
+              } : prev)}
+              label={t('apiConfig.context1m')}
+              description={t('apiConfig.context1mDesc')}
             />
           )}
-        </ConfigField>
-        {validationErrors.model && (
-          <p className="text-xs text-error -mt-3">{validationErrors.model}</p>
-        )}
-        </div>
 
-        {/* Provider-specific params */}
-        {provider?.value === 'anthropic' && (
-          <div className="flex items-center gap-3 py-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={config.params?.context1m || false}
-                onChange={(e) => setConfig(prev => prev ? {
-                  ...prev,
-                  params: { ...prev.params, context1m: e.target.checked }
-                } : prev)}
-                className="h-4 w-4 rounded border-border-hover bg-bg-surface text-brand focus:ring-brand/20"
-              />
-              <span className="text-sm text-text-secondary">{t('apiConfig.context1m')}</span>
-            </label>
-            <span className="text-xs text-text-muted">{t('apiConfig.context1mDesc')}</span>
-          </div>
-        )}
+          {(provider?.value === 'zai' || (provider?.value === 'anthropic' && config.base_url.includes('api.z.ai'))) && (
+            <ConfigToggle
+              enabled={config.params?.tool_stream || false}
+              onChange={(v) => setConfig(prev => prev ? {
+                ...prev, params: { ...prev.params, tool_stream: v }
+              } : prev)}
+              label={t('apiConfig.toolStream')}
+              description={t('apiConfig.toolStreamDesc')}
+            />
+          )}
 
-        {(provider?.value === 'zai' || (provider?.value === 'anthropic' && config.base_url.includes('api.z.ai'))) && (
-          <div className="flex items-center gap-3 py-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={config.params?.tool_stream || false}
-                onChange={(e) => setConfig(prev => prev ? {
-                  ...prev,
-                  params: { ...prev.params, tool_stream: e.target.checked }
-                } : prev)}
-                className="h-4 w-4 rounded border-border-hover bg-bg-surface text-brand focus:ring-brand/20"
-              />
-              <span className="text-sm text-text-secondary">{t('apiConfig.toolStream')}</span>
-            </label>
-            <span className="text-xs text-text-muted">{t('apiConfig.toolStreamDesc')}</span>
-          </div>
-        )}
+          {/* Actions row: link + test connection */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            {provider?.freeUrl ? (
+              <a
+                href={provider.freeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand transition-opacity hover:opacity-80"
+              >
+                {t('apiConfig.getApiKey')}
+                <ExternalLink className="h-4 w-4" />
+              </a>
+            ) : <span />}
 
-        {/* Connection Test */}
-        <div className="pt-4 border-t border-border">
-          <div className="flex items-center justify-between">
-            <Button
-              variant="outline"
-              onClick={handleTestConnection}
-              disabled={testingConnection || !config.base_url}
-            >
-              {testingConnection ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {t('apiConfig.testing')}
-                </>
-              ) : (
-                <>
-                  <Zap className="h-4 w-4" />
-                  {t('apiConfig.testConnection')}
-                </>
+            <div className="flex items-center gap-3">
+              {testResult && (
+                <span className={cn(
+                  'flex items-center gap-1.5 text-sm',
+                  testResult.success ? 'text-success' : 'text-error',
+                )}>
+                  {testResult.success ? (
+                    <>
+                      <CheckCircle2 className="h-4 w-4" />
+                      {testResult.latency ? `${testResult.latency}ms` : '✓'}
+                    </>
+                  ) : (
+                    testResult.error || t('apiConfig.connectionFailed')
+                  )}
+                </span>
               )}
-            </Button>
-
-            {/* Test Result */}
-            {testResult && (
-              <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${
-                testResult.success
-                  ? 'bg-success-subtle text-success'
-                  : 'bg-error-subtle text-error'
-              }`}>
-                {testResult.success ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleTestConnection}
+                disabled={
+                  testingConnection ||
+                  (!apiKey && !config.api_key_configured && !provider?.noKey) ||
+                  !config.model
+                }
+              >
+                {testingConnection ? (
                   <>
-                    <CheckCircle2 className="h-4 w-4" />
-                    <span className="text-sm font-medium">
-                      {testResult.latency && `${testResult.latency}ms`}
-                    </span>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {t('apiConfig.testing')}
                   </>
                 ) : (
                   <>
-                    <XCircle className="h-4 w-4" />
-                    <span className="text-sm">{t('apiConfig.connectionFailed')}</span>
+                    <Zap className="h-4 w-4" />
+                    {t('apiConfig.testConnection')}
                   </>
                 )}
-              </div>
-            )}
-          </div>
-
-          {/* Error Message */}
-          {testResult && !testResult.success && testResult.error && (
-            <div className="mt-3 flex items-start gap-2 rounded-xl bg-error-subtle border border-error/10 p-3">
-              <AlertTriangle className="h-4 w-4 text-error flex-shrink-0 mt-0.5" />
-              <p className="text-xs text-error">{testResult.error}</p>
+              </Button>
             </div>
-          )}
+          </div>
         </div>
       </ConfigSection>
 
-      {/* Status Card */}
-      <ConfigCard
-        title={t('apiConfig.statusTitle')}
-        icon={config.api_key_configured ? CheckCircle2 : AlertTriangle}
-        status={config.api_key_configured ? 'success' : 'warning'}
-        className="mb-10"
-        actions={
-          <div className="text-right">
-            <p className="text-xs text-text-muted">{t('apiConfig.currentProvider')}</p>
-            <p className="text-sm font-medium text-text-primary capitalize">{config.provider}</p>
-          </div>
+      {/* ═══ Vision ═══ */}
+      <ConfigSection
+        icon={Image}
+        title={t('config.visionTitle')}
+        description={t('config.visionDesc')}
+        trailing={
+          <ConfigToggle
+            enabled={config.media.vision_enabled}
+            onChange={(v) => updateMedia('vision_enabled', v)}
+            label=""
+          />
         }
       >
-        <p className={`text-sm ${config.api_key_configured ? 'text-success' : 'text-warning'}`}>
-          {config.api_key_configured
-            ? t('apiConfig.statusConfigured')
-            : t('apiConfig.statusNotConfigured')
-          }
-        </p>
-      </ConfigCard>
-    </ConfigPage>
+        <ConfigField label={t('config.visionModel')} hint={t('config.visionModelHint', { model: config.model })}>
+          <ConfigInput
+            value={config.media.vision_model}
+            onChange={(v) => updateMedia('vision_model', v)}
+            placeholder={t('config.visionModelPlaceholder')}
+          />
+        </ConfigField>
+
+        <ConfigField label={t('config.visionQuality')}>
+          <ConfigSelect
+            value={config.media.vision_detail}
+            onChange={(v) => updateMedia('vision_detail', v)}
+            options={[
+              { value: 'auto', label: t('config.visionQualityAuto') },
+              { value: 'low', label: t('config.visionQualityLow') },
+              { value: 'high', label: t('config.visionQualityHigh') },
+            ]}
+          />
+        </ConfigField>
+      </ConfigSection>
+
+      {/* ═══ Transcription ═══ */}
+      <ConfigSection
+        icon={Mic}
+        title={t('config.transcriptionTitle')}
+        description={t('config.transcriptionDesc')}
+        trailing={
+          <ConfigToggle
+            enabled={config.media.transcription_enabled}
+            onChange={(v) => updateMedia('transcription_enabled', v)}
+            label=""
+          />
+        }
+      >
+        <ConfigField label={t('config.transcriptionModel')}>
+          <ConfigInput
+            value={config.media.transcription_model}
+            onChange={(v) => updateMedia('transcription_model', v)}
+            placeholder={t('config.transcriptionModelPlaceholder')}
+          />
+        </ConfigField>
+
+        <ConfigField label={t('config.transcriptionBaseUrl')} hint={t('config.transcriptionBaseUrlHint')}>
+          <ConfigInput
+            value={config.media.transcription_base_url}
+            onChange={(v) => updateMedia('transcription_base_url', v)}
+            placeholder={t('config.transcriptionBaseUrlPlaceholder')}
+          />
+        </ConfigField>
+
+        <ConfigField label={t('config.transcriptionLanguage')} hint={t('config.transcriptionLanguageHint')}>
+          <ConfigSelect
+            value={config.media.transcription_language}
+            onChange={(v) => updateMedia('transcription_language', v)}
+            placeholder={t('config.autoDetect')}
+            options={[
+              { value: 'pt', label: 'Português' },
+              { value: 'en', label: 'English' },
+              { value: 'es', label: 'Español' },
+              { value: 'fr', label: 'Français' },
+              { value: 'de', label: 'Deutsch' },
+              { value: 'it', label: 'Italiano' },
+              { value: 'ja', label: '日本語' },
+              { value: 'ko', label: '한국어' },
+              { value: 'zh', label: '中文' },
+            ]}
+          />
+        </ConfigField>
+
+        <ConfigField label={t('config.transcriptionApiKey')} hint={t('config.transcriptionApiKeyHint')}>
+          <PasswordInput
+            value={transcriptionApiKey}
+            onChange={setTranscriptionApiKey}
+            placeholder={
+              config.media.transcription_api_key
+                ? `••••••• (${t('config.apiKeyConfigured')})`
+                : t('config.transcriptionApiKeyPlaceholder')
+            }
+          />
+        </ConfigField>
+      </ConfigSection>
+
+      <UnsavedChangesBar
+        hasChanges={hasChanges}
+        saving={saving}
+        onSave={handleSave}
+        onDiscard={handleReset}
+      />
+    </div>
   )
 }

@@ -450,27 +450,19 @@ export function getDefaultBaseUrl(provider: ProviderDef): string {
 }
 
 /**
- * Validated provider IDs — only these are shown in the UI.
- * Other providers will be re-enabled as their parameter mappings are verified.
+ * Provider IDs shown in the default (collapsed) grid.
  */
-const ACTIVE_PROVIDER_IDS = ['openai', 'anthropic', 'google', 'zai', 'openrouter'];
+export const DEFAULT_PROVIDER_IDS = ['openai', 'anthropic', 'google', 'zai'];
 
 /**
- * Categorize providers into free, paid, and local.
- * Currently filtered to only validated providers.
+ * Full provider IDs shown when grid is expanded via "See More".
  */
-export function categorizeProviders(): {
-  free: ProviderDef[];
-  paid: ProviderDef[];
-  local: ProviderDef[];
-} {
-  const active = PROVIDERS.filter((p) => ACTIVE_PROVIDER_IDS.includes(p.value));
-  return {
-    free: active.filter((p) => p.isFree && !p.isLocal),
-    paid: active.filter((p) => !p.isFree && !p.isLocal),
-    local: active.filter((p) => p.isLocal),
-  };
-}
+export const EXPANDED_PROVIDER_IDS = [
+  'openai', 'anthropic', 'google', 'zai',
+  'openrouter', 'groq', 'cerebras', 'mistral',
+  'xai', 'deepseek', 'minimax', 'ollama',
+  'custom',
+];
 
 /**
  * Get all visible models for a provider including endpoint extras
@@ -500,29 +492,3 @@ export function getProviderColor(value: string): string {
   return provider?.color || '#64748b';
 }
 
-/**
- * Provider categories with styling info
- */
-export const PROVIDER_CATEGORIES = {
-  free: {
-    label: 'Free Providers',
-    borderColor: 'border-[#22c55e]/50',
-    bgColor: 'bg-[#22c55e]/10',
-    textColor: 'text-[#22c55e]',
-    accentColor: '#22c55e',
-  },
-  paid: {
-    label: 'Paid Providers',
-    borderColor: 'border-[#3b82f6]/50',
-    bgColor: 'bg-[#3b82f6]/10',
-    textColor: 'text-[#3b82f6]',
-    accentColor: '#3b82f6',
-  },
-  local: {
-    label: 'Local / Self-Hosted',
-    borderColor: 'border-[#a855f7]/50',
-    bgColor: 'bg-[#a855f7]/10',
-    textColor: 'text-[#a855f7]',
-    accentColor: '#a855f7',
-  },
-};

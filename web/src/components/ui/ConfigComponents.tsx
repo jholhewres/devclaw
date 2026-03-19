@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, ChevronUp, Save, RotateCcw, Loader2 } from 'lucide-react';
+import { ChevronDown, Save, RotateCcw, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/Button';
 
@@ -64,7 +64,7 @@ export function ConfigPage({
 }
 
 // ============================================
-// Config Section (Collapsible)
+// Config Section (Collapsible, with optional trailing element)
 // ============================================
 
 interface ConfigSectionProps {
@@ -74,6 +74,8 @@ interface ConfigSectionProps {
   children: ReactNode;
   collapsible?: boolean;
   defaultCollapsed?: boolean;
+  defaultOpen?: boolean;
+  trailing?: ReactNode;
   className?: string;
   iconColor?: string;
 }
@@ -83,63 +85,70 @@ export function ConfigSection({
   title,
   description,
   children,
-  collapsible = false,
-  defaultCollapsed = false,
+  collapsible = true,
+  defaultCollapsed = true,
+  defaultOpen,
+  trailing,
   className,
   iconColor,
 }: ConfigSectionProps) {
-  const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed);
+  const [open, setOpen] = useState(defaultOpen ?? !defaultCollapsed);
 
-  const content = (
-    <div className={cn('space-y-5 rounded-2xl border border-border bg-bg-surface p-6', className)}>
-      {children}
-    </div>
-  );
+  const canToggle = collapsible;
 
-  if (collapsible) {
-    return (
-      <section className="mb-8">
-        <button
-          onClick={() => setIsCollapsed(!isCollapsed)}
-          aria-expanded={!isCollapsed}
-          className="group mb-6 flex w-full items-center gap-3 text-left"
-        >
-          {Icon && (
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-bg-surface transition-colors group-hover:border-border-hover">
-              <Icon className="h-5 w-5 text-text-muted" />
-            </div>
-          )}
-          <div className="flex-1">
-            <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
-            {description && <p className="text-sm text-text-muted">{description}</p>}
-          </div>
-          {isCollapsed ? (
-            <ChevronDown className="h-5 w-5 text-text-muted transition-colors group-hover:text-text-primary" />
-          ) : (
-            <ChevronUp className="h-5 w-5 text-text-muted transition-colors group-hover:text-text-primary" />
-          )}
-        </button>
-        {!isCollapsed && content}
-      </section>
-    );
-  }
+  const handleHeaderClick = () => {
+    if (canToggle) setOpen(!open);
+  };
+
+  // Use a <div> wrapper when trailing contains interactive elements (buttons)
+  // to avoid invalid nested <button> in HTML.
+  const useDiv = !!trailing;
+  const Wrapper = canToggle && !useDiv ? 'button' : 'div';
 
   return (
-    <section className="mb-8">
-      {(Icon || title) && (
-        <div className="mb-6 flex items-center gap-3">
-          {Icon && (
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-bg-surface">
-              <Icon className="h-5 w-5" style={{ color: iconColor || undefined }} />
-            </div>
-          )}
-          <div>
-            <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
-            {description && <p className="text-sm text-text-muted">{description}</p>}
+    <section className={cn('rounded-2xl border border-border', className)}>
+      <Wrapper
+        {...(Wrapper === 'button' ? { onClick: handleHeaderClick, 'aria-expanded': open, type: 'button' as const } : { role: canToggle ? 'button' : undefined, tabIndex: canToggle ? 0 : undefined, 'aria-expanded': canToggle ? open : undefined, onClick: canToggle ? handleHeaderClick : undefined, onKeyDown: canToggle ? (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleHeaderClick(); } } : undefined })}
+        className={cn(
+          'flex w-full items-center gap-3 p-5 text-left sm:p-6',
+          canToggle && 'cursor-pointer',
+        )}
+      >
+        {Icon && (
+          <div
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-bg-subtle"
+            style={iconColor ? { color: iconColor } : undefined}
+          >
+            <Icon className={cn('h-5 w-5', !iconColor && 'text-text-primary')} />
           </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-medium text-text-primary sm:text-lg sm:font-semibold">
+            {title}
+          </h2>
+          {description && (
+            <p className="truncate text-sm text-text-muted">{description}</p>
+          )}
+        </div>
+        {trailing && (
+          <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+            {trailing}
+          </div>
+        )}
+        {collapsible && !trailing && (
+          <ChevronDown
+            className={cn(
+              'h-5 w-5 shrink-0 text-text-muted transition-transform duration-200',
+              open && 'rotate-180',
+            )}
+          />
+        )}
+      </Wrapper>
+      {open && (
+        <div className="space-y-5 border-t border-border px-5 py-4 sm:px-6 sm:py-5">
+          {children}
         </div>
       )}
-      {content}
     </section>
   );
 }

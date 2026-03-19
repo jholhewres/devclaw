@@ -511,6 +511,7 @@
     "providerModel": "Provedor e modelo de IA principal",
     "providerTitle": "Provedor e modelo de IA principal",
     "providerDesc": "Gerencie o modelo que vai comandar o raciocínio e as respostas do seu agente.",
+    "seeMore": "Ver mais",
     "provider": "Provedor",
     "model": "Modelo",
     "baseUrl": "URL Base",

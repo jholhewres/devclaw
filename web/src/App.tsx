@@ -16,7 +16,6 @@ import { Channels } from '@/pages/Channels'
 import { WhatsAppConnect } from '@/pages/WhatsAppConnect'
 import { Security } from '@/pages/Security'
 import { DevSettings } from '@/pages/DevSettings'
-import { Config } from '@/pages/Config'
 import { ApiConfig } from '@/pages/ApiConfig'
 import { Webhooks } from '@/pages/Webhooks'
 import { Hooks } from '@/pages/Hooks'
@@ -136,7 +135,7 @@ export function App() {
 
             {/* Dev tab */}
             <Route path="/dev" element={<DevSettings />} />
-            <Route path="/config" element={<><Config /><ApiConfig /></>} />
+            <Route path="/config" element={<ApiConfig />} />
             <Route path="/webhooks" element={<Webhooks />} />
             <Route path="/hooks" element={<Hooks />} />
             <Route path="/memory" element={<Memory />} />

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CheckCircle2, XCircle, Key, Cpu, ExternalLink, Link } from 'lucide-react'
+import { CheckCircle2, XCircle, Key, Cpu, ExternalLink, Link, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api } from '@/lib/api'
 import type { SetupData } from './SetupWizard'
@@ -11,11 +11,10 @@ import {
 import { ModelCombobox } from '@/components/ui/ModelCombobox'
 import {
   PROVIDERS,
-  categorizeProviders,
+  DEFAULT_PROVIDER_IDS,
+  EXPANDED_PROVIDER_IDS,
   getVisibleModels,
   getProviderIcon,
-  PROVIDER_CATEGORIES,
-  type ProviderDef,
 } from '@/lib/providers'
 
 interface Props {
@@ -27,9 +26,11 @@ export function StepProvider({ data, updateData }: Props) {
   const { t } = useTranslation()
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null)
+  const [expandedGrid, setExpandedGrid] = useState(false)
 
-  // Categorized providers
-  const { free, paid, local } = categorizeProviders()
+  // Build provider grid
+  const gridIds = expandedGrid ? EXPANDED_PROVIDER_IDS : DEFAULT_PROVIDER_IDS
+  const allCards = gridIds.map((id) => PROVIDERS.find((p) => p.value === id)!).filter(Boolean)
 
   // Get current provider
   const provider = PROVIDERS.find((p) => p.value === data.provider)
@@ -59,41 +60,6 @@ export function StepProvider({ data, updateData }: Props) {
     setTestResult(null)
   }
 
-  // Provider card button component
-  const ProviderButton = ({ p, category }: { p: ProviderDef; category: 'free' | 'paid' | 'local' }) => {
-    const categoryStyle = PROVIDER_CATEGORIES[category]
-    const isSelected = data.provider === p.value
-    const icon = getProviderIcon(p.value)
-
-    return (
-      <button
-        key={p.value}
-        onClick={() => handleProviderChange(p.value)}
-        className={cn(
-          'flex cursor-pointer flex-col items-center gap-1 rounded-xl border px-2 py-2.5 text-center transition-all',
-          isSelected
-            ? `${categoryStyle.borderColor} ${categoryStyle.bgColor}`
-            : 'border-border-hover bg-bg-main hover:border-text-muted hover:bg-bg-surface',
-        )}
-        style={isSelected ? {
-          borderColor: `${categoryStyle.accentColor}80`,
-          backgroundColor: `${categoryStyle.accentColor}15`,
-        } : undefined}
-        title={p.description}
-      >
-        <div className={isSelected ? categoryStyle.textColor : 'text-text-muted'} style={isSelected ? { color: categoryStyle.accentColor } : undefined}>
-          {icon}
-        </div>
-        <span className={cn(
-          'text-[10px] font-medium',
-          isSelected ? 'text-text-primary' : 'text-text-secondary',
-        )}>
-          {p.label}
-        </span>
-      </button>
-    )
-  }
-
   return (
     <StepContainer>
       <StepHeader
@@ -102,30 +68,59 @@ export function StepProvider({ data, updateData }: Props) {
       />
 
       <FieldGroup>
-        {/* Free Providers */}
-        <Field label={t('setupPage.freeProviders')} icon={Cpu}>
-          <div className="grid grid-cols-5 gap-1.5">
-            {free.map((p) => (
-              <ProviderButton key={p.value} p={p} category="free" />
-            ))}
-          </div>
-        </Field>
+        {/* Provider grid */}
+        <Field label={t('setupPage.providerTitle')} icon={Cpu}>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+            {allCards.map((p) => {
+              const isSelected = data.provider === p.value
+              const icon = getProviderIcon(p.value)
+              return (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => handleProviderChange(p.value)}
+                  className={cn(
+                    'flex cursor-pointer flex-col items-start gap-2.5 rounded-xl border p-3 transition-colors',
+                    isSelected
+                      ? 'border-brand ring-1 ring-brand ring-inset'
+                      : 'border-border-hover bg-bg-main hover:border-text-muted hover:bg-bg-surface',
+                  )}
+                  title={p.description}
+                >
+                  <div className="flex w-full items-start justify-between">
+                    <div className="flex h-6 w-6 items-center justify-center text-text-muted">
+                      {icon}
+                    </div>
+                    <div
+                      className={cn(
+                        'flex h-4 w-4 items-center justify-center rounded-full border-2 transition-colors',
+                        isSelected ? 'border-brand bg-brand' : 'border-border-hover',
+                      )}
+                    >
+                      {isSelected && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
+                    </div>
+                  </div>
+                  <span className={cn(
+                    'text-xs font-medium',
+                    isSelected ? 'text-text-primary' : 'text-text-secondary',
+                  )}>
+                    {p.label}
+                  </span>
+                </button>
+              )
+            })}
 
-        {/* Paid Providers */}
-        <Field label={t('setupPage.paidProviders')} icon={Cpu}>
-          <div className="grid grid-cols-5 gap-1.5">
-            {paid.map((p) => (
-              <ProviderButton key={p.value} p={p} category="paid" />
-            ))}
-          </div>
-        </Field>
-
-        {/* Local / Self-Hosted Providers */}
-        <Field label={t('setupPage.localProviders')} icon={Cpu}>
-          <div className="grid grid-cols-5 gap-1.5">
-            {local.map((p) => (
-              <ProviderButton key={p.value} p={p} category="local" />
-            ))}
+            {/* See more */}
+            {!expandedGrid && EXPANDED_PROVIDER_IDS.length > DEFAULT_PROVIDER_IDS.length && (
+              <button
+                type="button"
+                onClick={() => setExpandedGrid(true)}
+                className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-border-hover p-3 transition-colors hover:border-text-muted hover:bg-bg-surface"
+              >
+                <Plus className="h-4 w-4 text-text-muted" />
+                <span className="text-xs font-medium text-text-muted">{t('config.seeMore')}</span>
+              </button>
+            )}
           </div>
         </Field>
 

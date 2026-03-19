@@ -511,6 +511,7 @@
     "providerModel": "Main AI provider and model",
     "providerTitle": "Main AI provider and model",
     "providerDesc": "Manage the model that will drive the reasoning and responses of your agent.",
+    "seeMore": "See more",
     "provider": "Provider",
     "model": "Model",
     "baseUrl": "Base URL",
