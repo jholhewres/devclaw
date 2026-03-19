@@ -18,8 +18,6 @@ import (
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels"
-	"github.com/jholhewres/devclaw/pkg/devclaw/channels/discord"
-	slackchan "github.com/jholhewres/devclaw/pkg/devclaw/channels/slack"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/telegram"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/whatsapp"
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot"
@@ -38,7 +36,7 @@ func newServeCmd() *cobra.Command {
 		Use:   "serve",
 		Short: "Start the daemon with messaging channels",
 		Long: `Start DevClaw as a daemon service, connecting to enabled
-channels (WhatsApp, Discord, Telegram) and processing messages.
+channels (WhatsApp, Telegram) and processing messages.
 
 Examples:
   devclaw serve
@@ -47,7 +45,7 @@ Examples:
 		RunE: runServe,
 	}
 
-	cmd.Flags().StringSlice("channel", nil, "channels to enable (whatsapp, discord, telegram)")
+	cmd.Flags().StringSlice("channel", nil, "channels to enable (whatsapp, telegram)")
 	return cmd
 }
 
@@ -135,26 +133,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	// Slack (core channel).
-	if shouldEnable("slack", channelFilter, false) && cfg.Channels.Slack.BotToken != "" {
-		sl := slackchan.New(cfg.Channels.Slack, logger)
-		if err := assistant.ChannelManager().Register(sl); err != nil {
-			logger.Error("failed to register Slack", "error", err)
-		} else {
-			logger.Info("Slack channel registered")
-		}
-	}
-
-	// Discord (core channel).
-	if shouldEnable("discord", channelFilter, false) && cfg.Channels.Discord.Token != "" {
-		dc := discord.New(cfg.Channels.Discord, logger)
-		if err := assistant.ChannelManager().Register(dc); err != nil {
-			logger.Error("failed to register Discord", "error", err)
-		} else {
-			logger.Info("Discord channel registered")
-		}
-	}
-
 	// Load plugins (other channels).
 	pluginLoader := plugins.NewLoader(cfg.Plugins, logger)
 	if err := pluginLoader.LoadAll(ctx); err != nil {
@@ -169,7 +147,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	var webServer *webui.Server
 	var adapter *webui.AssistantAdapter
 	if cfg.WebUI.Enabled {
-		adapter = buildWebUIAdapter(assistant, cfg, wa, configPath)
+		adapter = buildWebUIAdapter(assistant, cfg, wa, configPath, logger)
 		webServer = webui.New(cfg.WebUI, adapter, logger)
 
 		// Register restart callback
@@ -782,7 +760,7 @@ func wireMediaAdapter(webServer *webui.Server, assistant *copilot.Assistant, log
 }
 
 // buildWebUIAdapter creates the adapter that bridges the Assistant to the WebUI.
-func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *whatsapp.WhatsApp, configPath string) *webui.AssistantAdapter {
+func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *whatsapp.WhatsApp, configPath string, logger *slog.Logger) *webui.AssistantAdapter {
 	adapter := &webui.AssistantAdapter{
 		GetConfigMapFn: func() map[string]any {
 			media := cfg.Media.Effective()
@@ -820,15 +798,6 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 						"respond_to_groups": cfg.Channels.Telegram.RespondToGroups,
 						"respond_to_dms":    cfg.Channels.Telegram.RespondToDMs,
 						"send_typing":       cfg.Channels.Telegram.SendTyping,
-					},
-					"discord": map[string]any{
-						"token_configured": cfg.Channels.Discord.Token != "",
-						"send_typing":      cfg.Channels.Discord.SendTyping,
-					},
-					"slack": map[string]any{
-						"bot_token_configured": cfg.Channels.Slack.BotToken != "",
-						"app_token_configured": cfg.Channels.Slack.AppToken != "",
-						"send_typing":          cfg.Channels.Slack.SendTyping,
 					},
 				},
 			}
@@ -959,6 +928,7 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 					if tgRaw, ok := channelsMap["telegram"]; ok {
 						if tgMap, ok := tgRaw.(map[string]any); ok {
 							if v, ok := tgMap["token"].(string); ok && v != "" {
+								wasEmpty := cfg.Channels.Telegram.Token == ""
 								if vaultOK {
 									if err := vault.Set("TELEGRAM_BOT_TOKEN", v); err != nil {
 										return fmt.Errorf("failed to store Telegram token in vault: %w", err)
@@ -966,45 +936,16 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 									os.Setenv("TELEGRAM_BOT_TOKEN", v)
 								}
 								cfg.Channels.Telegram.Token = v
-							}
-						}
-					}
 
-					// Discord
-					if dcRaw, ok := channelsMap["discord"]; ok {
-						if dcMap, ok := dcRaw.(map[string]any); ok {
-							if v, ok := dcMap["token"].(string); ok && v != "" {
-								if vaultOK {
-									if err := vault.Set("DISCORD_BOT_TOKEN", v); err != nil {
-										return fmt.Errorf("failed to store Discord token in vault: %w", err)
+								// Hot-reload: register and connect if not already registered.
+								if wasEmpty {
+									tg := telegram.New(cfg.Channels.Telegram, logger)
+									if err := assistant.ChannelManager().RegisterAndConnect(tg); err != nil {
+										logger.Error("failed to hot-reload Telegram channel", "error", err)
+									} else {
+										logger.Info("Telegram channel connected via hot-reload")
 									}
-									os.Setenv("DISCORD_BOT_TOKEN", v)
 								}
-								cfg.Channels.Discord.Token = v
-							}
-						}
-					}
-
-					// Slack
-					if slRaw, ok := channelsMap["slack"]; ok {
-						if slMap, ok := slRaw.(map[string]any); ok {
-							if v, ok := slMap["bot_token"].(string); ok && v != "" {
-								if vaultOK {
-									if err := vault.Set("SLACK_BOT_TOKEN", v); err != nil {
-										return fmt.Errorf("failed to store Slack bot token in vault: %w", err)
-									}
-									os.Setenv("SLACK_BOT_TOKEN", v)
-								}
-								cfg.Channels.Slack.BotToken = v
-							}
-							if v, ok := slMap["app_token"].(string); ok && v != "" {
-								if vaultOK {
-									if err := vault.Set("SLACK_APP_TOKEN", v); err != nil {
-										return fmt.Errorf("failed to store Slack app token in vault: %w", err)
-									}
-									os.Setenv("SLACK_APP_TOKEN", v)
-								}
-								cfg.Channels.Slack.AppToken = v
 							}
 						}
 					}
@@ -1099,8 +1040,6 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 			}{
 				{"whatsapp", true}, // WhatsApp is always enabled (QR-based)
 				{"telegram", cfg.Channels.Telegram.Token != ""},
-				{"discord", cfg.Channels.Discord.Token != ""},
-				{"slack", cfg.Channels.Slack.BotToken != "" && cfg.Channels.Slack.AppToken != ""},
 			}
 
 			result := make([]webui.ChannelHealthInfo, 0, len(coreChannels))

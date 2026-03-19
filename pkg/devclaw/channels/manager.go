@@ -251,6 +251,36 @@ func (m *Manager) HasChannels() bool {
 	return len(m.channels) > 0
 }
 
+// RegisterAndConnect registers a new channel and immediately connects it.
+// Use this to add channels at runtime after the manager has started
+// (e.g., when a user configures a token via the Web UI).
+// Returns error if the channel is already registered, manager is not started,
+// or connection fails (the channel is still registered on connect failure).
+func (m *Manager) RegisterAndConnect(ch Channel) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	name := ch.Name()
+	if _, exists := m.channels[name]; exists {
+		return fmt.Errorf("channel %q already registered", name)
+	}
+	if m.ctx == nil {
+		return fmt.Errorf("manager not started")
+	}
+
+	m.channels[name] = ch
+	m.logger.Info("channel registered (hot-reload)", "channel", name)
+
+	if err := ch.Connect(m.ctx); err != nil {
+		m.logger.Error("failed to connect channel", "channel", name, "error", err)
+		return err
+	}
+
+	m.logger.Info("channel connected (hot-reload)", "channel", name)
+	m.startListener(ch)
+	return nil
+}
+
 // ConnectChannel connects a specific channel by name.
 // Returns error if channel not found or connection fails.
 func (m *Manager) ConnectChannel(name string) error {
