@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/ConfigComponents'
 import { ProviderCard } from '@/components/ui/ProviderCard'
 import { EndpointSelector } from '@/components/ui/EndpointSelector'
+import { ModelCombobox } from '@/components/ui/ModelCombobox'
 import {
   categorizeProviders,
   getProviderByValue,
@@ -415,7 +416,14 @@ export function ApiConfig() {
             label={t('apiConfig.model')}
             hint={t('apiConfig.modelHint')}
           >
-          {visibleModels.length > 0 ? (
+          {provider?.allowCustomModel ? (
+            <ModelCombobox
+              value={config.model}
+              onChange={(v) => setConfig(prev => prev ? { ...prev, model: v } : prev)}
+              suggestions={visibleModels}
+              placeholder={t('apiConfig.selectOrTypeModel')}
+            />
+          ) : visibleModels.length > 0 ? (
             <ConfigSelect
               value={config.model}
               onChange={(v) => setConfig(prev => prev ? { ...prev, model: v } : prev)}

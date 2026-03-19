@@ -8,6 +8,7 @@ import {
   StepContainer, StepHeader, FieldGroup, Field,
   Input, PasswordInput, Select, Button,
 } from './SetupComponents'
+import { ModelCombobox } from '@/components/ui/ModelCombobox'
 import {
   PROVIDERS,
   categorizeProviders,
@@ -205,7 +206,14 @@ export function StepProvider({ data, updateData }: Props) {
 
         {/* Model */}
         <Field label={t('setupPage.model')} icon={Cpu}>
-          {visibleModels.length > 0 ? (
+          {provider?.allowCustomModel ? (
+            <ModelCombobox
+              value={data.model}
+              onChange={(val) => updateData({ model: val })}
+              suggestions={visibleModels}
+              placeholder={t('setupPage.selectOrTypeModel')}
+            />
+          ) : visibleModels.length > 0 ? (
             <Select
               value={data.model}
               onChange={(val) => updateData({ model: val })}

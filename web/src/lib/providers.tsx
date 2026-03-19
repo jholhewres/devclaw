@@ -22,6 +22,7 @@ export interface ProviderDef {
   noKey?: boolean;
   baseUrls?: BaseUrlOption[];
   customBaseUrl?: boolean;
+  allowCustomModel?: boolean;
   freeUrl?: string;
   freeNote?: string;
   isFree?: boolean;
@@ -244,19 +245,22 @@ export const PROVIDERS: ProviderDef[] = [
     value: 'openrouter',
     label: 'OpenRouter',
     models: [
-      'openrouter/free',
       'openrouter/auto',
+      'anthropic/claude-sonnet-4-20250514',
+      'openai/gpt-4.1',
+      'google/gemini-2.5-pro-preview',
       'meta-llama/llama-3.3-70b-instruct:free',
       'deepseek/deepseek-r1:free',
       'google/gemma-3-27b-it:free',
       'qwen/qwen-2.5-72b-instruct:free',
     ],
-    description: '50 req/day, 400+ models',
+    description: '400+ models, one API',
     keyPlaceholder: 'sk-or-...',
     isFree: true,
+    allowCustomModel: true,
     freeUrl: 'https://openrouter.ai/keys',
     freeNote: '50 req/day free tier',
-    color: '#64748b',
+    color: '#6366f1',
   },
   // ── Paid Providers ──
   {
@@ -449,7 +453,7 @@ export function getDefaultBaseUrl(provider: ProviderDef): string {
  * Validated provider IDs — only these are shown in the UI.
  * Other providers will be re-enabled as their parameter mappings are verified.
  */
-const ACTIVE_PROVIDER_IDS = ['openai', 'anthropic', 'google', 'zai'];
+const ACTIVE_PROVIDER_IDS = ['openai', 'anthropic', 'google', 'zai', 'openrouter'];
 
 /**
  * Categorize providers into free, paid, and local.
