@@ -51,6 +51,7 @@ var defaultModelCosts = map[string]ModelCost{
 	"claude-3.5-sonnet": {InputPer1M: 3.00, OutputPer1M: 15.00},
 	// GLM (Z.AI)
 	"glm-5":           {InputPer1M: 1.00, OutputPer1M: 3.20},
+	"glm-5-turbo":     {InputPer1M: 0.80, OutputPer1M: 2.50},
 	"glm-5-code":      {InputPer1M: 1.20, OutputPer1M: 5.00},
 	"glm-4.7":         {InputPer1M: 0.50, OutputPer1M: 1.50},
 	"glm-4.7-flash":   {InputPer1M: 0.10, OutputPer1M: 0.40},

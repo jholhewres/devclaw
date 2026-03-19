@@ -20,6 +20,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"sync"
@@ -249,6 +250,19 @@ type WhatsApp struct {
 	// messagesClosed tracks if the messages channel has been closed.
 	// This prevents sending to a closed channel which would cause a panic.
 	messagesClosed atomic.Bool
+
+	// sentMessageIDs tracks messages sent by the bot for reply-to-bot detection.
+	sentMessageIDs map[string]bool
+	sentMu         sync.RWMutex
+
+	// dedup filters out duplicate messages during reconnections.
+	dedup *messageDedupCache
+
+	// pairingCompleteAt tracks when pairing completed for grace period.
+	pairingCompleteAt atomic.Value // time.Time
+
+	// lastLatencyMs tracks the last measured latency for health reporting.
+	lastLatencyMs atomic.Int64
 }
 
 // New creates a new WhatsApp channel instance.
@@ -263,15 +277,17 @@ func New(cfg Config, logger *slog.Logger) *WhatsApp {
 	}
 
 	w := &WhatsApp{
-		cfg:           cfg,
-		logger:        logger.With("component", "whatsapp"),
-		messages:      make(chan *channels.IncomingMessage, 256),
-		accessUsers:   make(map[string]string),
-		accessGroups:  make(map[string]string),
-		blockedUsers:  make(map[string]struct{}),
-		blockedGroups: make(map[string]struct{}),
-		askedOnce:     make(map[string]time.Time),
-		groupPolicies: make(map[string]*GroupPolicyConfig),
+		cfg:            cfg,
+		logger:         logger.With("component", "whatsapp"),
+		messages:       make(chan *channels.IncomingMessage, 256),
+		accessUsers:    make(map[string]string),
+		accessGroups:   make(map[string]string),
+		blockedUsers:   make(map[string]struct{}),
+		blockedGroups:  make(map[string]struct{}),
+		askedOnce:      make(map[string]time.Time),
+		groupPolicies:  make(map[string]*GroupPolicyConfig),
+		sentMessageIDs: make(map[string]bool),
+		dedup:          newMessageDedupCache(),
 	}
 	w.setState(StateDisconnected)
 
@@ -608,7 +624,9 @@ func (w *WhatsApp) attemptReconnect() {
 			return
 		}
 
-		backoff := min(w.cfg.ReconnectBackoff*time.Duration(attempts), 5*time.Minute)
+		base := min(w.cfg.ReconnectBackoff*time.Duration(attempts), 5*time.Minute)
+		jitter := time.Duration(rand.Int64N(int64(base) / 4))
+		backoff := base + jitter
 
 		w.logger.Info("whatsapp: attempting reconnect",
 			"attempt", attempts,
@@ -681,12 +699,13 @@ func (w *WhatsApp) Send(ctx context.Context, to string, msg *channels.OutgoingMe
 
 	waMsg := buildTextMessage(msg.Content, msg.ReplyTo)
 
-	_, err = w.client.SendMessage(ctx, jid, waMsg)
+	resp, err := w.client.SendMessage(ctx, jid, waMsg)
 	if err != nil {
 		w.errorCount.Add(1)
 		return fmt.Errorf("sending message: %w", err)
 	}
 
+	w.recordSentMessage(to, string(resp.ID))
 	return nil
 }
 
@@ -732,6 +751,7 @@ func (w *WhatsApp) Health() channels.HealthStatus {
 	h := channels.HealthStatus{
 		Connected:  w.connected.Load(),
 		ErrorCount: int(w.errorCount.Load()),
+		LatencyMs:  w.lastLatencyMs.Load(),
 		Details:    make(map[string]any),
 	}
 	if t, ok := w.lastMsg.Load().(time.Time); ok {
@@ -764,12 +784,13 @@ func (w *WhatsApp) SendMedia(ctx context.Context, to string, media *channels.Med
 		return fmt.Errorf("building media message: %w", err)
 	}
 
-	_, err = w.client.SendMessage(ctx, jid, waMsg)
+	resp, err := w.client.SendMessage(ctx, jid, waMsg)
 	if err != nil {
 		w.errorCount.Add(1)
 		return fmt.Errorf("sending media: %w", err)
 	}
 
+	w.recordSentMessage(to, string(resp.ID))
 	return nil
 }
 
@@ -796,14 +817,22 @@ func (w *WhatsApp) SendTyping(ctx context.Context, to string) error {
 }
 
 // SendPresence updates the bot's online/offline status.
+// Also measures latency for health reporting.
 func (w *WhatsApp) SendPresence(ctx context.Context, available bool) error {
 	if !w.connected.Load() {
 		return nil
 	}
+	start := time.Now()
+	var err error
 	if available {
-		return w.client.SendPresence(ctx, types.PresenceAvailable)
+		err = w.client.SendPresence(ctx, types.PresenceAvailable)
+	} else {
+		err = w.client.SendPresence(ctx, types.PresenceUnavailable)
 	}
-	return w.client.SendPresence(ctx, types.PresenceUnavailable)
+	if err == nil {
+		w.lastLatencyMs.Store(time.Since(start).Milliseconds())
+	}
+	return err
 }
 
 // MarkRead marks messages as read.
@@ -1063,11 +1092,19 @@ func (w *WhatsApp) RequestNewQR(ctx context.Context) error {
 }
 
 // emitMessage sends a message to the incoming messages channel.
+// Uses recover to handle the race between messagesClosed check and channel send.
 func (w *WhatsApp) emitMessage(msg *channels.IncomingMessage) {
-	// Check if channel is already closed to prevent panic.
 	if w.messagesClosed.Load() {
 		return
 	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			// Channel was closed between the check and the send.
+			w.logger.Debug("whatsapp: message channel closed, dropping message",
+				"from", msg.From, "type", msg.Type)
+		}
+	}()
 
 	select {
 	case w.messages <- msg:
@@ -1160,15 +1197,26 @@ func (w *WhatsApp) CanResponse(msg *channels.IncomingMessage) (bool, string) {
 	senderJID := normalizeJID(msg.From)
 	chatJID := normalizeJID(msg.ChatID)
 
-	// Check if user is explicitly blocked.
+	// Always enforce block lists, even during grace period.
 	if _, blocked := w.blockedUsers[senderJID]; blocked {
 		return false, "user blocked"
 	}
-
-	// Check if group is explicitly blocked.
 	if msg.IsGroup {
 		if _, blocked := w.blockedGroups[chatJID]; blocked {
 			return false, "group blocked"
+		}
+	}
+
+	// Pairing grace period: accept DM messages from the device owner
+	// within 30s of pairing completion. Only applies to non-group messages
+	// to prevent bypassing group ACLs.
+	if !msg.IsGroup {
+		if v := w.pairingCompleteAt.Load(); v != nil {
+			if pairingTime, ok := v.(time.Time); ok {
+				if time.Since(pairingTime) < 30*time.Second {
+					return true, "pairing_grace"
+				}
+			}
 		}
 	}
 
@@ -1309,7 +1357,7 @@ func (w *WhatsApp) ShouldRespond(msg *channels.IncomingMessage, trigger string) 
 			}
 			return false
 		case "reply":
-			return msg.ReplyTo != ""
+			return msg.ReplyTo != "" && w.isBotMessage(msg.ChatID, msg.ReplyTo)
 		case "keyword":
 			if len(keywords) > 0 {
 				return containsKeywordInList(msg.Content, keywords)
@@ -1575,6 +1623,41 @@ func (w *WhatsApp) GetGroupPolicies() any {
 	}
 }
 
+// ---------- SentMessageTracker Interface ----------
+
+// recordSentMessage stores a sent message ID for reply-to-bot detection.
+func (w *WhatsApp) recordSentMessage(chatJID, messageID string) {
+	key := normalizeJID(chatJID) + ":" + messageID
+	w.sentMu.Lock()
+	if len(w.sentMessageIDs) >= 10000 {
+		// Simple eviction: clear half when full.
+		for k := range w.sentMessageIDs {
+			delete(w.sentMessageIDs, k)
+			if len(w.sentMessageIDs) < 5000 {
+				break
+			}
+		}
+	}
+	w.sentMessageIDs[key] = true
+	w.sentMu.Unlock()
+}
+
+// IsBotMessage returns true if the given message was sent by the bot.
+// Implements channels.SentMessageTracker.
+func (w *WhatsApp) IsBotMessage(chatID, messageID string) bool {
+	return w.isBotMessage(chatID, messageID)
+}
+
+// isBotMessage is the internal implementation of IsBotMessage.
+// Safe to call with w.mu already held (uses only sentMu).
+func (w *WhatsApp) isBotMessage(chatID, messageID string) bool {
+	key := normalizeJID(chatID) + ":" + messageID
+	w.sentMu.RLock()
+	ok := w.sentMessageIDs[key]
+	w.sentMu.RUnlock()
+	return ok
+}
+
 // ---------- Helpers ----------
 
 // seedAccessFromConfig initializes access control from config.
@@ -1790,3 +1873,6 @@ func containsUserInList(userJID string, allowedList []string) bool {
 	}
 	return false
 }
+
+// Compile-time interface verification.
+var _ channels.SentMessageTracker = (*WhatsApp)(nil)

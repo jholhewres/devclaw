@@ -121,6 +121,11 @@ func (w *WhatsApp) uploadAudio(ctx context.Context, data []byte, mimeType string
 	// Voice messages use audio/ogg; codecs=opus.
 	ptt := strings.Contains(mimeType, "ogg") || strings.Contains(mimeType, "opus")
 
+	// WhatsApp requires the full codec spec for PTT voice notes.
+	if ptt && mimeType == "audio/ogg" {
+		mimeType = "audio/ogg; codecs=opus"
+	}
+
 	msg := &waE2E.Message{
 		AudioMessage: &waE2E.AudioMessage{
 			URL:           &resp.URL,

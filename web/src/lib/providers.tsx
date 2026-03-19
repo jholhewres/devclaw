@@ -299,7 +299,7 @@ export const PROVIDERS: ProviderDef[] = [
       {
         value: 'https://api.z.ai/api/anthropic',
         label: 'Z.Ai Proxy',
-        extraModels: ['glm-5', 'glm-4.7', 'glm-4.7-flash', 'glm-4.7-flashx'],
+        extraModels: ['glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.7-flash', 'glm-4.7-flashx'],
       },
     ],
     freeUrl: 'https://console.anthropic.com/settings/keys',
@@ -308,8 +308,8 @@ export const PROVIDERS: ProviderDef[] = [
   {
     value: 'zai',
     label: 'Z.Ai',
-    models: ['glm-5', 'glm-4.7', 'glm-4.7-flash', 'glm-4.7-flashx'],
-    description: 'GLM-5, GLM-4.7',
+    models: ['glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.7-flash', 'glm-4.7-flashx'],
+    description: 'GLM-5, GLM-5-Turbo',
     keyPlaceholder: 'API key',
     baseUrls: [
       { value: 'https://api.z.ai/api/paas/v4', label: 'Global (paas)' },
@@ -449,7 +449,7 @@ export function getDefaultBaseUrl(provider: ProviderDef): string {
  * Validated provider IDs — only these are shown in the UI.
  * Other providers will be re-enabled as their parameter mappings are verified.
  */
-const ACTIVE_PROVIDER_IDS = ['openai', 'anthropic', 'google'];
+const ACTIVE_PROVIDER_IDS = ['openai', 'anthropic', 'google', 'zai'];
 
 /**
  * Categorize providers into free, paid, and local.

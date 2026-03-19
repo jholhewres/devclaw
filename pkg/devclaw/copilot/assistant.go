@@ -1704,7 +1704,7 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 				shouldRespond = gf.ShouldRespond(msg, matchedTrigger)
 			} else if a.groupPolicyMgr != nil {
 				// Fall back to global GroupPolicyManager.
-				isReplyToBot := false // TODO: detect if message is a reply to bot
+				isReplyToBot := msg.ReplyTo != "" && a.channelMgr.IsBotMessage(msg.Channel, msg.ChatID, msg.ReplyTo)
 				matchedTrigger := ""
 				if triggered {
 					matchedTrigger = trigger
@@ -1717,7 +1717,7 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 		} else {
 			// No channel found, use global GroupPolicyManager if available.
 			if a.groupPolicyMgr != nil {
-				isReplyToBot := false
+				isReplyToBot := msg.ReplyTo != "" && a.channelMgr.IsBotMessage(msg.Channel, msg.ChatID, msg.ReplyTo)
 				matchedTrigger := ""
 				if triggered {
 					matchedTrigger = trigger
@@ -1793,6 +1793,17 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 			Channel:   msg.Channel,
 			Message:   userContent,
 		})
+	}
+
+	// ── Step 4b: Reply context ──
+	// If the user is replying to a previous message, prepend the quoted content
+	// so the agent knows what the reply refers to.
+	if msg.QuotedContent != "" {
+		quoted := msg.QuotedContent
+		if len(quoted) > 500 {
+			quoted = quoted[:497] + "..."
+		}
+		userContent = fmt.Sprintf("[Replying to: \"%s\"]\n\n%s", quoted, userContent)
 	}
 
 	// ── Step 5: Validate input ──

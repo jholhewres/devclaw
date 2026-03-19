@@ -366,6 +366,9 @@ func (w *WhatsApp) handlePairSuccess(evt *events.PairSuccess) {
 		"platform", evt.Platform,
 		"business", evt.BusinessName)
 
+	// Record pairing time for grace period (accept messages within 30s of pairing).
+	w.pairingCompleteAt.Store(time.Now())
+
 	// Notify QR observers of success.
 	w.notifyQR(QREvent{
 		Type:    "success",
@@ -378,9 +381,21 @@ func (w *WhatsApp) handleMessageEvt(evt *events.Message) {
 	// Update last activity time for health monitoring.
 	w.UpdateLastMsgTime()
 
-	// Skip messages from self.
-	if evt.Info.IsFromMe {
+	// Deduplicate messages — WhatsApp may redeliver during reconnections.
+	if w.dedup != nil && w.dedup.isDuplicate(string(evt.Info.ID)) {
+		w.logger.Debug("whatsapp: dropping duplicate message", "id", evt.Info.ID)
 		return
+	}
+
+	// Skip messages from self, but allow self-chat (messages sent to own number).
+	if evt.Info.IsFromMe {
+		// Allow self-chat: when sender and chat are the same JID (DM to self).
+		sender := evt.Info.Sender.ToNonAD()
+		chat := evt.Info.Chat.ToNonAD()
+		if sender != chat {
+			return
+		}
+		// This is a self-chat message — continue processing.
 	}
 
 	// Skip status broadcasts.
@@ -419,6 +434,21 @@ func (w *WhatsApp) handleMessageEvt(evt *events.Message) {
 	}
 
 	// Build the incoming message.
+	// sender_jid is the raw JID (may be phone-based or LID-based).
+	// sender_lid is the LID (Linked Identity) if available (only present for LID senders).
+	metadata := map[string]any{
+		"sender_jid":   senderJID.String(),
+		"sender_phone": resolvedSender,
+		"chat_jid":     chatJID.String(),
+		"push_name":    evt.Info.PushName,
+	}
+	if senderJID.Server == "lid" {
+		metadata["sender_lid"] = senderJID.String()
+	}
+	if evt.Info.IsFromMe {
+		metadata["self_chat"] = true
+	}
+
 	msg := &channels.IncomingMessage{
 		ID:        string(evt.Info.ID),
 		Channel:   "whatsapp",
@@ -427,13 +457,7 @@ func (w *WhatsApp) handleMessageEvt(evt *events.Message) {
 		ChatID:    resolvedChat,
 		IsGroup:   isGroup,
 		Timestamp: evt.Info.Timestamp,
-		Metadata: map[string]any{
-			"sender_jid":   senderJID.String(),
-			"sender_lid":   senderJID.String(),
-			"sender_phone": resolvedSender,
-			"chat_jid":     chatJID.String(),
-			"push_name":    evt.Info.PushName,
-		},
+		Metadata:  metadata,
 	}
 
 	// Extract message content by type.
@@ -477,9 +501,13 @@ func (w *WhatsApp) extractMessageContent(waMsg *waE2E.Message, msg *channels.Inc
 	if img := waMsg.ImageMessage; img != nil {
 		msg.Type = channels.MessageImage
 		msg.Content = img.GetCaption()
+		mimeType := img.GetMimetype()
+		if mimeType == "" {
+			mimeType = "image/jpeg"
+		}
 		msg.Media = &channels.MediaInfo{
 			Type:          channels.MessageImage,
-			MimeType:      img.GetMimetype(),
+			MimeType:      mimeType,
 			FileSize:      img.GetFileLength(),
 			Caption:       img.GetCaption(),
 			Width:         img.GetWidth(),
@@ -500,9 +528,13 @@ func (w *WhatsApp) extractMessageContent(waMsg *waE2E.Message, msg *channels.Inc
 		if audio.GetPTT() {
 			msg.Content = "[voice note]"
 		}
+		mimeType := audio.GetMimetype()
+		if mimeType == "" {
+			mimeType = "audio/ogg; codecs=opus"
+		}
 		msg.Media = &channels.MediaInfo{
 			Type:          channels.MessageAudio,
-			MimeType:      audio.GetMimetype(),
+			MimeType:      mimeType,
 			FileSize:      audio.GetFileLength(),
 			Duration:      audio.GetSeconds(),
 			URL:           audio.GetURL(),
@@ -518,9 +550,13 @@ func (w *WhatsApp) extractMessageContent(waMsg *waE2E.Message, msg *channels.Inc
 	if video := waMsg.VideoMessage; video != nil {
 		msg.Type = channels.MessageVideo
 		msg.Content = video.GetCaption()
+		mimeType := video.GetMimetype()
+		if mimeType == "" {
+			mimeType = "video/mp4"
+		}
 		msg.Media = &channels.MediaInfo{
 			Type:          channels.MessageVideo,
-			MimeType:      video.GetMimetype(),
+			MimeType:      mimeType,
 			FileSize:      video.GetFileLength(),
 			Caption:       video.GetCaption(),
 			Duration:      video.GetSeconds(),
@@ -561,9 +597,13 @@ func (w *WhatsApp) extractMessageContent(waMsg *waE2E.Message, msg *channels.Inc
 	if sticker := waMsg.StickerMessage; sticker != nil {
 		msg.Type = channels.MessageSticker
 		msg.Content = "[sticker]"
+		mimeType := sticker.GetMimetype()
+		if mimeType == "" {
+			mimeType = "image/webp"
+		}
 		msg.Media = &channels.MediaInfo{
 			Type:          channels.MessageSticker,
-			MimeType:      sticker.GetMimetype(),
+			MimeType:      mimeType,
 			FileSize:      sticker.GetFileLength(),
 			Width:         sticker.GetWidth(),
 			Height:        sticker.GetHeight(),

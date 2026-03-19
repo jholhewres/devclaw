@@ -117,6 +117,21 @@ type Telegram struct {
 	sentMessageIDs map[string]bool
 	sentMu         sync.RWMutex
 
+	// typingConsecutive401 tracks consecutive auth errors for sendChatAction.
+	typingConsecutive401 atomic.Int32
+	// typingSuspended is set to true when sendChatAction is suspended due to repeated auth errors.
+	typingSuspended atomic.Bool
+	// typingSuspendedAt tracks when typing was suspended for time-based recovery.
+	typingSuspendedAt atomic.Value // time.Time
+
+	// lastPollAt tracks when the last successful getUpdates completed (for stall detection).
+	lastPollAt atomic.Value // time.Time
+	// pollRestartCh signals the pollLoop to restart (used by pollWatchdog).
+	pollRestartCh chan struct{}
+
+	// lastLatencyMs tracks the last measured API latency in milliseconds.
+	lastLatencyMs atomic.Int64
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	mu     sync.RWMutex
@@ -137,6 +152,7 @@ func New(cfg Config, logger *slog.Logger) *Telegram {
 		baseURL:         "https://api.telegram.org/bot" + cfg.Token,
 		messages:        make(chan *channels.IncomingMessage, 256),
 		sentMessageIDs:  make(map[string]bool),
+		pollRestartCh:   make(chan struct{}, 1),
 	}
 }
 
@@ -169,6 +185,9 @@ func (t *Telegram) Connect(ctx context.Context) error {
 	// Start polling loop.
 	go t.pollLoop()
 
+	// Start poll watchdog to detect stalled polling.
+	go t.pollWatchdog()
+
 	return nil
 }
 
@@ -183,6 +202,7 @@ func (t *Telegram) Disconnect() error {
 }
 
 // Send sends a text message to the specified chat.
+// If message.EditMessageID is set, edits the existing message instead.
 func (t *Telegram) Send(ctx context.Context, to string, message *channels.OutgoingMessage) error {
 	if !t.connected.Load() {
 		return channels.ErrChannelDisconnected
@@ -190,6 +210,11 @@ func (t *Telegram) Send(ctx context.Context, to string, message *channels.Outgoi
 	chatID, threadID, err := parseChatIDAndThread(to)
 	if err != nil {
 		return err
+	}
+
+	// Edit existing message if EditMessageID is set.
+	if message.EditMessageID != "" {
+		return t.editMessage(chatID, message)
 	}
 
 	payload := map[string]any{
@@ -211,14 +236,44 @@ func (t *Telegram) Send(ctx context.Context, to string, message *channels.Outgoi
 		payload["reply_markup"] = replyMarkup
 	}
 
-	result, err := t.apiCall("sendMessage", payload)
+	result, err := t.sendWithThreadFallback("sendMessage", payload)
 	if err != nil {
 		return err
 	}
 
-	// Record sent message ID for reaction notifications "own" scope.
-	if t.cfg.ReactionNotifications == "own" && result != nil {
+	// Record sent message ID for reply-to-bot detection and reaction notifications.
+	if result != nil {
 		t.recordSentMessage(chatID, result)
+	}
+	return nil
+}
+
+// editMessage edits an existing message via editMessageText.
+func (t *Telegram) editMessage(chatID int64, message *channels.OutgoingMessage) error {
+	msgID, err := strconv.ParseInt(message.EditMessageID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("telegram: invalid edit message ID %q: %w", message.EditMessageID, err)
+	}
+
+	payload := map[string]any{
+		"chat_id":    chatID,
+		"message_id": msgID,
+		"text":       message.Content,
+		"parse_mode": t.cfg.ParseMode,
+	}
+
+	// Preserve inline keyboard if present.
+	if replyMarkup := t.buildReplyMarkup(message); replyMarkup != nil {
+		payload["reply_markup"] = replyMarkup
+	}
+
+	_, err = t.apiCall("editMessageText", payload)
+	if err != nil {
+		// Treat "message is not modified" as success — content already matches.
+		if tgErr := asTelegramAPIError(err); tgErr != nil && tgErr.isMessageNotModified() {
+			return nil
+		}
+		return err
 	}
 	return nil
 }
@@ -241,6 +296,7 @@ func (t *Telegram) Health() channels.HealthStatus {
 		Connected:     t.connected.Load(),
 		LastMessageAt: lastAt,
 		ErrorCount:    int(t.errorCount.Load()),
+		LatencyMs:     t.lastLatencyMs.Load(),
 	}
 }
 
@@ -268,6 +324,9 @@ func (t *Telegram) SendMedia(ctx context.Context, to string, media *channels.Med
 	case channels.MessageVideo:
 		method = "sendVideo"
 		fieldName = "video"
+	case channels.MessageVideoNote:
+		method = "sendVideoNote"
+		fieldName = "video_note"
 	case channels.MessageDocument:
 		method = "sendDocument"
 		fieldName = "document"
@@ -289,7 +348,7 @@ func (t *Telegram) SendMedia(ctx context.Context, to string, media *channels.Med
 			payload["caption"] = media.Caption
 			payload["parse_mode"] = t.cfg.ParseMode
 		}
-		_, err = t.apiCall(method, payload)
+		_, err = t.sendWithThreadFallback(method, payload)
 		return err
 	}
 
@@ -332,10 +391,30 @@ func (t *Telegram) DownloadMedia(ctx context.Context, msg *channels.IncomingMess
 // ---------- PresenceChannel Interface ----------
 
 // SendTyping sends a "typing..." chat action.
+// Implements a circuit breaker: after 10 consecutive auth errors,
+// typing indicators are silently suspended to prevent hammering
+// the API with an invalid token and triggering bot exclusion.
 func (t *Telegram) SendTyping(ctx context.Context, to string) error {
 	if !t.connected.Load() {
 		return nil
 	}
+
+	// Circuit breaker: if typing is suspended, check for time-based recovery.
+	if t.typingSuspended.Load() {
+		if v := t.typingSuspendedAt.Load(); v != nil {
+			if suspendedAt, ok := v.(time.Time); ok && time.Since(suspendedAt) > 5*time.Minute {
+				// Recovery: allow a single probe request.
+				t.typingSuspended.Store(false)
+				t.typingConsecutive401.Store(0)
+				t.logger.Info("telegram: typing circuit breaker recovered after cooldown")
+			} else {
+				return nil
+			}
+		} else {
+			return nil
+		}
+	}
+
 	chatID, threadID, err := parseChatIDAndThread(to)
 	if err != nil {
 		return nil // ignore invalid chat IDs
@@ -347,8 +426,24 @@ func (t *Telegram) SendTyping(ctx context.Context, to string) error {
 	if threadID != 0 {
 		payload["message_thread_id"] = threadID
 	}
-	_, err = t.apiCall("sendChatAction", payload)
-	return err
+	_, err = t.sendWithThreadFallback("sendChatAction", payload)
+	if err != nil {
+		if tgErr := asTelegramAPIError(err); tgErr != nil && tgErr.isAuthError() {
+			count := t.typingConsecutive401.Add(1)
+			if count >= 10 {
+				t.typingSuspended.Store(true)
+				t.typingSuspendedAt.Store(time.Now())
+				t.logger.Warn("telegram: typing suspended after repeated auth errors",
+					"consecutive_errors", count)
+			}
+			return nil // Suppress auth errors for typing
+		}
+		return err
+	}
+
+	// Reset on success.
+	t.typingConsecutive401.Store(0)
+	return nil
 }
 
 // SendPresence is a no-op for Telegram.
@@ -606,6 +701,59 @@ func (t *Telegram) processMessageReaction(r *tgMessageReaction) {
 	}
 }
 
+// processCallbackQuery handles inline keyboard button presses.
+// It ACKs the callback via answerCallbackQuery and emits the data as an IncomingMessage.
+func (t *Telegram) processCallbackQuery(cq *tgCallbackQuery) {
+	// Always ACK the callback query to dismiss the loading indicator.
+	_, _ = t.apiCall("answerCallbackQuery", map[string]any{
+		"callback_query_id": cq.ID,
+	})
+
+	// Build sender info.
+	from := strconv.FormatInt(cq.From.ID, 10)
+	fromName := strings.TrimSpace(cq.From.FirstName + " " + cq.From.LastName)
+	if fromName == "" {
+		fromName = cq.From.Username
+	}
+
+	// Determine chat info from the associated message.
+	chatIDStr := from // fallback to sender for DMs
+	isGroup := false
+	if cq.Message != nil {
+		chatIDStr = strconv.FormatInt(cq.Message.Chat.ID, 10)
+		isGroup = cq.Message.Chat.Type == "group" || cq.Message.Chat.Type == "supergroup"
+	}
+
+	incoming := &channels.IncomingMessage{
+		ID:        "cb-" + cq.ID,
+		Channel:   "telegram",
+		From:      from,
+		FromName:  fromName,
+		ChatID:    chatIDStr,
+		IsGroup:   isGroup,
+		Type:      channels.MessageText,
+		Content:   cq.Data,
+		Timestamp: time.Now(),
+		Metadata: map[string]any{
+			"callback_query": true,
+			"callback_id":    cq.ID,
+		},
+	}
+
+	// If there's an associated message, set it as ReplyTo.
+	if cq.Message != nil {
+		incoming.ReplyTo = strconv.FormatInt(int64(cq.Message.MessageID), 10)
+	}
+
+	t.lastMsg.Store(time.Now())
+
+	select {
+	case t.messages <- incoming:
+	default:
+		t.logger.Warn("telegram: message buffer full, dropping callback query", "cb_id", cq.ID)
+	}
+}
+
 // extractReactionEmoji returns the emoji string from the first emoji-type reaction.
 func (t *Telegram) extractReactionEmoji(reactions []tgReaction) string {
 	for _, r := range reactions {
@@ -639,6 +787,20 @@ func (t *Telegram) recordSentMessage(chatID int64, result json.RawMessage) {
 	t.sentMu.Unlock()
 }
 
+// IsBotMessage returns true if the given message was sent by the bot.
+// Implements channels.SentMessageTracker.
+func (t *Telegram) IsBotMessage(chatID, messageID string) bool {
+	cid, err := strconv.ParseInt(chatID, 10, 64)
+	if err != nil {
+		return false
+	}
+	mid, err := strconv.Atoi(messageID)
+	if err != nil {
+		return false
+	}
+	return t.isBotMessage(cid, mid)
+}
+
 // isBotMessage returns true if the given chatID:messageID was sent by the bot.
 func (t *Telegram) isBotMessage(chatID int64, messageID int) bool {
 	key := fmt.Sprintf("%d:%d", chatID, messageID)
@@ -649,6 +811,7 @@ func (t *Telegram) isBotMessage(chatID int64, messageID int) bool {
 }
 
 // pollLoop runs the getUpdates long-polling loop.
+// It listens for restart signals from pollWatchdog via pollRestartCh.
 func (t *Telegram) pollLoop() {
 	t.logger.Info("telegram: polling started")
 	backoff := time.Second
@@ -658,6 +821,11 @@ func (t *Telegram) pollLoop() {
 		case <-t.ctx.Done():
 			t.logger.Info("telegram: polling stopped")
 			return
+		case <-t.pollRestartCh:
+			// Watchdog detected stall — reset backoff and continue polling.
+			t.logger.Info("telegram: poll loop restarted by watchdog")
+			backoff = time.Second
+			continue
 		default:
 		}
 
@@ -668,6 +836,9 @@ func (t *Telegram) pollLoop() {
 			select {
 			case <-t.ctx.Done():
 				return
+			case <-t.pollRestartCh:
+				backoff = time.Second
+				continue
 			case <-time.After(backoff):
 			}
 			if backoff < 30*time.Second {
@@ -678,6 +849,7 @@ func (t *Telegram) pollLoop() {
 
 		backoff = time.Second
 		t.errorCount.Store(0)
+		t.lastPollAt.Store(time.Now())
 
 		for _, u := range updates {
 			if u.UpdateID >= t.offset {
@@ -688,8 +860,45 @@ func (t *Telegram) pollLoop() {
 	}
 }
 
+// pollWatchdog monitors the polling loop and signals a restart if stalled.
+// If no successful getUpdates completes within 90 seconds, the watchdog
+// sends a restart signal to the poll loop via pollRestartCh.
+func (t *Telegram) pollWatchdog() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-t.ctx.Done():
+			return
+		case <-ticker.C:
+			v := t.lastPollAt.Load()
+			if v == nil {
+				continue // No poll yet, skip.
+			}
+			lastPoll := v.(time.Time)
+			if time.Since(lastPoll) > 90*time.Second {
+				t.logger.Warn("telegram: poll stall detected, signaling restart",
+					"last_poll", lastPoll, "stalled_for", time.Since(lastPoll))
+				t.lastPollAt.Store(time.Now())
+				// Non-blocking signal to pollLoop.
+				select {
+				case t.pollRestartCh <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}
+}
+
 // processUpdate converts a Telegram update into an IncomingMessage.
 func (t *Telegram) processUpdate(u tgUpdate) {
+	// Handle callback queries from inline keyboard buttons.
+	if u.CallbackQuery != nil {
+		t.processCallbackQuery(u.CallbackQuery)
+		return
+	}
+
 	// Handle message_reaction updates (user reactions to messages).
 	if u.MessageReaction != nil {
 		t.processMessageReaction(u.MessageReaction)
@@ -819,6 +1028,14 @@ func (t *Telegram) processUpdate(u tgUpdate) {
 			FileSize: uint64(msg.Document.FileSize),
 			Filename: msg.Document.FileName,
 		}
+	} else if msg.VideoNote != nil {
+		incoming.Type = channels.MessageVideoNote
+		incoming.Media = &channels.MediaInfo{
+			Type:     channels.MessageVideoNote,
+			URL:      msg.VideoNote.FileID,
+			FileSize: uint64(msg.VideoNote.FileSize),
+			Duration: uint32(msg.VideoNote.Duration),
+		}
 	} else if msg.Sticker != nil {
 		incoming.Type = channels.MessageSticker
 		incoming.Media = &channels.MediaInfo{
@@ -844,6 +1061,15 @@ type tgUpdate struct {
 	EditedMessage   *tgMessage           `json:"edited_message"`
 	ChannelPost     *tgMessage           `json:"channel_post"`
 	MessageReaction *tgMessageReaction   `json:"message_reaction"`
+	CallbackQuery   *tgCallbackQuery     `json:"callback_query"`
+}
+
+// tgCallbackQuery represents a callback query from an inline keyboard button.
+type tgCallbackQuery struct {
+	ID      string     `json:"id"`
+	From    tgUser     `json:"from"`
+	Message *tgMessage `json:"message"`
+	Data    string     `json:"data"`
 }
 
 // tgMessageReaction is the MessageReactionUpdated object from the Bot API.
@@ -865,19 +1091,27 @@ type tgReaction struct {
 }
 
 type tgMessage struct {
-	MessageID      int        `json:"message_id"`
-	From           *tgUser    `json:"from"`
-	Chat           tgChat     `json:"chat"`
-	Date           int        `json:"date"`
-	Text           string     `json:"text"`
-	Caption        string     `json:"caption"`
-	ReplyToMessage *tgMessage `json:"reply_to_message"`
-	Photo          []tgPhoto  `json:"photo"`
-	Audio          *tgAudio   `json:"audio"`
-	Voice          *tgVoice   `json:"voice"`
-	Video          *tgVideo   `json:"video"`
-	Document       *tgDocument `json:"document"`
-	Sticker        *tgSticker `json:"sticker"`
+	MessageID      int          `json:"message_id"`
+	From           *tgUser      `json:"from"`
+	Chat           tgChat       `json:"chat"`
+	Date           int          `json:"date"`
+	Text           string       `json:"text"`
+	Caption        string       `json:"caption"`
+	ReplyToMessage *tgMessage   `json:"reply_to_message"`
+	Photo          []tgPhoto    `json:"photo"`
+	Audio          *tgAudio     `json:"audio"`
+	Voice          *tgVoice     `json:"voice"`
+	Video          *tgVideo     `json:"video"`
+	VideoNote      *tgVideoNote `json:"video_note"`
+	Document       *tgDocument  `json:"document"`
+	Sticker        *tgSticker   `json:"sticker"`
+}
+
+type tgVideoNote struct {
+	FileID   string `json:"file_id"`
+	Duration int    `json:"duration"`
+	Length   int    `json:"length"`
+	FileSize int    `json:"file_size"`
 }
 
 type tgUser struct {
@@ -951,9 +1185,37 @@ type tgBotUser struct {
 	Username  string `json:"username"`
 }
 
+// sendWithThreadFallback calls apiCall and, if the error indicates a missing
+// forum topic/thread, removes message_thread_id from the payload and retries.
+// This handles cases where a supergroup topic has been closed or deleted.
+// The original payload is not mutated; a shallow copy is used for the retry.
+func (t *Telegram) sendWithThreadFallback(method string, payload map[string]any) (json.RawMessage, error) {
+	result, err := t.apiCall(method, payload)
+	if err != nil {
+		if tgErr := asTelegramAPIError(err); tgErr != nil && tgErr.isThreadNotFound() {
+			if _, hasThread := payload["message_thread_id"]; hasThread {
+				t.logger.Warn("telegram: thread not found, retrying without thread ID",
+					"method", method, "thread_id", payload["message_thread_id"])
+				// Clone payload to avoid mutating the caller's map.
+				retry := make(map[string]any, len(payload)-1)
+				for k, v := range payload {
+					if k != "message_thread_id" {
+						retry[k] = v
+					}
+				}
+				return t.apiCall(method, retry)
+			}
+		}
+		return nil, err
+	}
+	return result, nil
+}
+
 // ---------- API Helpers ----------
 
 // apiCall makes a POST request to the Telegram Bot API.
+// On API errors it returns a *TelegramAPIError with structured fields
+// for classification (retryable, auth, rate-limited, etc.).
 func (t *Telegram) apiCall(method string, payload map[string]any) (json.RawMessage, error) {
 	url := t.baseURL + "/" + method
 	body, err := json.Marshal(payload)
@@ -967,14 +1229,18 @@ func (t *Telegram) apiCall(method string, payload map[string]any) (json.RawMessa
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	start := time.Now()
 	resp, err := t.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("telegram: %s request failed: %w", method, err)
 	}
 	defer resp.Body.Close()
 
+	latency := time.Since(start).Milliseconds()
+
 	var result struct {
 		OK          bool            `json:"ok"`
+		ErrorCode   int             `json:"error_code"`
 		Description string          `json:"description"`
 		Result      json.RawMessage `json:"result"`
 	}
@@ -982,8 +1248,17 @@ func (t *Telegram) apiCall(method string, payload map[string]any) (json.RawMessa
 		return nil, fmt.Errorf("telegram: decoding %s response: %w", method, err)
 	}
 	if !result.OK {
-		return nil, fmt.Errorf("telegram: %s: %s", method, result.Description)
+		return nil, &TelegramAPIError{
+			Method:      method,
+			HTTPStatus:  resp.StatusCode,
+			ErrorCode:   result.ErrorCode,
+			Description: result.Description,
+		}
 	}
+
+	// Track latency only from successful API calls.
+	t.lastLatencyMs.Store(latency)
+
 	return result.Result, nil
 }
 
@@ -1007,7 +1282,7 @@ func (t *Telegram) getUpdates(offset int64, limit, timeoutSecs int) ([]tgUpdate,
 		"limit":   limit,
 		"timeout": timeoutSecs,
 		"allowed_updates": []string{
-			"message", "edited_message", "channel_post", "message_reaction",
+			"message", "edited_message", "channel_post", "message_reaction", "callback_query",
 		},
 	}
 	data, err := t.apiCall("getUpdates", payload)
@@ -1079,8 +1354,9 @@ func (t *Telegram) uploadFile(method string, chatID int64, threadID int64, field
 	defer resp.Body.Close()
 
 	var result struct {
-		OK          bool   `json:"ok"`
-		Description string `json:"description"`
+		OK          bool            `json:"ok"`
+		Description string          `json:"description"`
+		Result      json.RawMessage `json:"result"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return fmt.Errorf("telegram: decoding %s upload response: %w", method, err)
@@ -1088,13 +1364,19 @@ func (t *Telegram) uploadFile(method string, chatID int64, threadID int64, field
 	if !result.OK {
 		return fmt.Errorf("telegram: %s upload: %s", method, result.Description)
 	}
+
+	// Record sent message ID for reply-to-bot detection.
+	if result.Result != nil {
+		t.recordSentMessage(chatID, result.Result)
+	}
 	return nil
 }
 
 // Compile-time interface verification.
 var (
-	_ channels.Channel         = (*Telegram)(nil)
-	_ channels.MediaChannel    = (*Telegram)(nil)
-	_ channels.PresenceChannel = (*Telegram)(nil)
-	_ channels.ReactionChannel = (*Telegram)(nil)
+	_ channels.Channel            = (*Telegram)(nil)
+	_ channels.MediaChannel       = (*Telegram)(nil)
+	_ channels.PresenceChannel    = (*Telegram)(nil)
+	_ channels.ReactionChannel    = (*Telegram)(nil)
+	_ channels.SentMessageTracker = (*Telegram)(nil)
 )

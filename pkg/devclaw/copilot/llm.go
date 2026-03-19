@@ -618,10 +618,15 @@ func (c *LLMClient) applyModelDefaults(req *chatRequest) {
 	// Z.AI tool_stream: enable real-time tool call streaming by default.
 	// Opt-out via params.tool_stream: false.
 	if c.isZAI() && req.ToolStream == nil {
-		enabled := !c.paramBool("tool_stream_disabled")
-		if enabled {
-			req.ToolStream = &enabled
+		enabled := true
+		if c.params != nil {
+			if v, ok := c.params["tool_stream"]; ok {
+				if b, isBool := v.(bool); isBool {
+					enabled = b
+				}
+			}
 		}
+		req.ToolStream = &enabled
 	}
 }
 

@@ -454,7 +454,7 @@ export function ApiConfig() {
           </div>
         )}
 
-        {provider?.value === 'zai' && (
+        {(provider?.value === 'zai' || (provider?.value === 'anthropic' && config.base_url.includes('api.z.ai'))) && (
           <div className="flex items-center gap-3 py-2">
             <label className="flex items-center gap-2 cursor-pointer">
               <input

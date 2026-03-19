@@ -21,7 +21,8 @@ const (
 	MessageSticker  MessageType = "sticker"
 	MessageLocation MessageType = "location"
 	MessageContact  MessageType = "contact"
-	MessageReaction MessageType = "reaction"
+	MessageReaction  MessageType = "reaction"
+	MessageVideoNote MessageType = "video_note"
 )
 
 // Channel defines the interface that every communication channel must implement.
@@ -82,6 +83,13 @@ type ReactionChannel interface {
 
 	// SendReaction sends a reaction emoji to a specific message.
 	SendReaction(ctx context.Context, chatID, messageID, emoji string) error
+}
+
+// SentMessageTracker tracks messages sent by the bot for reply detection.
+// Channels that implement this can identify whether a given message was
+// sent by the bot, enabling accurate reply-to-bot detection.
+type SentMessageTracker interface {
+	IsBotMessage(chatID, messageID string) bool
 }
 
 // AutoReadConfigurable extends Channel with AutoRead configuration access.
@@ -224,6 +232,10 @@ type OutgoingMessage struct {
 
 	// Attachments contains media attachments to send with the message.
 	Attachments []*MediaAttachment
+
+	// EditMessageID, if set, indicates this is an edit of an existing message
+	// rather than a new message. The channel should update the original message.
+	EditMessageID string
 
 	// IsReasoning indicates this message contains internal reasoning/thinking
 	// that should not be sent to end users on certain channels.

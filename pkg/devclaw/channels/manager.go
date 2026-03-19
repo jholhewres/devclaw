@@ -13,10 +13,11 @@ import (
 // Manager orchestrates multiple communication channels, aggregating
 // incoming messages into a single stream and routing responses.
 type Manager struct {
-	channels map[string]Channel
-	messages chan *IncomingMessage
-	logger   *slog.Logger
-	listenWg sync.WaitGroup
+	channels        map[string]Channel
+	messages        chan *IncomingMessage
+	logger          *slog.Logger
+	listenWg        sync.WaitGroup
+	activeListeners map[string]bool // tracks channels with running listener goroutines
 
 	mu     sync.RWMutex
 	ctx    context.Context
@@ -30,9 +31,10 @@ func NewManager(logger *slog.Logger) *Manager {
 	}
 
 	return &Manager{
-		channels: make(map[string]Channel),
-		messages: make(chan *IncomingMessage, 256),
-		logger:   logger,
+		channels:        make(map[string]Channel),
+		messages:        make(chan *IncomingMessage, 256),
+		logger:          logger,
+		activeListeners: make(map[string]bool),
 	}
 }
 
@@ -80,11 +82,9 @@ func (m *Manager) Start(ctx context.Context) error {
 			m.logger.Info("channel connected", "channel", name)
 			// Start listening only for successfully connected channels.
 			// Channels that fail here will get a listener via ConnectChannel on reconnect.
-			m.listenWg.Add(1)
-			go func(c Channel) {
-				defer m.listenWg.Done()
-				m.listenChannel(c)
-			}(ch)
+			m.mu.Lock()
+			m.startListener(ch)
+			m.mu.Unlock()
 		}
 	}
 
@@ -209,6 +209,21 @@ func (m *Manager) SendReaction(ctx context.Context, channelName, chatID, message
 	}
 }
 
+// IsBotMessage checks if the given message was sent by the bot on the specified channel.
+// Returns false if the channel doesn't implement SentMessageTracker.
+func (m *Manager) IsBotMessage(channelName, chatID, messageID string) bool {
+	m.mu.RLock()
+	ch, exists := m.channels[channelName]
+	m.mu.RUnlock()
+	if !exists {
+		return false
+	}
+	if tracker, ok := ch.(SentMessageTracker); ok {
+		return tracker.IsBotMessage(chatID, messageID)
+	}
+	return false
+}
+
 // Channel returns a specific channel by name.
 func (m *Manager) Channel(name string) (Channel, bool) {
 	m.mu.RLock()
@@ -262,12 +277,8 @@ func (m *Manager) ConnectChannel(name string) error {
 
 	m.logger.Info("channel connected", "channel", name)
 
-	// Start listening if not already running
-	m.listenWg.Add(1)
-	go func(c Channel) {
-		defer m.listenWg.Done()
-		m.listenChannel(c)
-	}(ch)
+	// Start listening if not already running.
+	m.startListener(ch)
 
 	return nil
 }
@@ -318,6 +329,27 @@ func (m *Manager) ListChannels() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// startListener starts a listener goroutine for a channel if one isn't already running.
+// Must be called with m.mu held.
+func (m *Manager) startListener(ch Channel) {
+	name := ch.Name()
+	if m.activeListeners[name] {
+		m.logger.Debug("listener already active, skipping", "channel", name)
+		return
+	}
+	m.activeListeners[name] = true
+	m.listenWg.Add(1)
+	go func(c Channel, n string) {
+		defer m.listenWg.Done()
+		defer func() {
+			m.mu.Lock()
+			delete(m.activeListeners, n)
+			m.mu.Unlock()
+		}()
+		m.listenChannel(c)
+	}(ch, name)
 }
 
 // listenChannel listens for messages from a channel and forwards them
