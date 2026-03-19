@@ -115,6 +115,12 @@ func SaveConfigToFile(cfg *Config, path string) error {
 	sanitized.API.APIKey = sanitizeSecretWithFallback(cfg.API.APIKey, apiKeyEnvVar, "DEVCLAW_API_KEY")
 	sanitized.Media.TranscriptionAPIKey = sanitizeSecret(cfg.Media.TranscriptionAPIKey, "DEVCLAW_TRANSCRIPTION_API_KEY")
 
+	// Sanitize channel tokens so they appear as ${ENV_VAR} references in config.yaml.
+	sanitized.Channels.Telegram.Token = sanitizeSecret(cfg.Channels.Telegram.Token, "TELEGRAM_BOT_TOKEN")
+	sanitized.Channels.Discord.Token = sanitizeSecret(cfg.Channels.Discord.Token, "DISCORD_BOT_TOKEN")
+	sanitized.Channels.Slack.BotToken = sanitizeSecret(cfg.Channels.Slack.BotToken, "SLACK_BOT_TOKEN")
+	sanitized.Channels.Slack.AppToken = sanitizeSecret(cfg.Channels.Slack.AppToken, "SLACK_APP_TOKEN")
+
 	data, err := yaml.Marshal(&sanitized)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)

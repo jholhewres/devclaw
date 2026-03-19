@@ -473,7 +473,7 @@ func validateFilePath(path string) error {
 	if filepath.IsAbs(clean) {
 		// Allow specific safe paths
 		// For now, just check it's not a sensitive system path
-		sensitive := []string{"/etc", "/root", "/home", "/var", "/usr", "/bin", "/sbin"}
+		sensitive := []string{"/etc", "/root", "/var/log", "/usr", "/bin", "/sbin"}
 		for _, s := range sensitive {
 			if strings.HasPrefix(clean, s) {
 				return fmt.Errorf("access to %s not allowed", s)

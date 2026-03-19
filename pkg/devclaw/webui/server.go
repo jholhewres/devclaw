@@ -168,6 +168,7 @@ type ChannelHealthInfo struct {
 	Connected  bool      `json:"connected"`
 	ErrorCount int       `json:"error_count"`
 	LastMsgAt  time.Time `json:"last_msg_at"`
+	Configured bool      `json:"configured"`
 }
 
 // JobInfo contains scheduler job info for display.

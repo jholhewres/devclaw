@@ -3,14 +3,15 @@ import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   AlertTriangle,
-  Radio,
   QrCode,
-  Wifi,
-  WifiOff,
   Smartphone,
-  MessageCircle,
   ArrowRight,
   Clock,
+  Eye,
+  EyeOff,
+  Check,
+  ExternalLink,
+  RefreshCw,
 } from 'lucide-react'
 import { api, type ChannelHealth } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
@@ -19,13 +20,77 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { StatusDot } from '@/components/ui/StatusDot'
-import { EmptyState } from '@/components/ui/EmptyState'
 import { LoadingSpinner } from '@/components/ui/ConfigComponents'
+
+/* Channel metadata (icons, colors, descriptions, token hints) */
+const CHANNEL_META: Record<string, {
+  color: string
+  icon: JSX.Element
+  descKey: string
+  tokenHintKey: string
+  tokenHintUrl?: string
+  tokenFields: { key: string; labelKey: string; placeholder: string }[]
+}> = {
+  whatsapp: {
+    color: '#22c55e',
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor">
+        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+      </svg>
+    ),
+    descKey: 'channelsPage.whatsappDesc',
+    tokenHintKey: '',
+    tokenFields: [],
+  },
+  telegram: {
+    color: '#3b82f6',
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor">
+        <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.479.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+      </svg>
+    ),
+    descKey: 'channelsPage.telegramDesc',
+    tokenHintKey: 'channelsPage.telegramTokenHint',
+    tokenHintUrl: 'https://t.me/BotFather',
+    tokenFields: [
+      { key: 'token', labelKey: 'channelsPage.botToken', placeholder: '123456:ABC-DEF1234...' },
+    ],
+  },
+  discord: {
+    color: '#8b5cf6',
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor">
+        <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189z"/>
+      </svg>
+    ),
+    descKey: 'channelsPage.discordDesc',
+    tokenHintKey: 'channelsPage.discordTokenHint',
+    tokenHintUrl: 'https://discord.com/developers/applications',
+    tokenFields: [
+      { key: 'token', labelKey: 'channelsPage.botToken', placeholder: 'MTIzNDU2Nzg5MDEyMzQ1Njc4OQ...' },
+    ],
+  },
+  slack: {
+    color: '#ec4899',
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor">
+        <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z"/>
+      </svg>
+    ),
+    descKey: 'channelsPage.slackDesc',
+    tokenHintKey: 'channelsPage.slackTokenHint',
+    tokenHintUrl: 'https://api.slack.com/apps',
+    tokenFields: [
+      { key: 'bot_token', labelKey: 'channelsPage.slackBotToken', placeholder: 'xoxb-...' },
+      { key: 'app_token', labelKey: 'channelsPage.slackAppToken', placeholder: 'xapp-...' },
+    ],
+  },
+}
 
 /**
  * Channel management page.
- * Shows status of all configured channels and allows
- * connecting/reconnecting WhatsApp via QR code.
+ * Shows all 4 core channels with status for configured ones
+ * and token configuration forms for unconfigured ones.
  */
 export function Channels() {
   const { t } = useTranslation()
@@ -33,12 +98,15 @@ export function Channels() {
   const [channels, setChannels] = useState<ChannelHealth[]>([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const loadChannels = () => {
+    setLoading(true)
     api.channels.list()
       .then(setChannels)
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { loadChannels() }, [])
 
   const whatsapp = channels.find((ch) => ch.name === 'whatsapp')
   const otherChannels = channels.filter((ch) => ch.name !== 'whatsapp')
@@ -54,14 +122,14 @@ export function Channels() {
         description={t('channelsPage.subtitle')}
       />
 
-      {channels.length === 0 ? (
-        <EmptyChannels />
-      ) : (
-        <div className="mt-8 space-y-4">
-          {whatsapp && <WhatsAppCard channel={whatsapp} onNavigate={() => navigate('/channels/whatsapp')} />}
-          {otherChannels.map((ch) => <ChannelCard key={ch.name} channel={ch} />)}
-        </div>
-      )}
+      <div className="mt-8 space-y-4">
+        {whatsapp && (
+          <WhatsAppCard channel={whatsapp} onNavigate={() => navigate('/channels/whatsapp')} />
+        )}
+        {otherChannels.map((ch) => (
+          <ConfigurableChannelCard key={ch.name} channel={ch} onSaved={loadChannels} />
+        ))}
+      </div>
     </div>
   )
 }
@@ -72,6 +140,7 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
   const { t } = useTranslation()
   const connected = channel.connected
   const hasLastMsg = channel.last_msg_at && channel.last_msg_at !== '0001-01-01T00:00:00Z'
+  const meta = CHANNEL_META.whatsapp
 
   return (
     <Card
@@ -82,15 +151,15 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
       )}
     >
       <div className="flex items-start gap-4">
-        {/* Icon */}
         <div className={cn(
           'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl transition-colors',
           connected ? 'bg-success-subtle' : 'bg-bg-subtle'
         )}>
-          <WhatsAppIcon className={cn('h-6 w-6', connected ? 'text-success' : 'text-text-muted')} />
+          <div className={cn(connected ? 'text-success' : 'text-text-muted')}>
+            {meta.icon}
+          </div>
         </div>
 
-        {/* Content */}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
             <h3 className="text-base font-semibold text-text-primary">{t('channels.whatsapp')}</h3>
@@ -108,7 +177,6 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
               : t('channelsPage.connect')}
           </p>
 
-          {/* Actions */}
           <div className="mt-4 flex items-center gap-3">
             <Button size="md" variant={connected ? 'outline' : 'default'} onClick={onNavigate}>
               {connected ? (
@@ -138,11 +206,13 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
   )
 }
 
-/* -- Generic Channel Card -- */
+/* -- Configurable Channel Card (Telegram, Discord, Slack) -- */
 
-function ChannelCard({ channel }: { channel: ChannelHealth }) {
+function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth; onSaved: () => void }) {
   const { t } = useTranslation()
+  const meta = CHANNEL_META[channel.name]
   const connected = channel.connected
+  const configured = channel.configured
   const hasLastMsg = channel.last_msg_at && channel.last_msg_at !== '0001-01-01T00:00:00Z'
 
   const channelNameKeys: Record<string, string> = {
@@ -150,109 +220,193 @@ function ChannelCard({ channel }: { channel: ChannelHealth }) {
     telegram: 'channels.telegram',
     slack: 'channels.slack',
   }
-
   const displayName = channelNameKeys[channel.name] ? t(channelNameKeys[channel.name]) : channel.name
 
-  return (
-    <Card
-      padding="md"
-      className={cn(
-        'transition-all',
-        !connected && 'opacity-60'
-      )}
-    >
-      <div className="flex items-center gap-4">
-        {/* Icon */}
-        <div className={cn(
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors',
-          connected ? 'bg-bg-subtle' : 'bg-bg-subtle/50'
-        )}>
-          {connected ? (
-            <Wifi className="h-5 w-5 text-success" />
-          ) : (
-            <WifiOff className="h-5 w-5 text-text-muted" />
-          )}
-        </div>
+  // Token form state
+  const [tokens, setTokens] = useState<Record<string, string>>({})
+  const [showTokens, setShowTokens] = useState<Record<string, boolean>>({})
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
 
-        {/* Content */}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2.5">
-            <h3 className="text-sm font-semibold text-text-primary">{displayName}</h3>
-            <StatusDot
-              status={connected ? 'online' : 'offline'}
-              label={connected ? t('common.online') : t('common.offline')}
-            />
+  const updateToken = (key: string, value: string) => {
+    setTokens((prev) => ({ ...prev, [key]: value }))
+    setSaved(false)
+  }
+
+  const toggleShow = (key: string) => {
+    setShowTokens((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const hasTokenInput = meta?.tokenFields.some((f) => tokens[f.key]?.trim())
+
+  const handleSave = async () => {
+    if (!hasTokenInput) return
+    setSaving(true)
+    try {
+      const channelData: Record<string, string> = {}
+      for (const field of meta.tokenFields) {
+        const val = tokens[field.key]?.trim()
+        if (val) channelData[field.key] = val
+      }
+      await api.config.update({
+        channels: { [channel.name]: channelData },
+      })
+      setSaved(true)
+      setTokens({})
+      onSaved()
+    } catch {
+      // error handling — toast would go here
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!meta) return null
+
+  // Configured channel — show status card
+  if (configured) {
+    return (
+      <Card
+        padding="md"
+        className={cn('transition-all', !connected && 'opacity-80')}
+      >
+        <div className="flex items-center gap-4">
+          <div className={cn(
+            'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors',
+            connected ? 'bg-bg-subtle' : 'bg-bg-subtle/50'
+          )} style={connected ? { color: meta.color } : undefined}>
+            <div className={cn(!connected && 'text-text-muted')}>
+              {meta.icon}
+            </div>
           </div>
-          <p className="mt-0.5 text-xs text-text-muted">
-            {connected
-              ? hasLastMsg
-                ? timeAgo(channel.last_msg_at, t)
-                : t('common.connected')
-              : t('common.disconnected')}
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2.5">
+              <h3 className="text-sm font-semibold text-text-primary">{displayName}</h3>
+              <StatusDot
+                status={connected ? 'online' : 'offline'}
+                label={connected ? t('common.online') : t('common.offline')}
+              />
+            </div>
+            <p className="mt-0.5 text-xs text-text-muted">
+              {connected
+                ? hasLastMsg
+                  ? timeAgo(channel.last_msg_at, t)
+                  : t('common.connected')
+                : t('channelsPage.restartRequired')}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {channel.error_count > 0 && (
+              <span className="flex items-center gap-1 text-xs text-warning">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                {channel.error_count}
+              </span>
+            )}
+            {hasLastMsg && (
+              <span className="flex items-center gap-1.5 text-xs text-text-muted">
+                <Clock className="h-3.5 w-3.5" />
+                {timeAgo(channel.last_msg_at, t)}
+              </span>
+            )}
+            {configured && !connected && (
+              <Badge variant="default" className="text-xs">
+                <RefreshCw className="h-3 w-3 mr-1" />
+                {t('channelsPage.restartRequired')}
+              </Badge>
+            )}
+          </div>
+        </div>
+      </Card>
+    )
+  }
+
+  // Unconfigured channel — show token form
+  return (
+    <Card padding="lg" className="transition-all">
+      <div className="flex items-start gap-4">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-bg-subtle text-text-muted">
+          {meta.icon}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-3">
+            <h3 className="text-base font-semibold text-text-primary">{displayName}</h3>
+            <Badge variant="default" className="text-xs">
+              {t('channelsPage.notConfigured')}
+            </Badge>
+          </div>
+
+          <p className="mt-1 text-sm text-text-muted">
+            {t(meta.descKey)}
           </p>
-        </div>
 
-        {/* Status indicators */}
-        <div className="flex items-center gap-3">
-          {channel.error_count > 0 && (
-            <span className="flex items-center gap-1 text-xs text-warning">
-              <AlertTriangle className="h-3.5 w-3.5" />
-              {channel.error_count}
-            </span>
-          )}
-          {hasLastMsg && (
-            <span className="flex items-center gap-1.5 text-xs text-text-muted">
-              <Clock className="h-3.5 w-3.5" />
-              {timeAgo(channel.last_msg_at, t)}
-            </span>
-          )}
+          {/* Token inputs */}
+          <div className="mt-4 space-y-3">
+            {meta.tokenFields.map((field) => (
+              <div key={field.key}>
+                <label className="block text-xs font-medium text-text-secondary mb-1.5">
+                  {t(field.labelKey)}
+                </label>
+                <div className="relative">
+                  <input
+                    type={showTokens[field.key] ? 'text' : 'password'}
+                    value={tokens[field.key] || ''}
+                    onChange={(e) => updateToken(field.key, e.target.value)}
+                    placeholder={field.placeholder}
+                    className="flex h-10 w-full rounded-lg border border-border bg-bg-main px-3 pr-10 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20 font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleShow(field.key)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer"
+                  >
+                    {showTokens[field.key]
+                      ? <EyeOff className="h-4 w-4" />
+                      : <Eye className="h-4 w-4" />
+                    }
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Hint + actions */}
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Button
+                size="md"
+                disabled={!hasTokenInput || saving}
+                onClick={handleSave}
+              >
+                {saving ? (
+                  t('common.saving')
+                ) : saved ? (
+                  <>
+                    <Check className="h-4 w-4" />
+                    {t('channelsPage.tokenSaved')}
+                  </>
+                ) : (
+                  t('common.save')
+                )}
+              </Button>
+            </div>
+
+            {meta.tokenHintUrl && (
+              <a
+                href={meta.tokenHintUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-xs text-text-muted hover:text-brand transition-colors"
+              >
+                {t(meta.tokenHintKey)}
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+          </div>
         </div>
       </div>
     </Card>
-  )
-}
-
-/* -- Empty State -- */
-
-function EmptyChannels() {
-  const { t } = useTranslation()
-  return (
-    <Card padding="lg" className="mt-8">
-      <EmptyState
-        icon={<Radio className="h-6 w-6" />}
-        title={t('channelsPage.title')}
-        description={t('channelsPage.subtitle')}
-      />
-
-      <div className="mt-6 mx-auto max-w-md rounded-xl bg-bg-main border border-border p-4">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">config.yaml</p>
-        <pre className="mt-3 overflow-x-auto font-mono text-xs leading-relaxed text-text-secondary">
-{`channels:
-  whatsapp:
-    enabled: true
-    owner_phone: "5511999999999"
-  discord:
-    enabled: true
-    token: "\${DEVCLAW_DISCORD_TOKEN}"`}
-        </pre>
-      </div>
-
-      <div className="mt-5 flex items-center justify-center gap-6 text-xs text-text-muted">
-        <span className="flex items-center gap-2">
-          <MessageCircle className="h-3.5 w-3.5" />
-          {t('channelsPage.supportedChannels')}
-        </span>
-      </div>
-    </Card>
-  )
-}
-
-/* -- WhatsApp Icon -- */
-
-function WhatsAppIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" className={className} fill="currentColor">
-      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-    </svg>
   )
 }

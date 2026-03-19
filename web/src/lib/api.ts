@@ -82,6 +82,7 @@ export interface ChannelHealth {
   connected: boolean;
   error_count: number;
   last_msg_at: string;
+  configured: boolean;
 }
 
 export interface JobInfo {

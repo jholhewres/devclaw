@@ -488,12 +488,14 @@ func parseOneShotTime(timeStr string) (time.Time, error) {
 	}
 
 	// Try "2006-01-02T15:04:05".
-	if t, err := time.Parse("2006-01-02T15:04:05", timeStr); err == nil {
+	// Use ParseInLocation with Local to interpret as server timezone, not UTC.
+	if t, err := time.ParseInLocation("2006-01-02T15:04:05", timeStr, time.Local); err == nil {
 		return t, nil
 	}
 
 	// Try "2006-01-02 15:04".
-	if t, err := time.Parse("2006-01-02 15:04", timeStr); err == nil {
+	// Use ParseInLocation with Local to interpret as server timezone, not UTC.
+	if t, err := time.ParseInLocation("2006-01-02 15:04", timeStr, time.Local); err == nil {
 		return t, nil
 	}
 

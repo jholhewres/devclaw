@@ -814,6 +814,23 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 					"blocked_users":   cfg.Access.BlockedUsers,
 					"pending_message": cfg.Access.PendingMessage,
 				},
+				"channels": map[string]any{
+					"telegram": map[string]any{
+						"token_configured":  cfg.Channels.Telegram.Token != "",
+						"respond_to_groups": cfg.Channels.Telegram.RespondToGroups,
+						"respond_to_dms":    cfg.Channels.Telegram.RespondToDMs,
+						"send_typing":       cfg.Channels.Telegram.SendTyping,
+					},
+					"discord": map[string]any{
+						"token_configured": cfg.Channels.Discord.Token != "",
+						"send_typing":      cfg.Channels.Discord.SendTyping,
+					},
+					"slack": map[string]any{
+						"bot_token_configured": cfg.Channels.Slack.BotToken != "",
+						"app_token_configured": cfg.Channels.Slack.AppToken != "",
+						"send_typing":          cfg.Channels.Slack.SendTyping,
+					},
+				},
 			}
 		},
 		UpdateConfigMapFn: func(updates map[string]any) error {
@@ -932,6 +949,68 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 				}
 			}
 
+			// Update channel tokens (store in vault, set env, update config).
+			if channelsRaw, ok := updates["channels"]; ok {
+				if channelsMap, ok := channelsRaw.(map[string]any); ok {
+					vault := assistant.Vault()
+					vaultOK := vault != nil && vault.IsUnlocked()
+
+					// Telegram
+					if tgRaw, ok := channelsMap["telegram"]; ok {
+						if tgMap, ok := tgRaw.(map[string]any); ok {
+							if v, ok := tgMap["token"].(string); ok && v != "" {
+								if vaultOK {
+									if err := vault.Set("TELEGRAM_BOT_TOKEN", v); err != nil {
+										return fmt.Errorf("failed to store Telegram token in vault: %w", err)
+									}
+									os.Setenv("TELEGRAM_BOT_TOKEN", v)
+								}
+								cfg.Channels.Telegram.Token = v
+							}
+						}
+					}
+
+					// Discord
+					if dcRaw, ok := channelsMap["discord"]; ok {
+						if dcMap, ok := dcRaw.(map[string]any); ok {
+							if v, ok := dcMap["token"].(string); ok && v != "" {
+								if vaultOK {
+									if err := vault.Set("DISCORD_BOT_TOKEN", v); err != nil {
+										return fmt.Errorf("failed to store Discord token in vault: %w", err)
+									}
+									os.Setenv("DISCORD_BOT_TOKEN", v)
+								}
+								cfg.Channels.Discord.Token = v
+							}
+						}
+					}
+
+					// Slack
+					if slRaw, ok := channelsMap["slack"]; ok {
+						if slMap, ok := slRaw.(map[string]any); ok {
+							if v, ok := slMap["bot_token"].(string); ok && v != "" {
+								if vaultOK {
+									if err := vault.Set("SLACK_BOT_TOKEN", v); err != nil {
+										return fmt.Errorf("failed to store Slack bot token in vault: %w", err)
+									}
+									os.Setenv("SLACK_BOT_TOKEN", v)
+								}
+								cfg.Channels.Slack.BotToken = v
+							}
+							if v, ok := slMap["app_token"].(string); ok && v != "" {
+								if vaultOK {
+									if err := vault.Set("SLACK_APP_TOKEN", v); err != nil {
+										return fmt.Errorf("failed to store Slack app token in vault: %w", err)
+									}
+									os.Setenv("SLACK_APP_TOKEN", v)
+								}
+								cfg.Channels.Slack.AppToken = v
+							}
+						}
+					}
+				}
+			}
+
 			savePath := configPath
 			if savePath == "" {
 				savePath = "config.yaml"
@@ -1012,14 +1091,30 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 		},
 		GetChannelHealthFn: func() []webui.ChannelHealthInfo {
 			healthMap := assistant.ChannelManager().HealthAll()
-			result := make([]webui.ChannelHealthInfo, 0, len(healthMap))
-			for name, h := range healthMap {
-				result = append(result, webui.ChannelHealthInfo{
-					Name:       name,
-					Connected:  h.Connected,
-					ErrorCount: h.ErrorCount,
-					LastMsgAt:  h.LastMessageAt,
-				})
+
+			// Always return all 4 core channels, even if not registered.
+			coreChannels := []struct {
+				name       string
+				configured bool
+			}{
+				{"whatsapp", true}, // WhatsApp is always enabled (QR-based)
+				{"telegram", cfg.Channels.Telegram.Token != ""},
+				{"discord", cfg.Channels.Discord.Token != ""},
+				{"slack", cfg.Channels.Slack.BotToken != "" && cfg.Channels.Slack.AppToken != ""},
+			}
+
+			result := make([]webui.ChannelHealthInfo, 0, len(coreChannels))
+			for _, ch := range coreChannels {
+				info := webui.ChannelHealthInfo{
+					Name:       ch.name,
+					Configured: ch.configured,
+				}
+				if h, ok := healthMap[ch.name]; ok {
+					info.Connected = h.Connected
+					info.ErrorCount = h.ErrorCount
+					info.LastMsgAt = h.LastMessageAt
+				}
+				result = append(result, info)
 			}
 			return result
 		},

@@ -2796,7 +2796,11 @@ func (a *Assistant) initScheduler() {
 
 		// ── AsSubagent path: delegate to the subagent manager ──
 		if job.AsSubagent && a.subagentMgr != nil {
-			return a.runCronAsSubagent(ctx, job)
+			result, err := a.runCronAsSubagent(ctx, job)
+			if err == nil {
+				a.recordScheduledResult(job, result)
+			}
+			return result, err
 		}
 
 		// ── Standard agent path ──
@@ -2862,11 +2866,33 @@ func (a *Assistant) initScheduler() {
 			}
 		}
 
+		// Record in main session so the bot remembers what it sent.
+		a.recordScheduledResult(job, result)
+
 		return result, nil
 	}
 
 	a.scheduler = scheduler.New(storage, handler, a.logger)
 	a.logger.Info("scheduler initialized")
+}
+
+// recordScheduledResult records a scheduled job's output in the main
+// conversation session so the bot remembers what it sent when the user
+// asks later. Skips recording if the cleaned result is empty (e.g. silent
+// tokens like NO_REPLY) or if the job has no channel/chatID target.
+func (a *Assistant) recordScheduledResult(job *scheduler.Job, rawResult string) {
+	if job.Channel == "" || job.ChatID == "" {
+		return
+	}
+	cleanResult := StripInternalTags(rawResult)
+	if cleanResult == "" {
+		return
+	}
+	mainSession := a.sessionStore.GetOrCreate(job.Channel, job.ChatID)
+	mainSession.AddMessage(
+		fmt.Sprintf("[scheduled:%s] %s", job.ID, job.Command),
+		cleanResult,
+	)
 }
 
 // runCronAsSubagent executes a cron job as a subagent, providing full
@@ -3118,9 +3144,8 @@ func (a *Assistant) registerSystemTools() {
 	RegisterMediaTools(a.toolExecutor, a.llmClient, a.config, a.logger)
 
 	// Register unified send_media tool (images, audio, video, documents).
-	if a.mediaSvc != nil {
-		RegisterNativeMediaTools(a.toolExecutor, a.mediaSvc, a.channelMgr, a.logger)
-	}
+	// Always register when channels exist; mediaSvc is optional (nil-safe).
+	RegisterNativeMediaTools(a.toolExecutor, a.mediaSvc, a.channelMgr, a.logger)
 
 	// Register native developer tools conditionally based on workspace detection.
 	devEnabled := a.shouldEnableDevTools()

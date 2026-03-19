@@ -145,7 +145,16 @@
     "slackDesc": "Llama a tu super agente en las conversaciones y canales de Slack.",
     "backToChannels": "Volver a canales",
     "errorCount": "{{count}} error(es)",
-    "supportedChannels": "WhatsApp, Discord, Telegram, Slack"
+    "supportedChannels": "WhatsApp, Discord, Telegram, Slack",
+    "notConfigured": "No configurado",
+    "tokenSaved": "Token guardado",
+    "restartRequired": "Reinicio necesario para conectar",
+    "botToken": "Token del Bot",
+    "slackBotToken": "Bot Token (xoxb-...)",
+    "slackAppToken": "App Token (xapp-...)",
+    "telegramTokenHint": "Obtén el token de @BotFather",
+    "discordTokenHint": "Obtén el token del Developer Portal",
+    "slackTokenHint": "Obtén los tokens de la API de Slack"
   },
   "settingsPage": {
     "title": "Configuración",

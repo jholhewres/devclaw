@@ -8,6 +8,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels"
 	"github.com/jholhewres/devclaw/pkg/devclaw/media"
@@ -195,9 +199,11 @@ func registerTranscribeAudioTool(executor *ToolExecutor, llm *LLMClient, media M
 
 // RegisterNativeMediaTools registers the unified send_media tool
 // for the LLM to send media (images, audio, documents, video) to users
-// through the channel manager.
+// through the channel manager. mediaSvc may be nil — in that case only
+// file_path is supported (no media_id or url); this ensures the
+// send_media tool is always available when channels are connected.
 func RegisterNativeMediaTools(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
-	if mediaSvc == nil || channelMgr == nil {
+	if channelMgr == nil {
 		return
 	}
 
@@ -213,44 +219,61 @@ var validMediaTypes = map[string]channels.MessageType{
 }
 
 func registerSendMediaTool(executor *ToolExecutor, mediaSvc *media.MediaService, channelMgr *channels.Manager, logger *slog.Logger) {
+	// Build tool description and properties based on available backends.
+	desc := "Send media (image, audio, video, or document) to the current user via file path. Channel and recipient are auto-detected from the conversation context. The media type is auto-detected from the file content when not specified."
+	props := map[string]any{
+		"type": map[string]any{
+			"type":        "string",
+			"description": "Media type: image, audio, video, or document. If omitted, auto-detected from the file MIME type.",
+			"enum":        []string{"image", "audio", "video", "document"},
+		},
+		"file_path": map[string]any{
+			"type":        "string",
+			"description": "Local file path to the media on the server",
+		},
+		"caption": map[string]any{
+			"type":        "string",
+			"description": "Optional caption text for the media",
+		},
+		"channel": map[string]any{
+			"type":        "string",
+			"description": "Target channel (e.g., whatsapp, telegram). Auto-detected from context if omitted.",
+		},
+		"to": map[string]any{
+			"type":        "string",
+			"description": "Recipient phone number or chat ID. Auto-detected from context if omitted.",
+		},
+	}
+
+	// Expose media_id and url only when the full media service is available.
+	if mediaSvc != nil {
+		desc = "Send media (image, audio, video, or document) to the current user via media_id, file path, or URL. Channel and recipient are auto-detected from the conversation context. The media type is auto-detected from the file content when not specified."
+		props["media_id"] = map[string]any{
+			"type":        "string",
+			"description": "ID of previously uploaded media (from /api/media upload)",
+		}
+		props["url"] = map[string]any{
+			"type":        "string",
+			"description": "URL to download the media from",
+		}
+	}
+
 	executor.Register(
-		MakeToolDefinition("send_media", "Send media (image, audio, video, or document) to the current user via media_id, file path, or URL. Channel and recipient are auto-detected from the conversation context. The media type is auto-detected from the file content when not specified.", map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"type": map[string]any{
-					"type":        "string",
-					"description": "Media type: image, audio, video, or document. If omitted, auto-detected from the file MIME type.",
-					"enum":        []string{"image", "audio", "video", "document"},
-				},
-				"media_id": map[string]any{
-					"type":        "string",
-					"description": "ID of previously uploaded media (from /api/media upload)",
-				},
-				"file_path": map[string]any{
-					"type":        "string",
-					"description": "Local file path to the media on the server",
-				},
-				"url": map[string]any{
-					"type":        "string",
-					"description": "URL to download the media from",
-				},
-				"caption": map[string]any{
-					"type":        "string",
-					"description": "Optional caption text for the media",
-				},
-				"channel": map[string]any{
-					"type":        "string",
-					"description": "Target channel (e.g., whatsapp, telegram). Auto-detected from context if omitted.",
-				},
-				"to": map[string]any{
-					"type":        "string",
-					"description": "Recipient phone number or chat ID. Auto-detected from context if omitted.",
-				},
-			},
+		MakeToolDefinition("send_media", desc, map[string]any{
+			"type":       "object",
+			"properties": props,
 		}),
 		func(ctx context.Context, args map[string]any) (any, error) {
-			// Resolve media source
-			data, mimeType, filename, err := mediaSvc.ResolveMediaSource(ctx, args)
+			// Resolve media source.
+			var data []byte
+			var mimeType, filename string
+			var err error
+
+			if mediaSvc != nil {
+				data, mimeType, filename, err = mediaSvc.ResolveMediaSource(ctx, args)
+			} else {
+				data, mimeType, filename, err = resolveFilePathOnly(args)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("resolving media source: %w", err)
 			}
@@ -292,7 +315,7 @@ func registerSendMediaTool(executor *ToolExecutor, mediaSvc *media.MediaService,
 			}
 
 			// Web UI path: save to media store and emit SSE event.
-			if channelName == "webui" {
+			if channelName == "webui" && mediaSvc != nil {
 				stored, uploadErr := mediaSvc.Upload(ctx, media.UploadRequest{
 					Data:      data,
 					Filename:  filename,
@@ -377,4 +400,61 @@ func registerSendMediaTool(executor *ToolExecutor, mediaSvc *media.MediaService,
 		},
 	)
 	logger.Debug("registered send_media tool")
+}
+
+// resolveFilePathOnly reads a file from disk and detects its MIME type.
+// Used as a lightweight fallback when the full MediaService is not available.
+func resolveFilePathOnly(args map[string]any) ([]byte, string, string, error) {
+	filePath, _ := args["file_path"].(string)
+	if filePath == "" {
+		return nil, "", "", fmt.Errorf("file_path is required (media_id and url require native media service to be enabled)")
+	}
+
+	clean := filepath.Clean(filePath)
+	if strings.Contains(clean, "..") {
+		return nil, "", "", fmt.Errorf("path traversal not allowed")
+	}
+
+	data, err := os.ReadFile(clean)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("reading file: %w", err)
+	}
+
+	filename := filepath.Base(clean)
+	mimeType := detectMimeFromDataAndName(data, filename)
+	return data, mimeType, filename, nil
+}
+
+// detectMimeFromDataAndName uses http.DetectContentType with extension-based
+// fallback for types that content sniffing misidentifies (e.g. PDF, OGG).
+func detectMimeFromDataAndName(data []byte, filename string) string {
+	detected := http.DetectContentType(data)
+
+	// http.DetectContentType returns "application/octet-stream" for many
+	// binary formats. Use extension heuristics as a fallback.
+	if detected == "application/octet-stream" {
+		ext := strings.ToLower(filepath.Ext(filename))
+		switch ext {
+		case ".pdf":
+			return "application/pdf"
+		case ".doc":
+			return "application/msword"
+		case ".docx":
+			return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		case ".xls":
+			return "application/vnd.ms-excel"
+		case ".xlsx":
+			return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+		case ".mp3":
+			return "audio/mpeg"
+		case ".m4a":
+			return "audio/mp4"
+		case ".ogg":
+			return "audio/ogg"
+		case ".wav":
+			return "audio/wav"
+		}
+	}
+
+	return detected
 }
