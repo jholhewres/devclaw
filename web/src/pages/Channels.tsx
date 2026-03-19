@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -25,7 +25,7 @@ import { LoadingSpinner } from '@/components/ui/ConfigComponents'
 /* Channel metadata (icons, colors, descriptions, token hints) */
 const CHANNEL_META: Record<string, {
   color: string
-  icon: JSX.Element
+  icon: ReactNode
   descKey: string
   tokenHintKey: string
   tokenHintUrl?: string
