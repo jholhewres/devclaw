@@ -411,11 +411,11 @@ export function ApiConfig() {
 
           {/* Model */}
           <div data-field="model">
-            {provider?.allowCustomModel ? (
-              <ConfigField
-                label={t('apiConfig.model')}
-                hint={validationErrors.model}
-              >
+            <ConfigField
+              label={t('apiConfig.model')}
+              hint={validationErrors.model}
+            >
+              {visibleModels.length > 0 ? (
                 <ModelCombobox
                   value={config.model}
                   onChange={(v) => {
@@ -425,27 +425,7 @@ export function ApiConfig() {
                   suggestions={visibleModels}
                   placeholder={t('apiConfig.selectOrTypeModel')}
                 />
-              </ConfigField>
-            ) : visibleModels.length > 0 ? (
-              <ConfigField
-                label={t('apiConfig.model')}
-                hint={validationErrors.model}
-              >
-                <ConfigSelect
-                  value={config.model}
-                  onChange={(v) => {
-                    setConfig(prev => prev ? { ...prev, model: v } : prev)
-                    setValidationErrors(prev => { const n = { ...prev }; delete n.model; return n })
-                  }}
-                  options={visibleModels.map(m => ({ value: m, label: m }))}
-                  placeholder={t('apiConfig.selectModel')}
-                />
-              </ConfigField>
-            ) : (
-              <ConfigField
-                label={t('apiConfig.model')}
-                hint={validationErrors.model}
-              >
+              ) : (
                 <ConfigInput
                   value={config.model}
                   onChange={(v) => {
@@ -454,8 +434,8 @@ export function ApiConfig() {
                   }}
                   placeholder={t('setupPage.modelName')}
                 />
-              </ConfigField>
-            )}
+              )}
+            </ConfigField>
           </div>
 
           {/* Custom base URL */}

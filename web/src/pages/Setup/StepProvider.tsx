@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import type { SetupData } from './SetupWizard'
 import {
   StepContainer, StepHeader, FieldGroup, Field,
-  Input, PasswordInput, Select, Button,
+  Input, PasswordInput, Button,
 } from './SetupComponents'
 import { ModelCombobox } from '@/components/ui/ModelCombobox'
 import {
@@ -34,7 +34,6 @@ export function StepProvider({ data, updateData }: Props) {
 
   // Get current provider
   const provider = PROVIDERS.find((p) => p.value === data.provider)
-  const activeEndpoint = provider?.baseUrls?.find((ep) => ep.value === data.baseUrl)
   const visibleModels = getVisibleModels(provider, data.baseUrl)
 
   const handleTest = async () => {
@@ -201,28 +200,12 @@ export function StepProvider({ data, updateData }: Props) {
 
         {/* Model */}
         <Field label={t('setupPage.model')} icon={Cpu}>
-          {provider?.allowCustomModel ? (
+          {visibleModels.length > 0 ? (
             <ModelCombobox
               value={data.model}
               onChange={(val) => updateData({ model: val })}
               suggestions={visibleModels}
               placeholder={t('setupPage.selectOrTypeModel')}
-            />
-          ) : visibleModels.length > 0 ? (
-            <Select
-              value={data.model}
-              onChange={(val) => updateData({ model: val })}
-              placeholder={t('setupPage.selectModel')}
-              groups={[
-                ...(activeEndpoint?.extraModels ? [{
-                  label: activeEndpoint.label,
-                  options: activeEndpoint.extraModels.map(m => ({ value: m, label: m })),
-                }] : []),
-                ...(provider ? [{
-                  label: provider.label,
-                  options: provider.models.map(m => ({ value: m, label: m })),
-                }] : []),
-              ]}
             />
           ) : (
             <Input
