@@ -2480,21 +2480,38 @@ func (a *Assistant) collectPendingSubagentResults(ctx context.Context) string {
 	}
 
 	runs := a.subagentMgr.List()
+
+	// Collect both running subagents AND recently-completed ones.
+	// There's a race between completeRun (which sets status to completed
+	// before close(run.done)) and this function: if a subagent finishes
+	// between the yield trigger and this collection call, its status is
+	// already "completed" and would be missed if we only checked for
+	// "running". We include completed/failed runs from the last 60 seconds
+	// to catch this race window.
+	cutoff := time.Now().Add(-60 * time.Second)
 	var pending []*SubagentRun
+	var alreadyDone []*SubagentRun
 	for _, run := range runs {
-		if run.Status == SubagentStatusRunning {
+		switch run.Status {
+		case SubagentStatusRunning:
 			pending = append(pending, run)
+		case SubagentStatusCompleted, SubagentStatusFailed:
+			if !run.CompletedAt.IsZero() && run.CompletedAt.After(cutoff) {
+				alreadyDone = append(alreadyDone, run)
+			}
 		}
 	}
-	if len(pending) == 0 {
+	if len(pending) == 0 && len(alreadyDone) == 0 {
 		return ""
 	}
 
-	// Wait up to 60s for pending subagents.
+	// Wait up to 60s for still-running subagents.
 	waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	var results []string
+
+	// Collect results from still-running subagents (wait for completion).
 	for _, run := range pending {
 		completed, err := a.subagentMgr.Wait(waitCtx, run.ID)
 		if err != nil {
@@ -2509,6 +2526,21 @@ func (a *Assistant) collectPendingSubagentResults(ctx context.Context) string {
 		if len(result) > 2000 {
 			result = result[:2000] + "..."
 		}
+		results = append(results, fmt.Sprintf("- Subagent %s (%s) [%s]: %s", run.ID, run.Task, status, result))
+	}
+
+	// Collect results from already-completed subagents (race window).
+	for _, run := range alreadyDone {
+		status := "completed"
+		if run.Error != "" {
+			status = "failed: " + run.Error
+		}
+		result := run.Result
+		if len(result) > 2000 {
+			result = result[:2000] + "..."
+		}
+		a.logger.Info("collecting already-completed subagent result via yield",
+			"run_id", run.ID, "label", run.Label)
 		results = append(results, fmt.Sprintf("- Subagent %s (%s) [%s]: %s", run.ID, run.Task, status, result))
 	}
 
