@@ -198,6 +198,102 @@ func (p *SessionPersistence) SaveCompaction(sessionID string, entry CompactionEn
 	return nil
 }
 
+// TruncateAfterCompaction rewrites the JSONL file keeping only the last
+// compaction entry and the most recent conversation entries written after it.
+// This prevents unbounded JSONL growth on long-lived sessions.
+func (p *SessionPersistence) TruncateAfterCompaction(sessionID string, keepRecentEntries int) error {
+	mu := p.fileMuFor(sessionID)
+	mu.Lock()
+	defer mu.Unlock()
+
+	sanitized := sanitizeSessionID(sessionID)
+	path := filepath.Join(p.dir, sanitized+".jsonl")
+
+	rawLines, err := p.readRawLines(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read session file: %w", err)
+	}
+
+	if len(rawLines) <= keepRecentEntries+1 {
+		return nil // Already small enough.
+	}
+
+	// Find the last compaction entry.
+	lastCompactionIdx := -1
+	for i := len(rawLines) - 1; i >= 0; i-- {
+		if strings.Contains(rawLines[i], `"compaction_summary"`) {
+			lastCompactionIdx = i
+			break
+		}
+	}
+
+	var keepLines []string
+	if lastCompactionIdx >= 0 {
+		// Keep: compaction entry + entries after it.
+		keepLines = rawLines[lastCompactionIdx:]
+	} else {
+		// No compaction entry found — keep only the most recent entries.
+		start := len(rawLines) - keepRecentEntries
+		if start < 0 {
+			start = 0
+		}
+		keepLines = rawLines[start:]
+	}
+
+	// Rewrite the file atomically.
+	tmpPath := path + ".truncate.tmp"
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+
+	for _, line := range keepLines {
+		if _, err := f.Write([]byte(line + "\n")); err != nil {
+			f.Close()
+			os.Remove(tmpPath)
+			return fmt.Errorf("write truncated entry: %w", err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename truncated file: %w", err)
+	}
+
+	p.logger.Info("session JSONL truncated after compaction",
+		"session", sessionID,
+		"original_lines", len(rawLines),
+		"kept_lines", len(keepLines))
+	return nil
+}
+
+// readRawLines reads raw line strings from a JSONL file.
+func (p *SessionPersistence) readRawLines(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines, scanner.Err()
+}
+
 // LoadSession reads all entries and facts for a session.
 func (p *SessionPersistence) LoadSession(sessionID string) ([]ConversationEntry, []string, error) {
 	mu := p.fileMuFor(sessionID)

@@ -210,6 +210,15 @@ func (s *LCMStore) GetMessage(id int64) (*LCMMessage, error) {
 	return &m, nil
 }
 
+// DeleteMessage removes a message from the store by ID.
+func (s *LCMStore) DeleteMessage(id int64) error {
+	_, err := s.db.Exec(`DELETE FROM lcm_messages WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("lcm delete message: %w", err)
+	}
+	return nil
+}
+
 // GetMessageRange returns messages within a seq range (inclusive).
 func (s *LCMStore) GetMessageRange(convID string, fromSeq, toSeq int) ([]*LCMMessage, error) {
 	rows, err := s.db.Query(
@@ -681,6 +690,71 @@ func scanSummaries(rows *sql.Rows) ([]*LCMSummary, error) {
 		sums = append(sums, &sum)
 	}
 	return sums, rows.Err()
+}
+
+// ── Large File Storage ──────────────────────────────────────────────────────
+
+// LCMFile represents a large file intercepted during ingest.
+type LCMFile struct {
+	ID             string
+	ConversationID string
+	OriginalTokens int
+	OriginalChars  int
+	Summary        string
+	FilePath       string
+	CreatedAt      time.Time
+}
+
+// InsertFile stores metadata for an intercepted large file.
+func (s *LCMStore) InsertFile(f *LCMFile) error {
+	_, err := s.db.Exec(
+		`INSERT INTO lcm_files (id, conversation_id, original_tokens, original_chars, summary, file_path, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		f.ID, f.ConversationID, f.OriginalTokens, f.OriginalChars, f.Summary, f.FilePath, f.CreatedAt.Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("lcm insert file: %w", err)
+	}
+	return nil
+}
+
+// GetFile retrieves an LCM file by ID.
+func (s *LCMStore) GetFile(id string) (*LCMFile, error) {
+	var f LCMFile
+	var createdAt string
+	err := s.db.QueryRow(
+		`SELECT id, conversation_id, original_tokens, original_chars, summary, file_path, created_at
+		 FROM lcm_files WHERE id = ?`, id,
+	).Scan(&f.ID, &f.ConversationID, &f.OriginalTokens, &f.OriginalChars, &f.Summary, &f.FilePath, &createdAt)
+	if err != nil {
+		return nil, fmt.Errorf("lcm get file: %w", err)
+	}
+	f.CreatedAt = parseTimeStr(createdAt)
+	return &f, nil
+}
+
+// ListFiles returns all LCM files for a conversation.
+func (s *LCMStore) ListFiles(convID string) ([]*LCMFile, error) {
+	rows, err := s.db.Query(
+		`SELECT id, conversation_id, original_tokens, original_chars, summary, file_path, created_at
+		 FROM lcm_files WHERE conversation_id = ? ORDER BY created_at`, convID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("lcm list files: %w", err)
+	}
+	defer rows.Close()
+
+	var files []*LCMFile
+	for rows.Next() {
+		var f LCMFile
+		var createdAt string
+		if err := rows.Scan(&f.ID, &f.ConversationID, &f.OriginalTokens, &f.OriginalChars, &f.Summary, &f.FilePath, &createdAt); err != nil {
+			return nil, fmt.Errorf("lcm list files scan: %w", err)
+		}
+		f.CreatedAt = parseTimeStr(createdAt)
+		files = append(files, &f)
+	}
+	return files, rows.Err()
 }
 
 // parseTimeStr parses an RFC3339 time string from SQLite.

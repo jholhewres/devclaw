@@ -6,10 +6,12 @@ package copilot
 import (
 	"context"
 	"fmt"
+	"os"
 )
 
 // RegisterLCMDispatcher registers the `lcm` tool for lossless memory retrieval.
-func RegisterLCMDispatcher(executor *ToolExecutor, engine *LCMEngine) {
+// The llm parameter is optional; when nil, the expand_query action is unavailable.
+func RegisterLCMDispatcher(executor *ToolExecutor, engine *LCMEngine, llm *LLMClient) {
 	if engine == nil {
 		return
 	}
@@ -19,8 +21,8 @@ func RegisterLCMDispatcher(executor *ToolExecutor, engine *LCMEngine) {
 		"properties": map[string]any{
 			"action": map[string]any{
 				"type":        "string",
-				"enum":        []string{"grep", "describe", "expand"},
-				"description": "grep=search messages/summaries, describe=inspect DAG structure, expand=recover detail",
+				"enum":        []string{"grep", "describe", "expand", "describe_file", "expand_query"},
+				"description": "grep=search messages/summaries, describe=inspect DAG structure, expand=recover detail, describe_file=retrieve intercepted large file content, expand_query=search+expand+synthesize answer via LLM",
 			},
 			"query": map[string]any{
 				"type":        "string",
@@ -41,6 +43,10 @@ func RegisterLCMDispatcher(executor *ToolExecutor, engine *LCMEngine) {
 			"limit": map[string]any{
 				"type":        "integer",
 				"description": "Max results (for grep). Default: 20.",
+			},
+			"file_id": map[string]any{
+				"type":        "string",
+				"description": "File ID (for describe_file). Retrieves content of an intercepted large file.",
 			},
 		},
 		"required": []string{"action"},
@@ -91,8 +97,58 @@ func RegisterLCMDispatcher(executor *ToolExecutor, engine *LCMEngine) {
 				depth := intArg(args, "depth", 0)
 				return retrieval.Expand(convID, summaryID, depth)
 
+			case "expand_query":
+				query, _ := args["query"].(string)
+				if query == "" {
+					return nil, fmt.Errorf("query is required for expand_query action")
+				}
+				if llm == nil {
+					return nil, fmt.Errorf("expand_query requires an LLM client (not available)")
+				}
+				queryFn := func(ctx context.Context, systemPrompt, userContent string) (string, error) {
+					msgs := []chatMessage{
+						{Role: "system", Content: systemPrompt},
+						{Role: "user", Content: userContent},
+					}
+					// Use the agent's model override if available.
+					var model string
+					if agent != nil {
+						model = agent.modelOverride
+					}
+					resp, err := llm.CompleteWithFallbackUsingModel(ctx, model, msgs, nil)
+					if err != nil {
+						return "", err
+					}
+					return resp.Content, nil
+				}
+				return retrieval.ExpandQuery(ctx, convID, query, queryFn)
+
+			case "describe_file":
+				fileID, _ := args["file_id"].(string)
+				if fileID == "" {
+					return nil, fmt.Errorf("file_id is required for describe_file action")
+				}
+				lcmFile, err := engine.Store().GetFile(fileID)
+				if err != nil {
+					return nil, fmt.Errorf("file not found: %w", err)
+				}
+				if lcmFile.ConversationID != convID {
+					return nil, fmt.Errorf("file %q does not belong to this conversation", fileID)
+				}
+				content, err := os.ReadFile(lcmFile.FilePath)
+				if err != nil {
+					return nil, fmt.Errorf("read file content: %w", err)
+				}
+				// Truncate to 50K chars to avoid context overflow.
+				result := string(content)
+				if len(result) > 50000 {
+					result = result[:50000] + "\n...(truncated at 50,000 chars)"
+				}
+				return fmt.Sprintf("File: %s\nOriginal tokens: %d | Chars: %d\n\n%s",
+					fileID, lcmFile.OriginalTokens, lcmFile.OriginalChars, result), nil
+
 			default:
-				return nil, fmt.Errorf("unknown action: %s (valid: grep, describe, expand)", action)
+				return nil, fmt.Errorf("unknown action: %s (valid: grep, describe, expand, describe_file)", action)
 			}
 		},
 	)

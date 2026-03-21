@@ -211,6 +211,10 @@ func (g *Gateway) handleSessionByID(w http.ResponseWriter, r *http.Request) {
 		g.handleCompactSession(w, r)
 		return
 	}
+	if strings.HasSuffix(path, "/reset") {
+		g.handleResetSession(w, r)
+		return
+	}
 	if path == "" {
 		g.writeError(w, "session id required", 400)
 		return

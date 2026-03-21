@@ -333,6 +333,48 @@ func (p *SQLiteSessionPersistence) SaveCompaction(sessionID string, entry Compac
 	return nil
 }
 
+// TruncateAfterCompaction removes old entries keeping only the last compaction
+// entry and entries written after it.
+func (p *SQLiteSessionPersistence) TruncateAfterCompaction(sessionID string, keepRecentEntries int) error {
+	// Find the last compaction entry ID.
+	var lastCompactionID int64
+	err := p.db.QueryRow(`
+		SELECT id FROM session_entries
+		WHERE session_id = ? AND meta LIKE '%compaction_summary%'
+		ORDER BY id DESC LIMIT 1`, sessionID,
+	).Scan(&lastCompactionID)
+
+	if err != nil {
+		// No compaction entry found — fall back to keeping the most recent entries.
+		_, err := p.db.Exec(`
+			DELETE FROM session_entries
+			WHERE session_id = ? AND id NOT IN (
+				SELECT id FROM session_entries
+				WHERE session_id = ?
+				ORDER BY id DESC
+				LIMIT ?
+			)`, sessionID, sessionID, keepRecentEntries)
+		if err != nil {
+			return fmt.Errorf("truncate session entries: %w", err)
+		}
+		return nil
+	}
+
+	// Delete all entries before the compaction entry.
+	res, err := p.db.Exec(`
+		DELETE FROM session_entries
+		WHERE session_id = ? AND id < ?`, sessionID, lastCompactionID)
+	if err != nil {
+		return fmt.Errorf("truncate before compaction: %w", err)
+	}
+	removed, _ := res.RowsAffected()
+	if removed > 0 {
+		p.logger.Info("session truncated after compaction",
+			"session", sessionID, "removed", removed)
+	}
+	return nil
+}
+
 // Close is a no-op; the shared *sql.DB is closed at the application level.
 func (p *SQLiteSessionPersistence) Close() error {
 	return nil

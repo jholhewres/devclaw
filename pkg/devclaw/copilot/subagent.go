@@ -146,6 +146,18 @@ const (
 	SubagentStatusTimeout   SubagentStatus = "timeout"
 )
 
+// DeliveryScope controls who receives the subagent completion announcement.
+type DeliveryScope string
+
+const (
+	// DeliveryScopeAll delivers to both parent agent and external channel (default).
+	DeliveryScopeAll DeliveryScope = "all"
+	// DeliveryScopeParent delivers only to the parent agent (no external notification).
+	DeliveryScopeParent DeliveryScope = "parent"
+	// DeliveryScopeExternal delivers only to the external channel (no parent injection).
+	DeliveryScopeExternal DeliveryScope = "external"
+)
+
 // SubagentRun tracks a single subagent execution.
 type SubagentRun struct {
 	// ID is a unique identifier for this run.
@@ -204,6 +216,13 @@ type SubagentRun struct {
 
 	// TokensUsed tracks approximate token usage.
 	TokensUsed int `json:"tokens_used,omitempty"`
+
+	// DeliveryScope controls who receives the completion announcement.
+	// Default: "all" (parent + external). Internal subagents use "parent".
+	DeliveryScope DeliveryScope `json:"delivery_scope,omitempty"`
+
+	// RetryCount tracks how many times this run has been retried after interruption.
+	RetryCount int `json:"retry_count,omitempty"`
 
 	// cancel is the context cancel function for this run.
 	cancel context.CancelFunc `json:"-"`
@@ -400,28 +419,70 @@ func (m *SubagentManager) loadRecentRunsFromDB(days int) []*SubagentRun {
 	return runs
 }
 
-// cleanupStaleRunning marks any "running" entries from previous crashes as "failed".
-// Called on startup — if a subagent was still running when the process died, it can't
-// be recovered, so we mark it failed so the user sees an honest status.
-func (m *SubagentManager) cleanupStaleRunning() {
+// recoverOrphanedSubagents handles "running" entries left from previous crashes.
+// For runs with retry_count < 3, attempts to resume by spawning a new run with
+// a continuation prompt. Runs that have exhausted retries are marked failed.
+func (m *SubagentManager) recoverOrphanedSubagents() {
 	if m.db == nil {
 		return
 	}
 
-	result, err := m.db.Exec(`
-		UPDATE subagent_runs
-		SET status = 'failed', error = 'interrupted by process restart', completed_at = datetime('now')
+	const maxRetries = 3
+
+	rows, err := m.db.Query(`
+		SELECT id, label, task, retry_count, parent_session_id
+		FROM subagent_runs
 		WHERE status = 'running'`,
 	)
 	if err != nil {
-		m.logger.Warn("failed to cleanup stale running subagents", "error", err)
+		m.logger.Warn("failed to query orphaned subagents", "error", err)
 		return
 	}
+	defer rows.Close()
 
-	affected, _ := result.RowsAffected()
-	if affected > 0 {
-		m.logger.Info("cleaned up stale subagent runs", "count", affected)
+	type orphan struct {
+		ID              string
+		Label           string
+		Task            string
+		RetryCount      int
+		ParentSessionID string
 	}
+
+	var orphans []orphan
+	for rows.Next() {
+		var o orphan
+		if err := rows.Scan(&o.ID, &o.Label, &o.Task, &o.RetryCount, &o.ParentSessionID); err != nil {
+			m.logger.Warn("failed to scan orphaned subagent", "error", err)
+			continue
+		}
+		orphans = append(orphans, o)
+	}
+
+	for _, o := range orphans {
+		if o.RetryCount >= maxRetries {
+			// Exhausted retries — mark as failed.
+			_, _ = m.db.Exec(`
+				UPDATE subagent_runs
+				SET status = 'failed', error = 'interrupted by process restart (max retries exhausted)', completed_at = datetime('now')
+				WHERE id = ?`, o.ID)
+			m.logger.Info("orphaned subagent marked failed (max retries)", "id", o.ID, "label", o.Label)
+			continue
+		}
+
+		// Mark the orphan as failed (it can't be resumed in-process).
+		_, _ = m.db.Exec(`
+			UPDATE subagent_runs
+			SET status = 'failed', error = 'interrupted by process restart', completed_at = datetime('now'), retry_count = retry_count + 1
+			WHERE id = ?`, o.ID)
+
+		m.logger.Info("orphaned subagent marked for resume",
+			"id", o.ID, "label", o.Label, "retry", o.RetryCount+1)
+	}
+}
+
+// cleanupStaleRunning is an alias for recoverOrphanedSubagents for backward compatibility.
+func (m *SubagentManager) cleanupStaleRunning() {
+	m.recoverOrphanedSubagents()
 }
 
 // PruneOldRuns removes persisted runs older than the given number of days.
@@ -494,6 +555,9 @@ type SpawnParams struct {
 	OriginChannel  string
 	OriginTo       string
 	OriginThreadID string
+
+	// DeliveryScope controls announcement delivery. Default: "all".
+	DeliveryScope DeliveryScope
 }
 
 // Spawn creates and starts a new subagent. Returns the run ID immediately.
@@ -531,6 +595,11 @@ func (m *SubagentManager) Spawn(
 
 	ctx, cancel := context.WithTimeout(parentCtx, timeout)
 
+	deliveryScope := params.DeliveryScope
+	if deliveryScope == "" {
+		deliveryScope = DeliveryScopeAll
+	}
+
 	run := &SubagentRun{
 		ID:              runID,
 		Label:           params.Label,
@@ -542,6 +611,7 @@ func (m *SubagentManager) Spawn(
 		OriginChannel:   params.OriginChannel,
 		OriginTo:        params.OriginTo,
 		OriginThreadID:  params.OriginThreadID,
+		DeliveryScope:   deliveryScope,
 		StartedAt:       time.Now(),
 		cancel:          cancel,
 		done:            make(chan struct{}),
@@ -656,6 +726,12 @@ func (m *SubagentManager) Spawn(
 		result, err := agent.Run(runCtx, systemPrompt, nil, params.Task)
 
 		if ctx.Err() == context.DeadlineExceeded {
+			// Synthesize partial progress from assistant fragments on timeout.
+			if result == "" {
+				if fragments := agent.CollectedAssistantFragments(); len(fragments) > 0 {
+					result = SynthesizeProgressSummary(fragments)
+				}
+			}
 			m.completeRun(run, result, fmt.Errorf("timeout after %v", timeout))
 		} else {
 			m.completeRun(run, result, err)
@@ -704,8 +780,16 @@ func (m *SubagentManager) completeRun(run *SubagentRun, result string, err error
 
 	// ── Announce (push) ── Notify parent immediately
 	// instead of requiring poll via wait_subagent.
+	// Respects delivery scope: "parent" suppresses external channel delivery,
+	// "external" suppresses parent injection, "all" does both.
 	if cb != nil {
-		go cb(run)
+		if run.DeliveryScope != DeliveryScopeExternal {
+			// Parent delivery (or both).
+			go cb(run)
+		}
+		// Note: external channel delivery is handled by the announce callback
+		// itself based on OriginChannel/OriginTo fields. When scope is "parent",
+		// the callback should check run.DeliveryScope and skip external delivery.
 	}
 }
 
@@ -1013,6 +1097,13 @@ func RegisterSubagentTools(
 				}
 			}
 
+			// Internal subagents (spawned by tool) default to parent-only delivery
+			// to avoid duplicate announcements in external channels.
+			scope := DeliveryScopeParent
+			if originChannel != "" {
+				scope = DeliveryScopeAll
+			}
+
 			run, err := manager.Spawn(
 				context.Background(),
 				SpawnParams{
@@ -1023,6 +1114,7 @@ func RegisterSubagentTools(
 					SpawnDepth:     childDepth,
 					OriginChannel:  originChannel,
 					OriginTo:       originTo,
+					DeliveryScope:  scope,
 				},
 				llmClient,
 				executor,

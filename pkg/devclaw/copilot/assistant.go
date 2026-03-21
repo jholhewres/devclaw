@@ -2347,7 +2347,12 @@ func (a *Assistant) executeAgentWithStream(ctx context.Context, workspaceID stri
 
 	// Wire LCM engine for lossless compaction.
 	if a.lcmEngine != nil {
-		convID, err := a.lcmEngine.Bootstrap(sessionID)
+		// Pass session history for reconciliation with the LCM store.
+		var sessionHistory []ConversationEntry
+		if session != nil {
+			sessionHistory = session.RecentHistory(100)
+		}
+		convID, err := a.lcmEngine.Bootstrap(sessionID, sessionHistory)
 		if err != nil {
 			a.logger.Warn("lcm bootstrap failed", "session", sessionID, "err", err)
 		} else {
@@ -3162,9 +3167,9 @@ func (a *Assistant) registerSystemTools() {
 	// Register sessions_yield for cooperative turn-ending in subagent orchestration.
 	RegisterSessionsYieldTool(a.toolExecutor)
 
-	// Register LCM tool for lossless memory retrieval (grep, describe, expand).
+	// Register LCM tool for lossless memory retrieval (grep, describe, expand, expand_query).
 	if a.lcmEngine != nil {
-		RegisterLCMDispatcher(a.toolExecutor, a.lcmEngine)
+		RegisterLCMDispatcher(a.toolExecutor, a.lcmEngine, a.llmClient)
 	}
 
 	// Register team tools for persistent agents and team memory.

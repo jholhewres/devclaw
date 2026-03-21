@@ -421,6 +421,31 @@ func (g *Gateway) handleCompactSession(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleResetSession implements POST /api/sessions/:id/reset
+// Clears history and token counters but preserves config, skills, and facts.
+func (g *Gateway) handleResetSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		g.writeError(w, "method not allowed", 405)
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
+	path = strings.TrimSuffix(path, "/reset")
+	if path == "" {
+		g.writeError(w, "session id required", 400)
+		return
+	}
+	session, _ := g.assistant.WorkspaceManager().GetSessionByID(path)
+	if session == nil {
+		g.writeError(w, "session not found", 404)
+		return
+	}
+	session.ResetWithPreservation()
+	if g.assistant.UsageTracker() != nil {
+		g.assistant.UsageTracker().ResetSession(path)
+	}
+	g.writeJSON(w, 200, map[string]string{"status": "reset"})
+}
+
 // handleGlobalUsage implements GET /api/usage
 func (g *Gateway) handleGlobalUsage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

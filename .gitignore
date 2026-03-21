@@ -55,6 +55,7 @@ configs/bootstrap/USER.md
 # Config with secrets
 config.yaml
 config.local.yaml
+config.yaml.bak*
 .env
 .env.*
 !.env.example

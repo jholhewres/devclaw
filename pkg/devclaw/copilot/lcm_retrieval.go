@@ -3,15 +3,27 @@
 package copilot
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // maxGrepMessages caps the number of messages loaded for grep searches
 // to prevent excessive memory usage on long-lived conversations.
 const maxGrepMessages = 10000
+
+// lcmFormatTime formats a time in the system's local timezone for LCM tool output.
+func lcmFormatTime(t time.Time) string {
+	return t.In(time.Now().Location()).Format("2006-01-02 15:04")
+}
+
+// lcmFormatTimeShort formats a time as HH:MM in local timezone.
+func lcmFormatTimeShort(t time.Time) string {
+	return t.In(time.Now().Location()).Format("15:04")
+}
 
 // LCMRetrieval provides search and inspection over the LCM DAG.
 type LCMRetrieval struct {
@@ -195,8 +207,8 @@ func (r *LCMRetrieval) Describe(convID, summaryID string) (string, error) {
 	fmt.Fprintf(&b, "Kind: %s | Depth: %d | Tokens: %d\n", sum.Kind, sum.Depth, sum.TokenCount)
 	fmt.Fprintf(&b, "Source message tokens: %d\n", sum.SourceMessageTokenCount)
 	fmt.Fprintf(&b, "Time range: %s → %s\n",
-		sum.EarliestAt.Format("2006-01-02 15:04"),
-		sum.LatestAt.Format("2006-01-02 15:04"))
+		lcmFormatTime(sum.EarliestAt),
+		lcmFormatTime(sum.LatestAt))
 
 	// Parents.
 	parents, _ := r.store.GetSummaryParents(summaryID)
@@ -271,8 +283,8 @@ func (r *LCMRetrieval) DescribeTree(convID string) (string, error) {
 			}
 			fmt.Fprintf(&b, "  %s (%s d%d, %d tokens, %s, %s→%s)\n",
 				root.ID, root.Kind, root.Depth, root.TokenCount, msgInfo,
-				root.EarliestAt.Format("2006-01-02 15:04"),
-				root.LatestAt.Format("2006-01-02 15:04"))
+				lcmFormatTime(root.EarliestAt),
+				lcmFormatTime(root.LatestAt))
 		}
 	} else {
 		b.WriteString("No summaries yet — all messages are in the fresh tail.\n")
@@ -316,11 +328,11 @@ func (r *LCMRetrieval) expandRecursive(sum *LCMSummary, maxDepth, currentDepth i
 		}
 		fmt.Fprintf(&b, "%s=== Leaf %s (%d messages, %s→%s) ===\n",
 			indent, sum.ID, len(msgs),
-			sum.EarliestAt.Format("15:04"),
-			sum.LatestAt.Format("15:04"))
+			lcmFormatTimeShort(sum.EarliestAt),
+			lcmFormatTimeShort(sum.LatestAt))
 		for _, m := range msgs {
 			fmt.Fprintf(&b, "%s[#%d %s %s] %s\n",
-				indent, m.Seq, m.Role, m.CreatedAt.Format("15:04"), m.Content)
+				indent, m.Seq, m.Role, lcmFormatTimeShort(m.CreatedAt), m.Content)
 		}
 		return b.String()
 	}
@@ -333,8 +345,8 @@ func (r *LCMRetrieval) expandRecursive(sum *LCMSummary, maxDepth, currentDepth i
 
 	fmt.Fprintf(&b, "%s=== Condensed %s (depth %d, %d children, %s→%s) ===\n",
 		indent, sum.ID, sum.Depth, len(children),
-		sum.EarliestAt.Format("15:04"),
-		sum.LatestAt.Format("15:04"))
+		lcmFormatTimeShort(sum.EarliestAt),
+		lcmFormatTimeShort(sum.LatestAt))
 
 	for _, child := range children {
 		if currentDepth < maxDepth {
@@ -351,4 +363,84 @@ func (r *LCMRetrieval) expandRecursive(sum *LCMSummary, maxDepth, currentDepth i
 	}
 
 	return b.String()
+}
+
+// LCMQueryFn is a function that sends a scoped query to the LLM and returns
+// the synthesized answer. No tools are provided (prevents recursion).
+type LCMQueryFn func(ctx context.Context, systemPrompt, userContent string) (string, error)
+
+// ExpandQuery searches the LCM store for context relevant to the query,
+// expands matching summaries, and sends the expanded context to an LLM
+// for synthesis. Budget: 30k tokens max, 60s timeout.
+func (r *LCMRetrieval) ExpandQuery(ctx context.Context, convID, query string, queryFn LCMQueryFn) (string, error) {
+	const (
+		maxContextTokens = 30000
+		maxContextChars  = maxContextTokens * 4
+	)
+
+	// Step 1: Grep for relevant results.
+	grepResults, err := r.Grep(convID, query, false, 10)
+	if err != nil {
+		return "", fmt.Errorf("lcm expand_query grep: %w", err)
+	}
+
+	// Step 2: Find relevant summary IDs from grep results and expand them.
+	var expandedContext strings.Builder
+	expandedContext.WriteString("=== Search Results ===\n")
+	expandedContext.WriteString(grepResults)
+
+	// Extract summary IDs mentioned in results and expand them.
+	summaryIDs := extractSummaryIDs(grepResults)
+	for _, sid := range summaryIDs {
+		if expandedContext.Len() > maxContextChars {
+			break
+		}
+		expanded, err := r.Expand(convID, sid, 0)
+		if err != nil {
+			r.logger.Debug("lcm expand_query: failed to expand summary", "id", sid, "err", err)
+			continue
+		}
+		expandedContext.WriteString("\n=== Expanded: " + sid + " ===\n")
+		expandedContext.WriteString(expanded)
+	}
+
+	// Truncate if too large.
+	contextStr := expandedContext.String()
+	if len(contextStr) > maxContextChars {
+		contextStr = contextStr[:maxContextChars] + "\n...(truncated)"
+	}
+
+	// Step 3: Send to LLM for synthesis.
+	systemPrompt := "You are answering a question about earlier conversation context. " +
+		"Use ONLY the provided search results and expanded summaries to answer. " +
+		"Be precise and cite specific details. If the answer is not in the context, say so."
+
+	userContent := fmt.Sprintf("Question: %s\n\nContext:\n%s", query, contextStr)
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+
+	answer, err := queryFn(timeoutCtx, systemPrompt, userContent)
+	if err != nil {
+		return "", fmt.Errorf("lcm expand_query llm: %w", err)
+	}
+
+	return answer, nil
+}
+
+// extractSummaryIDs extracts summary IDs (sum_xxx format) from text.
+func extractSummaryIDs(text string) []string {
+	re := regexp.MustCompile(`sum_[a-f0-9-]+`)
+	matches := re.FindAllString(text, -1)
+
+	// Deduplicate.
+	seen := make(map[string]bool)
+	var unique []string
+	for _, m := range matches {
+		if !seen[m] {
+			seen[m] = true
+			unique = append(unique, m)
+		}
+	}
+	return unique
 }

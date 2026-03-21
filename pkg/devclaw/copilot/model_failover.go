@@ -4,6 +4,7 @@
 package copilot
 
 import (
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -54,6 +55,29 @@ const (
 	FailoverModelNotFound  FailoverReason = "model_not_found" // Model doesn't exist for this provider
 	FailoverUnknown        FailoverReason = "unknown"
 )
+
+// symbolicErrorCodes maps provider-specific error code identifiers to failover
+// reasons. Checked case-insensitively against the raw error message before
+// heuristic matching in ClassifyError.
+var symbolicErrorCodes = map[string]FailoverReason{
+	// Google Cloud / gRPC
+	"resource_exhausted": FailoverRateLimit,
+	"deadline_exceeded":  FailoverTimeout,
+	"unauthenticated":    FailoverAuth,
+
+	// AWS
+	"throttlingexception":          FailoverRateLimit,
+	"toomanyrequestsexception":     FailoverRateLimit,
+	"serviceunavailableexception":  FailoverServer,
+	"accessdeniedexception":        FailoverAuthPermanent,
+
+	// Anthropic
+	"overloaded_error": FailoverRateLimit,
+
+	// Generic / cross-provider
+	"rate_limit_error":       FailoverRateLimit,
+	"internal_server_error":  FailoverServer,
+}
 
 // ModelCooldown tracks a model's cooldown state.
 type ModelCooldown struct {
@@ -154,7 +178,13 @@ func (m *ModelFailoverManager) ReportSuccess(model string) {
 // ReportFailure records a failure for a model and applies cooldown if needed.
 // Returns the reason classification.
 func (m *ModelFailoverManager) ReportFailure(model string, statusCode int, errMsg string) FailoverReason {
-	reason := ClassifyError(statusCode, errMsg)
+	return m.ReportFailureWithCause(model, statusCode, errMsg, nil)
+}
+
+// ReportFailureWithCause is like ReportFailure but also traverses the error
+// cause chain for more accurate classification of wrapped errors.
+func (m *ModelFailoverManager) ReportFailureWithCause(model string, statusCode int, errMsg string, cause error) FailoverReason {
+	reason := ClassifyErrorFull(statusCode, errMsg, cause)
 	m.ApplyClassifiedFailure(model, reason)
 	return reason
 }
@@ -325,6 +355,60 @@ func (m *ModelFailoverManager) isInCooldownLocked(model string) bool {
 	return true
 }
 
+// unwrapCauseChain traverses the Go error chain via errors.Unwrap, returning
+// all errors in the chain from outermost to innermost. This handles both
+// single-wrap (errors.Unwrap) and multi-error (Unwrap() []error) patterns.
+func unwrapCauseChain(err error) []error {
+	if err == nil {
+		return nil
+	}
+	var chain []error
+	chain = append(chain, err)
+
+	// Single-wrap chain.
+	inner := errors.Unwrap(err)
+	for inner != nil {
+		chain = append(chain, inner)
+		inner = errors.Unwrap(inner)
+	}
+
+	// Multi-error pattern (Go 1.20+ errors.Join).
+	if multi, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, e := range multi.Unwrap() {
+			chain = append(chain, unwrapCauseChain(e)...)
+		}
+	}
+
+	return chain
+}
+
+// ClassifyErrorFull determines the failover reason by examining the HTTP status
+// code, error message, AND the full error cause chain. It walks inner causes
+// before applying timeout heuristics, so a RESOURCE_EXHAUSTED wrapped in an
+// AbortError is correctly classified as rate_limit, not timeout.
+func ClassifyErrorFull(statusCode int, errMsg string, cause error) FailoverReason {
+	// First try the surface-level classification.
+	reason := ClassifyError(statusCode, errMsg)
+	if reason != FailoverUnknown {
+		return reason
+	}
+
+	// If surface classification failed, walk the error cause chain.
+	if cause != nil {
+		for _, inner := range unwrapCauseChain(cause) {
+			if inner == nil {
+				continue
+			}
+			innerReason := ClassifyError(0, inner.Error())
+			if innerReason != FailoverUnknown {
+				return innerReason
+			}
+		}
+	}
+
+	return FailoverUnknown
+}
+
 // ClassifyError determines the failover reason from an HTTP status code and error message.
 func ClassifyError(statusCode int, errMsg string) FailoverReason {
 	switch statusCode {
@@ -356,6 +440,16 @@ func ClassifyError(statusCode int, errMsg string) FailoverReason {
 
 	// Check error message patterns.
 	lower := strings.ToLower(errMsg)
+
+	// Check for provider-specific symbolic error codes before heuristic matching.
+	// These are identifiers like RESOURCE_EXHAUSTED (Google/gRPC), ThrottlingException (AWS),
+	// etc. that may appear in error messages without a corresponding HTTP status code.
+	for code, reason := range symbolicErrorCodes {
+		if strings.Contains(lower, code) {
+			return reason
+		}
+	}
+
 	switch {
 	case strings.Contains(lower, "timeout") || strings.Contains(lower, "timed out"):
 		return FailoverTimeout

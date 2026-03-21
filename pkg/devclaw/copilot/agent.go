@@ -264,6 +264,10 @@ type AgentRun struct {
 	// Populated during the agent loop and retrieved via CollectedToolCalls().
 	collectedToolCalls []ToolCallRecord
 
+	// assistantFragments collects assistant response content from each turn.
+	// Used by subagent timeout handling to synthesize partial progress.
+	assistantFragments []string
+
 	logger *slog.Logger
 }
 
@@ -322,6 +326,43 @@ func (a *AgentRun) ToolSummary() string {
 // CollectedToolCalls returns the individual tool call records collected during the run.
 func (a *AgentRun) CollectedToolCalls() []ToolCallRecord {
 	return a.collectedToolCalls
+}
+
+// CollectedAssistantFragments returns assistant response fragments collected
+// during the agent run, for partial progress synthesis on timeout.
+func (a *AgentRun) CollectedAssistantFragments() []string {
+	return a.assistantFragments
+}
+
+// SynthesizeProgressSummary builds a concise summary from collected assistant
+// fragments. Used by subagent timeout handling to report partial progress
+// instead of a generic timeout message.
+func SynthesizeProgressSummary(fragments []string) string {
+	if len(fragments) == 0 {
+		return ""
+	}
+
+	const maxChars = 4000
+	var b strings.Builder
+	b.WriteString("Partial progress before timeout:\n\n")
+
+	for i, f := range fragments {
+		if b.Len() > maxChars {
+			b.WriteString("\n...(additional fragments truncated)")
+			break
+		}
+		// Truncate individual fragments to keep summary manageable.
+		if len(f) > 500 {
+			f = f[:500] + "..."
+		}
+		fmt.Fprintf(&b, "[Turn %d] %s\n", i+1, f)
+	}
+
+	result := b.String()
+	if len(result) > maxChars {
+		result = result[:maxChars] + "\n...(truncated)"
+	}
+	return result
 }
 
 // NewAgentRun creates a new agent runner.
@@ -822,6 +863,11 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 			ToolCalls: resp.ToolCalls,
 		})
 
+		// Collect assistant fragment for partial progress synthesis.
+		if resp.Content != "" {
+			a.assistantFragments = append(a.assistantFragments, resp.Content)
+		}
+
 		// ── Tool Loop Detection ──
 		// Record tool calls and check for repetitive patterns before execution.
 		// LoopBreaker → hard stop the entire agent run.
@@ -1055,6 +1101,23 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 					rec.Result = truncateStr(res, 500)
 				}
 				a.collectedToolCalls = append(a.collectedToolCalls, rec)
+			}
+		}
+
+		// ── Preemptive context overflow guard ──
+		// After each tool execution round, estimate total tokens. If above
+		// 85% of the context window, truncate old tool results in-place to
+		// prevent the next LLM call from hitting context_length_exceeded.
+		{
+			ctxWindow := ResolveContextWindowTokens(a.cfg.ContextTokens, a.modelOverride)
+			estimated := a.estimateTokens(messages)
+			highWater := int(float64(ctxWindow) * 0.85)
+			if estimated > highWater {
+				a.logger.Info("preemptive context guard: truncating old tool results",
+					"estimated_tokens", estimated, "high_water", highWater)
+				messages = GuardToolResultContext(messages, ctxWindow)
+				pcfg := resolvedCompactionConfig(a.cfg.Compaction).ContextPruning
+				messages = pruneByContextRatio(messages, a.estimateTokens(messages), ctxWindow, pcfg)
 			}
 		}
 
@@ -1682,6 +1745,114 @@ func pruneOldImages(messages []chatMessage, pruneAfterTurns int) []chatMessage {
 	return result
 }
 
+// deduplicateToolCallIDs removes duplicate tool_call_id references from messages.
+// Some providers (OpenAI-compatible) reject requests with duplicate IDs. Duplicates
+// can arise after compaction reassembly or if the LLM reuses IDs. The last occurrence
+// of each ID wins (both for assistant tool calls and tool result messages).
+func deduplicateToolCallIDs(messages []chatMessage) []chatMessage {
+	// Collect all tool call IDs and their last occurrence index.
+	type idEntry struct {
+		lastAssistantIdx int
+		lastToolIdx      int
+	}
+	seen := make(map[string]*idEntry)
+
+	for i, m := range messages {
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			for _, tc := range m.ToolCalls {
+				if tc.ID == "" {
+					continue
+				}
+				if _, ok := seen[tc.ID]; !ok {
+					seen[tc.ID] = &idEntry{lastAssistantIdx: -1, lastToolIdx: -1}
+				}
+				seen[tc.ID].lastAssistantIdx = i
+			}
+		}
+		if m.Role == "tool" && m.ToolCallID != "" {
+			if _, ok := seen[m.ToolCallID]; !ok {
+				seen[m.ToolCallID] = &idEntry{lastAssistantIdx: -1, lastToolIdx: -1}
+			}
+			seen[m.ToolCallID].lastToolIdx = i
+		}
+	}
+
+	// Check if any ID appears more than once.
+	hasDuplicates := false
+	idCount := make(map[string]int)
+	for _, m := range messages {
+		if m.Role == "assistant" {
+			for _, tc := range m.ToolCalls {
+				if tc.ID != "" {
+					idCount[tc.ID]++
+					if idCount[tc.ID] > 1 {
+						hasDuplicates = true
+					}
+				}
+			}
+		}
+		if m.Role == "tool" && m.ToolCallID != "" {
+			idCount[m.ToolCallID]++
+			if idCount[m.ToolCallID] > 1 {
+				hasDuplicates = true
+			}
+		}
+	}
+
+	if !hasDuplicates {
+		return messages
+	}
+
+	// Remove earlier occurrences, keeping only the last.
+	idSeen := make(map[string]bool)
+	var result []chatMessage
+
+	// Walk backwards to keep only last occurrences.
+	for i := len(messages) - 1; i >= 0; i-- {
+		m := messages[i]
+
+		if m.Role == "tool" && m.ToolCallID != "" {
+			key := "tool:" + m.ToolCallID
+			if idSeen[key] {
+				continue // Skip earlier duplicate.
+			}
+			idSeen[key] = true
+		}
+
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			// Filter tool calls to remove duplicates.
+			var keptCalls []ToolCall
+			for _, tc := range m.ToolCalls {
+				key := "call:" + tc.ID
+				if tc.ID != "" && idSeen[key] {
+					continue
+				}
+				if tc.ID != "" {
+					idSeen[key] = true
+				}
+				keptCalls = append(keptCalls, tc)
+			}
+			if len(keptCalls) == 0 && len(m.ToolCalls) > 0 {
+				// All tool calls were duplicates — skip this message entirely
+				// only if it has no content.
+				if s, ok := m.Content.(string); ok && s == "" {
+					continue
+				}
+			}
+			m.ToolCalls = keptCalls
+		}
+
+		result = append(result, m)
+	}
+
+	// Reverse to restore chronological order.
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
+	}
+
+	return result
+}
+
 // RepairToolUseResultPairing scans messages and removes orphan tool results
 // (tool_result messages whose corresponding tool_use was removed) and orphan
 // tool_use calls (assistant tool calls with no matching tool result).
@@ -1857,6 +2028,11 @@ func (a *AgentRun) pruneOldToolResults(messages []chatMessage, currentTurn int) 
 func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []chatMessage, tools []ToolDefinition) (*LLMResponse, error) {
 	toolResultTruncated := false
 
+	// Deduplicate tool call IDs: some providers (OpenAI-compatible) reject
+	// requests with duplicate tool_call_id values. This can happen after
+	// compaction reassembles messages or if the LLM reuses IDs.
+	messages = deduplicateToolCallIDs(messages)
+
 	// Pre-LLM context guard: cap oversized tool results and compact oldest
 	// when total tool content exceeds the context budget.
 	ctxTokens := ResolveContextWindowTokens(a.cfg.ContextTokens, a.modelOverride)
@@ -1868,6 +2044,8 @@ func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []ch
 
 	// Prune old images to prevent token accumulation from multimodal content.
 	messages = pruneOldImages(messages, DefaultImagePruneAfterTurns)
+
+	prevTokenEstimate := a.estimateTokens(messages)
 
 	for attempt := 0; attempt < a.maxCompactionAttempts; attempt++ {
 		// Use the shorter of: run context deadline or llmCallTimeout safety net.
@@ -1940,6 +2118,24 @@ func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []ch
 			a.logger.Warn("using emergency compression as last resort")
 			messages = a.emergencyCompression(ctx, messages)
 		}
+
+		// Progress check: if compaction didn't reduce tokens by at least 10%,
+		// escalate to the next strategy level to avoid spinning on the same approach.
+		currentTokens := a.estimateTokens(messages)
+		reduction := float64(prevTokenEstimate-currentTokens) / float64(prevTokenEstimate)
+		if reduction < 0.10 && attempt < a.maxCompactionAttempts-1 {
+			a.logger.Warn("compaction made insufficient progress, escalating",
+				"prev_tokens", prevTokenEstimate,
+				"current_tokens", currentTokens,
+				"reduction_pct", fmt.Sprintf("%.1f%%", reduction*100),
+				"attempt", attempt+1,
+			)
+			// Skip ahead: if we were at managed, jump to aggressive; if aggressive, jump to emergency.
+			if attempt == 0 {
+				messages = a.aggressiveCompaction(ctx, messages)
+			}
+		}
+		prevTokenEstimate = a.estimateTokens(messages)
 	}
 
 	return nil, fmt.Errorf("context overflow: compacted %d times but still exceeded context limit", a.maxCompactionAttempts)
@@ -2133,7 +2329,7 @@ func (a *AgentRun) managedCompaction(ctx context.Context, messages []chatMessage
 		if err := a.lcmIngestNew(ctx, messages); err != nil {
 			a.logger.Warn("lcm ingest failed, falling back to legacy compaction", "err", err)
 		} else {
-			summarizeFn := buildLCMSummarizeFn(a.llm, a.cfg.Compaction, a.modelOverride, a.logger)
+			summarizeFn := buildLCMSummarizeFn(a.llm, a.cfg.Compaction, a.cfg.Compaction.LCM, a.modelOverride, a.logger)
 			ctxWindow := a.getModelContextWindow()
 			compacted, err := a.lcmEngine.Compact(ctx, a.lcmConversationID, ctxWindow, summarizeFn)
 			if err != nil {
@@ -2321,6 +2517,11 @@ func (a *AgentRun) persistCompactionSummary(summary string, before, after int) {
 			a.logger.Warn("failed to persist compaction summary", "session", a.sessionID, "err", err)
 		} else {
 			a.logger.Debug("compaction summary persisted", "session", a.sessionID, "summary_len", len(summary), "before", before, "after", after)
+
+			// Truncate the session file to prevent unbounded JSONL growth.
+			if err := a.sessionPersistence.TruncateAfterCompaction(a.sessionID, after); err != nil {
+				a.logger.Warn("failed to truncate session after compaction", "session", a.sessionID, "err", err)
+			}
 		}
 	}
 
@@ -2345,7 +2546,7 @@ func (a *AgentRun) aggressiveCompaction(ctx context.Context, messages []chatMess
 		if err := a.lcmIngestNew(ctx, messages); err != nil {
 			a.logger.Warn("lcm aggressive: ingest failed, falling back to legacy", "err", err)
 		} else {
-			summarizeFn := buildLCMSummarizeFn(a.llm, a.cfg.Compaction, a.modelOverride, a.logger)
+			summarizeFn := buildLCMSummarizeFn(a.llm, a.cfg.Compaction, a.cfg.Compaction.LCM, a.modelOverride, a.logger)
 			ctxWindow := a.getModelContextWindow()
 			// Force a sweep even if ShouldCompact says no.
 			if _, err := a.lcmEngine.compactor.FullSweep(ctx, a.lcmConversationID, summarizeFn); err != nil {

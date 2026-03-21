@@ -81,6 +81,25 @@ type LCMConfig struct {
 
 	// MaxSummaryTokens is the max tokens per individual summary. Default: 2000.
 	MaxSummaryTokens int `yaml:"max_summary_tokens"`
+
+	// SummaryModel overrides the model used for LCM summarization calls.
+	// Priority: SummaryModel > CompactionConfig.CompactionModel > agent's current model.
+	// If empty, falls back to the next available model in the chain.
+	SummaryModel string `yaml:"summary_model"`
+
+	// SummaryProvider overrides the provider for LCM summarization calls.
+	// If empty, uses the provider from the session's LLM client.
+	SummaryProvider string `yaml:"summary_provider"`
+
+	// LargeFileTokenThreshold is the token count above which ingested content
+	// is intercepted and stored as a separate file with an exploration summary.
+	// Default: 25000. Set to 0 to disable.
+	LargeFileTokenThreshold int `yaml:"large_file_token_threshold"`
+
+	// PruneHeartbeatOK removes heartbeat turn cycles (user heartbeat prompt +
+	// assistant HEARTBEAT_OK response) from the LCM store during ingest.
+	// Default: true (nil pointer = true).
+	PruneHeartbeatOK *bool `yaml:"prune_heartbeat_ok"`
 }
 
 // QualityGuardConfig controls the post-summarization audit and retry mechanism.
@@ -173,6 +192,11 @@ func resolvedLCMConfig(cfg LCMConfig) LCMConfig {
 	if cfg.MaxSummaryTokens <= 0 {
 		cfg.MaxSummaryTokens = 2000
 	}
+	if cfg.LargeFileTokenThreshold == 0 {
+		cfg.LargeFileTokenThreshold = 25000
+	}
+	// PruneHeartbeatOK defaults to true (nil = true).
+	// SummaryModel and SummaryProvider default to "" (use fallback chain).
 	return cfg
 }
 
@@ -286,6 +310,11 @@ func buildStructuredCompactionPrompt(cfg CompactionConfig, toolFailures []string
 	b.WriteString("- If a tool result was ambiguous or errored, say so explicitly.\n")
 	b.WriteString("- Do NOT assert that something was done successfully unless the tool result confirmed it.\n")
 	b.WriteString("- NEVER use bold text formatting.\n")
+
+	b.WriteString("\nCRITICAL — LANGUAGE & PERSONA CONTINUITY:\n")
+	b.WriteString("- The summary MUST be written in the SAME LANGUAGE as the original conversation (e.g., Portuguese, English, Spanish).\n")
+	b.WriteString("- Preserve the assistant's persona, tone, and communication style.\n")
+	b.WriteString("- If the user has been addressed in a specific way (formal/informal), maintain that style.\n")
 
 	b.WriteString("\nMUST PRESERVE:\n")
 	b.WriteString("- Active tasks and their current status\n")
@@ -486,41 +515,43 @@ func pruneByContextRatio(messages []chatMessage, estimatedTokens, contextWindow 
 		softKeepTail = 1500
 	)
 
+	// Phase 1: Soft trim — truncate oversized tool results to head+tail.
+	// Always runs first to reduce size without losing all content.
+	trimmed := 0
 	for i := range result {
-		if protected[i] {
+		if protected[i] || result[i].Role != "tool" {
 			continue
 		}
-
-		if result[i].Role != "tool" {
-			continue
-		}
-
 		s, ok := result[i].Content.(string)
-		if !ok {
+		if !ok || len(s) <= cfg.SoftTrimMaxChars {
 			continue
 		}
+		keepHead := softKeepHead
+		keepTail := softKeepTail
+		if keepHead+keepTail >= len(s) {
+			continue
+		}
+		head := s[:keepHead]
+		tail := s[len(s)-keepTail:]
+		result[i].Content = head + "\n...[trimmed " + fmt.Sprintf("%d", len(s)-keepHead-keepTail) + " chars]...\n" + tail
+		trimmed++
+	}
 
-		if ratio >= cfg.HardClearRatio {
-			// Phase 2: hard clear.
+	// Phase 2: Hard clear — replace old tool results with a placeholder.
+	// Only runs if ratio is above HardClearRatio AND after soft trim has been applied.
+	if ratio >= cfg.HardClearRatio {
+		for i := range result {
+			if protected[i] || result[i].Role != "tool" {
+				continue
+			}
+			if _, ok := result[i].Content.(string); !ok {
+				continue
+			}
 			result[i] = chatMessage{
 				Role:       result[i].Role,
 				Content:    "[Old tool result content cleared]",
 				ToolCallID: result[i].ToolCallID,
 			}
-			continue
-		}
-
-		// Phase 1: soft trim.
-		if len(s) > cfg.SoftTrimMaxChars {
-			keepHead := softKeepHead
-			keepTail := softKeepTail
-			if keepHead+keepTail >= len(s) {
-				// Content is smaller than head+tail budget — just keep it as-is.
-				continue
-			}
-			head := s[:keepHead]
-			tail := s[len(s)-keepTail:]
-			result[i].Content = head + "\n...[trimmed " + fmt.Sprintf("%d", len(s)-keepHead-keepTail) + " chars]...\n" + tail
 		}
 	}
 

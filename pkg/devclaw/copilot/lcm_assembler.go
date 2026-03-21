@@ -161,8 +161,8 @@ func (a *LCMAssembler) renderSummary(s *LCMSummary) string {
 %s
 </summary>`,
 		s.ID, s.Kind, s.Depth, s.TokenCount, msgCount,
-		s.EarliestAt.Format("2006-01-02T15:04"),
-		s.LatestAt.Format("2006-01-02T15:04"),
+		lcmFormatTime(s.EarliestAt),
+		lcmFormatTime(s.LatestAt),
 		s.Content,
 	)
 }

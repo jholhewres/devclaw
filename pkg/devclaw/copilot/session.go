@@ -88,6 +88,7 @@ type SessionPersister interface {
 	SaveFacts(sessionID string, facts []string) error
 	SaveMeta(sessionID, channel, chatID string, config SessionConfig, activeSkills []string) error
 	SaveCompaction(sessionID string, entry CompactionEntry) error
+	TruncateAfterCompaction(sessionID string, keepRecentEntries int) error
 	DeleteSession(sessionID string) error
 	Rotate(sessionID string, maxLines int) error
 	LoadAll() (map[string]*SessionData, error)
@@ -473,6 +474,42 @@ func (s *Session) CompactHistory(summary string, keepRecent int) []ConversationE
 
 	s.history = recent
 	return old
+}
+
+// ResetWithPreservation clears conversation history, compaction state, and token
+// counters while preserving session identity and configuration fields:
+// ThinkingLevel, FastMode, Model, Language, Verbose, ToolProfile, BusinessContext,
+// Trigger, activeSkills, and facts. Also syncs the persistence layer so that the
+// next load does not restore stale data.
+// The lastActiveAt timestamp is bumped to prevent immediate pruning after reset.
+func (s *Session) ResetWithPreservation() {
+	s.mu.Lock()
+
+	// Clear transient state.
+	s.history = nil
+	s.compactionSummaries = nil
+	s.compactionCount = 0
+	s.totalPromptTokens = 0
+	s.totalCompletionTokens = 0
+	s.totalRequests = 0
+	s.lastPromptTokens = 0
+	s.lastOutputTokens = 0
+	s.lastCacheRead = 0
+	s.lastCacheWrite = 0
+	s.lastActiveAt = time.Now()
+
+	// Preserved: s.config (ThinkingLevel, FastMode, Model, Language, Verbose,
+	// ToolProfile, BusinessContext, Trigger), s.activeSkills, s.facts,
+	// s.ID, s.Channel, s.ChatID, s.CreatedAt, s.persistence.
+
+	persistence := s.persistence
+	sessionID := s.ID
+	s.mu.Unlock()
+
+	// Sync persistence outside the lock to avoid holding it during I/O.
+	if persistence != nil {
+		_ = persistence.TruncateAfterCompaction(sessionID, 0)
+	}
 }
 
 // SessionStore gerencia sessões ativas, criando e recuperando por canal e chatID.

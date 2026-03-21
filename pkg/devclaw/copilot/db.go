@@ -427,6 +427,17 @@ CREATE TABLE IF NOT EXISTS lcm_context_items (
 );
 CREATE INDEX IF NOT EXISTS idx_lcm_ci_conv ON lcm_context_items(conversation_id, ordinal);
 
+CREATE TABLE IF NOT EXISTS lcm_files (
+    id              TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    original_tokens INTEGER NOT NULL,
+    original_chars  INTEGER NOT NULL,
+    summary         TEXT NOT NULL,
+    file_path       TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id) ON DELETE CASCADE
+);
+
 `
 
 // lcmFTSSchema is created separately because FTS5 may not be available in all
@@ -538,6 +549,16 @@ func OpenDatabase(path string) (*sql.DB, error) {
 			FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_lcm_ci_conv ON lcm_context_items(conversation_id, ordinal)`,
+		`CREATE TABLE IF NOT EXISTS lcm_files (
+			id              TEXT PRIMARY KEY,
+			conversation_id TEXT NOT NULL,
+			original_tokens INTEGER NOT NULL,
+			original_chars  INTEGER NOT NULL,
+			summary         TEXT NOT NULL,
+			file_path       TEXT NOT NULL,
+			created_at      TEXT NOT NULL,
+			FOREIGN KEY (conversation_id) REFERENCES lcm_conversations(id) ON DELETE CASCADE
+		)`,
 	}
 	for _, m := range lcmMigrations {
 		if _, err := db.Exec(m); err != nil {
@@ -554,6 +575,7 @@ func OpenDatabase(path string) (*sql.DB, error) {
 	// if the column already exists (no IF NOT EXISTS support for ALTER TABLE ADD COLUMN).
 	columnMigrations := []string{
 		`ALTER TABLE jobs ADD COLUMN announce INTEGER DEFAULT 1`,
+		`ALTER TABLE subagent_runs ADD COLUMN retry_count INTEGER DEFAULT 0`,
 	}
 	for _, m := range columnMigrations {
 		_, _ = db.Exec(m) // ignore "duplicate column" errors

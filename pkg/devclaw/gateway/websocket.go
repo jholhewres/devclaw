@@ -22,18 +22,22 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot"
 	"github.com/jholhewres/devclaw/pkg/devclaw/webui"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  4096,
-	WriteBufferSize: 4096,
-	CheckOrigin:     func(r *http.Request) bool { return true },
-}
+// defaultHandshakeTimeout is the default WebSocket handshake timeout.
+// Override via DEVCLAW_WS_HANDSHAKE_TIMEOUT_MS env var (max 120000).
+const defaultHandshakeTimeout = 10 * time.Second
+
+// maxHandshakeTimeout is the upper bound for the configurable handshake timeout.
+const maxHandshakeTimeout = 120 * time.Second
 
 // wsMessage is the envelope for all WebSocket messages.
 type wsMessage struct {
@@ -50,21 +54,45 @@ type wsMessage struct {
 // WebSocketHandler upgrades HTTP connections to WebSocket and handles
 // bidirectional JSON-RPC communication.
 type WebSocketHandler struct {
-	api    webui.AssistantAPI
-	logger *slog.Logger
+	api      webui.AssistantAPI
+	logger   *slog.Logger
+	upgrader websocket.Upgrader
 }
 
 // NewWebSocketHandler creates a new WebSocket handler.
+// The handshake timeout defaults to 10s and can be overridden via
+// DEVCLAW_WS_HANDSHAKE_TIMEOUT_MS environment variable.
 func NewWebSocketHandler(api webui.AssistantAPI, logger *slog.Logger) *WebSocketHandler {
+	wsLogger := logger.With("component", "websocket")
+	timeout := defaultHandshakeTimeout
+	if ms := os.Getenv("DEVCLAW_WS_HANDSHAKE_TIMEOUT_MS"); ms != "" {
+		if v, err := strconv.Atoi(ms); err == nil && v > 0 {
+			timeout = time.Duration(v) * time.Millisecond
+			if timeout > maxHandshakeTimeout {
+				wsLogger.Warn("DEVCLAW_WS_HANDSHAKE_TIMEOUT_MS exceeds maximum, capping",
+					"requested_ms", v, "max_ms", maxHandshakeTimeout.Milliseconds())
+				timeout = maxHandshakeTimeout
+			}
+		} else {
+			wsLogger.Warn("invalid DEVCLAW_WS_HANDSHAKE_TIMEOUT_MS, using default",
+				"value", ms, "default_ms", defaultHandshakeTimeout.Milliseconds())
+		}
+	}
 	return &WebSocketHandler{
 		api:    api,
-		logger: logger.With("component", "websocket"),
+		logger: wsLogger,
+		upgrader: websocket.Upgrader{
+			ReadBufferSize:   4096,
+			WriteBufferSize:  4096,
+			HandshakeTimeout: timeout,
+			CheckOrigin:      func(r *http.Request) bool { return true },
+		},
 	}
 }
 
 // ServeHTTP upgrades the connection and starts the message loop.
 func (h *WebSocketHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		h.logger.Error("websocket upgrade failed", "error", err)
 		return

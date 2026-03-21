@@ -319,9 +319,15 @@ func TestLCMCompactor_ShouldCompact(t *testing.T) {
 
 	conv, _ := store.GetOrCreateConversation("sess-compact")
 
-	// Ingest 100 messages with 1000 tokens each.
+	// Ingest 100 messages with 1000 tokens each (alternating user/assistant).
 	for i := 0; i < 100; i++ {
-		store.IngestMessage(conv.ID, "user", "x", 1000)
+		role := "user"
+		content := "test user message content"
+		if i%2 == 1 {
+			role = "assistant"
+			content = "test assistant response content"
+		}
+		store.IngestMessage(conv.ID, role, content, 1000)
 	}
 
 	// Context window = 200000. Unsummarized (100-32)*1000 = 68000.
@@ -597,7 +603,7 @@ func TestLCMEngine_Bootstrap(t *testing.T) {
 	ccfg := DefaultCompactionConfig()
 	engine := NewLCMEngine(db, cfg, ccfg, testLogger())
 
-	convID, err := engine.Bootstrap("sess-boot")
+	convID, err := engine.Bootstrap("sess-boot", nil)
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
@@ -606,7 +612,7 @@ func TestLCMEngine_Bootstrap(t *testing.T) {
 	}
 
 	// Second bootstrap returns same ID.
-	convID2, err := engine.Bootstrap("sess-boot")
+	convID2, err := engine.Bootstrap("sess-boot", nil)
 	if err != nil {
 		t.Fatalf("bootstrap 2: %v", err)
 	}
@@ -621,7 +627,7 @@ func TestLCMEngine_IngestAndAssemble(t *testing.T) {
 	ccfg := DefaultCompactionConfig()
 	engine := NewLCMEngine(db, cfg, ccfg, testLogger())
 
-	convID, _ := engine.Bootstrap("sess-e2e")
+	convID, _ := engine.Bootstrap("sess-e2e", nil)
 
 	// Ingest messages via engine.
 	msgs := []chatMessage{
@@ -661,7 +667,7 @@ func TestLCMToolDispatcher_Registration(t *testing.T) {
 	engine := NewLCMEngine(db, cfg, ccfg, testLogger())
 
 	executor := NewToolExecutor(testLogger())
-	RegisterLCMDispatcher(executor, engine)
+	RegisterLCMDispatcher(executor, engine, nil)
 
 	// Check tool is registered.
 	tools := executor.Tools()

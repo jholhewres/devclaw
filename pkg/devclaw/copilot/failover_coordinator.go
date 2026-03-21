@@ -103,11 +103,19 @@ func (fc *FailoverCoordinator) ReportSuccess(model string, profileID profiles.Pr
 // to both the model and profile systems. This eliminates the inconsistency
 // where the same error could be classified differently by each system.
 func (fc *FailoverCoordinator) ReportFailure(model string, profileID profiles.ProfileID, statusCode int, errMsg string) FailoverReason {
+	return fc.ReportFailureWithCause(model, profileID, statusCode, errMsg, nil)
+}
+
+// ReportFailureWithCause is like ReportFailure but also traverses the error
+// cause chain for more accurate classification of wrapped errors (e.g.,
+// RESOURCE_EXHAUSTED wrapped in AbortError).
+func (fc *FailoverCoordinator) ReportFailureWithCause(model string, profileID profiles.ProfileID, statusCode int, errMsg string, cause error) FailoverReason {
 	fc.mu.Lock()
 	defer fc.mu.Unlock()
 
 	// Classify once — single source of truth for both systems.
-	reason := ClassifyError(statusCode, errMsg)
+	// Uses ClassifyErrorFull to traverse wrapped error causes.
+	reason := ClassifyErrorFull(statusCode, errMsg, cause)
 
 	// Apply pre-classified reason to model failover (avoids re-classification).
 	if fc.modelMgr != nil && model != "" {

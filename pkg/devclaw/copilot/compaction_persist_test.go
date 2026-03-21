@@ -79,6 +79,10 @@ func (m *mockSessionPersister) SaveCompaction(sessionID string, entry Compaction
 	return nil
 }
 
+func (m *mockSessionPersister) TruncateAfterCompaction(sessionID string, keepRecentEntries int) error {
+	return nil
+}
+
 func (m *mockSessionPersister) DeleteSession(sessionID string) error {
 	return nil
 }

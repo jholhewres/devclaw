@@ -121,6 +121,11 @@ type PromptComposer struct {
 	isSubagent    bool // When true, only AGENTS.md + TOOLS.md are loaded.
 	contextEngines *ContextEngineRegistry // Pluggable context engines.
 
+	// memorySectionBuilders holds pluggable memory section builders.
+	// Each builder contributes an additional section to the memory layer.
+	memorySectionBuildersMu sync.RWMutex
+	memorySectionBuilders   []MemoryPromptSectionBuilder
+
 	// bootstrapCache caches bootstrap file contents to avoid re-reading from disk
 	// on every prompt compose. Invalidated when file content changes (hash mismatch).
 	bootstrapCacheMu sync.RWMutex
@@ -145,6 +150,16 @@ type SkillInfo struct {
 	Location      string   // Absolute path to SKILL.md ("" for built-in skills)
 	HasReferences bool     // True if the skill has a references/ directory
 	Tools         []string
+}
+
+// MemoryPromptSectionBuilder is implemented by memory plugins that want to
+// contribute additional sections to the memory layer of the system prompt.
+// Each registered builder is called during buildMemoryLayer and its output
+// is concatenated after the core memory sections.
+type MemoryPromptSectionBuilder interface {
+	// BuildMemorySection returns a prompt section string (may be empty).
+	// Implementations should be fast (<100ms) to avoid blocking prompt composition.
+	BuildMemorySection(session *Session, input string) string
 }
 
 // NewPromptComposer creates a new prompt composer.
@@ -179,6 +194,15 @@ func (p *PromptComposer) SetSQLiteMemory(store *memory.SQLiteStore) {
 // SetContextEngines sets the pluggable context engine registry.
 func (p *PromptComposer) SetContextEngines(registry *ContextEngineRegistry) {
 	p.contextEngines = registry
+}
+
+// RegisterMemorySectionBuilder adds a pluggable memory section builder.
+// Builders are called in registration order during buildMemoryLayer.
+// Thread-safe: may be called concurrently with prompt composition.
+func (p *PromptComposer) RegisterMemorySectionBuilder(builder MemoryPromptSectionBuilder) {
+	p.memorySectionBuildersMu.Lock()
+	p.memorySectionBuilders = append(p.memorySectionBuilders, builder)
+	p.memorySectionBuildersMu.Unlock()
 }
 
 // SetSkillGetter sets the function used to retrieve skill system prompts.
@@ -1019,18 +1043,48 @@ func (p *PromptComposer) buildSkillsLayerReference() string {
 		entries[i] = entry.String()
 	}
 
-	included := findMaxSkillsFit(entries, maxChars)
+	// Reserve budget for preamble (already written) + closing tags.
+	preambleLen := b.Len()
+	entriesBudget := maxChars - preambleLen - 50 // 50 chars for </available_skills> + comment
+	included := findMaxSkillsFit(entries, entriesBudget)
 
 	b.WriteString("<available_skills>\n")
 	for i := 0; i < included; i++ {
 		b.WriteString(entries[i])
 	}
-	b.WriteString("</available_skills>\n")
 
-	if included < len(allSkills) {
-		b.WriteString(fmt.Sprintf("\n_%d of %d skills shown (budget limit)._\n", included, len(allSkills)))
+	// Compact fallback: skills that didn't fit in full format are shown in
+	// a name+description+location format. Descriptions are truncated to 80
+	// chars to preserve LLM matching while saving tokens.
+	if included < len(skills) {
+		remaining := skills[included:]
+		compactEntries := make([]string, len(remaining))
+		for i, skill := range remaining {
+			loc := compactHomePath(skill.Location, homeDir)
+			desc := skill.Description
+			if len(desc) > 80 {
+				desc = desc[:80] + "..."
+			}
+			compactEntries[i] = fmt.Sprintf("  <skill name=\"%s\" description=\"%s\" location=\"%s\" />\n",
+				xmlAttrEscape(skill.Name), xmlAttrEscape(desc), xmlAttrEscape(loc))
+		}
+
+		// Calculate remaining budget.
+		currentChars := b.Len()
+		remainingBudget := maxChars - currentChars - 50 // Reserve for closing tags.
+		compactIncluded := findMaxSkillsFit(compactEntries, remainingBudget)
+
+		for i := 0; i < compactIncluded; i++ {
+			b.WriteString(compactEntries[i])
+		}
+
+		totalShown := included + compactIncluded
+		if totalShown < len(allSkills) {
+			b.WriteString(fmt.Sprintf("  <!-- %d more skills omitted -->\n", len(allSkills)-totalShown))
+		}
 	}
 
+	b.WriteString("</available_skills>\n")
 	return b.String()
 }
 
@@ -1227,6 +1281,28 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 			fmt.Fprintf(&b, "- %s\n", SanitizeMemoryContent(fact))
 		}
 		parts = append(parts, b.String())
+	}
+
+	// Pluggable memory section builders: call all registered builders.
+	// Each call is wrapped in a recover to prevent a panicking plugin from
+	// crashing prompt composition.
+	p.memorySectionBuildersMu.RLock()
+	builders := make([]MemoryPromptSectionBuilder, len(p.memorySectionBuilders))
+	copy(builders, p.memorySectionBuilders)
+	p.memorySectionBuildersMu.RUnlock()
+
+	for _, builder := range builders {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// Silently skip this builder — panics in plugins must not
+					// break prompt composition.
+				}
+			}()
+			if section := builder.BuildMemorySection(session, input); section != "" {
+				parts = append(parts, section)
+			}
+		}()
 	}
 
 	return strings.Join(parts, "\n")
