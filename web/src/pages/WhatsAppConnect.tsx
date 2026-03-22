@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { QRCodeSVG } from 'qrcode.react'
 import {
@@ -48,6 +48,13 @@ const tabFromHash = (): Tab => {
 export function WhatsAppConnect() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { instanceId } = useParams<{ instanceId?: string }>()
+
+  // When instanceId is set, use instance-specific API endpoints.
+  // Otherwise use the default (backward-compatible) endpoints.
+  const isInstance = !!instanceId
+  const instanceLabel = instanceId ? ` (${instanceId})` : ''
+
   const [activeTab, setActiveTab] = useState<Tab>(tabFromHash())
   const [state, setState] = useState<ConnectionState>('loading')
   const [qrCode, setQrCode] = useState('')
@@ -55,6 +62,30 @@ export function WhatsAppConnect() {
   const [refreshing, setRefreshing] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
   const eventSourceRef = useRef<EventSource | null>(null)
+
+  // API helpers that route to instance-specific endpoints when needed.
+  const getStatus = useCallback(() =>
+    isInstance
+      ? api.channels.instanceStatus('whatsapp', instanceId!)
+      : api.channels.whatsapp.status()
+  , [isInstance, instanceId])
+
+  const requestQR = useCallback(() =>
+    isInstance
+      ? api.channels.instanceRequestQR('whatsapp', instanceId!)
+      : api.channels.whatsapp.requestQR()
+  , [isInstance, instanceId])
+
+  const disconnect = useCallback(() =>
+    isInstance
+      ? api.channels.instanceDisconnect('whatsapp', instanceId!)
+      : api.channels.whatsapp.disconnect()
+  , [isInstance, instanceId])
+
+  // SSE endpoint for QR streaming.
+  const qrEndpoint = isInstance
+    ? `/api/channels/instances/whatsapp/${instanceId}/qr`
+    : '/api/channels/whatsapp/qr'
 
   const connectSSE = useCallback(() => {
     if (eventSourceRef.current) {
@@ -64,8 +95,8 @@ export function WhatsAppConnect() {
 
     const token = localStorage.getItem('devclaw_token')
     const url = token
-      ? `/api/channels/whatsapp/qr?token=${encodeURIComponent(token)}`
-      : '/api/channels/whatsapp/qr'
+      ? `${qrEndpoint}?token=${encodeURIComponent(token)}`
+      : qrEndpoint
 
     const es = new EventSource(url)
     eventSourceRef.current = es
@@ -118,18 +149,23 @@ export function WhatsAppConnect() {
       setState('error')
       setMessage(t('whatsapp.sseLost'))
     }
-  }, [t])
+  }, [t, qrEndpoint])
 
   useEffect(() => {
-    api.channels.whatsapp
-      .status()
+    getStatus()
       .then((status) => {
         if (status.connected) {
           setState('connected')
           setMessage(t('whatsapp.connected'))
-        } else {
+        } else if (status.needs_qr) {
+          // Not connected and needs QR — open SSE stream to receive codes
+          // but do NOT auto-request a new QR. User must click "Generate QR".
+          setState('waiting_qr')
+          setMessage(t('whatsapp.waitingQR'))
           connectSSE()
-          api.channels.whatsapp.requestQR().catch(() => {})
+        } else {
+          setState('waiting_qr')
+          setMessage(t('whatsapp.waitingQR'))
         }
       })
       .catch(() => {
@@ -140,12 +176,12 @@ export function WhatsAppConnect() {
     return () => {
       eventSourceRef.current?.close()
     }
-  }, [connectSSE, t])
+  }, [connectSSE, getStatus, t])
 
   const handleRefresh = async () => {
     setRefreshing(true)
     try {
-      await api.channels.whatsapp.requestQR()
+      await requestQR()
       setState('waiting_qr')
       setMessage(t('whatsapp.generatingQR'))
       setQrCode('')
@@ -161,7 +197,7 @@ export function WhatsAppConnect() {
   const handleDisconnect = async () => {
     setDisconnecting(true)
     try {
-      await api.channels.whatsapp.disconnect()
+      await disconnect()
       setState('waiting_qr')
       setMessage(t('whatsapp.disconnected'))
       setQrCode('')
@@ -199,7 +235,7 @@ export function WhatsAppConnect() {
             {t('channelsPage.backToChannels')}
           </button>
           <div className="flex flex-col gap-1">
-            <h2 className="text-lg font-medium text-primary">{t('whatsapp.title')}</h2>
+            <h2 className="text-lg font-medium text-primary">{t('whatsapp.title')}{instanceLabel}</h2>
             <p className="text-sm text-tertiary">{t('whatsapp.subtitle')}</p>
           </div>
         </div>
@@ -1035,7 +1071,7 @@ function SettingsTab() {
       <Card className="p-6">
         <h3 className="mb-4 text-sm font-semibold text-primary">{t('whatsapp.settings.bot')}</h3>
 
-        <div className="flex items-start justify-between border-b border-secondarypy-4">
+        <div className="flex items-start justify-between border-b border-secondary py-4">
           <div className="flex flex-col gap-1">
             <span className="text-sm font-medium text-primary">
               {t('whatsapp.settings.respondToGroups')}
@@ -1074,7 +1110,7 @@ function SettingsTab() {
           {t('whatsapp.settings.behavior')}
         </h3>
 
-        <div className="flex items-start justify-between border-b border-secondarypy-4">
+        <div className="flex items-start justify-between border-b border-secondary py-4">
           <div className="flex flex-col gap-1">
             <span className="text-sm font-medium text-primary">
               {t('whatsapp.settings.autoRead')}

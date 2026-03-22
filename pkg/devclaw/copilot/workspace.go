@@ -7,7 +7,7 @@
 //   - Each workspace has its own session store (isolated conversation memory)
 //   - A workspace can be assigned to specific users (JIDs) or groups
 //   - One user can belong to one workspace at a time
-//   - There is always a "default" workspace for unassigned users
+//   - There is always a "main" workspace for unassigned users
 //
 // Example use cases:
 //   - Personal workspace: your own assistant with custom instructions
@@ -20,9 +20,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
 )
 
 // Workspace represents an isolated assistant profile.
@@ -40,6 +44,11 @@ type Workspace struct {
 	// Instructions are the custom system prompt for this workspace.
 	// Overrides the global instructions when set.
 	Instructions string `yaml:"instructions"`
+
+	// Soul is the agent's persona/personality definition.
+	// Personality traits, core truths, boundaries, vibe.
+	// Injected as persona layer before operational instructions.
+	Soul string `yaml:"soul,omitempty" json:"soul,omitempty"`
 
 	// Model overrides the default LLM model.
 	// Empty = use global default.
@@ -128,13 +137,14 @@ type WorkspaceConfig struct {
 // DefaultWorkspaceConfig returns a minimal workspace configuration.
 func DefaultWorkspaceConfig() WorkspaceConfig {
 	return WorkspaceConfig{
-		DefaultWorkspace: "default",
+		DefaultWorkspace: "main",
 		Workspaces: []Workspace{
 			{
-				ID:          "default",
-				Name:        "Default",
-				Description: "Default workspace for all users",
+				ID:          "main",
+				Name:        "Main",
+				Description: "Main agent for all users",
 				Active:      true,
+				Default:     true,
 				CreatedAt:   time.Now(),
 			},
 		},
@@ -217,12 +227,63 @@ func NewWorkspaceManager(globalCfg *Config, wsCfg WorkspaceConfig, logger *slog.
 		}
 	}
 
+	// Migration: rename "default" → "main" for alignment with OpenClaw conventions.
+	if ws, ok := wm.workspaces["default"]; ok {
+		if _, hasMain := wm.workspaces["main"]; !hasMain {
+			ws.ID = "main"
+			if ws.Name == "Default" || ws.Name == "" {
+				ws.Name = "Main"
+			}
+			ws.Default = true
+			delete(wm.workspaces, "default")
+			wm.workspaces["main"] = ws
+			if store, ok := wm.sessions["default"]; ok {
+				delete(wm.sessions, "default")
+				wm.sessions["main"] = store
+			}
+			if wm.defaultWSID == "default" {
+				wm.defaultWSID = "main"
+			}
+			for k, v := range wm.userMap {
+				if v == "default" {
+					wm.userMap[k] = "main"
+				}
+			}
+			for k, v := range wm.groupMap {
+				if v == "default" {
+					wm.groupMap[k] = "main"
+				}
+			}
+			for k, v := range wm.channelMap {
+				if v == "default" {
+					wm.channelMap[k] = "main"
+				}
+			}
+			wm.logger.Info("migrated default workspace to main")
+		}
+	}
+
+	// Scaffold workspace directories for existing non-main agents
+	for _, ws := range wm.workspaces {
+		if ws.ID == wm.defaultWSID {
+			continue
+		}
+		if !hasWorkspaceDir(ws.ID) {
+			if err := ScaffoldWorkspaceDir(ws.ID, ws); err != nil {
+				wm.logger.Warn("failed to scaffold workspace", "workspace", ws.ID, "error", err)
+			} else {
+				wm.logger.Info("scaffolded workspace directory", "workspace", ws.ID)
+			}
+		}
+	}
+
 	// Ensure default workspace exists.
 	if _, ok := wm.workspaces[wm.defaultWSID]; !ok && wm.defaultWSID != "" {
 		wm.workspaces[wm.defaultWSID] = &Workspace{
-			ID:     wm.defaultWSID,
-			Name:   "Default",
-			Active: true,
+			ID:      wm.defaultWSID,
+			Name:    "Main",
+			Active:  true,
+			Default: true,
 		}
 		wm.sessions[wm.defaultWSID] = NewSessionStore(
 			logger.With("workspace", wm.defaultWSID),
@@ -264,31 +325,40 @@ type ResolvedWorkspace struct {
 // Resolve determines which workspace a message belongs to and returns
 // the workspace along with its isolated session.
 func (wm *WorkspaceManager) Resolve(channel, chatID, senderJID string, isGroup bool) *ResolvedWorkspace {
+	// Fast path: read lock for the common case where session store exists.
 	wm.mu.RLock()
-	defer wm.mu.RUnlock()
-
 	wsID := wm.resolveWorkspaceIDWithChannel(channel, chatID, senderJID, isGroup)
 
 	ws, ok := wm.workspaces[wsID]
 	if !ok || !ws.Active {
-		// Fallback to default.
 		wsID = wm.defaultWSID
 		ws = wm.workspaces[wsID]
 	}
 
 	store := wm.sessions[wsID]
+	wm.mu.RUnlock()
+
+	// Slow path: upgrade to write lock to create a missing session store.
 	if store == nil {
-		store = NewSessionStore(wm.logger)
-		if wm.persistence != nil {
-			store.SetPersistence(wm.persistence)
+		wm.mu.Lock()
+		// Double-check after acquiring write lock.
+		store = wm.sessions[wsID]
+		if store == nil {
+			store = NewSessionStore(wm.logger)
+			if wm.persistence != nil {
+				store.SetPersistence(wm.persistence)
+			}
+			wm.sessions[wsID] = store
 		}
-		wm.sessions[wsID] = store
+		wm.mu.Unlock()
 	}
 
 	session := store.GetOrCreate(channel, chatID)
 
 	// Apply workspace overrides to session config.
+	wm.mu.RLock()
 	wm.applyWorkspaceConfig(ws, session)
+	wm.mu.RUnlock()
 
 	return &ResolvedWorkspace{
 		Workspace:    ws,
@@ -319,31 +389,40 @@ func (wm *WorkspaceManager) resolveWorkspaceID(chatID, senderJID string, isGroup
 }
 
 // resolveWorkspaceIDWithChannel finds the workspace for a channel/JID/group,
-// including channel-level routing.
+// including channel-level routing with accountId support (e.g. "whatsapp:personal").
 func (wm *WorkspaceManager) resolveWorkspaceIDWithChannel(channel, chatID, senderJID string, isGroup bool) string {
 	normSender := normalizeJID(senderJID)
 	normChat := normalizeJID(chatID)
 
-	// 1. Check group assignment first (for group messages).
+	// 1. Group assignment (highest priority)
 	if isGroup {
 		if wsID, ok := wm.groupMap[normChat]; ok {
 			return wsID
 		}
 	}
 
-	// 2. Check user assignment.
+	// 2. User assignment
 	if wsID, ok := wm.userMap[normSender]; ok {
 		return wsID
 	}
 
-	// 3. Check channel routing.
+	// 3. Channel routing — exact match first, then base channel fallback
 	if channel != "" {
-		if wsID, ok := wm.channelMap[strings.ToLower(channel)]; ok {
+		lc := strings.ToLower(channel)
+		// 3a. Exact: "whatsapp:personal" or "telegram:support-bot"
+		if wsID, ok := wm.channelMap[lc]; ok {
 			return wsID
+		}
+		// 3b. Fallback: strip accountId → try base channel "whatsapp"
+		if idx := strings.IndexByte(lc, ':'); idx > 0 {
+			base := lc[:idx]
+			if wsID, ok := wm.channelMap[base]; ok {
+				return wsID
+			}
 		}
 	}
 
-	// 4. Fallback to default.
+	// 4. Default workspace
 	return wm.defaultWSID
 }
 
@@ -366,9 +445,29 @@ func (wm *WorkspaceManager) applyWorkspaceConfig(ws *Workspace, session *Session
 		cfg.Trigger = ws.Trigger
 		changed = true
 	}
-	if ws.Instructions != "" && cfg.BusinessContext != ws.Instructions {
-		cfg.BusinessContext = ws.Instructions
-		changed = true
+	if ws.ID != wm.defaultWSID && hasWorkspaceDir(ws.ID) {
+		// File-backed: Soul comes from SOUL.md via bootstrap layer.
+		// Only Instructions go to BusinessContext.
+		if ws.Instructions != "" && cfg.BusinessContext != ws.Instructions {
+			cfg.BusinessContext = ws.Instructions
+			changed = true
+		}
+	} else {
+		// Main agent or no workspace dir: existing Soul + Instructions behavior
+		if ws.Soul != "" || ws.Instructions != "" {
+			var parts []string
+			if ws.Soul != "" {
+				parts = append(parts, ws.Soul)
+			}
+			if ws.Instructions != "" {
+				parts = append(parts, ws.Instructions)
+			}
+			combined := strings.Join(parts, "\n\n")
+			if cfg.BusinessContext != combined {
+				cfg.BusinessContext = combined
+				changed = true
+			}
+		}
 	}
 
 	if changed {
@@ -379,6 +478,80 @@ func (wm *WorkspaceManager) applyWorkspaceConfig(ws *Workspace, session *Session
 	if len(ws.Skills) > 0 {
 		session.SetActiveSkills(ws.Skills)
 	}
+}
+
+// --- Workspace Directory Scaffolding ---
+
+// hasWorkspaceDir checks if a workspace directory exists on disk.
+func hasWorkspaceDir(wsID string) bool {
+	dir := paths.ResolveWorkspaceDir(wsID)
+	info, err := os.Stat(dir)
+	return err == nil && info.IsDir()
+}
+
+// FormatIdentityMd converts an IdentityConfig to markdown content.
+func FormatIdentityMd(id *IdentityConfig) string {
+	if id == nil {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("# IDENTITY.md — Who Am I?\n\n")
+	if id.Name != "" {
+		fmt.Fprintf(&b, "- **Name:** %s\n", id.Name)
+	}
+	if id.Creature != "" {
+		fmt.Fprintf(&b, "- **Creature:** %s\n", id.Creature)
+	}
+	if id.Vibe != "" {
+		fmt.Fprintf(&b, "- **Vibe:** %s\n", id.Vibe)
+	}
+	if id.Emoji != "" {
+		fmt.Fprintf(&b, "- **Emoji:** %s\n", id.Emoji)
+	}
+	if id.Theme != "" {
+		fmt.Fprintf(&b, "- **Theme:** %s\n", id.Theme)
+	}
+	if id.Avatar != "" {
+		fmt.Fprintf(&b, "- **Avatar:** %s\n", id.Avatar)
+	}
+	return b.String()
+}
+
+// ScaffoldWorkspaceDir creates the workspace directory and seeds template files.
+// Files are written only if they don't exist (preserves user edits).
+// If ws has Soul/Identity content, those are written instead of templates.
+func ScaffoldWorkspaceDir(wsID string, ws *Workspace) error {
+	dir := paths.ResolveWorkspaceDir(wsID)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("scaffold workspace dir: %w", err)
+	}
+
+	// Map: filename → content from struct (empty = use template)
+	files := map[string]string{
+		"SOUL.md":     ws.Soul,
+		"IDENTITY.md": FormatIdentityMd(ws.Identity),
+		"TOOLS.md":    "",
+		"MEMORY.md":   "",
+	}
+
+	tmplDir := paths.ResolveWorkspaceTemplatesDir()
+	for filename, content := range files {
+		target := filepath.Join(dir, filename)
+		if _, err := os.Stat(target); err == nil {
+			continue // preserve existing
+		}
+		if content == "" {
+			if tmpl, err := os.ReadFile(filepath.Join(tmplDir, filename)); err == nil {
+				content = string(tmpl)
+			} else {
+				content = "# " + strings.TrimSuffix(filename, ".md") + "\n"
+			}
+		}
+		if err := os.WriteFile(target, []byte(content), 0600); err != nil {
+			return fmt.Errorf("scaffold %s: %w", filename, err)
+		}
+	}
+	return nil
 }
 
 // --- Admin operations ---
@@ -417,6 +590,13 @@ func (wm *WorkspaceManager) Create(ws Workspace, createdBy string) error {
 		wm.channelMap[strings.ToLower(ch)] = ws.ID
 	}
 
+	// Auto-scaffold workspace directory for non-main agents
+	if ws.ID != wm.defaultWSID {
+		if err := ScaffoldWorkspaceDir(ws.ID, &ws); err != nil {
+			wm.logger.Warn("failed to scaffold workspace", "id", ws.ID, "error", err)
+		}
+	}
+
 	wm.logger.Info("workspace created",
 		"id", ws.ID, "name", ws.Name, "by", createdBy)
 	return nil
@@ -445,6 +625,15 @@ func (wm *WorkspaceManager) Delete(wsID, deletedBy string) error {
 	}
 	for _, ch := range ws.Channels {
 		delete(wm.channelMap, strings.ToLower(ch))
+	}
+
+	// Soft-delete workspace directory (rename to .deleted-workspace-{id}-{timestamp})
+	wsDir := paths.ResolveWorkspaceDir(wsID)
+	if info, err := os.Stat(wsDir); err == nil && info.IsDir() {
+		deletedPath := filepath.Join(filepath.Dir(wsDir), ".deleted-workspace-"+wsID+"-"+fmt.Sprint(time.Now().Unix()))
+		if err := os.Rename(wsDir, deletedPath); err != nil {
+			wm.logger.Warn("failed to soft-delete workspace dir", "id", wsID, "error", err)
+		}
 	}
 
 	delete(wm.workspaces, wsID)
@@ -529,6 +718,44 @@ func (wm *WorkspaceManager) Get(wsID string) (*Workspace, bool) {
 	return ws, ok
 }
 
+// Resolve returns a workspace by ID first, then falls back to normalized name
+// match. This allows lookups like "agentdev" to find an agent named "AgentDev"
+// even if the ID is different (e.g. "tester"). Returns the workspace and its
+// canonical ID so callers can use the real ID for subsequent operations.
+func (wm *WorkspaceManager) ResolveByNameOrID(input string) (*Workspace, bool) {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+
+	// 1. Exact ID match.
+	if ws, ok := wm.workspaces[input]; ok {
+		return ws, true
+	}
+
+	// 2. Normalized name match: strip non-alphanumeric, lowercase.
+	norm := normalizeName(input)
+	if norm == "" {
+		return nil, false
+	}
+	for _, ws := range wm.workspaces {
+		if normalizeName(ws.Name) == norm {
+			return ws, true
+		}
+	}
+
+	return nil, false
+}
+
+// normalizeName strips non-alphanumeric chars and lowercases for fuzzy matching.
+func normalizeName(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // SessionInfo holds session metadata with workspace ID for API responses.
 type SessionInfo struct {
 	SessionMeta
@@ -544,6 +771,21 @@ func (wm *WorkspaceManager) ListAllSessions() []SessionInfo {
 		for _, m := range store.ListSessions() {
 			out = append(out, SessionInfo{SessionMeta: m, WorkspaceID: wsID})
 		}
+	}
+	return out
+}
+
+// ListSessionsForWorkspace returns sessions for a specific workspace only.
+func (wm *WorkspaceManager) ListSessionsForWorkspace(wsID string) []SessionInfo {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+	store, ok := wm.sessions[wsID]
+	if !ok {
+		return nil
+	}
+	var out []SessionInfo
+	for _, m := range store.ListSessions() {
+		out = append(out, SessionInfo{SessionMeta: m, WorkspaceID: wsID})
 	}
 	return out
 }

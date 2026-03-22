@@ -65,6 +65,18 @@ type WhatsAppJoinedGroup struct {
 	Name string `json:"name"`
 }
 
+// ChannelInstanceInfo describes a single channel instance for the UI.
+type ChannelInstanceInfo struct {
+	Type       string `json:"type"`        // "whatsapp", "telegram", etc.
+	InstanceID string `json:"instance_id"` // "" for default, "business" for named
+	FullName   string `json:"full_name"`   // "whatsapp" or "whatsapp:business"
+	Label      string `json:"label"`       // Display name: "WhatsApp" or "WhatsApp (business)"
+	Connected  bool   `json:"connected"`
+	Configured bool   `json:"configured"`
+	NeedsQR    bool   `json:"needs_qr"`
+	ErrorCount int    `json:"error_count"`
+}
+
 // AssistantAdapter wraps a generic set of callbacks to satisfy the AssistantAPI
 // interface. This avoids a direct import cycle between copilot and webui.
 type AssistantAdapter struct {
@@ -86,11 +98,22 @@ type AssistantAdapter struct {
 	AbortRunFn           func(sessionID string) bool
 	DeleteSessionFn      func(sessionID string) error
 
-	// WhatsApp QR support
+	// WhatsApp QR support (default instance)
 	GetWhatsAppStatusFn   func() WhatsAppStatus
 	SubscribeWhatsAppQRFn func() (chan WhatsAppQREvent, func())
 	RequestWhatsAppQRFn   func() error
 	DisconnectWhatsAppFn  func() error
+
+	// Instance-aware WhatsApp operations
+	GetWhatsAppStatusByInstanceFn   func(instanceID string) WhatsAppStatus
+	SubscribeWhatsAppQRByInstanceFn func(instanceID string) (chan WhatsAppQREvent, func())
+	RequestWhatsAppQRByInstanceFn   func(instanceID string) error
+	DisconnectWhatsAppByInstanceFn  func(instanceID string) error
+
+	// Channel instance management (all channel types)
+	ListChannelInstancesFn  func(channelType string) []ChannelInstanceInfo
+	CreateChannelInstanceFn func(channelType, instanceID string, config map[string]any) error
+	DeleteChannelInstanceFn func(channelType, instanceID string) error
 
 	// WhatsApp Access & Groups
 	GetWhatsAppAccessConfigFn           func() WhatsAppAccessConfig
@@ -171,6 +194,9 @@ type AssistantAdapter struct {
 	InstallPluginFn   func(source string) (*plugins.PluginInstallResult, error)
 	RemovePluginFn    func(name string) error
 
+	// Models
+	ListModelsFn func() []ModelInfo
+
 	// Agents
 	ListAgentsFn      func() []AgentInfoAPI
 	CreateAgentFn     func(req CreateAgentRequest) (string, error)
@@ -179,6 +205,17 @@ type AssistantAdapter struct {
 	DeleteAgentFn     func(id string) error
 	SetDefaultAgentFn func(id string) error
 	ToggleAgentFn     func(id string, active bool) error
+
+	// Agent Files
+	ListAgentFilesFn  func(id string) (*AgentFilesResponse, error)
+	UpdateAgentFileFn func(id, filename, content string) error
+}
+
+// ModelInfo contains model info for API responses.
+type ModelInfo struct {
+	ID       string `json:"id"`       // e.g. "claude-sonnet-4-20250514"
+	Name     string `json:"name"`     // e.g. "Claude Sonnet 4"
+	Provider string `json:"provider"` // e.g. "anthropic"
 }
 
 // ToolProfileInfo contains profile info for API responses.
@@ -642,8 +679,9 @@ func (a *AssistantAdapter) GetToolGroups() map[string][]string {
 		"group:vault":     {"vault_status", "vault_save", "vault_get", "vault_list", "vault_delete"},
 		"group:sessions":  {"sessions"},
 		"group:daemon":    {"daemon"},
-		"group:media":     {"describe_image", "transcribe_audio", "image-gen_generate_image"},
-		"group:teams":     {"team_manage", "team_agent", "team_task", "team_memory", "team_comm"},
+		"group:media":     {"describe_image", "transcribe_audio", "image-gen_generate_image", "send_media"},
+		"group:browser":   {"browser_open", "browser_search", "browser_screenshot", "browser_extract"},
+		"group:skill_db":  {"skill_db_query", "skill_db_index"},
 	}
 }
 
@@ -712,6 +750,15 @@ func (a *AssistantAdapter) RemovePlugin(name string) error {
 	return errors.New("not implemented")
 }
 
+// ── Models ──
+
+func (a *AssistantAdapter) ListModels() []ModelInfo {
+	if a.ListModelsFn != nil {
+		return a.ListModelsFn()
+	}
+	return nil
+}
+
 // ── Agents ──
 
 func (a *AssistantAdapter) ListAgents() []AgentInfoAPI {
@@ -759,6 +806,20 @@ func (a *AssistantAdapter) SetDefaultAgent(id string) error {
 func (a *AssistantAdapter) ToggleAgent(id string, active bool) error {
 	if a.ToggleAgentFn != nil {
 		return a.ToggleAgentFn(id, active)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) ListAgentFiles(id string) (*AgentFilesResponse, error) {
+	if a.ListAgentFilesFn != nil {
+		return a.ListAgentFilesFn(id)
+	}
+	return nil, errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) UpdateAgentFile(id, filename, content string) error {
+	if a.UpdateAgentFileFn != nil {
+		return a.UpdateAgentFileFn(id, filename, content)
 	}
 	return errors.New("not implemented")
 }

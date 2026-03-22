@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
+	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
 )
 
 // xmlAttrEscape escapes a string for safe use as an XML attribute value.
@@ -58,7 +59,7 @@ const (
 	LayerIdentity       PromptLayer = 10 // Custom instructions.
 	LayerThinking       PromptLayer = 12 // Extended thinking level hint (from /think).
 	LayerBootstrap      PromptLayer = 15 // SOUL.md, AGENTS.md, etc.
-	LayerBuiltinSkills  PromptLayer = 18 // Built-in tool guides (memory, teams, etc.)
+	LayerBuiltinSkills  PromptLayer = 18 // Built-in tool guides (memory, agents, etc.)
 	LayerPluginAgents   PromptLayer = 19 // Available plugin agents for delegation.
 	LayerBusiness       PromptLayer = 20 // User/workspace context.
 	LayerProjectContext PromptLayer = 25 // Auto-discovered project context.
@@ -122,6 +123,13 @@ type PromptComposer struct {
 	pluginAgentLister func() []pluginAgentInfo // Lists available plugin agents.
 	isSubagent    bool // When true, only AGENTS.md + TOOLS.md are loaded.
 	contextEngines *ContextEngineRegistry // Pluggable context engines.
+
+	// workspaceID identifies the active workspace for cache key namespacing.
+	// Empty = main agent (global bootstrap dirs).
+	workspaceID string
+
+	// workspaceBootstrapDirs are prepended to search dirs for non-main workspaces.
+	workspaceBootstrapDirs []string
 
 	// memorySectionBuilders holds pluggable memory section builders.
 	// Each builder contributes an additional section to the memory layer.
@@ -190,6 +198,21 @@ func (p *PromptComposer) SetAgentProfile(profile *AgentProfileConfig) {
 // SetSubagentMode restricts bootstrap loading to AGENTS.md + TOOLS.md only.
 func (p *PromptComposer) SetSubagentMode(isSubagent bool) {
 	p.isSubagent = isSubagent
+}
+
+// SetWorkspaceContext configures workspace-specific bootstrap loading.
+// Call before Compose() for non-main workspaces; call with "" to reset.
+func (p *PromptComposer) SetWorkspaceContext(wsID string, dirs []string) {
+	p.workspaceID = wsID
+	p.workspaceBootstrapDirs = dirs
+}
+
+// bootstrapCacheKey returns a workspace-namespaced cache key.
+func (p *PromptComposer) bootstrapCacheKey(filename string) string {
+	if p.workspaceID == "" {
+		return filename
+	}
+	return p.workspaceID + ":" + filename
 }
 
 // SetMemoryStore configures the file-based memory store for the prompt composer.
@@ -549,7 +572,7 @@ func (p *PromptComposer) buildProjectContextLayer() string {
 	}
 
 	for _, filename := range targetFiles {
-		text := p.loadBootstrapFileCached(filename, searchDirs)
+		text := p.loadBootstrapFileCached(filename, filename, searchDirs)
 		if text == "" {
 			continue
 		}
@@ -607,7 +630,7 @@ func (p *PromptComposer) buildCoreLayer() string {
 	if p.config.Heartbeat.WorkspaceDir != "" && p.config.Heartbeat.WorkspaceDir != "." {
 		searchDirs = append([]string{p.config.Heartbeat.WorkspaceDir}, searchDirs...)
 	}
-	identityContent := p.loadBootstrapFileCached("IDENTITY.md", searchDirs)
+	identityContent := p.loadBootstrapFileCached(p.bootstrapCacheKey("IDENTITY.md"), "IDENTITY.md", searchDirs)
 	identity := ResolveIdentity(p.config, p.agentProfile, identityContent)
 	name := identity.EffectiveName(p.config.Name)
 
@@ -845,12 +868,18 @@ func (p *PromptComposer) buildBootstrapLayer() string {
 		bootstrapFiles = allBootstrapFiles
 	}
 
-	// Search directories: workspace dir, current dir, configs/.
+	// Search directories: workspace dir > global WorkspaceDir > current dir > main workspace > configs
 	searchDirs := []string{"."}
 	if p.config.Heartbeat.WorkspaceDir != "" && p.config.Heartbeat.WorkspaceDir != "." {
 		searchDirs = append([]string{p.config.Heartbeat.WorkspaceDir}, searchDirs...)
 	}
-	searchDirs = append(searchDirs, "configs")
+	mainWsDir := paths.ResolveWorkspaceDir("main")
+	searchDirs = append(searchDirs, mainWsDir, "configs/bootstrap", "configs")
+
+	// Prepend agent workspace dir (highest priority override)
+	if len(p.workspaceBootstrapDirs) > 0 {
+		searchDirs = append(p.workspaceBootstrapDirs, searchDirs...)
+	}
 
 	var files []struct {
 		path    string
@@ -859,7 +888,16 @@ func (p *PromptComposer) buildBootstrapLayer() string {
 	hasSoul := false
 
 	for _, bf := range bootstrapFiles {
-		text := p.loadBootstrapFileCached(bf.Path, searchDirs)
+		// MEMORY.md: only search in agent workspace dir (never inherit global)
+		var effectiveDirs []string
+		if bf.Path == "MEMORY.md" && len(p.workspaceBootstrapDirs) > 0 {
+			effectiveDirs = p.workspaceBootstrapDirs
+		} else {
+			effectiveDirs = searchDirs
+		}
+
+		cacheKey := p.bootstrapCacheKey(bf.Path)
+		text := p.loadBootstrapFileCached(cacheKey, bf.Path, effectiveDirs)
 		if text == "" {
 			continue
 		}
@@ -921,10 +959,11 @@ func (p *PromptComposer) buildBootstrapLayer() string {
 // Returns the trimmed content, or "" if the file doesn't exist or is empty.
 // Within the TTL window (30s), returns cached content with zero disk I/O.
 // After TTL expires, re-reads the file and invalidates if content changed.
-func (p *PromptComposer) loadBootstrapFileCached(filename string, searchDirs []string) string {
+// cacheKey is used as the cache map key (may differ from filename for workspace namespacing).
+func (p *PromptComposer) loadBootstrapFileCached(cacheKey, filename string, searchDirs []string) string {
 	// Fast path: check if cache is still fresh (no disk I/O).
 	p.bootstrapCacheMu.RLock()
-	cached, ok := p.bootstrapCache[filename]
+	cached, ok := p.bootstrapCache[cacheKey]
 	p.bootstrapCacheMu.RUnlock()
 
 	if ok && time.Since(cached.cachedAt) < bootstrapCacheTTL {
@@ -944,7 +983,7 @@ func (p *PromptComposer) loadBootstrapFileCached(filename string, searchDirs []s
 	if err != nil || len(strings.TrimSpace(string(content))) == 0 {
 		// File not found or empty: cache empty result to avoid repeated lookups.
 		p.bootstrapCacheMu.Lock()
-		p.bootstrapCache[filename] = &bootstrapCacheEntry{
+		p.bootstrapCache[cacheKey] = &bootstrapCacheEntry{
 			content:  "",
 			cachedAt: time.Now(),
 		}
@@ -969,7 +1008,7 @@ func (p *PromptComposer) loadBootstrapFileCached(filename string, searchDirs []s
 	}
 
 	p.bootstrapCacheMu.Lock()
-	p.bootstrapCache[filename] = &bootstrapCacheEntry{
+	p.bootstrapCache[cacheKey] = &bootstrapCacheEntry{
 		content:  text,
 		hash:     hash,
 		cachedAt: time.Now(),

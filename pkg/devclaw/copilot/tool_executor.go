@@ -42,6 +42,44 @@ type ctxKeyToolProfile struct{}
 // ctxKeyVaultReader is the context key for passing the vault reader.
 type ctxKeyVaultReader struct{}
 
+// ctxKeyWorkspaceID is the context key for passing the active workspace ID.
+type ctxKeyWorkspaceID struct{}
+
+// ctxKeyToolOverlay is the context key for workspace tool allow/deny overlay.
+type ctxKeyToolOverlay struct{}
+
+// ToolOverlay holds workspace-scoped tool allow/deny lists.
+type ToolOverlay struct {
+	Allow []string
+	Deny  []string
+}
+
+// ContextWithWorkspaceID returns a context carrying the workspace ID.
+func ContextWithWorkspaceID(ctx context.Context, wsID string) context.Context {
+	return context.WithValue(ctx, ctxKeyWorkspaceID{}, wsID)
+}
+
+// WorkspaceIDFromContext extracts the workspace ID from context.
+func WorkspaceIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(ctxKeyWorkspaceID{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// ContextWithToolOverlay returns a context carrying the tool overlay.
+func ContextWithToolOverlay(ctx context.Context, overlay *ToolOverlay) context.Context {
+	return context.WithValue(ctx, ctxKeyToolOverlay{}, overlay)
+}
+
+// ToolOverlayFromContext extracts the tool overlay from context.
+func ToolOverlayFromContext(ctx context.Context) *ToolOverlay {
+	if v, ok := ctx.Value(ctxKeyToolOverlay{}).(*ToolOverlay); ok {
+		return v
+	}
+	return nil
+}
+
 // DeliveryTarget holds the channel and chatID for message delivery.
 type DeliveryTarget struct {
 	Channel string
@@ -1047,9 +1085,10 @@ func (e *ToolExecutor) executeSingle(ctx context.Context, call ToolCall) ToolRes
 	// Security check: verify the caller has permission.
 	var check ToolCheckResult
 	if guard != nil {
-		// Extract profile from context (workspace may override global profile).
+		// Extract profile and overlay from context (workspace may override global profile).
 		profile := ToolProfileFromContext(ctx)
-		check = guard.CheckWithProfile(name, callerLevel, args, profile)
+		overlay := ToolOverlayFromContext(ctx)
+		check = guard.CheckWithProfile(name, callerLevel, args, profile, overlay)
 		if !check.Allowed {
 			result.Content = formatToolError(name, fmt.Errorf("access denied: %s", check.Reason))
 			result.Error = fmt.Errorf("access denied: %s", check.Reason)

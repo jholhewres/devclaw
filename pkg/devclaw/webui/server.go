@@ -137,6 +137,9 @@ type AssistantAPI interface {
 	// Auth Profiles for OAuth/API key management
 	GetProfileManager() profiles.ProfileManager
 
+	// Models
+	ListModels() []ModelInfo
+
 	// Plugins
 	ListPlugins() []PluginInfoAPI
 	GetPluginInfo(id string) *PluginInfoAPI
@@ -153,6 +156,10 @@ type AssistantAPI interface {
 	DeleteAgent(id string) error
 	SetDefaultAgent(id string) error
 	ToggleAgent(id string, active bool) error
+
+	// Agent Files
+	ListAgentFiles(id string) (*AgentFilesResponse, error)
+	UpdateAgentFile(id, filename, content string) error
 }
 
 // PluginInfoAPI is the plugin info type exposed via the API.
@@ -165,6 +172,7 @@ type AgentInfoAPI struct {
 	Description  string         `json:"description,omitempty"`
 	Model        string         `json:"model,omitempty"`
 	Instructions string         `json:"instructions,omitempty"`
+	Soul         string         `json:"soul,omitempty"`
 	Language     string         `json:"language,omitempty"`
 	Timezone     string         `json:"timezone,omitempty"`
 	Trigger      string         `json:"trigger,omitempty"`
@@ -185,15 +193,25 @@ type AgentInfoAPI struct {
 	MemberCount  int            `json:"member_count"`
 	GroupCount   int            `json:"group_count"`
 	SessionCount int            `json:"session_count"`
+	WorkspaceDir string         `json:"workspace_dir,omitempty"`
+	FileBacked   bool           `json:"file_backed"`
+}
+
+// AgentFilesResponse is the response from the agent files list endpoint.
+type AgentFilesResponse struct {
+	WorkspaceDir string             `json:"workspace_dir"`
+	Files        map[string]*string `json:"files"`
+	Inherited    map[string]string  `json:"inherited"`
 }
 
 // AgentIdentity holds identity/persona fields for an agent.
 type AgentIdentity struct {
-	Name   string `json:"name,omitempty"`
-	Emoji  string `json:"emoji,omitempty"`
-	Theme  string `json:"theme,omitempty"`
-	Avatar string `json:"avatar,omitempty"`
-	Vibe   string `json:"vibe,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Emoji    string `json:"emoji,omitempty"`
+	Theme    string `json:"theme,omitempty"`
+	Avatar   string `json:"avatar,omitempty"`
+	Vibe     string `json:"vibe,omitempty"`
+	Creature string `json:"creature,omitempty"`
 }
 
 // CreateAgentRequest is the request body for creating a new agent.
@@ -203,6 +221,7 @@ type CreateAgentRequest struct {
 	Description  string         `json:"description,omitempty"`
 	Model        string         `json:"model,omitempty"`
 	Instructions string         `json:"instructions,omitempty"`
+	Soul         string         `json:"soul,omitempty"`
 	Language     string         `json:"language,omitempty"`
 	Identity     *AgentIdentity `json:"identity,omitempty"`
 	Skills       []string       `json:"skills,omitempty"`
@@ -218,10 +237,15 @@ type UpdateAgentRequest struct {
 	Description  *string        `json:"description,omitempty"`
 	Model        *string        `json:"model,omitempty"`
 	Instructions *string        `json:"instructions,omitempty"`
+	Soul         *string        `json:"soul,omitempty"`
 	Language     *string        `json:"language,omitempty"`
+	Timezone     *string        `json:"timezone,omitempty"`
+	Trigger      *string        `json:"trigger,omitempty"`
 	Identity     *AgentIdentity `json:"identity,omitempty"`
 	Skills       []string       `json:"skills,omitempty"`
 	Channels     []string       `json:"channels,omitempty"`
+	Members      []string       `json:"members,omitempty"`
+	Groups       []string       `json:"groups,omitempty"`
 	ToolProfile  *string        `json:"tool_profile,omitempty"`
 	ToolsAllow   []string       `json:"tools_allow,omitempty"`
 	ToolsDeny    []string       `json:"tools_deny,omitempty"`
@@ -259,6 +283,8 @@ type UsageInfo struct {
 // ChannelHealthInfo contains channel health for display.
 type ChannelHealthInfo struct {
 	Name       string    `json:"name"`
+	AccountID  string    `json:"account_id,omitempty"`
+	FullID     string    `json:"full_id"`
 	Connected  bool      `json:"connected"`
 	ErrorCount int       `json:"error_count"`
 	LastMsgAt  time.Time `json:"last_msg_at"`
@@ -586,6 +612,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/channels/telegram/config", s.authMiddleware(s.requireAssistant(s.handleAPITelegramConfig)))
 	mux.HandleFunc("/api/channels/telegram/connect", s.authMiddleware(s.requireAssistant(s.handleAPITelegramConnect)))
 	mux.HandleFunc("/api/channels/telegram/disconnect", s.authMiddleware(s.requireAssistant(s.handleAPITelegramDisconnect)))
+	// Channel instance routes (multi-instance support)
+	mux.HandleFunc("/api/channels/instances/", s.authMiddleware(s.requireAssistant(s.handleAPIChannelInstances)))
 	mux.HandleFunc("/api/config", s.authMiddleware(s.requireAssistant(s.handleAPIConfig)))
 	mux.HandleFunc("/api/domain", s.authMiddleware(s.requireAssistant(s.handleAPIDomain)))
 	mux.HandleFunc("/api/webhooks", s.authMiddleware(s.requireAssistant(s.handleAPIWebhooks)))
@@ -611,6 +639,9 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/system/version", s.authMiddleware(s.handleAPISystemVersion))
 	mux.HandleFunc("/api/system/check-update", s.authMiddleware(s.requireAssistant(s.handleAPISystemCheckUpdate)))
 	mux.HandleFunc("/api/system/update", s.authMiddleware(s.requireAssistant(s.handleAPISystemUpdate)))
+
+	// Models
+	mux.HandleFunc("/api/models", s.authMiddleware(s.requireAssistant(s.handleAPIModels)))
 
 	// Settings / Tool Profiles
 	mux.HandleFunc("/api/settings/tool-profiles", s.authMiddleware(s.requireAssistant(s.handleAPISettingsToolProfiles)))

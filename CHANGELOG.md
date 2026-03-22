@@ -4,6 +4,45 @@ All notable changes to DevClaw are documented in this file.
 
 ## [Unreleased]
 
+### Channels — Multi-Instance & QR Lifecycle
+
+- **Multi-instance channel creation**: `CreateChannelInstanceFn` now calls `RegisterAndConnect()` instead of `Register()` for all 4 channel types (WhatsApp, Telegram, Discord, Slack), ensuring new instances are fully connected on creation
+- **Instance-aware QR closures**: Moved `GetWhatsAppStatusByInstanceFn`, `SubscribeWhatsAppQRByInstanceFn`, `RequestWhatsAppQRByInstanceFn`, and `DisconnectWhatsAppByInstanceFn` outside the default-instance guard so they work for dynamically created instances
+- **SSE named events for instances**: `channel_instance_handlers.go` now uses `writeSSE(w, flusher, evt.Type, evt)` with named events (`code`, `success`, `timeout`, `error`) matching the frontend's `addEventListener` expectations
+- **WhatsApp QR lifecycle overhaul**: Removed auto-QR generation on `Connect()` (now sets `StateWaitingQR` and waits for explicit request); added `qrGuard atomic.Bool` to prevent concurrent QR generation; `RequestNewQR` goroutine uses instance context (`w.ctx`) instead of process context to stop on disconnect; `Disconnect()` notifies QR observers with `close` event before cancelling context
+- **Instance lock safety**: All instance-aware closures in `serve.go` now acquire `instanceMu.RLock()` before reading `waInstances` map; error event emitted for unknown instance IDs instead of silent closed channel
+- **Generic instance status**: `handleInstanceStatus` now handles non-WhatsApp channels (Telegram, Discord, Slack) via `ListChannelInstancesFn` fallback, fixing 501 errors
+- **Instance handler routing**: Added 405 Method Not Allowed response and GET guard for status endpoint
+
+### Concurrency & Stability
+
+- **Workspace Resolve() race fix**: Changed from single `Lock()` to double-check locking pattern — `RLock` for read path, upgrade to `Lock` only when creating new session store
+- **Multiuser update_role race fix**: Single locked section for user lookup + role mutation instead of separate `GetUser()` + lock
+- **Context propagation**: `RequestNewQR` and default-instance QR closures use server context (`ctx`) instead of `context.Background()`, ensuring goroutines stop on shutdown
+- **NeedsQR field**: `ListChannelInstancesFn` now populates `NeedsQR` via type assertion for WhatsApp instances
+
+### Backend Cleanup
+
+- **Removed team system**: Deleted `team_manager.go`, `team_memory.go`, `team_tools.go`, `team_types.go`, `notification_dispatcher.go` and their tests; removed `builtin/skills/teams/SKILL.md`; removed `"Team"` category from `tool_profiles.go` and corresponding test cases
+- **Tool groups sync**: Removed `"group:teams"` from `GetToolGroups()`; added `"send_media"` to media group; added `"group:browser"` and `"group:skill_db"`
+- **Path resolution**: Replaced 5 hardcoded paths in `serve.go` with `paths.Resolve*()` calls (skills dir, TLS dir, hub_config.json)
+- **Permissions fix**: Removed `ResolveWorkspaceTemplatesDir()` from `EnsureStateDirs` (was 0755, now only created by `EnsureWorkspaceTemplates` with 0700)
+- **CLI help text**: Updated `--channel` flag to list all 4 supported channels
+- **Stale comment fix**: Updated "teams" reference to "agents" in `prompt_layers.go`
+- **Test adjustments**: `builtin_skills_test.go` threshold updated from `< 2` to `< 10`; removed 3 `team_*` test cases from `tool_profiles_test.go`
+
+### Workspace Templates
+
+- **Enriched templates**: `configs/templates/` files (SOUL.md, IDENTITY.md, TOOLS.md, MEMORY.md) upgraded from skeleton placeholders to substantive content matching `configs/bootstrap/` quality — includes vault guide, boundaries, continuity instructions, and security notes
+
+### Frontend
+
+- **WhatsApp QR on-demand**: Removed auto `requestQR()` from useEffect; QR generation only triggers on explicit user action; proper error handling on `requestQR().catch()`
+- **Telegram instance-aware**: `TelegramConnect.tsx` branches on `instanceId` for status/disconnect API calls using instance endpoints; fixed `phone_number` → `phone` type mismatch
+- **CSS fixes**: Fixed 5 missing-space class concatenation bugs across `WhatsAppConnect.tsx` and `TelegramConnect.tsx` (`border-secondarypy-4` → `border-secondary py-4`, etc.)
+- **Toggle knob size**: Fixed non-standard `h-4.5 w-4.5` to `h-5 w-5` in `Toggle.tsx`
+- **Agents page i18n**: Full internationalization of `Agents.tsx` with `agentsPage` section in `en.json` and `pt.json`
+
 ### TLS / HTTPS
 
 - **Self-signed TLS support**: New `pkg/devclaw/tls` package generates ECDSA P-256 certificates (10yr validity, SHA-256, 0600 permissions) using Go's `crypto/x509` stdlib — no OpenSSL dependency required

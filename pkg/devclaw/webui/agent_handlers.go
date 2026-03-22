@@ -2,9 +2,26 @@ package webui
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 )
+
+// ErrAgentNotFound is returned when an agent/workspace is not found.
+var ErrAgentNotFound = errors.New("agent not found")
+
+// handleAPIModels handles GET /api/models — returns available LLM models.
+func (s *Server) handleAPIModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	models := s.api.ListModels()
+	if models == nil {
+		models = []ModelInfo{}
+	}
+	writeJSON(w, http.StatusOK, models)
+}
 
 // handleAPIAgents handles /api/agents:
 //   - GET  — list all agents
@@ -78,15 +95,27 @@ func (s *Server) handleAPIAgentAction(w http.ResponseWriter, r *http.Request) {
 		s.handleAgentToggle(w, r, id)
 	case "default":
 		s.handleAgentSetDefault(w, r, id)
+	case "files":
+		s.handleAgentFilesAction(w, r, id)
 	default:
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown action"})
+		// Check for files/{filename} pattern
+		if strings.HasPrefix(action, "files/") {
+			filename := strings.TrimPrefix(action, "files/")
+			s.handleAgentFileUpdate(w, r, id, filename)
+		} else {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown action"})
+		}
 	}
 }
 
 // agentErrorStatus returns the appropriate HTTP status for an agent error.
 func agentErrorStatus(err error) int {
-	msg := err.Error()
-	if strings.Contains(msg, "not found") {
+	if errors.Is(err, ErrAgentNotFound) {
+		return http.StatusNotFound
+	}
+	// Fallback: check message for backwards compatibility with errors not yet
+	// wrapped with ErrAgentNotFound.
+	if strings.Contains(err.Error(), "not found") {
 		return http.StatusNotFound
 	}
 	return http.StatusBadRequest
@@ -164,5 +193,53 @@ func (s *Server) handleAgentSetDefault(w http.ResponseWriter, r *http.Request, i
 		return
 	}
 
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleAgentFilesAction handles GET /api/agents/{id}/files — list workspace files.
+func (s *Server) handleAgentFilesAction(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	result, err := s.api.ListAgentFiles(id)
+	if err != nil {
+		writeJSON(w, agentErrorStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handleAgentFileUpdate handles PUT /api/agents/{id}/files/{filename} — update a workspace file.
+func (s *Server) handleAgentFileUpdate(w http.ResponseWriter, r *http.Request, id, filename string) {
+	if r.Method != http.MethodPut {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	// Validate filename (prevent path traversal)
+	allowed := map[string]bool{
+		"SOUL.md": true, "IDENTITY.md": true, "TOOLS.md": true,
+		"MEMORY.md": true, "AGENTS.md": true, "HEARTBEAT.md": true,
+	}
+	if !allowed[filename] {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid filename"})
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+
+	if err := s.api.UpdateAgentFile(id, filename, req.Content); err != nil {
+		writeJSON(w, agentErrorStatus(err), map[string]string{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

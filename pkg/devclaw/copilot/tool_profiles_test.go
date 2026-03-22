@@ -8,7 +8,7 @@ import (
 
 func TestBuiltInProfiles_Exist(t *testing.T) {
 	// Verify all built-in profiles exist.
-	expectedProfiles := []string{"minimal", "coding", "messaging", "team", "full"}
+	expectedProfiles := []string{"minimal", "coding", "messaging", "full"}
 
 	for _, name := range expectedProfiles {
 		profile, ok := BuiltInProfiles[name]
@@ -111,7 +111,7 @@ func TestBuiltInProfiles_Messaging(t *testing.T) {
 		"group:vault", "group:skills", "group:sessions",
 		"group:media", "group:skill_db",
 		"group:fs", "group:subagents", "group:browser",
-		"group:teams", "group:daemon",
+		"group:daemon",
 		"bash", "exec", "apply_patch",
 	} {
 		if !allowMap[required] {
@@ -130,40 +130,6 @@ func TestBuiltInProfiles_Messaging(t *testing.T) {
 	} {
 		if !denyMap[denied] {
 			t.Errorf("messaging profile should deny %s", denied)
-		}
-	}
-}
-
-func TestBuiltInProfiles_Team(t *testing.T) {
-	profile := BuiltInProfiles["team"]
-
-	allowMap := make(map[string]bool)
-	for _, item := range profile.Allow {
-		allowMap[item] = true
-	}
-
-	for _, required := range []string{
-		"group:teams", "group:web", "group:memory",
-		"group:scheduler", "group:vault", "group:skills",
-		"group:media", "group:skill_db", "group:fs",
-		"group:sessions", "group:browser",
-		"bash", "exec", "apply_patch",
-	} {
-		if !allowMap[required] {
-			t.Errorf("team profile should allow %s", required)
-		}
-	}
-
-	denyMap := make(map[string]bool)
-	for _, item := range profile.Deny {
-		denyMap[item] = true
-	}
-
-	for _, denied := range []string{
-		"group:subagents", "group:daemon", "ssh", "scp",
-	} {
-		if !denyMap[denied] {
-			t.Errorf("team profile should deny %s", denied)
 		}
 	}
 }
@@ -271,9 +237,9 @@ func TestListProfiles(t *testing.T) {
 
 	profiles := ListProfiles(customProfiles)
 
-	// Should have 5 built-in + 2 custom = 7 profiles.
-	if len(profiles) != 7 {
-		t.Errorf("expected 7 profiles, got %d: %v", len(profiles), profiles)
+	// Should have 4 built-in + 2 custom = 6 profiles.
+	if len(profiles) != 6 {
+		t.Errorf("expected 6 profiles, got %d: %v", len(profiles), profiles)
 	}
 
 	// Verify built-in profiles are included.
@@ -282,7 +248,7 @@ func TestListProfiles(t *testing.T) {
 		profileMap[p] = true
 	}
 
-	for _, builtIn := range []string{"minimal", "coding", "messaging", "team", "full"} {
+	for _, builtIn := range []string{"minimal", "coding", "messaging", "full"} {
 		if !profileMap[builtIn] {
 			t.Errorf("expected built-in profile '%s' in list", builtIn)
 		}
@@ -568,11 +534,6 @@ func TestInferToolCategory(t *testing.T) {
 		{"gcloud_compute", "Cloud"},
 		{"azure_vm", "Cloud"},
 		{"terraform_apply", "Cloud"},
-
-		// Team
-		{"team_manage", "Team"},
-		{"team_agent", "Team"},
-		{"team_task", "Team"},
 
 		// Skills
 		{"skill_init", "Skills"},

@@ -134,7 +134,9 @@ export function App() {
             {/* Channels tab */}
             <Route path="/channels" element={<Channels />} />
             <Route path="/channels/whatsapp" element={<WhatsAppConnect />} />
+            <Route path="/channels/whatsapp/:instanceId" element={<WhatsAppConnect />} />
             <Route path="/channels/telegram" element={<TelegramConnect />} />
+            <Route path="/channels/telegram/:instanceId" element={<TelegramConnect />} />
 
             {/* Security tab */}
             <Route path="/security" element={<Security />} />

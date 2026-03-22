@@ -164,9 +164,6 @@ type Assistant struct {
 	// userMgr handles multi-user operations when team mode is enabled.
 	userMgr *UserManager
 
-	// teamMgr manages persistent agents and team memory.
-	teamMgr *TeamManager
-
 	// maintenanceMgr manages maintenance mode state.
 	maintenanceMgr *MaintenanceManager
 
@@ -729,36 +726,6 @@ func (a *Assistant) Start(ctx context.Context) error {
 	// 1d. Create and start scheduler if enabled.
 	if a.config.Scheduler.Enabled {
 		a.initScheduler()
-	}
-
-	// 1d-2. Initialize TeamManager for persistent agents.
-	if a.devclawDB != nil && a.scheduler != nil {
-		a.teamMgr = NewTeamManager(a.devclawDB, a.scheduler, a.logger.With("component", "team-manager"))
-		// Wire spawn callback for active notification push.
-		a.teamMgr.SetSpawnAgentCallback(func(ctx context.Context, agent *PersistentAgent, task string) error {
-			sessionID := fmt.Sprintf("agent:%s:run", agent.ID)
-			a.enqueueFollowupMessage(sessionID, task, "team", agent.TeamID)
-			a.logger.Info("persistent agent triggered via spawn callback", "agent_id", agent.ID)
-			return nil
-		})
-
-		// Initialize notification dispatcher for team agents.
-		notifConfig := &NotificationConfig{
-			Enabled: true,
-			Defaults: NotificationDefaults{
-				ActivityFeed: true,
-			},
-		}
-		notifDisp := NewNotificationDispatcher(
-			a.devclawDB,
-			a.teamMgr,
-			a.channelMgr,
-			a.hookMgr,
-			notifConfig,
-			a.logger.With("component", "notifications"),
-		)
-		a.teamMgr.SetNotificationDispatcher(notifDisp)
-		a.logger.Info("team manager initialized with spawn callback and notification dispatcher")
 	}
 
 	// 1d-b. Configure profile manager for OAuth/API key tools.
@@ -2080,6 +2047,16 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	agentCtx = ContextWithDelivery(agentCtx, msg.Channel, msg.ChatID)
 	agentCtx = ContextWithMessageID(agentCtx, msg.ID)
 	agentCtx = ContextWithCaller(agentCtx, accessLevel, msg.From)
+	agentCtx = ContextWithWorkspaceID(agentCtx, workspace.ID)
+
+	// Inject workspace tool overlay (ToolsAllow/ToolsDeny)
+	if len(workspace.ToolsAllow) > 0 || len(workspace.ToolsDeny) > 0 {
+		overlay := &ToolOverlay{
+			Allow: workspace.ToolsAllow,
+			Deny:  workspace.ToolsDeny,
+		}
+		agentCtx = ContextWithToolOverlay(agentCtx, overlay)
+	}
 
 	// Resolve tool profile: session > workspace > channel inference > global.
 	// Extend with active skill tool prefixes so their tools pass the filter.
@@ -2301,6 +2278,7 @@ func (a *Assistant) resolveToolProfile(ws *Workspace, session *Session) *ToolPro
 }
 
 // composeWorkspacePrompt builds the prompt using workspace overrides.
+// Always holds composeMu to serialize access to promptComposer shared state.
 func (a *Assistant) composeWorkspacePrompt(ws *Workspace, session *Session, input string) string {
 	// If workspace has custom instructions, inject them as business context.
 	if ws.Instructions != "" {
@@ -2309,6 +2287,18 @@ func (a *Assistant) composeWorkspacePrompt(ws *Workspace, session *Session, inpu
 			cfg.BusinessContext = ws.Instructions
 			session.SetConfig(cfg)
 		}
+	}
+
+	// Always serialize — even default-workspace Compose() reads workspaceID/workspaceBootstrapDirs,
+	// so it must not race with a concurrent non-default call that sets those fields.
+	a.composeMu.Lock()
+	defer a.composeMu.Unlock()
+
+	// Set workspace context for non-main file-backed agents.
+	if ws.ID != a.workspaceMgr.DefaultID() && hasWorkspaceDir(ws.ID) {
+		wsDir := paths.ResolveWorkspaceDir(ws.ID)
+		a.promptComposer.SetWorkspaceContext(ws.ID, []string{wsDir})
+		defer a.promptComposer.SetWorkspaceContext("", nil)
 	}
 
 	return a.promptComposer.Compose(session, input)
@@ -2336,9 +2326,16 @@ func (a *Assistant) composePromptWithAgent(profile *AgentProfileConfig, ws *Work
 		a.config.Instructions = originalInstructions
 		a.configMu.Unlock()
 		a.promptComposer.SetAgentProfile(nil)
+		a.promptComposer.SetWorkspaceContext("", nil)
 	}()
 
 	a.promptComposer.SetAgentProfile(profile)
+
+	// Set workspace context for non-main file-backed agents
+	if ws.ID != a.workspaceMgr.DefaultID() && hasWorkspaceDir(ws.ID) {
+		wsDir := paths.ResolveWorkspaceDir(ws.ID)
+		a.promptComposer.SetWorkspaceContext(ws.ID, []string{wsDir})
+	}
 
 	// Also add workspace instructions as business context if available.
 	if ws.Instructions != "" {
@@ -2776,6 +2773,11 @@ func (a *Assistant) HookManager() *HookManager {
 // Config returns the assistant configuration.
 func (a *Assistant) Config() *Config {
 	return a.config
+}
+
+// ProviderDiscovery returns the provider discovery instance (may be nil).
+func (a *Assistant) ProviderDiscovery() *ProviderDiscovery {
+	return a.providerDiscovery
 }
 
 // LLMClient returns the LLM client (for gateway chat completions).
@@ -3311,11 +3313,6 @@ func (a *Assistant) registerSystemTools() {
 		RegisterLCMDispatcher(a.toolExecutor, a.lcmEngine, a.llmClient)
 	}
 
-	// Register team tools for persistent agents and team memory.
-	if a.teamMgr != nil {
-		RegisterTeamTools(a.toolExecutor, a.teamMgr, a.devclawDB, a.scheduler, a.logger)
-	}
-
 	// Register agent management tools for creating/managing workspaces via AI.
 	RegisterAgentTools(a.toolExecutor, a.workspaceMgr)
 
@@ -3380,13 +3377,11 @@ func (a *Assistant) registerSystemTools() {
 		a.mcpBridge.ConnectAll(a.ctx, a.config.MCP.Servers)
 	}
 
-	// Register multi-user tools (when enabled).
-	if a.config.Team.Enabled {
-		if a.userMgr == nil {
-			a.userMgr = NewUserManager(a.config.Team)
-		}
-		RegisterMultiUserTools(a.toolExecutor, a.userMgr)
+	// Register multi-user tools.
+	if a.userMgr == nil {
+		a.userMgr = NewUserManager(UserManagerConfig{})
 	}
+	RegisterMultiUserTools(a.toolExecutor, a.userMgr)
 
 	toolNames := a.toolExecutor.ToolNames()
 	visibleDefs := a.toolExecutor.Tools()

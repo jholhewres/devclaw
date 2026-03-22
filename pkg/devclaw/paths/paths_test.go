@@ -3,6 +3,7 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -185,7 +186,6 @@ func TestEnsureStateDirs(t *testing.T) {
 		filepath.Join(ResolveMediaDir(), "telegram"),
 		ResolveSessionsDir(),
 		ResolveSkillsDir(),
-		ResolveWorkspacesDir(),
 		ResolvePluginsDir(),
 	}
 
@@ -193,5 +193,128 @@ func TestEnsureStateDirs(t *testing.T) {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			t.Errorf("Directory %q was not created", dir)
 		}
+	}
+}
+
+func TestResolveWorkspaceDir(t *testing.T) {
+	os.Setenv(StateDirEnv, "/tmp/test-devclaw")
+	defer os.Unsetenv(StateDirEnv)
+
+	tests := []struct {
+		name string
+		wsID string
+		want string
+	}{
+		{"empty ID returns main workspace", "", "/tmp/test-devclaw/workspace"},
+		{"main ID returns main workspace", "main", "/tmp/test-devclaw/workspace"},
+		{"named agent returns flat dir", "support", "/tmp/test-devclaw/workspace-support"},
+		{"another named agent", "sales", "/tmp/test-devclaw/workspace-sales"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveWorkspaceDir(tt.wsID)
+			if got != tt.want {
+				t.Errorf("ResolveWorkspaceDir(%q) = %q, want %q", tt.wsID, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveWorkspaceDir_PathTraversal(t *testing.T) {
+	os.Setenv(StateDirEnv, "/tmp/test-devclaw")
+	defer os.Unsetenv(StateDirEnv)
+
+	stateDir := ResolveStateDir()
+
+	tests := []struct {
+		name string
+		wsID string
+	}{
+		{"dot-dot slash", "../../../etc"},
+		{"dot-dot only", ".."},
+		{"slash in ID", "a/b/c"},
+		{"backslash in ID", "a\\b\\c"},
+		{"dot-dot embedded", "foo/../bar"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveWorkspaceDir(tt.wsID)
+			// Result must stay under the state directory
+			relPath, err := filepath.Rel(stateDir, got)
+			if err != nil {
+				t.Fatalf("filepath.Rel failed: %v", err)
+			}
+			if relPath == ".." || (len(relPath) >= 3 && relPath[:3] == "../") {
+				t.Errorf("ResolveWorkspaceDir(%q) = %q escapes state dir %q", tt.wsID, got, stateDir)
+			}
+			// Must not contain path separators in the workspace component
+			base := filepath.Base(got)
+			if strings.ContainsAny(base, "/\\") {
+				t.Errorf("ResolveWorkspaceDir(%q) base %q contains path separator", tt.wsID, base)
+			}
+		})
+	}
+}
+
+func TestEnsureStateDirs_MigratesOldWorkspaces(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.Setenv(StateDirEnv, tmpDir)
+	defer os.Unsetenv(StateDirEnv)
+
+	// Create old layout: workspaces/templates/ and workspaces/support/
+	oldTemplates := filepath.Join(tmpDir, "workspaces", "templates")
+	oldAgent := filepath.Join(tmpDir, "workspaces", "support")
+	os.MkdirAll(oldTemplates, 0755)
+	os.MkdirAll(oldAgent, 0755)
+	os.WriteFile(filepath.Join(oldTemplates, "SOUL.md"), []byte("template soul"), 0600)
+	os.WriteFile(filepath.Join(oldAgent, "SOUL.md"), []byte("support soul"), 0600)
+	os.WriteFile(filepath.Join(oldAgent, "IDENTITY.md"), []byte("support identity"), 0600)
+
+	if err := EnsureStateDirs(); err != nil {
+		t.Fatalf("EnsureStateDirs() error = %v", err)
+	}
+
+	// Templates should be in configs/templates/
+	data, err := os.ReadFile(filepath.Join(tmpDir, "configs", "templates", "SOUL.md"))
+	if err != nil {
+		t.Fatalf("template SOUL.md not migrated: %v", err)
+	}
+	if string(data) != "template soul" {
+		t.Errorf("template content = %q, want %q", data, "template soul")
+	}
+
+	// Agent workspace should be at workspace-support/
+	data, err = os.ReadFile(filepath.Join(tmpDir, "workspace-support", "SOUL.md"))
+	if err != nil {
+		t.Fatalf("agent SOUL.md not migrated: %v", err)
+	}
+	if string(data) != "support soul" {
+		t.Errorf("agent soul content = %q, want %q", data, "support soul")
+	}
+
+	data, err = os.ReadFile(filepath.Join(tmpDir, "workspace-support", "IDENTITY.md"))
+	if err != nil {
+		t.Fatalf("agent IDENTITY.md not migrated: %v", err)
+	}
+	if string(data) != "support identity" {
+		t.Errorf("agent identity content = %q, want %q", data, "support identity")
+	}
+
+	// Old workspaces/ should be removed
+	if _, err := os.Stat(filepath.Join(tmpDir, "workspaces")); !os.IsNotExist(err) {
+		t.Error("old workspaces/ directory should have been removed")
+	}
+}
+
+func TestResolveWorkspaceTemplatesDir(t *testing.T) {
+	os.Setenv(StateDirEnv, "/tmp/test-devclaw")
+	defer os.Unsetenv(StateDirEnv)
+
+	got := ResolveWorkspaceTemplatesDir()
+	want := "/tmp/test-devclaw/configs/templates"
+	if got != want {
+		t.Errorf("ResolveWorkspaceTemplatesDir() = %q, want %q", got, want)
 	}
 }

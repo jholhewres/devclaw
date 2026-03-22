@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
   ArrowLeft,
@@ -35,6 +35,8 @@ const tabFromHash = (): Tab => {
 export function TelegramConnect() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const { instanceId } = useParams<{ instanceId?: string }>()
+  const instanceLabel = instanceId ? ` (${instanceId})` : ''
   const [activeTab, setActiveTab] = useState<Tab>(tabFromHash())
   const [config, setConfig] = useState<TelegramConfig | null>(null)
   const [loading, setLoading] = useState(true)
@@ -43,13 +45,33 @@ export function TelegramConnect() {
   const loadConfig = () => {
     setLoading(true)
     setError('')
-    api.channels.telegram
-      .getConfig()
-      .then(setConfig)
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : t('common.error'))
-      })
-      .finally(() => setLoading(false))
+    if (instanceId) {
+      api.channels.instanceStatus('telegram', instanceId)
+        .then((status) => {
+          setConfig({
+            configured: true,
+            connected: status.connected,
+            bot_username: status.phone || '',
+            respond_to_groups: true,
+            respond_to_dms: true,
+            send_typing: true,
+            reaction_notifications: 'off',
+            allowed_chats: [],
+          })
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : t('common.error'))
+        })
+        .finally(() => setLoading(false))
+    } else {
+      api.channels.telegram
+        .getConfig()
+        .then(setConfig)
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : t('common.error'))
+        })
+        .finally(() => setLoading(false))
+    }
   }
 
   useEffect(() => {
@@ -79,7 +101,7 @@ export function TelegramConnect() {
             {t('channelsPage.backToChannels')}
           </button>
           <div className="flex flex-col gap-1">
-            <h2 className="text-lg font-medium text-primary">{t('telegram.title')}</h2>
+            <h2 className="text-lg font-medium text-primary">{t('telegram.title')}{instanceLabel}</h2>
             <p className="text-sm text-tertiary">{t('telegram.subtitle')}</p>
           </div>
         </div>
@@ -92,7 +114,7 @@ export function TelegramConnect() {
         {/* Tab Content */}
         <div className="mt-6">
           {activeTab === 'connection' && (
-            <ConnectionTab config={config} loading={loading} error={error} onReload={loadConfig} />
+            <ConnectionTab config={config} loading={loading} error={error} onReload={loadConfig} instanceId={instanceId} />
           )}
           {activeTab === 'settings' && (
             <SettingsTab config={config} onConfigChange={setConfig} />
@@ -110,11 +132,13 @@ function ConnectionTab({
   loading,
   error,
   onReload,
+  instanceId,
 }: {
   config: TelegramConfig | null
   loading: boolean
   error: string
   onReload: () => void
+  instanceId?: string
 }) {
   const { t } = useTranslation()
   const [token, setToken] = useState('')
@@ -142,7 +166,11 @@ function ConnectionTab({
     setDisconnecting(true)
     setActionError('')
     try {
-      await api.channels.telegram.disconnect()
+      if (instanceId) {
+        await api.channels.instanceDisconnect('telegram', instanceId)
+      } else {
+        await api.channels.telegram.disconnect()
+      }
       onReload()
     } catch (err) {
       setActionError(err instanceof Error ? err.message : t('common.error'))
@@ -204,7 +232,7 @@ function ConnectionTab({
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
                 placeholder={t('telegram.tokenPlaceholder')}
-                className="w-full rounded-lg border border-secondarybg-primary px-3 py-2.5 pr-10 text-sm text-primary placeholder:text-tertiary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                className="w-full rounded-lg border border-secondary bg-primary px-3 py-2.5 pr-10 text-sm text-primary placeholder:text-tertiary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                 onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
               />
               <button
@@ -364,7 +392,7 @@ function SettingsTab({
       <Card className="p-6">
         <h3 className="mb-4 text-sm font-semibold text-primary">{t('telegram.settings.bot')}</h3>
 
-        <div className="flex items-start justify-between border-b border-secondarypy-4">
+        <div className="flex items-start justify-between border-b border-secondary py-4">
           <div className="flex flex-col gap-1">
             <span className="text-sm font-medium text-primary">
               {t('telegram.settings.respondToGroups')}
@@ -381,7 +409,7 @@ function SettingsTab({
           />
         </div>
 
-        <div className="flex items-start justify-between border-b border-secondarypy-4">
+        <div className="flex items-start justify-between border-b border-secondary py-4">
           <div className="flex flex-col gap-1">
             <span className="text-sm font-medium text-primary">
               {t('telegram.settings.respondToDMs')}

@@ -218,7 +218,7 @@ func (bs *BuiltinSkills) OnDemandSkills() []*BuiltinSkill {
 }
 
 // titleCase capitalizes the first letter of a string.
-// Simple implementation for ASCII skill names (memory, teams, etc.)
+// Simple implementation for ASCII skill names (memory, scheduler, etc.)
 func titleCase(s string) string {
 	if s == "" {
 		return s

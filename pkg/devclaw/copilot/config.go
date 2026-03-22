@@ -120,9 +120,6 @@ type Config struct {
 	// Budget configures monthly cost tracking and limits.
 	Budget BudgetConfig `yaml:"budget"`
 
-	// Team configures multi-user mode.
-	Team TeamConfig `yaml:"team"`
-
 	// Media configures vision and audio transcription.
 	Media MediaConfig `yaml:"media"`
 
@@ -676,17 +673,71 @@ type APIConfig struct {
 
 // ChannelsConfig holds configuration for all channels.
 type ChannelsConfig struct {
-	// WhatsApp is the WhatsApp channel config (core).
+	// WhatsApp is the default WhatsApp channel config (core).
 	WhatsApp whatsapp.Config `yaml:"whatsapp"`
 
-	// Telegram is the Telegram channel config (core).
+	// Telegram is the default Telegram channel config (core).
 	Telegram telegram.Config `yaml:"telegram"`
 
-	// Discord is the Discord channel config (core).
+	// Discord is the default Discord channel config (core).
 	Discord discord.Config `yaml:"discord"`
 
-	// Slack is the Slack channel config (core).
+	// Slack is the default Slack channel config (core).
 	Slack slack.Config `yaml:"slack"`
+
+	// WhatsAppInstances holds additional named WhatsApp instances.
+	// Each key is the instance ID (e.g. "business") and the value is
+	// the full channel config for that instance.
+	WhatsAppInstances map[string]whatsapp.Config `yaml:"whatsapp_instances,omitempty"`
+
+	// TelegramInstances holds additional named Telegram instances.
+	TelegramInstances map[string]telegram.Config `yaml:"telegram_instances,omitempty"`
+
+	// DiscordInstances holds additional named Discord instances.
+	DiscordInstances map[string]discord.Config `yaml:"discord_instances,omitempty"`
+
+	// SlackInstances holds additional named Slack instances.
+	SlackInstances map[string]slack.Config `yaml:"slack_instances,omitempty"`
+}
+
+// WhatsAppAll returns all WhatsApp configs: the default instance (key "")
+// merged with any named instances from WhatsAppInstances.
+func (c ChannelsConfig) WhatsAppAll() map[string]whatsapp.Config {
+	result := map[string]whatsapp.Config{"": c.WhatsApp}
+	for id, cfg := range c.WhatsAppInstances {
+		result[id] = cfg
+	}
+	return result
+}
+
+// TelegramAll returns all Telegram configs: the default instance (key "")
+// merged with any named instances from TelegramInstances.
+func (c ChannelsConfig) TelegramAll() map[string]telegram.Config {
+	result := map[string]telegram.Config{"": c.Telegram}
+	for id, cfg := range c.TelegramInstances {
+		result[id] = cfg
+	}
+	return result
+}
+
+// DiscordAll returns all Discord configs: the default instance (key "")
+// merged with any named instances from DiscordInstances.
+func (c ChannelsConfig) DiscordAll() map[string]discord.Config {
+	result := map[string]discord.Config{"": c.Discord}
+	for id, cfg := range c.DiscordInstances {
+		result[id] = cfg
+	}
+	return result
+}
+
+// SlackAll returns all Slack configs: the default instance (key "")
+// merged with any named instances from SlackInstances.
+func (c ChannelsConfig) SlackAll() map[string]slack.Config {
+	result := map[string]slack.Config{"": c.Slack}
+	for id, cfg := range c.SlackInstances {
+		result[id] = cfg
+	}
+	return result
 }
 
 // MemoryConfig configures the memory and persistence system.
@@ -961,7 +1012,6 @@ func DefaultConfig() *Config {
 		Agent:      DefaultAgentConfig(),
 		Fallback:   DefaultFallbackConfig(),
 		Budget:     DefaultBudgetConfig(),
-		Team:       DefaultTeamConfig(),
 		Media:      DefaultMediaConfig(),
 		Logging: LoggingConfig{
 			Level:  "info",

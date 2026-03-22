@@ -6,7 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
 )
 
 // RegisterAgentTools registers the agent_manage dispatcher tool.
@@ -15,20 +20,20 @@ func RegisterAgentTools(executor *ToolExecutor, wsMgr *WorkspaceManager) {
 		return
 	}
 
-	executor.RegisterHidden(
+	executor.Register(
 		MakeToolDefinition("agent_manage",
-			"Manage agents (isolated assistant profiles). Actions: create, list, get, update, delete, set_default. Each agent has its own instructions, model, skills, sessions, and routing.",
+			"Manage agents (isolated assistant profiles). Actions: create, list, get, update, delete, set_default, sessions. Each agent has its own instructions, model, skills, sessions, and routing.",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"enum":        []string{"create", "list", "get", "update", "delete", "set_default"},
+						"enum":        []string{"create", "list", "get", "update", "delete", "set_default", "sessions"},
 						"description": "Action to perform",
 					},
 					"agent_id": map[string]any{
 						"type":        "string",
-						"description": "Agent ID (required for get/update/delete/set_default)",
+						"description": "Agent ID or display name — resolved automatically (required for get/update/delete/set_default/sessions)",
 					},
 					"name": map[string]any{
 						"type":        "string",
@@ -45,6 +50,10 @@ func RegisterAgentTools(executor *ToolExecutor, wsMgr *WorkspaceManager) {
 					"instructions": map[string]any{
 						"type":        "string",
 						"description": "System prompt (for create/update)",
+					},
+					"soul": map[string]any{
+						"type":        "string",
+						"description": "Agent personality/persona definition (written to SOUL.md in workspace)",
 					},
 					"emoji": map[string]any{
 						"type":        "string",
@@ -86,8 +95,10 @@ func RegisterAgentTools(executor *ToolExecutor, wsMgr *WorkspaceManager) {
 				return handleAgentDelete(wsMgr, args)
 			case "set_default":
 				return handleAgentSetDefault(wsMgr, args)
+			case "sessions":
+				return handleAgentSessions(wsMgr, args)
 			default:
-				return nil, fmt.Errorf("unknown action: %s (valid: create, list, get, update, delete, set_default)", action)
+				return nil, fmt.Errorf("unknown action: %s (valid: create, list, get, update, delete, set_default, sessions)", action)
 			}
 		},
 	)
@@ -120,6 +131,9 @@ func handleAgentCreate(wsMgr *WorkspaceManager, args map[string]any) (any, error
 	}
 	if instr, ok := args["instructions"].(string); ok && instr != "" {
 		ws.Instructions = instr
+	}
+	if soul, ok := args["soul"].(string); ok && soul != "" {
+		ws.Soul = soul
 	}
 	if emoji, ok := args["emoji"].(string); ok && emoji != "" {
 		ws.Identity = &IdentityConfig{Emoji: emoji}
@@ -163,6 +177,7 @@ func handleAgentList(wsMgr *WorkspaceManager) (any, error) {
 		Active      bool     `json:"active"`
 		Default     bool     `json:"default"`
 		Source      string   `json:"source,omitempty"`
+		FileBacked  bool     `json:"file_backed"`
 		MemberCount int      `json:"member_count"`
 		Sessions    int      `json:"session_count"`
 	}
@@ -177,6 +192,7 @@ func handleAgentList(wsMgr *WorkspaceManager) (any, error) {
 			Active:      ws.Active,
 			Default:     ws.Default,
 			Source:      ws.Source,
+			FileBacked:  ws.ID != wsMgr.DefaultID() && hasWorkspaceDir(ws.ID),
 			MemberCount: len(ws.Members),
 			Sessions:    wsMgr.SessionCountForWorkspace(ws.ID),
 		})
@@ -186,28 +202,64 @@ func handleAgentList(wsMgr *WorkspaceManager) (any, error) {
 	return string(data), nil
 }
 
-func handleAgentGet(wsMgr *WorkspaceManager, args map[string]any) (any, error) {
-	id, _ := args["agent_id"].(string)
-	if id == "" {
-		return nil, fmt.Errorf("agent_id is required for get")
+// resolveAgent looks up an agent by ID or display name and returns the
+// canonical workspace. This allows users to refer to agents by name
+// (e.g. "@agentdev" finds "AgentDev" with ID "tester").
+func resolveAgent(wsMgr *WorkspaceManager, args map[string]any, field string) (*Workspace, error) {
+	input, _ := args[field].(string)
+	if input == "" {
+		return nil, fmt.Errorf("%s is required", field)
 	}
-
-	ws, ok := wsMgr.Get(id)
+	ws, ok := wsMgr.ResolveByNameOrID(input)
 	if !ok {
-		return nil, fmt.Errorf("agent %q not found", id)
+		return nil, fmt.Errorf("agent %q not found (searched by ID and name)", input)
+	}
+	return ws, nil
+}
+
+func handleAgentGet(wsMgr *WorkspaceManager, args map[string]any) (any, error) {
+	ws, err := resolveAgent(wsMgr, args, "agent_id")
+	if err != nil {
+		return nil, err
 	}
 
-	data, _ := json.MarshalIndent(ws, "", "  ")
+	type agentDetail struct {
+		*Workspace
+		WorkspaceDir   string            `json:"workspace_dir,omitempty"`
+		FileBacked     bool              `json:"file_backed"`
+		WorkspaceFiles map[string]string `json:"workspace_files,omitempty"`
+	}
+
+	detail := agentDetail{Workspace: ws}
+	if ws.ID != wsMgr.DefaultID() && hasWorkspaceDir(ws.ID) {
+		wsDir := paths.ResolveWorkspaceDir(ws.ID)
+		detail.WorkspaceDir = wsDir
+		detail.FileBacked = true
+		detail.WorkspaceFiles = readWorkspaceFiles(wsDir)
+	}
+	data, _ := json.MarshalIndent(detail, "", "  ")
 	return string(data), nil
 }
 
-func handleAgentUpdate(wsMgr *WorkspaceManager, args map[string]any) (any, error) {
-	id, _ := args["agent_id"].(string)
-	if id == "" {
-		return nil, fmt.Errorf("agent_id is required for update")
+func readWorkspaceFiles(dir string) map[string]string {
+	files := map[string]string{}
+	for _, name := range []string{"SOUL.md", "IDENTITY.md", "TOOLS.md", "MEMORY.md", "AGENTS.md", "HEARTBEAT.md"} {
+		if content, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
+			files[name] = strings.TrimSpace(string(content))
+		}
 	}
+	return files
+}
 
-	err := wsMgr.Update(id, func(ws *Workspace) {
+func handleAgentUpdate(wsMgr *WorkspaceManager, args map[string]any) (any, error) {
+	resolved, err := resolveAgent(wsMgr, args, "agent_id")
+	if err != nil {
+		return nil, err
+	}
+	id := resolved.ID
+
+	var soulToSync string
+	err = wsMgr.Update(id, func(ws *Workspace) {
 		if name, ok := args["name"].(string); ok && name != "" {
 			ws.Name = name
 		}
@@ -219,6 +271,12 @@ func handleAgentUpdate(wsMgr *WorkspaceManager, args map[string]any) (any, error
 		}
 		if instr, ok := args["instructions"].(string); ok {
 			ws.Instructions = instr
+		}
+		if soul, ok := args["soul"].(string); ok && soul != "" {
+			ws.Soul = soul
+			if ws.ID != wsMgr.DefaultID() && hasWorkspaceDir(ws.ID) {
+				soulToSync = soul
+			}
 		}
 		if emoji, ok := args["emoji"].(string); ok && emoji != "" {
 			if ws.Identity == nil {
@@ -256,33 +314,62 @@ func handleAgentUpdate(wsMgr *WorkspaceManager, args map[string]any) (any, error
 	// Rebuild routing maps after update
 	wsMgr.RebuildMaps()
 
+	// Sync soul to workspace file (outside closure to handle errors)
+	if soulToSync != "" {
+		wsDir := paths.ResolveWorkspaceDir(id)
+		if err := os.WriteFile(filepath.Join(wsDir, "SOUL.md"), []byte(soulToSync), 0600); err != nil {
+			return nil, fmt.Errorf("sync SOUL.md: %w", err)
+		}
+	}
+
 	return fmt.Sprintf("Agent `%s` updated.", id), nil
 }
 
 func handleAgentDelete(wsMgr *WorkspaceManager, args map[string]any) (any, error) {
-	id, _ := args["agent_id"].(string)
-	if id == "" {
-		return nil, fmt.Errorf("agent_id is required for delete")
+	ws, err := resolveAgent(wsMgr, args, "agent_id")
+	if err != nil {
+		return nil, err
 	}
 
-	if err := wsMgr.Delete(id, "ai"); err != nil {
+	if err := wsMgr.Delete(ws.ID, "ai"); err != nil {
 		return nil, fmt.Errorf("delete agent: %w", err)
 	}
 
-	return fmt.Sprintf("Agent `%s` deleted.", id), nil
+	return fmt.Sprintf("Agent `%s` deleted.", ws.ID), nil
 }
 
 func handleAgentSetDefault(wsMgr *WorkspaceManager, args map[string]any) (any, error) {
-	id, _ := args["agent_id"].(string)
-	if id == "" {
-		return nil, fmt.Errorf("agent_id is required for set_default")
+	ws, err := resolveAgent(wsMgr, args, "agent_id")
+	if err != nil {
+		return nil, err
 	}
 
-	if err := wsMgr.SetDefault(id); err != nil {
+	if err := wsMgr.SetDefault(ws.ID); err != nil {
 		return nil, fmt.Errorf("set default: %w", err)
 	}
 
-	return fmt.Sprintf("Agent `%s` is now the default.", id), nil
+	return fmt.Sprintf("Agent `%s` is now the default.", ws.ID), nil
+}
+
+func handleAgentSessions(wsMgr *WorkspaceManager, args map[string]any) (any, error) {
+	ws, err := resolveAgent(wsMgr, args, "agent_id")
+	if err != nil {
+		return nil, err
+	}
+	agentID := ws.ID
+
+	sessions := wsMgr.ListSessionsForWorkspace(agentID)
+	if len(sessions) == 0 {
+		return fmt.Sprintf("No active sessions for agent %q.", agentID), nil
+	}
+
+	var b strings.Builder
+	for _, s := range sessions {
+		ago := time.Since(s.LastActiveAt).Round(time.Second)
+		fmt.Fprintf(&b, "- [%s] %s — %d msgs — %s ago\n",
+			s.Channel, s.ChatID, s.MessageCount, ago)
+	}
+	return fmt.Sprintf("Sessions for agent %q (%d):\n%s", agentID, len(sessions), b.String()), nil
 }
 
 // Slugify converts a name to a URL-friendly slug (lowercase, hyphens).

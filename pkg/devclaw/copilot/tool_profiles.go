@@ -61,7 +61,6 @@ var BuiltInProfiles = map[string]ToolProfile{
 			"group:subagents", // no subagents
 			"group:daemon",    // no daemons
 			"group:browser",   // no browser
-			"group:teams",     // no teams
 		},
 	},
 	"coding": {
@@ -110,7 +109,6 @@ var BuiltInProfiles = map[string]ToolProfile{
 			"group:fs",        // read_file, write_file, edit_file, list_files, search_files, glob_files
 			"group:subagents", // spawn, list, wait, stop subagents
 			"group:browser",   // browser automation for skills
-			"group:teams",     // team_manage, team_agent, team_task, team_memory, team_comm
 			"group:daemon",    // daemon manager
 			"bash",            // shell access (curl, jq, etc. for API skills)
 			"exec",            // sandboxed execution
@@ -126,32 +124,6 @@ var BuiltInProfiles = map[string]ToolProfile{
 			"ssh",     // no remote access
 			"scp",     // no remote copy
 			"set_env", // no env modification
-		},
-	},
-	"team": {
-		Name:        "team",
-		Description: "Team agent - team tools, web, memory, scheduler, vault, skills, full FS, bash",
-		Allow: []string{
-			"group:teams",     // team_manage, team_agent, team_task, team_memory, team_comm
-			"group:web",       // web_search, web_fetch
-			"group:memory",    // memory dispatcher + sub-tools
-			"group:scheduler", // scheduler dispatcher + sub-tools
-			"group:vault",     // vault dispatcher + sub-tools
-			"group:skills",    // get_skill_instructions, get_skill_reference, skill_list, etc.
-			"group:media",     // describe_image, transcribe_audio, send_media
-			"group:skill_db",  // skill_db_query, skill_db_list_tables, etc.
-			"group:fs",        // full filesystem access
-			"group:sessions",  // sessions
-			"group:browser",   // browser automation
-			"bash",            // shell access (for team task execution)
-			"exec",            // sandboxed execution
-			"apply_patch",     // multi-file patches
-		},
-		Deny: []string{
-			"group:subagents", // no subagents (team agents are agents themselves)
-			"group:daemon",    // no daemon management
-			"ssh",             // no remote access
-			"scp",
 		},
 	},
 	"full": {
@@ -452,10 +424,6 @@ func InferToolCategory(name string) string {
 		strings.Contains(name, "test") ||
 		strings.Contains(name, "debug"):
 		return "Development"
-
-	// Team tools
-	case strings.HasPrefix(name, "team_"):
-		return "Team"
 
 	// Daemon management
 	case name == "daemon":

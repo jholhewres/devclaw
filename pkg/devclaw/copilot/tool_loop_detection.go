@@ -86,7 +86,8 @@ type toolCallEntry struct {
 // knownNoProgressTools are tools that frequently poll external state without
 // making progress. These get hard-blocked earlier than generic repeats.
 var knownNoProgressTools = map[string]map[string]bool{
-	"process": {"poll": true, "log": true},
+	"process":       {"poll": true, "log": true},
+	"agent_manage":  {"list": true, "get": true, "sessions": true},
 }
 
 // idempotentReadOnlyTools are tools that always return the same output for the
@@ -99,13 +100,8 @@ var idempotentReadOnlyTools = map[string]bool{
 	// skill_list: loop detection normal is sufficient
 }
 
-// destructiveTools are tools that can cause data loss or irreversible changes.
-// These get additional batch detection to prevent accidental mass operations.
-// Note: Dispatcher tools (team_agent, team_manage, team_task) are NOT included
-// because they have multiple actions, not all destructive. The DestructiveTracker
-// handles those with action-specific checking.
-// destructiveTools tracks tools that can cause data loss.
-// Note: With dispatcher consolidation, destructive actions (scheduler remove,
+// destructiveTools tracks tools that can cause data loss or irreversible changes.
+// With dispatcher consolidation, destructive actions (scheduler remove,
 // vault delete, sessions delete) are now sub-actions within their dispatchers.
 // The dispatchers themselves are not destructive (most actions are safe).
 // Action-level protection is handled within each dispatcher handler.

@@ -12,10 +12,10 @@ func TestLoadBuiltinSkills(t *testing.T) {
 		t.Fatal("LoadBuiltinSkills returned nil")
 	}
 
-	// Check that memory and teams skills are loaded
+	// Check that builtin skills are loaded
 	names := skills.Names()
-	if len(names) < 2 {
-		t.Errorf("expected at least 2 builtin skills, got %d: %v", len(names), names)
+	if len(names) < 10 {
+		t.Errorf("expected at least 10 builtin skills, got %d: %v", len(names), names)
 	}
 
 	// Check memory skill
@@ -34,17 +34,10 @@ func TestLoadBuiltinSkills(t *testing.T) {
 		}
 	}
 
-	// Check teams skill
+	// Verify teams skill no longer exists (removed in agent overhaul)
 	teamsSkill := skills.Get("teams")
-	if teamsSkill == nil {
-		t.Error("expected teams skill to be loaded")
-	} else {
-		if teamsSkill.Name != "teams" {
-			t.Errorf("expected skill name 'teams', got %q", teamsSkill.Name)
-		}
-		if !strings.Contains(teamsSkill.Content, "team_manage") {
-			t.Error("expected teams skill content to contain tool references")
-		}
+	if teamsSkill != nil {
+		t.Error("expected teams skill to not be loaded (removed)")
 	}
 }
 

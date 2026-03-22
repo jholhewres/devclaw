@@ -82,3 +82,5 @@ pkg/devclaw/webui/dist/
 /devclaw-linux
 pkg/devclaw/copilot/data/
 devclaw-linux-amd64
+
+workspace-*/

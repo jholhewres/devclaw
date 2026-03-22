@@ -493,6 +493,88 @@ func TestNormalizeBRPhone(t *testing.T) {
 	}
 }
 
+// ---------- Multi-instance tests ----------
+
+func TestWhatsAppNameDefault(t *testing.T) {
+	cfg := DefaultConfig()
+	w := New(cfg, slog.Default())
+	if w.Name() != "whatsapp" {
+		t.Errorf("default instance Name() = %q, want %q", w.Name(), "whatsapp")
+	}
+	if w.InstanceID() != "" {
+		t.Errorf("default InstanceID() = %q, want empty", w.InstanceID())
+	}
+	if w.BaseType() != "whatsapp" {
+		t.Errorf("default BaseType() = %q, want %q", w.BaseType(), "whatsapp")
+	}
+}
+
+func TestWhatsAppNameInstance(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.InstanceID = "business"
+	w := New(cfg, slog.Default())
+	if w.Name() != "whatsapp:business" {
+		t.Errorf("named instance Name() = %q, want %q", w.Name(), "whatsapp:business")
+	}
+	if w.InstanceID() != "business" {
+		t.Errorf("named InstanceID() = %q, want %q", w.InstanceID(), "business")
+	}
+	if w.BaseType() != "whatsapp" {
+		t.Errorf("named BaseType() = %q, want %q", w.BaseType(), "whatsapp")
+	}
+}
+
+func TestDBPathIsolation(t *testing.T) {
+	tests := []struct {
+		name       string
+		dbPath     string
+		sessionDir string
+		instanceID string
+		want       string
+	}{
+		{
+			name:       "default instance with db path",
+			dbPath:     "/data/devclaw.db",
+			instanceID: "",
+			want:       "/data/devclaw.db",
+		},
+		{
+			name:       "named instance with db path",
+			dbPath:     "/data/devclaw.db",
+			instanceID: "business",
+			want:       "/data/devclaw_business.db",
+		},
+		{
+			name:       "default instance with session dir",
+			sessionDir: "/sessions",
+			instanceID: "",
+			want:       "/sessions/whatsapp.db",
+		},
+		{
+			name:       "named instance with session dir",
+			sessionDir: "/sessions",
+			instanceID: "alerts",
+			want:       "/sessions/whatsapp_alerts.db",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.DatabasePath = tt.dbPath
+			if tt.sessionDir != "" {
+				cfg.SessionDir = tt.sessionDir
+			}
+			cfg.InstanceID = tt.instanceID
+			w := New(cfg, slog.Default())
+			got := w.getDBPath()
+			if got != tt.want {
+				t.Errorf("getDBPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // Test helper types
 
 type testConnectionObserver struct {

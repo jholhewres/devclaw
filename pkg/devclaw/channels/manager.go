@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 )
 
@@ -359,6 +360,49 @@ func (m *Manager) ListChannels() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// UnregisterChannel removes a channel by name. If the channel is connected,
+// it is disconnected first. Use this for runtime instance deletion.
+func (m *Manager) UnregisterChannel(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	ch, exists := m.channels[name]
+	if !exists {
+		return fmt.Errorf("channel %q not found", name)
+	}
+
+	if ch.IsConnected() {
+		if err := ch.Disconnect(); err != nil {
+			m.logger.Error("error disconnecting channel during unregister",
+				"channel", name, "error", err)
+		}
+	}
+
+	delete(m.channels, name)
+	m.logger.Info("channel unregistered", "channel", name)
+	return nil
+}
+
+// ChannelsByType returns all channels whose base type matches. For instance-aware
+// channels, this matches on BaseType(); for others, it matches on Name() equality
+// or Name() having the given prefix followed by ":".
+func (m *Manager) ChannelsByType(baseType string) []Channel {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []Channel
+	for _, ch := range m.channels {
+		if ia, ok := ch.(InstanceAware); ok {
+			if ia.BaseType() == baseType {
+				result = append(result, ch)
+			}
+		} else if ch.Name() == baseType || strings.HasPrefix(ch.Name(), baseType+":") {
+			result = append(result, ch)
+		}
+	}
+	return result
 }
 
 // startListener starts a listener goroutine for a channel if one isn't already running.

@@ -43,24 +43,10 @@ type SharedMemory struct {
 	Tags      []string  `json:"tags,omitempty"`
 }
 
-// TeamConfig holds multi-user configuration.
-type TeamConfig struct {
-	Enabled       bool   `yaml:"enabled" json:"enabled"`
-	MaxUsers      int    `yaml:"max_users" json:"max_users"`
-	SharedMemory  bool   `yaml:"shared_memory" json:"shared_memory"`
-	AuditLog      bool   `yaml:"audit_log" json:"audit_log"`
-	DefaultRole   string `yaml:"default_role" json:"default_role"`
-}
-
-// DefaultTeamConfig returns sensible defaults.
-func DefaultTeamConfig() TeamConfig {
-	return TeamConfig{
-		Enabled:      false,
-		MaxUsers:     10,
-		SharedMemory: true,
-		AuditLog:     true,
-		DefaultRole:  "user",
-	}
+// UserManagerConfig holds multi-user configuration.
+type UserManagerConfig struct {
+	MaxUsers    int    `yaml:"max_users" json:"max_users"`
+	DefaultRole string `yaml:"default_role" json:"default_role"`
 }
 
 // ---------- User Manager ----------
@@ -70,11 +56,17 @@ type UserManager struct {
 	mu           sync.RWMutex
 	users        map[string]*TeamUser
 	sharedMemory map[string]*SharedMemory
-	config       TeamConfig
+	config       UserManagerConfig
 }
 
 // NewUserManager creates a new user manager.
-func NewUserManager(config TeamConfig) *UserManager {
+func NewUserManager(config UserManagerConfig) *UserManager {
+	if config.MaxUsers == 0 {
+		config.MaxUsers = 10
+	}
+	if config.DefaultRole == "" {
+		config.DefaultRole = "user"
+	}
 	return &UserManager{
 		users:        make(map[string]*TeamUser),
 		sharedMemory: make(map[string]*SharedMemory),
@@ -253,11 +245,12 @@ func RegisterMultiUserTools(executor *ToolExecutor, um *UserManager) {
 		case "update_role":
 			userID, _ := args["user_id"].(string)
 			role, _ := args["role"].(string)
-			user, ok := um.GetUser(userID)
+			um.mu.Lock()
+			user, ok := um.users[userID]
 			if !ok {
+				um.mu.Unlock()
 				return nil, fmt.Errorf("user %q not found", userID)
 			}
-			um.mu.Lock()
 			user.Role = UserRole(role)
 			um.mu.Unlock()
 			return fmt.Sprintf("User %q role updated to %q.", userID, role), nil

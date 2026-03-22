@@ -31,6 +31,10 @@ import (
 
 // Config holds Telegram channel configuration.
 type Config struct {
+	// InstanceID identifies this instance ("" for default, e.g. "alerts" for named).
+	// Set automatically from the config key in telegram_instances.
+	InstanceID string `yaml:"instance_id,omitempty"`
+
 	// Token is the Telegram Bot API token (from @BotFather).
 	Token string `yaml:"token"`
 
@@ -158,8 +162,20 @@ func New(cfg Config, logger *slog.Logger) *Telegram {
 
 // ---------- Channel Interface ----------
 
-// Name returns "telegram".
-func (t *Telegram) Name() string { return "telegram" }
+// Name returns the channel name. For the default instance this is "telegram";
+// for named instances it returns "telegram:<instance_id>".
+func (t *Telegram) Name() string {
+	if t.cfg.InstanceID != "" {
+		return "telegram:" + t.cfg.InstanceID
+	}
+	return "telegram"
+}
+
+// InstanceID returns the instance identifier ("" for default).
+func (t *Telegram) InstanceID() string { return t.cfg.InstanceID }
+
+// BaseType returns "telegram".
+func (t *Telegram) BaseType() string { return "telegram" }
 
 // Connect starts the long-polling loop for receiving updates.
 func (t *Telegram) Connect(ctx context.Context) error {
@@ -676,7 +692,7 @@ func (t *Telegram) processMessageReaction(r *tgMessageReaction) {
 
 	incoming := &channels.IncomingMessage{
 		ID:        fmt.Sprintf("reaction-%d-%d", r.Chat.ID, r.MessageID),
-		Channel:   "telegram",
+		Channel:   t.Name(),
 		From:      fromID,
 		FromName:  fromName,
 		ChatID:    chatIDStr,
@@ -726,7 +742,7 @@ func (t *Telegram) processCallbackQuery(cq *tgCallbackQuery) {
 
 	incoming := &channels.IncomingMessage{
 		ID:        "cb-" + cq.ID,
-		Channel:   "telegram",
+		Channel:   t.Name(),
 		From:      from,
 		FromName:  fromName,
 		ChatID:    chatIDStr,
@@ -955,7 +971,7 @@ func (t *Telegram) processUpdate(u tgUpdate) {
 	// Build the incoming message.
 	incoming := &channels.IncomingMessage{
 		ID:        strconv.FormatInt(int64(msg.MessageID), 10),
-		Channel:   "telegram",
+		Channel:   t.Name(),
 		From:      from,
 		FromName:  fromName,
 		ChatID:    chatIDStr,

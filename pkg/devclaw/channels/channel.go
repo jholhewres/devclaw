@@ -6,6 +6,7 @@ package channels
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 )
 
@@ -90,6 +91,18 @@ type ReactionChannel interface {
 // sent by the bot, enabling accurate reply-to-bot detection.
 type SentMessageTracker interface {
 	IsBotMessage(chatID, messageID string) bool
+}
+
+// InstanceAware is an optional interface for channels that support multiple
+// instances of the same type (e.g., two WhatsApp accounts). Channels that
+// implement this return a non-empty InstanceID for named instances, while
+// the default instance returns "".
+type InstanceAware interface {
+	// InstanceID returns the instance identifier ("" for default, e.g. "business" for named).
+	InstanceID() string
+
+	// BaseType returns the channel type without instance suffix (e.g. "whatsapp").
+	BaseType() string
 }
 
 // AutoReadConfigurable extends Channel with AutoRead configuration access.
@@ -374,6 +387,30 @@ type ChannelConfig struct {
 	RetryBackoffMs int    `yaml:"retry_backoff_ms"`
 }
 
+// validInstanceID matches alphanumeric, underscore, and hyphen; 1–64 chars.
+var validInstanceID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+
+// ValidateInstanceID checks that id is safe to use as a channel instance identifier.
+// An empty string is always valid (it represents the default instance).
+// Named instances must be 1–64 characters of [a-zA-Z0-9_-].
+func ValidateInstanceID(id string) error {
+	if id == "" {
+		return nil
+	}
+	if !validInstanceID.MatchString(id) {
+		return fmt.Errorf("invalid instance ID %q: must be 1-64 alphanumeric, underscore, or hyphen characters", id)
+	}
+	return nil
+}
+
+// ValidChannelTypes lists the known channel type slugs.
+var ValidChannelTypes = map[string]bool{
+	"whatsapp": true,
+	"telegram": true,
+	"discord":  true,
+	"slack":    true,
+}
+
 // Errors.
 var (
 	ErrChannelDisconnected = fmt.Errorf("channel is not connected")
@@ -381,4 +418,5 @@ var (
 	ErrConnectionFailed    = fmt.Errorf("failed to connect to channel")
 	ErrMediaNotSupported   = fmt.Errorf("media not supported by this channel")
 	ErrMediaDownloadFailed = fmt.Errorf("failed to download media")
+	ErrInvalidInstanceID   = fmt.Errorf("invalid instance ID")
 )

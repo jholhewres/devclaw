@@ -79,10 +79,23 @@ export interface UsageInfo {
 
 export interface ChannelHealth {
   name: string;
+  account_id?: string;
+  full_id?: string;
   connected: boolean;
   error_count: number;
   last_msg_at: string;
   configured: boolean;
+}
+
+export interface ChannelInstance {
+  type: string;
+  instance_id: string;
+  full_name: string;
+  label: string;
+  connected: boolean;
+  configured: boolean;
+  needs_qr: boolean;
+  error_count: number;
 }
 
 export interface JobInfo {
@@ -465,6 +478,14 @@ export interface VersionInfo {
   update?: UpdateInfo;
 }
 
+/* ── Model Types ── */
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  provider: string;
+}
+
 /* ── Agent Types ── */
 
 export interface AgentIdentity {
@@ -473,6 +494,7 @@ export interface AgentIdentity {
   theme?: string;
   avatar?: string;
   vibe?: string;
+  creature?: string;
 }
 
 export interface AgentInfo {
@@ -481,6 +503,7 @@ export interface AgentInfo {
   description?: string;
   model?: string;
   instructions?: string;
+  soul?: string;
   language?: string;
   timezone?: string;
   trigger?: string;
@@ -501,6 +524,8 @@ export interface AgentInfo {
   member_count: number;
   group_count: number;
   session_count: number;
+  workspace_dir?: string;
+  file_backed?: boolean;
 }
 
 export interface CreateAgentRequest {
@@ -509,6 +534,7 @@ export interface CreateAgentRequest {
   description?: string;
   model?: string;
   instructions?: string;
+  soul?: string;
   language?: string;
   identity?: AgentIdentity;
   skills?: string[];
@@ -523,10 +549,15 @@ export interface UpdateAgentRequest {
   description?: string;
   model?: string;
   instructions?: string;
+  soul?: string;
   language?: string;
+  timezone?: string;
+  trigger?: string;
   identity?: AgentIdentity;
   skills?: string[];
   channels?: string[];
+  members?: string[];
+  groups?: string[];
   tool_profile?: string;
   tools_allow?: string[];
   tools_deny?: string[];
@@ -630,11 +661,51 @@ export const api = {
       request<{ status: string }>(`/agents/${encodeURIComponent(id)}/default`, {
         method: 'POST',
       }),
+    files: {
+      list: (agentId: string) =>
+        request<{
+          workspace_dir: string;
+          files: Record<string, string | null>;
+          inherited: Record<string, string>;
+        }>(`/agents/${encodeURIComponent(agentId)}/files`),
+      update: (agentId: string, filename: string, content: string) =>
+        request<{ status: string }>(
+          `/agents/${encodeURIComponent(agentId)}/files/${encodeURIComponent(filename)}`,
+          {
+            method: 'PUT',
+            body: JSON.stringify({ content }),
+          },
+        ),
+    },
   },
 
   /* Channels */
   channels: {
     list: () => request<ChannelHealth[]>('/channels'),
+
+    // Multi-instance management
+    instances: (type: string) =>
+      request<ChannelInstance[]>(`/channels/instances/${type}`),
+    createInstance: (type: string, instanceId: string, config: Record<string, unknown> = {}) =>
+      request<{ status: string; instance_id: string }>(`/channels/instances/${type}`, {
+        method: 'POST',
+        body: JSON.stringify({ instance_id: instanceId, config }),
+      }),
+    deleteInstance: (type: string, instanceId: string) =>
+      request<{ status: string }>(`/channels/instances/${type}/${instanceId}`, {
+        method: 'DELETE',
+      }),
+    instanceStatus: (type: string, instanceId: string) =>
+      request<WhatsAppStatus>(`/channels/instances/${type}/${instanceId}/status`),
+    instanceDisconnect: (type: string, instanceId: string) =>
+      request<{ status: string }>(`/channels/instances/${type}/${instanceId}/disconnect`, {
+        method: 'POST',
+      }),
+    instanceRequestQR: (type: string, instanceId: string) =>
+      request<{ status: string }>(`/channels/instances/${type}/${instanceId}/qr`, {
+        method: 'POST',
+      }),
+
     whatsapp: {
       status: () => request<WhatsAppStatus>('/channels/whatsapp/status'),
       requestQR: () =>
@@ -889,6 +960,11 @@ export const api = {
       request<{ status: string }>('/system/update', {
         method: 'POST',
       }),
+  },
+
+  /* Models */
+  models: {
+    list: () => request<ModelInfo[]>('/models'),
   },
 
   /* Settings / Tool Profiles */

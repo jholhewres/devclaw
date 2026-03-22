@@ -29,6 +29,10 @@ import (
 
 // Config holds Discord channel configuration.
 type Config struct {
+	// InstanceID identifies this instance ("" for default, e.g. "gaming" for named).
+	// Set automatically from the config key in discord_instances.
+	InstanceID string `yaml:"instance_id,omitempty"`
+
 	// Token is the Discord bot token.
 	Token string `yaml:"token"`
 
@@ -105,8 +109,20 @@ func New(cfg Config, logger *slog.Logger) *Discord {
 
 // ---------- Channel Interface ----------
 
-// Name returns "discord".
-func (d *Discord) Name() string { return "discord" }
+// Name returns the channel name. For the default instance this is "discord";
+// for named instances it returns "discord:<instance_id>".
+func (d *Discord) Name() string {
+	if d.cfg.InstanceID != "" {
+		return "discord:" + d.cfg.InstanceID
+	}
+	return "discord"
+}
+
+// InstanceID returns the instance identifier ("" for default).
+func (d *Discord) InstanceID() string { return d.cfg.InstanceID }
+
+// BaseType returns "discord".
+func (d *Discord) BaseType() string { return "discord" }
 
 // Connect opens the Discord gateway WebSocket connection.
 func (d *Discord) Connect(ctx context.Context) error {
@@ -367,7 +383,7 @@ func (d *Discord) onMessageCreate(s *discordgo.Session, m *discordgo.MessageCrea
 	// Build the incoming message.
 	incoming := &channels.IncomingMessage{
 		ID:        m.ID,
-		Channel:   "discord",
+		Channel:   d.Name(),
 		From:      m.Author.ID,
 		FromName:  m.Author.Username,
 		ChatID:    m.ChannelID,

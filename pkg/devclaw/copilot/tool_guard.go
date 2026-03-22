@@ -181,13 +181,6 @@ var ToolGroups = map[string][]string{
 	"group:media":     {"describe_image", "transcribe_audio", "send_media", "image-gen_generate_image"},
 	"group:skill_db":  {"skill_db_query", "skill_db_list_tables", "skill_db_insert", "skill_db_update", "skill_db_delete", "skill_db_create_table", "skill_db_describe", "skill_db_drop_table"},
 	"group:browser":   {"browser", "browser_navigate", "browser_screenshot", "browser_content", "browser_click", "browser_fill", "browser_snapshot", "browser_tabs", "browser_open_tab", "browser_focus_tab", "browser_close_tab", "browser_act"},
-	"group:teams": {
-		"team_manage",
-		"team_agent",
-		"team_task",
-		"team_memory",
-		"team_comm",
-	},
 }
 
 // ExpandToolGroups expands group references (e.g. "group:memory") into
@@ -273,10 +266,34 @@ type ToolCheckResult struct {
 	RequiresConfirmation  bool // true if tool needs user approval before execution
 }
 
-// CheckWithProfile evaluates tool access considering a profile's allow/deny lists.
-// The profile check runs before the standard permission checks.
-// If no profile is provided (nil), delegates directly to Check().
-func (g *ToolGuard) CheckWithProfile(toolName string, callerLevel AccessLevel, args map[string]any, profile *ToolProfile) ToolCheckResult {
+// CheckWithProfile evaluates tool access considering a profile's allow/deny lists
+// and an optional workspace overlay. The overlay is applied after the profile check
+// but before standard permission checks.
+// If no profile is provided (nil), delegates directly to Check() (with overlay).
+func (g *ToolGuard) CheckWithProfile(toolName string, callerLevel AccessLevel, args map[string]any, profile *ToolProfile, overlay *ToolOverlay) ToolCheckResult {
+	// Apply workspace overlay (ToolsAllow/ToolsDeny) first
+	if overlay != nil {
+		expandedDeny := ExpandToolGroups(overlay.Deny)
+		for _, denied := range expandedDeny {
+			if denied == toolName {
+				return ToolCheckResult{Allowed: false, Reason: fmt.Sprintf("tool %q denied by workspace policy", toolName)}
+			}
+		}
+		if len(overlay.Allow) > 0 {
+			expandedAllow := ExpandToolGroups(overlay.Allow)
+			allowed := false
+			for _, a := range expandedAllow {
+				if a == toolName {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return ToolCheckResult{Allowed: false, Reason: fmt.Sprintf("tool %q not in workspace allow list", toolName)}
+			}
+		}
+	}
+
 	// If no profile, use standard check.
 	if profile == nil {
 		return g.Check(toolName, callerLevel, args)

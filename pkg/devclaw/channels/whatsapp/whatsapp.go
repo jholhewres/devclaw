@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,6 +41,10 @@ import (
 
 // Config holds WhatsApp channel configuration.
 type Config struct {
+	// InstanceID identifies this instance ("" for default, e.g. "business" for named).
+	// Set automatically from the config key in whatsapp_instances.
+	InstanceID string `yaml:"instance_id,omitempty"`
+
 	// SessionDir is the directory for session persistence (SQLite).
 	// Ignored if DatabasePath is set.
 	SessionDir string `yaml:"session_dir"`
@@ -247,6 +252,9 @@ type WhatsApp struct {
 	// reconnectGuard prevents multiple concurrent reconnection attempts.
 	reconnectGuard atomic.Bool
 
+	// qrGuard prevents multiple concurrent QR generation attempts.
+	qrGuard atomic.Bool
+
 	// messagesClosed tracks if the messages channel has been closed.
 	// This prevents sending to a closed channel which would cause a panic.
 	messagesClosed atomic.Bool
@@ -426,8 +434,45 @@ func (w *WhatsApp) notifyConnectionChange(evt ConnectionEvent) {
 
 // ---------- Channel Interface ----------
 
-// Name returns "whatsapp".
-func (w *WhatsApp) Name() string { return "whatsapp" }
+// Name returns the channel name. For the default instance this is "whatsapp";
+// for named instances it returns "whatsapp:<instance_id>".
+func (w *WhatsApp) Name() string {
+	if w.cfg.InstanceID != "" {
+		return "whatsapp:" + w.cfg.InstanceID
+	}
+	return "whatsapp"
+}
+
+// InstanceID returns the instance identifier ("" for default).
+func (w *WhatsApp) InstanceID() string { return w.cfg.InstanceID }
+
+// BaseType returns "whatsapp".
+func (w *WhatsApp) BaseType() string { return "whatsapp" }
+
+// getDBPath returns the database path for this instance.
+// Named instances derive a unique path to isolate sessions:
+//
+//	default → data/devclaw.db (or SessionDir/whatsapp.db)
+//	"business" → data/devclaw_business.db (or SessionDir/whatsapp_business.db)
+func (w *WhatsApp) getDBPath() string {
+	// Defense-in-depth: reject unsafe instance IDs even though they should be
+	// validated earlier (at config load / HTTP handler level).
+	if err := channels.ValidateInstanceID(w.cfg.InstanceID); err != nil {
+		w.logger.Error("whatsapp: invalid instance ID, falling back to default DB path",
+			"instance_id", w.cfg.InstanceID, "error", err)
+		w.cfg.InstanceID = ""
+	}
+
+	base := w.cfg.DatabasePath
+	if base == "" {
+		base = filepath.Join(w.cfg.SessionDir, "whatsapp.db")
+	}
+	if w.cfg.InstanceID == "" {
+		return base
+	}
+	ext := filepath.Ext(base)
+	return strings.TrimSuffix(base, ext) + "_" + w.cfg.InstanceID + ext
+}
 
 // Connect establishes the WhatsApp Web connection via whatsmeow.
 // If no existing session is found, the QR login process runs in the
@@ -441,9 +486,9 @@ func (w *WhatsApp) Connect(ctx context.Context) error {
 
 	// Initialize session store (SQLite).
 	// Use DatabasePath if provided, otherwise fall back to SessionDir/whatsapp.db.
-	dbPath := w.cfg.DatabasePath
-	if dbPath == "" {
-		dbPath = w.cfg.SessionDir + "/whatsapp.db"
+	// Named instances derive a unique DB path to isolate sessions.
+	dbPath := w.getDBPath()
+	if w.cfg.DatabasePath == "" {
 		w.logger.Info("whatsapp: using standalone session database", "path", dbPath)
 	} else {
 		w.logger.Info("whatsapp: using shared devclaw database for sessions", "path", dbPath)
@@ -480,14 +525,10 @@ func (w *WhatsApp) Connect(ctx context.Context) error {
 
 	// Connect.
 	if w.client.Store.ID == nil {
-		// First login — start QR process in background (non-blocking).
+		// No existing session — wait for user to request QR via web UI.
+		// Do NOT auto-start QR generation on boot.
 		w.setState(StateWaitingQR)
-		w.logger.Info("whatsapp: no existing session, QR code required — scan via web UI")
-		go func() {
-			if err := w.loginWithQR(w.ctx); err != nil {
-				w.logger.Warn("whatsapp: QR login pending", "error", err)
-			}
-		}()
+		w.logger.Info("whatsapp: no existing session, waiting for QR request via web UI")
 		return nil
 	}
 
@@ -514,6 +555,12 @@ func (w *WhatsApp) Disconnect() error {
 	w.setState(StateDisconnected)
 	w.connected.Store(false)
 
+	// Notify QR observers before cancelling context so SSE streams can close cleanly.
+	w.notifyQR(QREvent{
+		Type:    "close",
+		Message: "Channel disconnected",
+	})
+
 	if w.cancel != nil {
 		w.cancel()
 	}
@@ -529,7 +576,7 @@ func (w *WhatsApp) Disconnect() error {
 
 	w.logger.Info("whatsapp: disconnected")
 
-	// Notify observers.
+	// Notify connection observers.
 	w.notifyConnectionChange(ConnectionEvent{
 		State:     StateDisconnected,
 		Previous:  previous,
@@ -1029,13 +1076,24 @@ func (w *WhatsApp) resetClientForQR(ctx context.Context) error {
 
 // RequestNewQR disconnects and reconnects to generate a fresh QR code.
 // This is used when the web UI needs a new QR after timeout.
-// A default timeout of 2 minutes is applied if the context has no deadline.
-func (w *WhatsApp) RequestNewQR(ctx context.Context) error {
+// A default timeout of 2 minutes is applied. The goroutine is bound to
+// the instance lifecycle (w.ctx) so it stops on Disconnect/deletion.
+// Only one QR generation can run at a time (guarded by qrGuard).
+func (w *WhatsApp) RequestNewQR(_ context.Context) error {
 	if w.connected.Load() {
 		return fmt.Errorf("already connected")
 	}
 	if w.client == nil {
 		return fmt.Errorf("client not initialized")
+	}
+	if w.ctx == nil || w.ctx.Err() != nil {
+		return fmt.Errorf("channel not connected")
+	}
+
+	// Prevent concurrent QR generation — only one goroutine at a time.
+	if !w.qrGuard.CompareAndSwap(false, true) {
+		w.logger.Debug("whatsapp: QR generation already in progress, skipping")
+		return nil
 	}
 
 	// Disconnect current attempt if any.
@@ -1066,16 +1124,12 @@ func (w *WhatsApp) RequestNewQR(ctx context.Context) error {
 	})
 
 	// Re-login with QR in a goroutine (non-blocking for the web handler).
-	// Use resetClientForQR if the device store was invalidated (ID is nil
-	// after logout) to avoid FK constraint failures.
+	// Use w.ctx (instance lifecycle) so the goroutine stops on Disconnect().
 	go func() {
-		// Apply default timeout if context has no deadline.
-		qrCtx := ctx
-		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-			var cancel context.CancelFunc
-			qrCtx, cancel = context.WithTimeout(ctx, 2*time.Minute)
-			defer cancel()
-		}
+		defer w.qrGuard.Store(false)
+
+		qrCtx, cancel := context.WithTimeout(w.ctx, 2*time.Minute)
+		defer cancel()
 
 		var err error
 		if w.client.Store == nil || w.client.Store.ID == nil {
@@ -1084,7 +1138,12 @@ func (w *WhatsApp) RequestNewQR(ctx context.Context) error {
 			err = w.loginWithQR(qrCtx)
 		}
 		if err != nil {
-			w.logger.Error("whatsapp: QR re-login failed", "error", err)
+			if w.ctx.Err() != nil {
+				// Instance was disconnected/deleted — expected, don't log as error.
+				w.logger.Debug("whatsapp: QR login cancelled (instance stopped)")
+			} else {
+				w.logger.Error("whatsapp: QR re-login failed", "error", err)
+			}
 		}
 	}()
 

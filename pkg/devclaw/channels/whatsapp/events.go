@@ -451,7 +451,7 @@ func (w *WhatsApp) handleMessageEvt(evt *events.Message) {
 
 	msg := &channels.IncomingMessage{
 		ID:        string(evt.Info.ID),
-		Channel:   "whatsapp",
+		Channel:   w.Name(),
 		From:      resolvedSender,
 		FromName:  evt.Info.PushName,
 		ChatID:    resolvedChat,

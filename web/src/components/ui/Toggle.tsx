@@ -10,7 +10,7 @@ const sizeConfig = {
   },
   md: {
     track: 'h-6 w-11',
-    knob: 'h-4.5 w-4.5',
+    knob: 'h-5 w-5',
     translate: 'translate-x-5',
     offset: 'translate-x-0.5',
   },
@@ -68,8 +68,8 @@ export function Toggle({
           'relative inline-flex flex-shrink-0 items-center rounded-full',
           'transition-colors duration-200 ease-in-out',
           config.track,
-          checked ? 'bg-brand' : 'bg-bg-subtle',
-          !disabled && !checked && 'hover:bg-bg-elevated',
+          checked ? 'bg-brand' : 'bg-tertiary',
+          !disabled && !checked && 'hover:bg-quaternary',
           !disabled && checked && 'hover:bg-brand-hover'
         )}
       >

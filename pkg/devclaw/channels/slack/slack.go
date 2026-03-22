@@ -30,6 +30,10 @@ import (
 
 // Config holds Slack channel configuration.
 type Config struct {
+	// InstanceID identifies this instance ("" for default, e.g. "support" for named).
+	// Set automatically from the config key in slack_instances.
+	InstanceID string `yaml:"instance_id,omitempty"`
+
 	// BotToken is the Slack Bot User OAuth Token (xoxb-...).
 	BotToken string `yaml:"bot_token"`
 
@@ -101,8 +105,20 @@ func New(cfg Config, logger *slog.Logger) *Slack {
 
 // ---------- Channel Interface ----------
 
-// Name returns "slack".
-func (s *Slack) Name() string { return "slack" }
+// Name returns the channel name. For the default instance this is "slack";
+// for named instances it returns "slack:<instance_id>".
+func (s *Slack) Name() string {
+	if s.cfg.InstanceID != "" {
+		return "slack:" + s.cfg.InstanceID
+	}
+	return "slack"
+}
+
+// InstanceID returns the instance identifier ("" for default).
+func (s *Slack) InstanceID() string { return s.cfg.InstanceID }
+
+// BaseType returns "slack".
+func (s *Slack) BaseType() string { return "slack" }
 
 // Connect starts the Socket Mode connection for receiving events.
 func (s *Slack) Connect(ctx context.Context) error {
@@ -391,7 +407,7 @@ func (s *Slack) pollMessages(_ string) {
 
 				incoming := &channels.IncomingMessage{
 					ID:        msg.TS,
-					Channel:   "slack",
+					Channel:   s.Name(),
 					From:      msg.User,
 					FromName:  msg.User, // Could resolve via users.info
 					ChatID:    ch,

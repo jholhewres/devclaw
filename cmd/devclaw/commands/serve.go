@@ -13,11 +13,14 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels"
+	"github.com/jholhewres/devclaw/pkg/devclaw/channels/discord"
+	"github.com/jholhewres/devclaw/pkg/devclaw/channels/slack"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/telegram"
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/whatsapp"
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot"
@@ -46,7 +49,7 @@ Examples:
 		RunE: runServe,
 	}
 
-	cmd.Flags().StringSlice("channel", nil, "channels to enable (whatsapp, telegram)")
+	cmd.Flags().StringSlice("channel", nil, "channels to enable (whatsapp, telegram, discord, slack)")
 	return cmd
 }
 
@@ -54,6 +57,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// ── Ensure state directories exist ──
 	if err := paths.EnsureStateDirs(); err != nil {
 		return fmt.Errorf("failed to create state directories: %w", err)
+	}
+	if err := paths.EnsureWorkspaceTemplates(); err != nil {
+		return fmt.Errorf("failed to create workspace templates: %w", err)
 	}
 
 	// ── Load config ──
@@ -107,62 +113,108 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// ── Register channels ──
 	channelFilter, _ := cmd.Flags().GetStringSlice("channel")
 
-	// WhatsApp (core channel).
-	var wa *whatsapp.WhatsApp
+	// WhatsApp (core channel — supports multiple instances).
+	waInstances := make(map[string]*whatsapp.WhatsApp)
 	if shouldEnable("whatsapp", channelFilter, true) {
-		// Use the main devclaw database for WhatsApp sessions.
-		// This stores whatsmeow tables alongside other devclaw data.
-		waCfg := cfg.Channels.WhatsApp
-		if waCfg.DatabasePath == "" && cfg.Database.Path != "" {
-			waCfg.DatabasePath = cfg.Database.Path
-		}
+		for instanceID, waCfg := range cfg.Channels.WhatsAppAll() {
+			if err := channels.ValidateInstanceID(instanceID); err != nil {
+				logger.Error("WhatsApp: invalid instance ID, skipping", "instance", instanceID, "error", err)
+				continue
+			}
+			waCfg.InstanceID = instanceID
 
-		// Inherit global access config into WhatsApp when the channel-specific
-		// access config is not explicitly set. The setup wizard writes owners
-		// and default_policy to the top-level "access" section, but the WhatsApp
-		// channel only checks its own "channels.whatsapp.access" config.
-		if waCfg.Access.DefaultPolicy == "" && string(cfg.Access.DefaultPolicy) != "" {
-			waCfg.Access.DefaultPolicy = string(cfg.Access.DefaultPolicy)
-			logger.Info("whatsapp: inherited global default_policy", "policy", waCfg.Access.DefaultPolicy)
-		}
-		if len(waCfg.Access.Owners) == 0 && len(cfg.Access.Owners) > 0 {
-			waCfg.Access.Owners = cfg.Access.Owners
-			logger.Info("whatsapp: inherited global owners", "count", len(waCfg.Access.Owners))
-		}
-		if len(waCfg.Access.Admins) == 0 && len(cfg.Access.Admins) > 0 {
-			waCfg.Access.Admins = cfg.Access.Admins
-		}
-		if len(waCfg.Access.AllowedUsers) == 0 && len(cfg.Access.AllowedUsers) > 0 {
-			waCfg.Access.AllowedUsers = cfg.Access.AllowedUsers
-		}
-		if len(waCfg.Access.BlockedUsers) == 0 && len(cfg.Access.BlockedUsers) > 0 {
-			waCfg.Access.BlockedUsers = cfg.Access.BlockedUsers
-		}
-		if len(waCfg.Access.AllowedGroups) == 0 && len(cfg.Access.AllowedGroups) > 0 {
-			waCfg.Access.AllowedGroups = cfg.Access.AllowedGroups
-		}
-		if len(waCfg.Access.BlockedGroups) == 0 && len(cfg.Access.BlockedGroups) > 0 {
-			waCfg.Access.BlockedGroups = cfg.Access.BlockedGroups
-		}
-		if waCfg.Access.PendingMessage == "" && cfg.Access.PendingMessage != "" {
-			waCfg.Access.PendingMessage = cfg.Access.PendingMessage
-		}
+			// Use the main devclaw database for WhatsApp sessions.
+			if waCfg.DatabasePath == "" && cfg.Database.Path != "" {
+				waCfg.DatabasePath = cfg.Database.Path
+			}
 
-		wa = whatsapp.New(waCfg, logger)
-		if err := assistant.ChannelManager().Register(wa); err != nil {
-			logger.Error("failed to register WhatsApp", "error", err)
-		} else {
-			logger.Info("WhatsApp channel registered")
+			// Inherit global access config into WhatsApp when the channel-specific
+			// access config is not explicitly set.
+			inheritWhatsAppAccess(&waCfg, cfg)
+
+			wa := whatsapp.New(waCfg, logger)
+			if err := assistant.ChannelManager().Register(wa); err != nil {
+				logger.Error("WhatsApp register failed", "instance", instanceID, "error", err)
+				continue
+			}
+			waInstances[instanceID] = wa
+			label := "WhatsApp"
+			if instanceID != "" {
+				label = "WhatsApp:" + instanceID
+			}
+			logger.Info(label + " channel registered")
 		}
 	}
 
-	// Telegram (core channel).
-	if shouldEnable("telegram", channelFilter, false) && cfg.Channels.Telegram.Token != "" {
-		tg := telegram.New(cfg.Channels.Telegram, logger)
-		if err := assistant.ChannelManager().Register(tg); err != nil {
-			logger.Error("failed to register Telegram", "error", err)
-		} else {
-			logger.Info("Telegram channel registered")
+	// Telegram (core channel — supports multiple instances).
+	if shouldEnable("telegram", channelFilter, false) {
+		for instanceID, tgCfg := range cfg.Channels.TelegramAll() {
+			if tgCfg.Token == "" {
+				continue
+			}
+			if err := channels.ValidateInstanceID(instanceID); err != nil {
+				logger.Error("Telegram: invalid instance ID, skipping", "instance", instanceID, "error", err)
+				continue
+			}
+			tgCfg.InstanceID = instanceID
+			tg := telegram.New(tgCfg, logger)
+			if err := assistant.ChannelManager().Register(tg); err != nil {
+				logger.Error("Telegram register failed", "instance", instanceID, "error", err)
+				continue
+			}
+			label := "Telegram"
+			if instanceID != "" {
+				label = "Telegram:" + instanceID
+			}
+			logger.Info(label + " channel registered")
+		}
+	}
+
+	// Discord (core channel — supports multiple instances).
+	if shouldEnable("discord", channelFilter, false) {
+		for instanceID, dcCfg := range cfg.Channels.DiscordAll() {
+			if dcCfg.Token == "" {
+				continue
+			}
+			if err := channels.ValidateInstanceID(instanceID); err != nil {
+				logger.Error("Discord: invalid instance ID, skipping", "instance", instanceID, "error", err)
+				continue
+			}
+			dcCfg.InstanceID = instanceID
+			dc := discord.New(dcCfg, logger)
+			if err := assistant.ChannelManager().Register(dc); err != nil {
+				logger.Error("Discord register failed", "instance", instanceID, "error", err)
+				continue
+			}
+			label := "Discord"
+			if instanceID != "" {
+				label = "Discord:" + instanceID
+			}
+			logger.Info(label + " channel registered")
+		}
+	}
+
+	// Slack (core channel — supports multiple instances).
+	if shouldEnable("slack", channelFilter, false) {
+		for instanceID, slCfg := range cfg.Channels.SlackAll() {
+			if slCfg.BotToken == "" {
+				continue
+			}
+			if err := channels.ValidateInstanceID(instanceID); err != nil {
+				logger.Error("Slack: invalid instance ID, skipping", "instance", instanceID, "error", err)
+				continue
+			}
+			slCfg.InstanceID = instanceID
+			sl := slack.New(slCfg, logger)
+			if err := assistant.ChannelManager().Register(sl); err != nil {
+				logger.Error("Slack register failed", "instance", instanceID, "error", err)
+				continue
+			}
+			label := "Slack"
+			if instanceID != "" {
+				label = "Slack:" + instanceID
+			}
+			logger.Info(label + " channel registered")
 		}
 	}
 
@@ -195,14 +247,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			certPath = cfg.Gateway.TLS.CertPath
 		}
 		if certPath == "" {
-			certPath = filepath.Join("data", "tls", "devclaw-cert.pem")
+			certPath = filepath.Join(paths.ResolveDataDir(), "tls", "devclaw-cert.pem")
 		}
 		keyPath := cfg.WebUI.TLS.KeyPath
 		if keyPath == "" {
 			keyPath = cfg.Gateway.TLS.KeyPath
 		}
 		if keyPath == "" {
-			keyPath = filepath.Join("data", "tls", "devclaw-key.pem")
+			keyPath = filepath.Join(paths.ResolveDataDir(), "tls", "devclaw-key.pem")
 		}
 
 		// Share paths to both configs.
@@ -234,7 +286,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	var webServer *webui.Server
 	var adapter *webui.AssistantAdapter
 	if cfg.WebUI.Enabled {
-		adapter = buildWebUIAdapter(assistant, cfg, wa, configPath, logger)
+		adapter = buildWebUIAdapter(ctx, assistant, cfg, waInstances, configPath, logger)
 		webServer = webui.New(cfg.WebUI, adapter, logger)
 
 		// Register restart callback
@@ -288,7 +340,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 				hubURL := ""
 
 				// Read hub_url from local hub_config.json
-				if data, err := os.ReadFile("hub_config.json"); err == nil {
+				if data, err := os.ReadFile(filepath.Join(paths.ResolveStateDir(), "hub_config.json")); err == nil {
 					var savedHub struct {
 						HubURL string `json:"hub_url"`
 						APIKey string `json:"api_key"`
@@ -314,7 +366,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			}
 			// Wire up skill installer for Hub skill downloads
 			oauthHandlers.SetSkillInstaller(func(name, content string) error {
-				dir := filepath.Join("./skills", name)
+				dir := filepath.Join(paths.ResolveSkillsDir(), name)
 				if err := os.MkdirAll(dir, 0o755); err != nil {
 					return fmt.Errorf("failed to create skill directory: %w", err)
 				}
@@ -330,7 +382,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			// Wire up bundle installer for multi-file skill installs (gator-hub + references)
 			oauthHandlers.SetSkillBundleInstaller(func(name string, files map[string]string) error {
 				for relPath, content := range files {
-					fullPath := filepath.Join("./skills", name, relPath)
+					fullPath := filepath.Join(paths.ResolveSkillsDir(), name, relPath)
 					if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 						return fmt.Errorf("failed to create directory for %s: %w", relPath, err)
 					}
@@ -346,7 +398,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 			// Wire up reference remover for disconnecting services
 			oauthHandlers.SetSkillReferenceRemover(func(skillName, refPath string) error {
-				fullPath := filepath.Join("./skills", skillName, refPath)
+				fullPath := filepath.Join(paths.ResolveSkillsDir(), skillName, refPath)
 				if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
 					return fmt.Errorf("failed to remove %s: %w", refPath, err)
 				}
@@ -641,6 +693,92 @@ func getServerIP() string {
 	return ""
 }
 
+// inheritWhatsAppAccess copies global access config fields into a WhatsApp config
+// when the channel-specific fields are not explicitly set.
+func inheritWhatsAppAccess(waCfg *whatsapp.Config, cfg *copilot.Config) {
+	if waCfg.Access.DefaultPolicy == "" && string(cfg.Access.DefaultPolicy) != "" {
+		waCfg.Access.DefaultPolicy = string(cfg.Access.DefaultPolicy)
+	}
+	if len(waCfg.Access.Owners) == 0 && len(cfg.Access.Owners) > 0 {
+		waCfg.Access.Owners = cfg.Access.Owners
+	}
+	if len(waCfg.Access.Admins) == 0 && len(cfg.Access.Admins) > 0 {
+		waCfg.Access.Admins = cfg.Access.Admins
+	}
+	if len(waCfg.Access.AllowedUsers) == 0 && len(cfg.Access.AllowedUsers) > 0 {
+		waCfg.Access.AllowedUsers = cfg.Access.AllowedUsers
+	}
+	if len(waCfg.Access.BlockedUsers) == 0 && len(cfg.Access.BlockedUsers) > 0 {
+		waCfg.Access.BlockedUsers = cfg.Access.BlockedUsers
+	}
+	if len(waCfg.Access.AllowedGroups) == 0 && len(cfg.Access.AllowedGroups) > 0 {
+		waCfg.Access.AllowedGroups = cfg.Access.AllowedGroups
+	}
+	if len(waCfg.Access.BlockedGroups) == 0 && len(cfg.Access.BlockedGroups) > 0 {
+		waCfg.Access.BlockedGroups = cfg.Access.BlockedGroups
+	}
+	if waCfg.Access.PendingMessage == "" && cfg.Access.PendingMessage != "" {
+		waCfg.Access.PendingMessage = cfg.Access.PendingMessage
+	}
+}
+
+// whatsappStatusFromInstance builds a WhatsAppStatus from a WhatsApp instance.
+func whatsappStatusFromInstance(wa *whatsapp.WhatsApp) webui.WhatsAppStatus {
+	health := wa.Health()
+	state := wa.GetState()
+	status := webui.WhatsAppStatus{
+		Connected:  wa.IsConnected(),
+		State:      string(state),
+		NeedsQR:    wa.NeedsQR(),
+		ErrorCount: health.ErrorCount,
+	}
+	if jid, ok := health.Details["jid"].(string); ok {
+		status.Phone = jid
+	}
+	if platform, ok := health.Details["platform"].(string); ok {
+		status.Platform = platform
+	}
+	if attempts, ok := health.Details["reconnect_attempts"].(int); ok {
+		status.ReconnectAttempts = attempts
+	}
+	switch state {
+	case "connected":
+		status.Message = "Connected"
+	case "disconnected":
+		status.Message = "Disconnected"
+	case "connecting":
+		status.Message = "Connecting..."
+	case "reconnecting":
+		status.Message = fmt.Sprintf("Reconnecting (attempt %d)...", status.ReconnectAttempts)
+	case "waiting_qr":
+		status.Message = "Waiting for QR code scan"
+	case "banned":
+		status.Message = "Account temporarily banned"
+	case "logging_out":
+		status.Message = "Logging out..."
+	}
+	return status
+}
+
+// bridgeWhatsAppQR bridges whatsapp.QREvent → webui.WhatsAppQREvent via a channel.
+func bridgeWhatsAppQR(wa *whatsapp.WhatsApp) (chan webui.WhatsAppQREvent, func()) {
+	ch, unsub := wa.SubscribeQR()
+	out := make(chan webui.WhatsAppQREvent, 8)
+	go func() {
+		defer close(out)
+		for evt := range ch {
+			out <- webui.WhatsAppQREvent{
+				Type:        evt.Type,
+				Code:        evt.Code,
+				Message:     evt.Message,
+				ExpiresAt:   evt.ExpiresAt.Format(time.RFC3339),
+				SecondsLeft: evt.SecondsLeft,
+			}
+		}
+	}()
+	return out, unsub
+}
+
 // shouldEnable checks if a channel should be enabled.
 func shouldEnable(name string, filter []string, defaultEnabled bool) bool {
 	if len(filter) == 0 {
@@ -866,7 +1004,7 @@ func wireMediaAdapter(webServer *webui.Server, assistant *copilot.Assistant, log
 }
 
 // buildWebUIAdapter creates the adapter that bridges the Assistant to the WebUI.
-func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *whatsapp.WhatsApp, configPath string, logger *slog.Logger) *webui.AssistantAdapter {
+func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *copilot.Config, waInstances map[string]*whatsapp.WhatsApp, configPath string, logger *slog.Logger) *webui.AssistantAdapter {
 	adapter := &webui.AssistantAdapter{
 		GetConfigMapFn: func() map[string]any {
 			media := cfg.Media.Effective()
@@ -1139,28 +1277,41 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 		GetChannelHealthFn: func() []webui.ChannelHealthInfo {
 			healthMap := assistant.ChannelManager().HealthAll()
 
-			// Always return all 4 core channels, even if not registered.
-			coreChannels := []struct {
+			// Collect all registered channels from the manager.
+			seen := make(map[string]bool)
+			result := make([]webui.ChannelHealthInfo, 0, len(healthMap)+2)
+
+			for name, h := range healthMap {
+				seen[name] = true
+				result = append(result, webui.ChannelHealthInfo{
+					Name:       name,
+					FullID:     name,
+					Configured: true,
+					Connected:  h.Connected,
+					ErrorCount: h.ErrorCount,
+					LastMsgAt:  h.LastMessageAt,
+				})
+			}
+
+			// Always include default core channels even if not registered,
+			// so the UI shows the "connect" option.
+			coreDefaults := []struct {
 				name       string
 				configured bool
 			}{
-				{"whatsapp", true}, // WhatsApp is always enabled (QR-based)
+				{"whatsapp", true},
 				{"telegram", cfg.Channels.Telegram.Token != ""},
 			}
-
-			result := make([]webui.ChannelHealthInfo, 0, len(coreChannels))
-			for _, ch := range coreChannels {
-				info := webui.ChannelHealthInfo{
-					Name:       ch.name,
-					Configured: ch.configured,
+			for _, ch := range coreDefaults {
+				if !seen[ch.name] {
+					result = append(result, webui.ChannelHealthInfo{
+						Name:       ch.name,
+						FullID:     ch.name,
+						Configured: ch.configured,
+					})
 				}
-				if h, ok := healthMap[ch.name]; ok {
-					info.Connected = h.Connected
-					info.ErrorCount = h.ErrorCount
-					info.LastMsgAt = h.LastMessageAt
-				}
-				result = append(result, info)
 			}
+
 			return result
 		},
 		GetSchedulerJobsFn: func() []webui.JobInfo {
@@ -1596,69 +1747,196 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 		return result
 	}
 
+	// Wire up channel instance listing.
+	adapter.ListChannelInstancesFn = func(channelType string) []webui.ChannelInstanceInfo {
+		chs := assistant.ChannelManager().ChannelsByType(channelType)
+		result := make([]webui.ChannelInstanceInfo, 0, len(chs))
+		for _, ch := range chs {
+			info := webui.ChannelInstanceInfo{
+				Type:      channelType,
+				FullName:  ch.Name(),
+				Connected: ch.IsConnected(),
+				ErrorCount: ch.Health().ErrorCount,
+				Configured: true,
+			}
+			if ia, ok := ch.(channels.InstanceAware); ok {
+				info.InstanceID = ia.InstanceID()
+			}
+			if qr, ok := ch.(interface{ NeedsQR() bool }); ok {
+				info.NeedsQR = qr.NeedsQR()
+			}
+			label := strings.ToUpper(channelType[:1]) + channelType[1:]
+			if info.InstanceID == "" {
+				info.Label = label
+			} else {
+				info.Label = label + " (" + info.InstanceID + ")"
+			}
+			result = append(result, info)
+		}
+		return result
+	}
+
+	// Mutex protects waInstances and cfg during runtime instance creation/deletion.
+	var instanceMu sync.Mutex
+
+	adapter.CreateChannelInstanceFn = func(channelType, instanceID string, config map[string]any) error {
+		if err := channels.ValidateInstanceID(instanceID); err != nil {
+			return err
+		}
+		if instanceID == "" {
+			return fmt.Errorf("instance ID cannot be empty")
+		}
+
+		instanceMu.Lock()
+		defer instanceMu.Unlock()
+
+		fullName := channelType + ":" + instanceID
+
+		// Check for duplicate.
+		existing := assistant.ChannelManager().ChannelsByType(channelType)
+		for _, ch := range existing {
+			if ch.Name() == fullName {
+				return fmt.Errorf("instance %q already exists", instanceID)
+			}
+		}
+
+		switch channelType {
+		case "whatsapp":
+			waCfg := whatsapp.Config{InstanceID: instanceID}
+			if cfg.Database.Path != "" {
+				waCfg.DatabasePath = cfg.Database.Path
+			}
+			inheritWhatsAppAccess(&waCfg, cfg)
+			wa := whatsapp.New(waCfg, logger)
+			if err := assistant.ChannelManager().RegisterAndConnect(wa); err != nil {
+				return fmt.Errorf("register: %w", err)
+			}
+			waInstances[instanceID] = wa
+
+			// Persist to config.
+			if cfg.Channels.WhatsAppInstances == nil {
+				cfg.Channels.WhatsAppInstances = make(map[string]whatsapp.Config)
+			}
+			cfg.Channels.WhatsAppInstances[instanceID] = waCfg
+
+		case "telegram":
+			tgCfg := telegram.Config{InstanceID: instanceID}
+			if tok, ok := config["token"].(string); ok {
+				tgCfg.Token = tok
+			}
+			tg := telegram.New(tgCfg, logger)
+			if err := assistant.ChannelManager().RegisterAndConnect(tg); err != nil {
+				return fmt.Errorf("register: %w", err)
+			}
+			if cfg.Channels.TelegramInstances == nil {
+				cfg.Channels.TelegramInstances = make(map[string]telegram.Config)
+			}
+			cfg.Channels.TelegramInstances[instanceID] = tgCfg
+
+		case "discord":
+			dcCfg := discord.Config{InstanceID: instanceID}
+			if tok, ok := config["token"].(string); ok {
+				dcCfg.Token = tok
+			}
+			dc := discord.New(dcCfg, logger)
+			if err := assistant.ChannelManager().RegisterAndConnect(dc); err != nil {
+				return fmt.Errorf("register: %w", err)
+			}
+			if cfg.Channels.DiscordInstances == nil {
+				cfg.Channels.DiscordInstances = make(map[string]discord.Config)
+			}
+			cfg.Channels.DiscordInstances[instanceID] = dcCfg
+
+		case "slack":
+			slCfg := slack.Config{InstanceID: instanceID}
+			if tok, ok := config["bot_token"].(string); ok {
+				slCfg.BotToken = tok
+			}
+			if tok, ok := config["app_token"].(string); ok {
+				slCfg.AppToken = tok
+			}
+			sl := slack.New(slCfg, logger)
+			if err := assistant.ChannelManager().RegisterAndConnect(sl); err != nil {
+				return fmt.Errorf("register: %w", err)
+			}
+			if cfg.Channels.SlackInstances == nil {
+				cfg.Channels.SlackInstances = make(map[string]slack.Config)
+			}
+			cfg.Channels.SlackInstances[instanceID] = slCfg
+
+		default:
+			return fmt.Errorf("unsupported channel type: %s", channelType)
+		}
+
+		// Persist config to disk.
+		if configPath != "" {
+			if err := copilot.SaveConfigToFile(cfg, configPath); err != nil {
+				logger.Error("failed to save config after instance creation", "error", err)
+				return fmt.Errorf("config save: %w", err)
+			}
+		}
+
+		logger.Info("channel instance created", "type", channelType, "instance", instanceID)
+		return nil
+	}
+
+	adapter.DeleteChannelInstanceFn = func(channelType, instanceID string) error {
+		if instanceID == "" {
+			return fmt.Errorf("cannot delete default instance")
+		}
+		if err := channels.ValidateInstanceID(instanceID); err != nil {
+			return err
+		}
+
+		instanceMu.Lock()
+		defer instanceMu.Unlock()
+
+		fullName := channelType + ":" + instanceID
+
+		// Unregister from channel manager (disconnects if connected).
+		if err := assistant.ChannelManager().UnregisterChannel(fullName); err != nil {
+			return fmt.Errorf("unregister: %w", err)
+		}
+
+		// Remove from runtime maps.
+		switch channelType {
+		case "whatsapp":
+			delete(waInstances, instanceID)
+			delete(cfg.Channels.WhatsAppInstances, instanceID)
+		case "telegram":
+			delete(cfg.Channels.TelegramInstances, instanceID)
+		case "discord":
+			delete(cfg.Channels.DiscordInstances, instanceID)
+		case "slack":
+			delete(cfg.Channels.SlackInstances, instanceID)
+		default:
+			return fmt.Errorf("unsupported channel type: %s", channelType)
+		}
+
+		// Persist config to disk.
+		if configPath != "" {
+			if err := copilot.SaveConfigToFile(cfg, configPath); err != nil {
+				logger.Error("failed to save config after instance deletion", "error", err)
+				return fmt.Errorf("config save: %w", err)
+			}
+		}
+
+		logger.Info("channel instance deleted", "type", channelType, "instance", instanceID)
+		return nil
+	}
+
 	// Wire up WhatsApp QR callbacks if WhatsApp channel is available.
+	// Use the default instance for backward-compatible adapter functions.
+	wa := waInstances[""]
 	if wa != nil {
 		adapter.GetWhatsAppStatusFn = func() webui.WhatsAppStatus {
-			health := wa.Health()
-			state := wa.GetState()
-			status := webui.WhatsAppStatus{
-				Connected:  wa.IsConnected(),
-				State:      string(state),
-				NeedsQR:    wa.NeedsQR(),
-				ErrorCount: health.ErrorCount,
-			}
-
-			// Add details from health.
-			if jid, ok := health.Details["jid"].(string); ok {
-				status.Phone = jid
-			}
-			if platform, ok := health.Details["platform"].(string); ok {
-				status.Platform = platform
-			}
-			if attempts, ok := health.Details["reconnect_attempts"].(int); ok {
-				status.ReconnectAttempts = attempts
-			}
-
-			// Add human-readable message based on state.
-			switch state {
-			case "connected":
-				status.Message = "Connected"
-			case "disconnected":
-				status.Message = "Disconnected"
-			case "connecting":
-				status.Message = "Connecting..."
-			case "reconnecting":
-				status.Message = fmt.Sprintf("Reconnecting (attempt %d)...", status.ReconnectAttempts)
-			case "waiting_qr":
-				status.Message = "Waiting for QR code scan"
-			case "banned":
-				status.Message = "Account temporarily banned"
-			case "logging_out":
-				status.Message = "Logging out..."
-			}
-
-			return status
+			return whatsappStatusFromInstance(wa)
 		}
 		adapter.SubscribeWhatsAppQRFn = func() (chan webui.WhatsAppQREvent, func()) {
-			ch, unsub := wa.SubscribeQR()
-			// Bridge whatsapp.QREvent → webui.WhatsAppQREvent
-			out := make(chan webui.WhatsAppQREvent, 8)
-			go func() {
-				defer close(out)
-				for evt := range ch {
-					out <- webui.WhatsAppQREvent{
-						Type:        evt.Type,
-						Code:        evt.Code,
-						Message:     evt.Message,
-						ExpiresAt:   evt.ExpiresAt.Format(time.RFC3339),
-						SecondsLeft: evt.SecondsLeft,
-					}
-				}
-			}()
-			return out, unsub
+			return bridgeWhatsAppQR(wa)
 		}
 		adapter.RequestWhatsAppQRFn = func() error {
-			return wa.RequestNewQR(context.Background())
+			return wa.RequestNewQR(ctx)
 		}
 		adapter.DisconnectWhatsAppFn = func() error {
 			return wa.Disconnect()
@@ -1904,6 +2182,47 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 			}
 			return result, nil
 		}
+	}
+
+	// Instance-aware WhatsApp variants (work independently of default wa instance).
+	adapter.GetWhatsAppStatusByInstanceFn = func(instanceID string) webui.WhatsAppStatus {
+		instanceMu.Lock()
+		inst := waInstances[instanceID]
+		instanceMu.Unlock()
+		if inst == nil {
+			return webui.WhatsAppStatus{State: "not_configured", Message: "Instance not found"}
+		}
+		return whatsappStatusFromInstance(inst)
+	}
+	adapter.SubscribeWhatsAppQRByInstanceFn = func(instanceID string) (chan webui.WhatsAppQREvent, func()) {
+		instanceMu.Lock()
+		inst := waInstances[instanceID]
+		instanceMu.Unlock()
+		if inst == nil {
+			ch := make(chan webui.WhatsAppQREvent, 1)
+			ch <- webui.WhatsAppQREvent{Type: "error", Message: "instance not found"}
+			close(ch)
+			return ch, func() {}
+		}
+		return bridgeWhatsAppQR(inst)
+	}
+	adapter.RequestWhatsAppQRByInstanceFn = func(instanceID string) error {
+		instanceMu.Lock()
+		inst := waInstances[instanceID]
+		instanceMu.Unlock()
+		if inst == nil {
+			return fmt.Errorf("whatsapp instance %q not found", instanceID)
+		}
+		return inst.RequestNewQR(ctx)
+	}
+	adapter.DisconnectWhatsAppByInstanceFn = func(instanceID string) error {
+		instanceMu.Lock()
+		inst := waInstances[instanceID]
+		instanceMu.Unlock()
+		if inst == nil {
+			return fmt.Errorf("whatsapp instance %q not found", instanceID)
+		}
+		return inst.Disconnect()
 	}
 
 	// ── MCP Servers ──
@@ -2160,6 +2479,48 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 		return nil
 	}
 
+	// ── Models ──
+	adapter.ListModelsFn = func() []webui.ModelInfo {
+		seen := make(map[string]bool)
+		var models []webui.ModelInfo
+
+		add := func(id, name, provider string) {
+			if id == "" || seen[id] {
+				return
+			}
+			seen[id] = true
+			models = append(models, webui.ModelInfo{ID: id, Name: name, Provider: provider})
+		}
+
+		// Primary model from config
+		provider := cfg.API.Provider
+		if provider == "" {
+			provider = "default"
+		}
+		add(cfg.Model, cfg.Model, provider)
+
+		// Fallback models
+		for _, m := range cfg.Fallback.Models {
+			add(m, m, provider)
+		}
+		for _, entry := range cfg.Fallback.Chain {
+			p := entry.Provider
+			if p == "" {
+				p = provider
+			}
+			add(entry.Model, entry.Model, p)
+		}
+
+		// Discovered models (Ollama, vLLM)
+		if pd := assistant.ProviderDiscovery(); pd != nil {
+			for _, dm := range pd.ListModels() {
+				add(dm.Name, dm.Name, dm.Provider)
+			}
+		}
+
+		return models
+	}
+
 	// ── Agents ──
 	wireAgentAdapter(adapter, assistant, cfg, configPath, logger)
 
@@ -2264,6 +2625,7 @@ func wireAgentAdapter(adapter *webui.AssistantAdapter, assistant *copilot.Assist
 			Description:  ws.Description,
 			Model:        ws.Model,
 			Instructions: ws.Instructions,
+			Soul:         ws.Soul,
 			Language:     ws.Language,
 			Timezone:     ws.Timezone,
 			Trigger:      ws.Trigger,
@@ -2283,16 +2645,28 @@ func wireAgentAdapter(adapter *webui.AssistantAdapter, assistant *copilot.Assist
 			GroupCount:   len(ws.Groups),
 			SessionCount: wsMgr.SessionCountForWorkspace(ws.ID),
 		}
+		// Read soul from workspace file for file-backed agents
+		if ws.ID != wsMgr.DefaultID() {
+			wsDir := paths.ResolveWorkspaceDir(ws.ID)
+			if fi, err := os.Stat(wsDir); err == nil && fi.IsDir() {
+				info.FileBacked = true
+				info.WorkspaceDir = wsDir
+				if soul, err := os.ReadFile(filepath.Join(wsDir, "SOUL.md")); err == nil {
+					info.Soul = strings.TrimSpace(string(soul))
+				}
+			}
+		}
 		if !ws.CreatedAt.IsZero() {
 			info.CreatedAt = ws.CreatedAt.Format("2006-01-02T15:04:05Z")
 		}
 		if ws.Identity != nil {
 			info.Identity = &webui.AgentIdentity{
-				Name:   ws.Identity.Name,
-				Emoji:  ws.Identity.Emoji,
-				Theme:  ws.Identity.Theme,
-				Avatar: ws.Identity.Avatar,
-				Vibe:   ws.Identity.Vibe,
+				Name:     ws.Identity.Name,
+				Emoji:    ws.Identity.Emoji,
+				Theme:    ws.Identity.Theme,
+				Avatar:   ws.Identity.Avatar,
+				Vibe:     ws.Identity.Vibe,
+				Creature: ws.Identity.Creature,
 			}
 		}
 		// Ensure slices are never nil for JSON
@@ -2352,10 +2726,12 @@ func wireAgentAdapter(adapter *webui.AssistantAdapter, assistant *copilot.Assist
 	}
 
 	adapter.CreateAgentFn = func(req webui.CreateAgentRequest) (string, error) {
-		// Auto-generate ID from name if not provided
+		// Auto-generate ID from name if not provided; always slugify for safety.
 		id := req.ID
 		if id == "" {
 			id = copilot.Slugify(req.Name)
+		} else {
+			id = copilot.Slugify(id)
 		}
 
 		ws := copilot.Workspace{
@@ -2364,6 +2740,7 @@ func wireAgentAdapter(adapter *webui.AssistantAdapter, assistant *copilot.Assist
 			Description:  req.Description,
 			Model:        req.Model,
 			Instructions: req.Instructions,
+			Soul:         req.Soul,
 			Language:     req.Language,
 			Skills:       req.Skills,
 			Channels:     req.Channels,
@@ -2374,10 +2751,12 @@ func wireAgentAdapter(adapter *webui.AssistantAdapter, assistant *copilot.Assist
 		}
 		if req.Identity != nil {
 			ws.Identity = &copilot.IdentityConfig{
-				Name:  req.Identity.Name,
-				Emoji: req.Identity.Emoji,
-				Theme: req.Identity.Theme,
-				Vibe:  req.Identity.Vibe,
+				Name:     req.Identity.Name,
+				Emoji:    req.Identity.Emoji,
+				Theme:    req.Identity.Theme,
+				Avatar:   req.Identity.Avatar,
+				Vibe:     req.Identity.Vibe,
+				Creature: req.Identity.Creature,
 			}
 		}
 
@@ -2395,7 +2774,7 @@ func wireAgentAdapter(adapter *webui.AssistantAdapter, assistant *copilot.Assist
 	adapter.GetAgentFn = func(id string) (*webui.AgentInfoAPI, error) {
 		ws, ok := wsMgr.Get(id)
 		if !ok {
-			return nil, fmt.Errorf("agent %q not found", id)
+			return nil, fmt.Errorf("agent %q: %w", id, webui.ErrAgentNotFound)
 		}
 		info := wsToAgent(ws)
 		return &info, nil
@@ -2415,15 +2794,26 @@ func wireAgentAdapter(adapter *webui.AssistantAdapter, assistant *copilot.Assist
 			if req.Instructions != nil {
 				ws.Instructions = *req.Instructions
 			}
+			if req.Soul != nil {
+				ws.Soul = *req.Soul
+			}
 			if req.Language != nil {
 				ws.Language = *req.Language
 			}
+			if req.Timezone != nil {
+				ws.Timezone = *req.Timezone
+			}
+			if req.Trigger != nil {
+				ws.Trigger = *req.Trigger
+			}
 			if req.Identity != nil {
 				ws.Identity = &copilot.IdentityConfig{
-					Name:  req.Identity.Name,
-					Emoji: req.Identity.Emoji,
-					Theme: req.Identity.Theme,
-					Vibe:  req.Identity.Vibe,
+					Name:     req.Identity.Name,
+					Emoji:    req.Identity.Emoji,
+					Theme:    req.Identity.Theme,
+					Avatar:   req.Identity.Avatar,
+					Vibe:     req.Identity.Vibe,
+					Creature: req.Identity.Creature,
 				}
 			}
 			if req.Skills != nil {
@@ -2431,6 +2821,12 @@ func wireAgentAdapter(adapter *webui.AssistantAdapter, assistant *copilot.Assist
 			}
 			if req.Channels != nil {
 				ws.Channels = req.Channels
+			}
+			if req.Members != nil {
+				ws.Members = req.Members
+			}
+			if req.Groups != nil {
+				ws.Groups = req.Groups
 			}
 			if req.ToolProfile != nil {
 				ws.ToolProfile = *req.ToolProfile
@@ -2458,6 +2854,33 @@ func wireAgentAdapter(adapter *webui.AssistantAdapter, assistant *copilot.Assist
 		// Rebuild routing maps after update
 		wsMgr.RebuildMaps()
 
+		// Sync changes to workspace files for file-backed agents
+		if id != wsMgr.DefaultID() {
+			wsDir := paths.ResolveWorkspaceDir(id)
+			if fi, statErr := os.Stat(wsDir); statErr == nil && fi.IsDir() {
+				if req.Soul != nil && *req.Soul != "" {
+					if err := os.WriteFile(filepath.Join(wsDir, "SOUL.md"), []byte(*req.Soul), 0600); err != nil {
+						logger.Warn("failed to sync SOUL.md", "agent", id, "error", err)
+					}
+				}
+				if req.Identity != nil {
+					content := copilot.FormatIdentityMd(&copilot.IdentityConfig{
+						Name:     req.Identity.Name,
+						Emoji:    req.Identity.Emoji,
+						Theme:    req.Identity.Theme,
+						Avatar:   req.Identity.Avatar,
+						Vibe:     req.Identity.Vibe,
+						Creature: req.Identity.Creature,
+					})
+					if content != "" {
+						if err := os.WriteFile(filepath.Join(wsDir, "IDENTITY.md"), []byte(content), 0600); err != nil {
+							logger.Warn("failed to sync IDENTITY.md", "agent", id, "error", err)
+						}
+					}
+				}
+			}
+		}
+
 		return persistWorkspaces(wsMgr, cfg, configPath)
 	}
 
@@ -2483,6 +2906,59 @@ func wireAgentAdapter(adapter *webui.AssistantAdapter, assistant *copilot.Assist
 			return err
 		}
 		return persistWorkspaces(wsMgr, cfg, configPath)
+	}
+
+	adapter.ListAgentFilesFn = func(id string) (*webui.AgentFilesResponse, error) {
+		if _, ok := wsMgr.Get(id); !ok {
+			return nil, fmt.Errorf("agent %q: %w", id, webui.ErrAgentNotFound)
+		}
+		wsDir := paths.ResolveWorkspaceDir(id)
+		allFiles := []string{"SOUL.md", "IDENTITY.md", "TOOLS.md", "MEMORY.md", "AGENTS.md", "HEARTBEAT.md"}
+
+		result := &webui.AgentFilesResponse{
+			WorkspaceDir: wsDir,
+			Files:        make(map[string]*string),
+			Inherited:    make(map[string]string),
+		}
+
+		for _, name := range allFiles {
+			// Check workspace dir first
+			wsPath := filepath.Join(wsDir, name)
+			if content, err := os.ReadFile(wsPath); err == nil {
+				s := strings.TrimSpace(string(content))
+				result.Files[name] = &s
+				continue
+			}
+			// Check global fallback
+			for _, fallback := range []string{"configs/bootstrap", "configs"} {
+				globalPath := filepath.Join(fallback, name)
+				if _, err := os.Stat(globalPath); err == nil {
+					result.Inherited[name] = globalPath
+					break
+				}
+			}
+			result.Files[name] = nil // not present
+		}
+		return result, nil
+	}
+
+	adapter.UpdateAgentFileFn = func(id, filename, content string) error {
+		// Defense in depth: validate filename even though the HTTP handler also checks.
+		allowed := map[string]bool{
+			"SOUL.md": true, "IDENTITY.md": true, "TOOLS.md": true,
+			"MEMORY.md": true, "AGENTS.md": true, "HEARTBEAT.md": true,
+		}
+		if !allowed[filename] {
+			return fmt.Errorf("invalid filename: %q", filename)
+		}
+		if _, ok := wsMgr.Get(id); !ok {
+			return fmt.Errorf("agent %q: %w", id, webui.ErrAgentNotFound)
+		}
+		wsDir := paths.ResolveWorkspaceDir(id)
+		if err := os.MkdirAll(wsDir, 0700); err != nil {
+			return fmt.Errorf("ensure workspace dir: %w", err)
+		}
+		return os.WriteFile(filepath.Join(wsDir, filename), []byte(content), 0600)
 	}
 }
 

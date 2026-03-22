@@ -11,6 +11,8 @@ import {
   Check,
   ExternalLink,
   RefreshCw,
+  Plus,
+  Trash2,
 } from 'lucide-react'
 import { api, type ChannelHealth } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
@@ -19,6 +21,8 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { StatusDot } from '@/components/ui/StatusDot'
+import { Modal } from '@/components/ui/Modal'
+import { Input } from '@/components/ui/Input'
 import { LoadingSpinner } from '@/components/ui/ConfigComponents'
 
 /* Channel metadata (icons, colors, descriptions, token hints) */
@@ -29,6 +33,7 @@ const CHANNEL_META: Record<string, {
   tokenHintKey: string
   tokenHintUrl?: string
   tokenFields: { key: string; labelKey: string; placeholder: string }[]
+  managePath: string
 }> = {
   whatsapp: {
     color: '#22c55e',
@@ -40,6 +45,7 @@ const CHANNEL_META: Record<string, {
     descKey: 'channelsPage.whatsappDesc',
     tokenHintKey: '',
     tokenFields: [],
+    managePath: '/channels/whatsapp',
   },
   telegram: {
     color: '#3b82f6',
@@ -54,19 +60,31 @@ const CHANNEL_META: Record<string, {
     tokenFields: [
       { key: 'token', labelKey: 'channelsPage.botToken', placeholder: '123456:ABC-DEF1234...' },
     ],
+    managePath: '/channels/telegram',
   },
 }
 
+const CHANNEL_NAME_KEYS: Record<string, string> = {
+  whatsapp: 'channels.whatsapp',
+  telegram: 'channels.telegram',
+  discord: 'channels.discord',
+  slack: 'channels.slack',
+}
+
+type ParsedChannel = ChannelHealth & { baseType: string; instanceId: string }
+
+const INSTANCE_ID_REGEX = /^[a-zA-Z0-9_-]{1,64}$/
+
 /**
  * Channel management page.
- * Shows core channels (WhatsApp + Telegram) with status for configured ones
- * and token configuration forms for unconfigured ones.
+ * Shows channels grouped by type, with instance management (add/delete).
  */
 export function Channels() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const [channels, setChannels] = useState<ChannelHealth[]>([])
   const [loading, setLoading] = useState(true)
+  const [addModal, setAddModal] = useState<{ type: string } | null>(null)
 
   const loadChannels = () => {
     setLoading(true)
@@ -78,8 +96,42 @@ export function Channels() {
 
   useEffect(() => { loadChannels() }, [])
 
-  const whatsapp = channels.find((ch) => ch.name === 'whatsapp')
-  const otherChannels = channels.filter((ch) => ch.name !== 'whatsapp')
+  // Parse instance info from channel names like "whatsapp:business"
+  const parseChannel = (ch: ChannelHealth): ParsedChannel => {
+    const [baseType, ...rest] = ch.name.split(':')
+    return { ...ch, baseType, instanceId: rest.join(':') }
+  }
+
+  const parsed = channels.map(parseChannel)
+
+  // Group by channel type
+  const grouped: Record<string, ParsedChannel[]> = {}
+  for (const ch of parsed) {
+    if (!grouped[ch.baseType]) grouped[ch.baseType] = []
+    grouped[ch.baseType].push(ch)
+  }
+
+  // Ensure whatsapp and telegram always show, even with 0 instances
+  for (const type of ['whatsapp', 'telegram']) {
+    if (!grouped[type]) grouped[type] = []
+  }
+
+  // Sort: whatsapp first, telegram second, rest alphabetical
+  const typeOrder = ['whatsapp', 'telegram']
+  const sortedTypes = Object.keys(grouped).sort((a, b) => {
+    const ai = typeOrder.indexOf(a)
+    const bi = typeOrder.indexOf(b)
+    if (ai >= 0 && bi >= 0) return ai - bi
+    if (ai >= 0) return -1
+    if (bi >= 0) return 1
+    return a.localeCompare(b)
+  })
+
+  const navigateToChannel = (ch: ParsedChannel) => {
+    const meta = CHANNEL_META[ch.baseType]
+    const basePath = meta?.managePath ?? `/channels/${ch.baseType}`
+    navigate(ch.instanceId ? `${basePath}/${ch.instanceId}` : basePath)
+  }
 
   if (loading) {
     return <LoadingSpinner />
@@ -92,25 +144,272 @@ export function Channels() {
         description={t('channelsPage.subtitle')}
       />
 
-      <div className="mt-8 space-y-4">
-        {whatsapp && (
-          <WhatsAppCard channel={whatsapp} onNavigate={() => navigate('/channels/whatsapp')} />
-        )}
-        {otherChannels.map((ch) => (
-          <ConfigurableChannelCard key={ch.name} channel={ch} onSaved={loadChannels} />
-        ))}
+      <div className="mt-8 space-y-8">
+        {sortedTypes.map((type) => {
+          const meta = CHANNEL_META[type]
+          const typeName = CHANNEL_NAME_KEYS[type] ? t(CHANNEL_NAME_KEYS[type]) : type
+          const instances = grouped[type]
+
+          return (
+            <div key={type}>
+              {/* Section header */}
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2.5">
+                  {meta && (
+                    <div className="text-tertiary" style={{ color: meta.color }}>
+                      {meta.icon}
+                    </div>
+                  )}
+                  <h3 className="text-sm font-semibold text-primary">{typeName}</h3>
+                  <span className="text-xs text-quaternary">
+                    {instances.length > 0
+                      ? `${instances.length} ${instances.length === 1 ? 'instance' : 'instances'}`
+                      : ''}
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setAddModal({ type })}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {t('channelsPage.addInstance')}
+                </Button>
+              </div>
+
+              {/* Instance cards */}
+              <div className="space-y-3">
+                {instances.length === 0 ? (
+                  <Card padding="md" className="text-center py-6">
+                    <p className="text-sm text-tertiary">{t(meta?.descKey ?? 'channelsPage.connect')}</p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-3"
+                      onClick={() => setAddModal({ type })}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      {t('channelsPage.addInstance')}
+                    </Button>
+                  </Card>
+                ) : (
+                  instances.map((ch) =>
+                    type === 'whatsapp' ? (
+                      <WhatsAppCard
+                        key={ch.name}
+                        channel={ch}
+                        onNavigate={() => navigateToChannel(ch)}
+                        onDeleted={loadChannels}
+                      />
+                    ) : (
+                      <ConfigurableChannelCard
+                        key={ch.name}
+                        channel={ch}
+                        onNavigate={() => navigateToChannel(ch)}
+                        onSaved={loadChannels}
+                        onDeleted={loadChannels}
+                      />
+                    )
+                  )
+                )}
+              </div>
+            </div>
+          )
+        })}
       </div>
+
+      {/* Add Instance Modal */}
+      {addModal && (
+        <AddInstanceModal
+          channelType={addModal.type}
+          onClose={() => setAddModal(null)}
+          onCreated={() => {
+            setAddModal(null)
+            loadChannels()
+          }}
+        />
+      )}
     </div>
   )
 }
 
-/* -- WhatsApp Card -- */
+/* ── Add Instance Modal ── */
 
-function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavigate: () => void }) {
+function AddInstanceModal({
+  channelType,
+  onClose,
+  onCreated,
+}: {
+  channelType: string
+  onClose: () => void
+  onCreated: () => void
+}) {
+  const { t } = useTranslation()
+  const typeName = CHANNEL_NAME_KEYS[channelType] ? t(CHANNEL_NAME_KEYS[channelType]) : channelType
+  const [instanceId, setInstanceId] = useState('')
+  const [error, setError] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  const validate = (id: string): string => {
+    if (!id.trim()) return t('channelsPage.instanceIdRequired')
+    if (!INSTANCE_ID_REGEX.test(id.trim())) return t('channelsPage.instanceIdInvalid')
+    return ''
+  }
+
+  const handleCreate = async () => {
+    const id = instanceId.trim()
+    const err = validate(id)
+    if (err) {
+      setError(err)
+      return
+    }
+    setCreating(true)
+    setError('')
+    try {
+      await api.channels.createInstance(channelType, id)
+      onCreated()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('common.error'))
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <Modal
+      isOpen
+      onClose={onClose}
+      title={t('channelsPage.addInstanceTitle', { channel: typeName })}
+      description={t('channelsPage.addInstanceDesc', { channel: typeName })}
+      size="sm"
+      footer={
+        <>
+          <Button size="sm" variant="outline" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            size="sm"
+            onClick={handleCreate}
+            disabled={!instanceId.trim() || creating}
+          >
+            {creating ? t('channelsPage.creating') : t('channelsPage.createInstance')}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <label className="text-sm font-medium text-primary">
+          {t('channelsPage.instanceIdLabel')}
+        </label>
+        <Input
+          value={instanceId}
+          onChange={(e) => {
+            setInstanceId(e.target.value)
+            setError('')
+          }}
+          placeholder={t('channelsPage.instanceIdPlaceholder')}
+          onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+          autoFocus
+        />
+        <p className="text-xs text-tertiary">
+          {t('channelsPage.instanceIdHint')}
+        </p>
+        {error && (
+          <p className="text-xs text-fg-error-secondary">{error}</p>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+/* ── Delete Instance Confirmation ── */
+
+function DeleteInstanceButton({
+  channelType,
+  instanceId,
+  onDeleted,
+}: {
+  channelType: string
+  instanceId: string
+  onDeleted: () => void
+}) {
+  const { t } = useTranslation()
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      await api.channels.deleteInstance(channelType, instanceId)
+      setShowConfirm(false)
+      onDeleted()
+    } catch {
+      // error silently — the reload will show the instance still exists
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setShowConfirm(true)
+        }}
+        className="rounded-lg p-1.5 text-tertiary hover:text-fg-error-secondary hover:bg-bg-hover transition-colors"
+        title={t('channelsPage.deleteInstance')}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+
+      {showConfirm && (
+        <Modal
+          isOpen
+          onClose={() => setShowConfirm(false)}
+          title={t('channelsPage.deleteInstanceTitle', { id: instanceId })}
+          description={t('channelsPage.deleteInstanceDesc')}
+          size="sm"
+          footer={
+            <>
+              <Button size="sm" variant="outline" onClick={() => setShowConfirm(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={handleDelete}
+                disabled={deleting}
+              >
+                {deleting ? t('channelsPage.deleting') : t('common.delete')}
+              </Button>
+            </>
+          }
+        />
+      )}
+    </>
+  )
+}
+
+/* ── WhatsApp Card ── */
+
+function WhatsAppCard({
+  channel,
+  onNavigate,
+  onDeleted,
+}: {
+  channel: ParsedChannel
+  onNavigate: () => void
+  onDeleted: () => void
+}) {
   const { t } = useTranslation()
   const connected = channel.connected
   const hasLastMsg = channel.last_msg_at && channel.last_msg_at !== '0001-01-01T00:00:00Z'
   const meta = CHANNEL_META.whatsapp
+  const instanceLabel = channel.instanceId
+    ? ` (${channel.instanceId})`
+    : ''
 
   return (
     <Card
@@ -132,7 +431,18 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
-            <h3 className="text-base font-semibold text-primary">{t('channels.whatsapp')}</h3>
+            <h3 className="text-base font-semibold text-primary">
+              {t('channels.whatsapp')}{instanceLabel}
+            </h3>
+            {channel.instanceId ? (
+              <Badge variant="default" className="text-xs font-mono">
+                {channel.instanceId}
+              </Badge>
+            ) : (
+              <Badge variant="default" className="text-xs">
+                {t('channelsPage.defaultInstance')}
+              </Badge>
+            )}
             <StatusDot
               status={connected ? 'online' : 'offline'}
               label={connected ? t('common.online') : t('common.offline')}
@@ -169,6 +479,16 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
                 {t('channelsPage.errorCount', { count: channel.error_count })}
               </Badge>
             )}
+
+            {channel.instanceId && (
+              <div className="ml-auto">
+                <DeleteInstanceButton
+                  channelType="whatsapp"
+                  instanceId={channel.instanceId}
+                  onDeleted={onDeleted}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -176,20 +496,30 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
   )
 }
 
-/* -- Configurable Channel Card (Telegram) -- */
+/* ── Configurable Channel Card (Telegram, Discord, Slack) ── */
 
-function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth; onSaved: () => void }) {
+function ConfigurableChannelCard({
+  channel,
+  onNavigate,
+  onSaved,
+  onDeleted,
+}: {
+  channel: ParsedChannel
+  onNavigate: () => void
+  onSaved: () => void
+  onDeleted: () => void
+}) {
   const { t } = useTranslation()
-  const navigate = useNavigate()
-  const meta = CHANNEL_META[channel.name]
+  const meta = CHANNEL_META[channel.baseType]
   const connected = channel.connected
   const configured = channel.configured
   const hasLastMsg = channel.last_msg_at && channel.last_msg_at !== '0001-01-01T00:00:00Z'
 
-  const channelNameKeys: Record<string, string> = {
-    telegram: 'channels.telegram',
-  }
-  const displayName = channelNameKeys[channel.name] ? t(channelNameKeys[channel.name]) : channel.name
+  const baseName = CHANNEL_NAME_KEYS[channel.baseType]
+    ? t(CHANNEL_NAME_KEYS[channel.baseType])
+    : channel.baseType
+  const instanceLabel = channel.instanceId ? ` (${channel.instanceId})` : ''
+  const displayName = baseName + instanceLabel
 
   // Token form state
   const [tokens, setTokens] = useState<Record<string, string>>({})
@@ -224,7 +554,7 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
       setTokens({})
       onSaved()
     } catch {
-      // error handling — toast would go here
+      // error handling
     } finally {
       setSaving(false)
     }
@@ -232,7 +562,7 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
 
   if (!meta) return null
 
-  // Configured channel — show status card with navigation to management page
+  // Configured channel — show status card with navigation
   if (configured) {
     return (
       <Card
@@ -241,7 +571,7 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
           'transition-all cursor-pointer hover:border-primary',
           !connected && 'opacity-80'
         )}
-        onClick={() => navigate(`/channels/${channel.name}`)}
+        onClick={onNavigate}
       >
         <div className="flex items-center gap-4">
           <div className={cn(
@@ -256,6 +586,15 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2.5">
               <h3 className="text-sm font-semibold text-primary">{displayName}</h3>
+              {channel.instanceId ? (
+                <Badge variant="default" className="text-xs font-mono">
+                  {channel.instanceId}
+                </Badge>
+              ) : (
+                <Badge variant="default" className="text-xs">
+                  {t('channelsPage.defaultInstance')}
+                </Badge>
+              )}
               <StatusDot
                 status={connected ? 'online' : 'offline'}
                 label={connected ? t('common.online') : t('common.offline')}
@@ -283,6 +622,13 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
                 {t('channelsPage.restartRequired')}
               </Badge>
             )}
+            {channel.instanceId && (
+              <DeleteInstanceButton
+                channelType={channel.baseType}
+                instanceId={channel.instanceId}
+                onDeleted={onDeleted}
+              />
+            )}
             <ArrowRight className="h-4 w-4 text-tertiary" />
           </div>
         </div>
@@ -301,6 +647,15 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
             <h3 className="text-base font-semibold text-primary">{displayName}</h3>
+            {channel.instanceId ? (
+              <Badge variant="default" className="text-xs font-mono">
+                {channel.instanceId}
+              </Badge>
+            ) : (
+              <Badge variant="default" className="text-xs">
+                {t('channelsPage.defaultInstance')}
+              </Badge>
+            )}
             <Badge variant="default" className="text-xs">
               {t('channelsPage.notConfigured')}
             </Badge>
@@ -359,6 +714,14 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
                   t('common.save')
                 )}
               </Button>
+
+              {channel.instanceId && (
+                <DeleteInstanceButton
+                  channelType={channel.baseType}
+                  instanceId={channel.instanceId}
+                  onDeleted={onDeleted}
+                />
+              )}
             </div>
 
             {meta.tokenHintUrl && (

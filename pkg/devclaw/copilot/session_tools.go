@@ -66,13 +66,13 @@ func RegisterSessionsDispatcher(executor *ToolExecutor, wm *WorkspaceManager) {
 
 			switch action {
 			case "list":
-				return handleSessionsList(wm, args)
+				return handleSessionsList(wm, args, ctx)
 			case "delete":
-				return handleSessionsDelete(wm, args)
+				return handleSessionsDelete(wm, args, ctx)
 			case "export":
-				return handleSessionsExport(wm, args)
+				return handleSessionsExport(wm, args, ctx)
 			case "send":
-				return handleSessionsSend(wm, args)
+				return handleSessionsSend(wm, args, ctx)
 			default:
 				return nil, fmt.Errorf("unknown action: %s (valid: list, delete, export, send)", action)
 			}
@@ -80,10 +80,18 @@ func RegisterSessionsDispatcher(executor *ToolExecutor, wm *WorkspaceManager) {
 	)
 }
 
-func handleSessionsList(wm *WorkspaceManager, args map[string]any) (any, error) {
+func handleSessionsList(wm *WorkspaceManager, args map[string]any, ctx context.Context) (any, error) {
 	channelFilter, _ := args["channel_filter"].(string)
+	currentWSID := WorkspaceIDFromContext(ctx)
 
-	allSessions := wm.ListAllSessions()
+	var allSessions []SessionInfo
+	if currentWSID == "" || currentWSID == wm.DefaultID() {
+		// Main agent: supervisor mode — sees all sessions
+		allSessions = wm.ListAllSessions()
+	} else {
+		// Non-main: only own workspace sessions
+		allSessions = wm.ListSessionsForWorkspace(currentWSID)
+	}
 	if len(allSessions) == 0 {
 		return "No active sessions.", nil
 	}
@@ -107,22 +115,48 @@ func handleSessionsList(wm *WorkspaceManager, args map[string]any) (any, error) 
 	return fmt.Sprintf("Active sessions (%d):\n%s", count, b.String()), nil
 }
 
-func handleSessionsDelete(wm *WorkspaceManager, args map[string]any) (any, error) {
+func handleSessionsDelete(wm *WorkspaceManager, args map[string]any, ctx context.Context) (any, error) {
 	sessionID, _ := args["session_id"].(string)
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required for delete action")
 	}
+
+	// Non-main agents can only delete their own sessions
+	currentWSID := WorkspaceIDFromContext(ctx)
+	if currentWSID != "" && currentWSID != wm.DefaultID() {
+		session, ws := wm.GetSessionByID(sessionID)
+		if session == nil {
+			return nil, fmt.Errorf("session %q not found", sessionID)
+		}
+		if ws != nil && ws.ID != currentWSID {
+			return nil, fmt.Errorf("cannot delete session from another workspace")
+		}
+	}
+
 	if wm.DeleteSessionByID(sessionID) {
 		return fmt.Sprintf("Session %s deleted.", sessionID), nil
 	}
 	return nil, fmt.Errorf("session %q not found", sessionID)
 }
 
-func handleSessionsExport(wm *WorkspaceManager, args map[string]any) (any, error) {
+func handleSessionsExport(wm *WorkspaceManager, args map[string]any, ctx context.Context) (any, error) {
 	sessionID, _ := args["session_id"].(string)
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required for export action")
 	}
+
+	// Non-main agents can only export their own sessions
+	currentWSID := WorkspaceIDFromContext(ctx)
+	if currentWSID != "" && currentWSID != wm.DefaultID() {
+		session, ws := wm.GetSessionByID(sessionID)
+		if session == nil {
+			return nil, fmt.Errorf("session %q not found", sessionID)
+		}
+		if ws != nil && ws.ID != currentWSID {
+			return nil, fmt.Errorf("cannot export session from another workspace")
+		}
+	}
+
 	export := wm.ExportSession(sessionID)
 	if export == nil {
 		return nil, fmt.Errorf("session %q not found", sessionID)
@@ -138,7 +172,7 @@ func handleSessionsExport(wm *WorkspaceManager, args map[string]any) (any, error
 	return result, nil
 }
 
-func handleSessionsSend(wm *WorkspaceManager, args map[string]any) (any, error) {
+func handleSessionsSend(wm *WorkspaceManager, args map[string]any, ctx context.Context) (any, error) {
 	sessionID, _ := args["session_id"].(string)
 	message, _ := args["message"].(string)
 	senderLabel, _ := args["sender_label"].(string)
@@ -147,6 +181,18 @@ func handleSessionsSend(wm *WorkspaceManager, args map[string]any) (any, error) 
 	}
 	if senderLabel == "" {
 		senderLabel = "agent"
+	}
+
+	// Non-main agents can only send to their own sessions
+	currentWSID := WorkspaceIDFromContext(ctx)
+	if currentWSID != "" && currentWSID != wm.DefaultID() {
+		session, ws := wm.GetSessionByID(sessionID)
+		if session == nil {
+			return nil, fmt.Errorf("session %q not found", sessionID)
+		}
+		if ws != nil && ws.ID != currentWSID {
+			return nil, fmt.Errorf("cannot send to session from another workspace")
+		}
 	}
 
 	session := wm.FindSessionByID(sessionID)
