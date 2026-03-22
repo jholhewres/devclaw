@@ -703,6 +703,25 @@ func generateConfigYAML(s *SetupRequest) string {
 		b.WriteString("    send_typing: true\n")
 		b.WriteString("    media_dir: \"./data/media\"\n")
 		b.WriteString("    max_media_size_mb: 16\n")
+		// Mirror global access config into WhatsApp channel so its own
+		// AccessFilter respects the same owners/policy set at the top level.
+		b.WriteString("    access:\n")
+		switch s.AccessMode {
+		case "relaxed":
+			b.WriteString("      default_policy: allow\n")
+		default:
+			b.WriteString("      default_policy: deny\n")
+		}
+		if s.OwnerPhone != "" {
+			jid := s.OwnerPhone + "@s.whatsapp.net"
+			fmt.Fprintf(&b, "      owners: [%q]\n", jid)
+		} else {
+			b.WriteString("      owners: []\n")
+		}
+		b.WriteString("      admins: []\n")
+		b.WriteString("      allowed_users: []\n")
+		b.WriteString("      blocked_users: []\n")
+		b.WriteString("      pending_message: \"Access not authorized. Contact an admin.\"\n")
 	}
 	if s.Channels["telegram"] {
 		b.WriteString("  telegram:\n")

@@ -105,6 +105,11 @@ type AssistantAdapter struct {
 	GetWhatsAppConfigFn                 func() map[string]any
 	UpdateWhatsAppConfigFn              func(config map[string]any) error
 
+	// Telegram
+	GetTelegramConfigFn    func() TelegramConfig
+	UpdateTelegramConfigFn func(config map[string]any) error
+	DisconnectTelegramFn   func() error
+
 	// Security: Audit Log
 	GetAuditLogFn   func(limit int) []AuditEntry
 	GetAuditCountFn func() int
@@ -382,6 +387,29 @@ func (a *AssistantAdapter) GetWhatsAppJoinedGroups() ([]WhatsAppJoinedGroup, err
 func (a *AssistantAdapter) DisconnectWhatsApp() error {
 	if a.DisconnectWhatsAppFn != nil {
 		return a.DisconnectWhatsAppFn()
+	}
+	return errors.New("not implemented")
+}
+
+// ── Telegram ──
+
+func (a *AssistantAdapter) GetTelegramConfig() TelegramConfig {
+	if a.GetTelegramConfigFn != nil {
+		return a.GetTelegramConfigFn()
+	}
+	return TelegramConfig{}
+}
+
+func (a *AssistantAdapter) UpdateTelegramConfig(config map[string]any) error {
+	if a.UpdateTelegramConfigFn != nil {
+		return a.UpdateTelegramConfigFn(config)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) DisconnectTelegram() error {
+	if a.DisconnectTelegramFn != nil {
+		return a.DisconnectTelegramFn()
 	}
 	return errors.New("not implemented")
 }

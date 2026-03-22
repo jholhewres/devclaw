@@ -1097,6 +1097,43 @@
     "permission": "Permiso",
     "changePermission": "Cambiar permiso"
   },
+  "telegram": {
+    "title": "Telegram",
+    "subtitle": "Administra tu bot de Telegram",
+    "connected": "Conectado",
+    "disconnected": "Desconectado",
+    "disconnectedHint": "El token del bot debe configurarse en la página de Canales. Reinicie el servidor después de configurar.",
+    "disconnect": "Desconectar",
+    "disconnecting": "Desconectando...",
+    "connectionError": "Error al conectar con Telegram",
+    "info": "Información",
+    "infoToken": "El token del bot de Telegram se configura en la página de Canales. Para cambiarlo, actualice el token y reinicie el servidor.",
+    "infoRestart": "Los cambios en la configuración se aplican inmediatamente, pero los cambios en el token requieren reiniciar el servidor.",
+    "settingsNotAvailable": "Configuración no disponible. Asegúrese de que Telegram esté configurado.",
+    "tabs": {
+      "connection": "Conexión",
+      "settings": "Configuración"
+    },
+    "settings": {
+      "bot": "Configuración del Bot",
+      "respondToGroups": "Responder en Grupos",
+      "respondToGroupsDesc": "Permite que el bot responda mensajes en grupos de Telegram",
+      "respondToDMs": "Responder en Privado",
+      "respondToDMsDesc": "Permite que el bot responda mensajes directos",
+      "sendTyping": "Enviar indicador de escritura",
+      "sendTypingDesc": "Muestra cuando el bot está procesando una respuesta",
+      "reactions": "Notificaciones de Reacciones",
+      "reactionsDesc": "Controla cuándo se notifican las reacciones de los usuarios al bot",
+      "allowedChats": "Chats Permitidos",
+      "allowedChatsDesc": "IDs de chats donde el bot puede responder. Vacío permite todos.",
+      "noAllowedChats": "Sin chats restringidos — el bot responde en todos los chats."
+    },
+    "reactions": {
+      "off": "Desactivado",
+      "own": "Solo mensajes del bot",
+      "all": "Todas las reacciones"
+    }
+  },
   "devSettingsPage": {
     "apiIa": {
       "title": "Configuración de API e IA",

@@ -147,6 +147,17 @@ export interface WhatsAppSettings {
   send_typing: boolean;
 }
 
+export interface TelegramConfig {
+  connected: boolean;
+  bot_username?: string;
+  bot_id?: number;
+  respond_to_groups: boolean;
+  respond_to_dms: boolean;
+  send_typing: boolean;
+  allowed_chats: number[];
+  reaction_notifications: string;
+}
+
 export interface DashboardData {
   sessions: SessionInfo[];
   usage: UsageInfo;
@@ -522,6 +533,18 @@ export const api = {
         request<{ status: string }>('/channels/whatsapp/config', {
           method: 'PATCH',
           body: JSON.stringify(config),
+        }),
+    },
+    telegram: {
+      getConfig: () => request<TelegramConfig>('/channels/telegram/config'),
+      updateConfig: (config: Partial<TelegramConfig>) =>
+        request<{ status: string }>('/channels/telegram/config', {
+          method: 'PATCH',
+          body: JSON.stringify(config),
+        }),
+      disconnect: () =>
+        request<{ status: string }>('/channels/telegram/disconnect', {
+          method: 'POST',
         }),
     },
   },

@@ -14,7 +14,7 @@ const SETTINGS_TABS = [
     id: 'canais',
     labelKey: 'settingsPage.tabCanais',
     defaultRoute: '/channels',
-    routes: ['/channels', '/channels/whatsapp'],
+    routes: ['/channels', '/channels/whatsapp', '/channels/telegram'],
   },
   {
     id: 'seguranca',
@@ -42,6 +42,7 @@ const SUB_ROUTES = [
   '/webhooks',
   '/hooks',
   '/channels/whatsapp',
+  '/channels/telegram',
 ]
 
 export function SettingsLayout() {

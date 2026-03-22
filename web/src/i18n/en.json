@@ -1195,6 +1195,43 @@
     "groupConfigured": "Configured",
     "configureGroup": "Configure"
   },
+  "telegram": {
+    "title": "Telegram",
+    "subtitle": "Manage your Telegram bot",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "disconnectedHint": "The bot token needs to be configured on the Channels page. Restart the server after configuring.",
+    "disconnect": "Disconnect",
+    "disconnecting": "Disconnecting...",
+    "connectionError": "Error connecting to Telegram",
+    "info": "Information",
+    "infoToken": "The Telegram bot token is configured on the Channels page. To change it, update the token and restart the server.",
+    "infoRestart": "Settings changes are applied immediately, but token changes require a server restart.",
+    "settingsNotAvailable": "Settings not available. Make sure Telegram is configured.",
+    "tabs": {
+      "connection": "Connection",
+      "settings": "Settings"
+    },
+    "settings": {
+      "bot": "Bot Settings",
+      "respondToGroups": "Respond to Groups",
+      "respondToGroupsDesc": "Allow the bot to respond to messages in Telegram groups",
+      "respondToDMs": "Respond to DMs",
+      "respondToDMsDesc": "Allow the bot to respond to direct messages",
+      "sendTyping": "Send typing indicator",
+      "sendTypingDesc": "Show when the bot is processing a response",
+      "reactions": "Reaction Notifications",
+      "reactionsDesc": "Controls when user reactions are surfaced to the bot",
+      "allowedChats": "Allowed Chats",
+      "allowedChatsDesc": "Chat IDs where the bot can respond. Empty allows all.",
+      "noAllowedChats": "No restricted chats — the bot responds in all chats."
+    },
+    "reactions": {
+      "off": "Off",
+      "own": "Bot messages only",
+      "all": "All reactions"
+    }
+  },
   "devSettingsPage": {
     "apiIa": {
       "title": "API & AI Settings",

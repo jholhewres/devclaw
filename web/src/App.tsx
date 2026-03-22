@@ -14,6 +14,7 @@ import { SetupWizard } from '@/pages/Setup/SetupWizard'
 import { System } from '@/pages/System'
 import { Channels } from '@/pages/Channels'
 import { WhatsAppConnect } from '@/pages/WhatsAppConnect'
+import { TelegramConnect } from '@/pages/TelegramConnect'
 import { Security } from '@/pages/Security'
 import { DevSettings } from '@/pages/DevSettings'
 import { ApiConfig } from '@/pages/ApiConfig'
@@ -129,6 +130,7 @@ export function App() {
             {/* Channels tab */}
             <Route path="/channels" element={<Channels />} />
             <Route path="/channels/whatsapp" element={<WhatsAppConnect />} />
+            <Route path="/channels/telegram" element={<TelegramConnect />} />
 
             {/* Security tab */}
             <Route path="/security" element={<Security />} />

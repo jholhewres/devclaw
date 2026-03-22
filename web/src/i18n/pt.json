@@ -1195,6 +1195,43 @@
     "groupConfigured": "Configurado",
     "configureGroup": "Configurar"
   },
+  "telegram": {
+    "title": "Telegram",
+    "subtitle": "Gerencie seu bot do Telegram",
+    "connected": "Conectado",
+    "disconnected": "Desconectado",
+    "disconnectedHint": "O token do bot precisa ser configurado na página de Canais. Reinicie o servidor após configurar.",
+    "disconnect": "Desconectar",
+    "disconnecting": "Desconectando...",
+    "connectionError": "Erro ao conectar com o Telegram",
+    "info": "Informações",
+    "infoToken": "O token do bot Telegram é configurado na página de Canais. Para alterar, atualize o token e reinicie o servidor.",
+    "infoRestart": "Alterações nas configurações são aplicadas imediatamente, mas alterações no token requerem reinicialização do servidor.",
+    "settingsNotAvailable": "Configurações não disponíveis. Certifique-se de que o Telegram está configurado.",
+    "tabs": {
+      "connection": "Conexão",
+      "settings": "Configurações"
+    },
+    "settings": {
+      "bot": "Configurações do Bot",
+      "respondToGroups": "Responder em Grupos",
+      "respondToGroupsDesc": "Permite que o bot responda mensagens em grupos do Telegram",
+      "respondToDMs": "Responder em Privado",
+      "respondToDMsDesc": "Permite que o bot responda mensagens privadas",
+      "sendTyping": "Enviar indicador de digitação",
+      "sendTypingDesc": "Mostra quando o bot está processando uma resposta",
+      "reactions": "Notificações de Reações",
+      "reactionsDesc": "Controla quando as reações dos usuários são notificadas ao bot",
+      "allowedChats": "Chats Permitidos",
+      "allowedChatsDesc": "IDs dos chats onde o bot pode responder. Vazio permite todos.",
+      "noAllowedChats": "Nenhum chat restrito — o bot responde em todos os chats."
+    },
+    "reactions": {
+      "off": "Desligado",
+      "own": "Apenas mensagens do bot",
+      "all": "Todas as reações"
+    }
+  },
   "devSettingsPage": {
     "apiIa": {
       "title": "Configurações de API e IA",

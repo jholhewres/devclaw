@@ -181,6 +181,7 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
 
 function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth; onSaved: () => void }) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const meta = CHANNEL_META[channel.name]
   const connected = channel.connected
   const configured = channel.configured
@@ -232,12 +233,16 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
 
   if (!meta) return null
 
-  // Configured channel — show status card
+  // Configured channel — show status card with navigation to management page
   if (configured) {
     return (
       <Card
         padding="md"
-        className={cn('transition-all', !connected && 'opacity-80')}
+        className={cn(
+          'transition-all cursor-pointer hover:border-border-hover',
+          !connected && 'opacity-80'
+        )}
+        onClick={() => navigate(`/channels/${channel.name}`)}
       >
         <div className="flex items-center gap-4">
           <div className={cn(
@@ -260,7 +265,7 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
             <p className="mt-0.5 text-xs text-text-muted">
               {connected
                 ? hasLastMsg
-                  ? timeAgo(channel.last_msg_at, t)
+                  ? `${t('channelsPage.manage')} - ${timeAgo(channel.last_msg_at, t)}`
                   : t('common.connected')
                 : t('channelsPage.restartRequired')}
             </p>
@@ -273,18 +278,13 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
                 {channel.error_count}
               </span>
             )}
-            {hasLastMsg && (
-              <span className="flex items-center gap-1.5 text-xs text-text-muted">
-                <Clock className="h-3.5 w-3.5" />
-                {timeAgo(channel.last_msg_at, t)}
-              </span>
-            )}
             {configured && !connected && (
               <Badge variant="default" className="text-xs">
                 <RefreshCw className="h-3 w-3 mr-1" />
                 {t('channelsPage.restartRequired')}
               </Badge>
             )}
+            <ArrowRight className="h-4 w-4 text-text-muted" />
           </div>
         </div>
       </Card>

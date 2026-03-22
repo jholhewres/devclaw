@@ -115,6 +115,38 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		if waCfg.DatabasePath == "" && cfg.Database.Path != "" {
 			waCfg.DatabasePath = cfg.Database.Path
 		}
+
+		// Inherit global access config into WhatsApp when the channel-specific
+		// access config is not explicitly set. The setup wizard writes owners
+		// and default_policy to the top-level "access" section, but the WhatsApp
+		// channel only checks its own "channels.whatsapp.access" config.
+		if waCfg.Access.DefaultPolicy == "" && string(cfg.Access.DefaultPolicy) != "" {
+			waCfg.Access.DefaultPolicy = string(cfg.Access.DefaultPolicy)
+			logger.Info("whatsapp: inherited global default_policy", "policy", waCfg.Access.DefaultPolicy)
+		}
+		if len(waCfg.Access.Owners) == 0 && len(cfg.Access.Owners) > 0 {
+			waCfg.Access.Owners = cfg.Access.Owners
+			logger.Info("whatsapp: inherited global owners", "count", len(waCfg.Access.Owners))
+		}
+		if len(waCfg.Access.Admins) == 0 && len(cfg.Access.Admins) > 0 {
+			waCfg.Access.Admins = cfg.Access.Admins
+		}
+		if len(waCfg.Access.AllowedUsers) == 0 && len(cfg.Access.AllowedUsers) > 0 {
+			waCfg.Access.AllowedUsers = cfg.Access.AllowedUsers
+		}
+		if len(waCfg.Access.BlockedUsers) == 0 && len(cfg.Access.BlockedUsers) > 0 {
+			waCfg.Access.BlockedUsers = cfg.Access.BlockedUsers
+		}
+		if len(waCfg.Access.AllowedGroups) == 0 && len(cfg.Access.AllowedGroups) > 0 {
+			waCfg.Access.AllowedGroups = cfg.Access.AllowedGroups
+		}
+		if len(waCfg.Access.BlockedGroups) == 0 && len(cfg.Access.BlockedGroups) > 0 {
+			waCfg.Access.BlockedGroups = cfg.Access.BlockedGroups
+		}
+		if waCfg.Access.PendingMessage == "" && cfg.Access.PendingMessage != "" {
+			waCfg.Access.PendingMessage = cfg.Access.PendingMessage
+		}
+
 		wa = whatsapp.New(waCfg, logger)
 		if err := assistant.ChannelManager().Register(wa); err != nil {
 			logger.Error("failed to register WhatsApp", "error", err)
@@ -133,15 +165,25 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	// Load plugins (other channels).
+	// Load plugins (YAML-based + legacy .so).
 	pluginLoader := plugins.NewLoader(cfg.Plugins, logger)
-	if err := pluginLoader.LoadAll(ctx); err != nil {
+	var pluginVault plugins.VaultReader
+	if vault != nil {
+		pluginVault = vault
+	}
+	if err := pluginLoader.LoadAll(ctx, pluginVault); err != nil {
 		logger.Error("failed to load plugins", "error", err)
 	} else if pluginLoader.Count() > 0 {
+		// Register native channel plugins with the channel manager.
 		if err := pluginLoader.RegisterChannels(assistant.ChannelManager()); err != nil {
 			logger.Error("failed to register plugin channels", "error", err)
 		}
 	}
+
+	// Create plugin registry and wire it into the assistant.
+	pluginRegistry := plugins.NewRegistry(logger)
+	pluginRegistry.AddLoadedPlugins(pluginLoader)
+	assistant.SetPluginRegistry(pluginRegistry)
 
 	// ── Start Web UI first (independent of channels) ──
 	var webServer *webui.Server
@@ -1944,6 +1986,55 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 		}
 
 		return status
+	}
+
+	// ── Telegram adapter wiring ──
+	// Get Telegram channel from the channel manager if registered.
+	adapter.GetTelegramConfigFn = func() webui.TelegramConfig {
+		result := webui.TelegramConfig{
+			RespondToGroups:       cfg.Channels.Telegram.RespondToGroups,
+			RespondToDMs:          cfg.Channels.Telegram.RespondToDMs,
+			SendTyping:            cfg.Channels.Telegram.SendTyping,
+			AllowedChats:          cfg.Channels.Telegram.AllowedChats,
+			ReactionNotifications: cfg.Channels.Telegram.ReactionNotifications,
+		}
+		ch, exists := assistant.ChannelManager().Channel("telegram")
+		if exists {
+			result.Connected = ch.IsConnected()
+		}
+		return result
+	}
+
+	adapter.UpdateTelegramConfigFn = func(config map[string]any) error {
+		changed := false
+		if v, ok := config["respond_to_groups"].(bool); ok {
+			cfg.Channels.Telegram.RespondToGroups = v
+			changed = true
+		}
+		if v, ok := config["respond_to_dms"].(bool); ok {
+			cfg.Channels.Telegram.RespondToDMs = v
+			changed = true
+		}
+		if v, ok := config["send_typing"].(bool); ok {
+			cfg.Channels.Telegram.SendTyping = v
+			changed = true
+		}
+		if v, ok := config["reaction_notifications"].(string); ok {
+			cfg.Channels.Telegram.ReactionNotifications = v
+			changed = true
+		}
+		if !changed {
+			return nil
+		}
+		savePath := configPath
+		if savePath == "" {
+			savePath = "config.yaml"
+		}
+		return copilot.SaveConfigToFile(cfg, savePath)
+	}
+
+	adapter.DisconnectTelegramFn = func() error {
+		return assistant.ChannelManager().DisconnectChannel("telegram")
 	}
 
 	return adapter
