@@ -2,6 +2,78 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [Unreleased]
+
+### Channels
+
+- **Telegram & WhatsApp message tracking**: Added `SentMessageTracker` interface for accurate reply detection; message deduplication in WhatsApp during reconnections; Telegram message editing via `EditMessageID`; structured error types for Telegram API; latency metrics in health reporting
+- **Channel token management**: Vault-based token storage for Telegram, secure environment variable injection, and configuration status in health reports
+- **Discord & Slack removal**: Simplified messaging channels to WhatsApp and Telegram; removed Discord and Slack integrations from serve command, setup wizard, and UI
+- **WhatsApp access control fix**: Setup wizard now mirrors global access config into `channels.whatsapp.access`; `serve.go` inherits global → channel config as fallback
+- **Telegram management UI**: Complete management stack with Connection and Settings tabs, hot-reload on token changes, connect/disconnect flows, full i18n (PT/EN/ES)
+
+### Core — Agent & Copilot
+
+- **Subagent yield fix**: `collectPendingSubagentResults` now also collects completed/failed subagent results from the last 60 seconds, closing a race window where results were missed between the yield trigger and collection call
+- **Compaction & context engine**: Content-aware compaction guard (require real conversation); session truncation after compaction; persona/language continuity in summaries; stabilized trim ordering with anti-loop detection; preemptive context overflow guard at 85% high-water mark; duplicate tool call ID deduplication
+- **Failover hardening**: Cause-chain traversal via recursive `errors.Unwrap()` for accurate error classification; symbolic error code map for Google Cloud, AWS, and Anthropic providers
+- **LCM enhancements**: Depth-aware summarization prompts (leaf/session/arc/durable); three-level escalation (normal → aggressive → deterministic fallback); large file interception (>25k tokens) with disk storage; heartbeat pruning; session reconciliation on bootstrap; LLM-bounded `expand_query` action; local timezone formatting; configurable summary model/provider
+- **Subagent improvements**: Orphan recovery with resume (max 3 retries, exponential backoff); partial progress synthesis on timeout (max 4000 chars); delivery scope (`All`/`Parent`/`External`) for completion announcements; tool-spawned subagents default to parent-only delivery
+
+### Skills, Memory & Gateway
+
+- **Skills compact fallback**: When skills exceed the token budget, degrades to compact format (name + description + location) via binary search instead of hard truncation
+- **Pluggable memory sections**: `MemoryPromptSectionBuilder` interface allows plugins to inject custom sections into the memory prompt layer, with panic protection per builder
+- **Channel health monitor**: Background goroutine that detects stale channels and triggers restarts with per-channel cooldown, global hourly cap, and per-restart timeout
+- **Session reset with preservation**: `ResetWithPreservation()` clears history/compaction/counters while preserving model, language, thinking level, fast mode, skills, and facts. Exposed via `POST /api/sessions/:id/reset`
+- **WS handshake timeout**: Configurable via `DEVCLAW_WS_HANDSHAKE_TIMEOUT_MS` environment variable (default 10s, max 120s)
+
+### UI
+
+- **ModelCombobox**: New component for model selection with type-ahead support, integrated into ApiConfig and StepProvider pages
+- **UnsavedChangesBar**: Notifies users of unsaved config changes with save/discard actions
+- **Configuration refactoring**: Streamlined model selection logic, improved collapsible sections, consolidated provider management
+- **Channel metadata**: Updated icon property type from `JSX.Element` to `ReactNode` for rendering flexibility
+
+### Plugins
+
+- **Unified YAML-first plugin system**: Replaces both legacy plugin systems (native `.so` and HTTP `PluginManager`) with a manifest-based framework supporting agents, tools, hooks, skills, channels, and services
+- **Plugin agent runtime**: `SpawnWithExecutor` for plugin agents with trigger-based routing, bidirectional communication (`delegate_to_plugin_agent` + `escalate_to_main`), and auto-escalation
+- **Plugin installer**: CLI commands (`devclaw plugin install/list/remove/update`) and WebUI install/remove flow with path traversal protection
+- **Security hardening**: `EvalSymlinks` path validation, `PLUGIN_` prefix for script env vars, secret redaction in frontend config, bounded HTTP responses, context-aware HTTP requests
+
+---
+
+## [1.15.0] — 2026-03-17
+
+### UI
+
+- **Unified design system**: Consolidated two competing design systems into one modern visual language with `rounded-xl/2xl`, `h-11` inputs, modern focus rings. Replaced ~40 ad-hoc buttons with the shared Button component. Removed dead code (Navbar, CollapsibleSection, Dashboard, `cx.ts`)
+
+### Core
+
+- **User-friendly error messages**: Raw LLM errors (429, timeout, quota, auth, context overflow) mapped to friendly messages instead of exposing technical details
+- **GLM-5-Turbo support**: New model entry (202K context, 16K default output, agent-optimized)
+- **Subagent timeout increase**: Default timeout changed from 5 to 15 minutes to resolve timeout errors on long-running research tasks
+- **Skill name normalization**: Auto-normalize skill names (hyphens → underscores, lowercase) in all `SkillDB` public methods
+- **Process manager detection**: Runtime prompt layer detects systemd/pm2/docker/k8s
+
+### Media
+
+- **File sending across all channels**: `send_media` tool auto-resolves channel and recipient from delivery context; Web UI delivers media via SSE `media` event with inline rendering (images, audio, video, document download cards)
+
+### Integrations
+
+- **Claude Code OAuth**: Removed API key injection in favor of user's OAuth config; cleared `ANTHROPIC_*` env vars instead of injecting credentials
+
+### Bug Fixes
+
+- Demoted empty streaming fallback log from Warn to Debug
+- Added startup warning when no fallback models are configured
+- Documented allowed column types in `skill_init` `database_schema`
+
+---
+
 ## [1.8.1] - 2025-02-22
 
 ### Fixed
