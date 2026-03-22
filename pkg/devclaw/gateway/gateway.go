@@ -3,6 +3,7 @@ package gateway
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -93,12 +94,29 @@ func (g *Gateway) Start(ctx context.Context) error {
 		}
 	}
 
-	go func() {
-		if err := g.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			g.logger.Error("gateway server error", "error", err)
+	if g.config.TLS.Enabled {
+		cert, err := tls.LoadX509KeyPair(g.config.TLS.CertPath, g.config.TLS.KeyPath)
+		if err != nil {
+			return fmt.Errorf("loading TLS certificate: %w", err)
 		}
-	}()
-	g.logger.Info("gateway started", "address", g.config.Address)
+		g.server.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		}
+		g.logger.Info("gateway starting (HTTPS)", "address", g.config.Address)
+		go func() {
+			if err := g.server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				g.logger.Error("gateway server TLS error", "error", err)
+			}
+		}()
+	} else {
+		go func() {
+			if err := g.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				g.logger.Error("gateway server error", "error", err)
+			}
+		}()
+		g.logger.Info("gateway started", "address", g.config.Address)
+	}
 	return nil
 }
 

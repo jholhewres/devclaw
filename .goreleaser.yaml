@@ -16,7 +16,6 @@ builds:
       - -s -w -X main.version={{.Version}}
     goos:
       - linux
-      - darwin
     goarch:
       - amd64
       - arm64
@@ -25,17 +24,6 @@ builds:
         goarch: arm64
         env:
           - CC=aarch64-linux-gnu-gcc
-      - goos: darwin
-        goarch: amd64
-        env:
-          - CGO_ENABLED=0
-      - goos: darwin
-        goarch: arm64
-        env:
-          - CGO_ENABLED=0
-    ignore:
-      - goos: windows
-        goarch: arm64
 
   - id: devclaw-windows
     main: ./cmd/devclaw

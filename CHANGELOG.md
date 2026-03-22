@@ -4,6 +4,21 @@ All notable changes to DevClaw are documented in this file.
 
 ## [Unreleased]
 
+### TLS / HTTPS
+
+- **Self-signed TLS support**: New `pkg/devclaw/tls` package generates ECDSA P-256 certificates (10yr validity, SHA-256, 0600 permissions) using Go's `crypto/x509` stdlib — no OpenSSL dependency required
+- **WebUI + Gateway HTTPS**: Both servers support `tls.enabled: true` in config with conditional `ListenAndServeTLS`, enforcing TLS 1.2 minimum
+- **CLI `devclaw tls`**: New `generate` and `info` subcommands for certificate management (fingerprint, expiry)
+- **Auto-generation on startup**: When `auto_generate: true` (default), certificates are generated automatically on first `devclaw serve` with SHA-256 fingerprint logged
+- **Install script TLS**: Three-tier fallback (devclaw binary → openssl → skip), `--no-tls` flag to skip
+
+### Deploy / CI
+
+- **macOS Apple Silicon fix**: Removed Darwin from GoReleaser (was using `CGO_ENABLED=0` breaking SQLite FTS5); added native `release-macos` job in GitHub Actions with `CGO_ENABLED=1` for arm64 + amd64
+- **CI macOS matrix**: Tests now run on both `ubuntu-latest` and `macos-latest`
+- **Docker multi-arch**: Removed hardcoded `--platform=linux/arm64` from runtime stage in Dockerfile
+- **Install script GitHub mode**: New `--github` flag downloads from GitHub Releases (GoReleaser tar.gz archives)
+
 ### Channels
 
 - **Telegram & WhatsApp message tracking**: Added `SentMessageTracker` interface for accurate reply detection; message deduplication in WhatsApp during reconnections; Telegram message editing via `EditMessageID`; structured error types for Telegram API; latency metrics in health reporting

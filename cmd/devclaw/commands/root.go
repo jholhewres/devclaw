@@ -45,6 +45,7 @@ Examples:
 		newDoctorCmd(),
 		newHooksCmd(),
 		newPluginCmd(),
+		newTLSCmd(),
 	)
 
 	// Flags globais.

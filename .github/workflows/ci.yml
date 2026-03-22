@@ -11,7 +11,10 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -37,4 +40,4 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: CGO_ENABLED=1 go test -tags 'sqlite_fts5' -count=1 -race -timeout 120s ./pkg/devclaw/copilot/ ./pkg/devclaw/copilot/security/ ./pkg/devclaw/skills/ ./pkg/devclaw/scheduler/
+        run: CGO_ENABLED=1 go test -tags 'sqlite_fts5' -count=1 -race -timeout 120s ./pkg/devclaw/copilot/ ./pkg/devclaw/copilot/security/ ./pkg/devclaw/skills/ ./pkg/devclaw/scheduler/ ./pkg/devclaw/tls/

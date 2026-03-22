@@ -25,6 +25,7 @@ import (
 	"github.com/jholhewres/devclaw/pkg/devclaw/media"
 	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
 	"github.com/jholhewres/devclaw/pkg/devclaw/plugins"
+	devtls "github.com/jholhewres/devclaw/pkg/devclaw/tls"
 	"github.com/jholhewres/devclaw/pkg/devclaw/updater"
 	"github.com/jholhewres/devclaw/pkg/devclaw/webui"
 	"github.com/spf13/cobra"
@@ -184,6 +185,50 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	pluginRegistry := plugins.NewRegistry(logger)
 	pluginRegistry.AddLoadedPlugins(pluginLoader)
 	assistant.SetPluginRegistry(pluginRegistry)
+
+	// ── Resolve TLS certificates ──
+	tlsEnabled := cfg.WebUI.TLS.Enabled || cfg.Gateway.TLS.Enabled
+	if tlsEnabled {
+		// Resolve default cert/key paths if not set.
+		certPath := cfg.WebUI.TLS.CertPath
+		if certPath == "" {
+			certPath = cfg.Gateway.TLS.CertPath
+		}
+		if certPath == "" {
+			certPath = filepath.Join("data", "tls", "devclaw-cert.pem")
+		}
+		keyPath := cfg.WebUI.TLS.KeyPath
+		if keyPath == "" {
+			keyPath = cfg.Gateway.TLS.KeyPath
+		}
+		if keyPath == "" {
+			keyPath = filepath.Join("data", "tls", "devclaw-key.pem")
+		}
+
+		// Share paths to both configs.
+		if cfg.WebUI.TLS.Enabled {
+			cfg.WebUI.TLS.CertPath = certPath
+			cfg.WebUI.TLS.KeyPath = keyPath
+		}
+		if cfg.Gateway.TLS.Enabled {
+			cfg.Gateway.TLS.CertPath = certPath
+			cfg.Gateway.TLS.KeyPath = keyPath
+		}
+
+		// Auto-generate if configured.
+		autoGen := cfg.WebUI.TLS.AutoGenerate || cfg.Gateway.TLS.AutoGenerate
+		if autoGen {
+			if err := devtls.EnsureSelfSignedCert(certPath, keyPath, logger); err != nil {
+				logger.Error("failed to generate TLS certificates", "error", err)
+				return fmt.Errorf("TLS certificate generation failed: %w", err)
+			}
+		}
+
+		// Log fingerprint.
+		if fp, err := devtls.CertFingerprint(certPath); err == nil {
+			logger.Info("TLS certificate fingerprint", "sha256", fp)
+		}
+	}
 
 	// ── Start Web UI first (independent of channels) ──
 	var webServer *webui.Server
@@ -369,7 +414,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// ── Start assistant (channels, scheduler, heartbeat, etc.) ──
 	if err := assistant.Start(ctx); err != nil {
 		logger.Warn("assistant started with warnings", "error", err)
-		logger.Info("channels pending — connect via web UI", "url", fmt.Sprintf("http://localhost%s/channels", cfg.WebUI.Address))
+		scheme := "http"
+		if cfg.WebUI.TLS.Enabled {
+			scheme = "https"
+		}
+		logger.Info("channels pending — connect via web UI", "url", fmt.Sprintf("%s://localhost%s/channels", scheme, cfg.WebUI.Address))
 	}
 
 	// ── Start gateway if enabled ──
@@ -619,7 +668,7 @@ func anySliceToStringSlice(items []any) []string {
 // wireDomainAdapter connects domain/network config functions to the WebUI adapter.
 func wireDomainAdapter(adapter *webui.AssistantAdapter, cfg *copilot.Config, ws *webui.Server, configPath string) {
 	adapter.GetDomainConfigFn = func() webui.DomainConfigInfo {
-		return webui.DomainConfigInfo{
+		info := webui.DomainConfigInfo{
 			WebuiAddress:   cfg.WebUI.Address,
 			WebuiAuthToken: cfg.WebUI.AuthToken != "",
 
@@ -627,7 +676,22 @@ func wireDomainAdapter(adapter *webui.AssistantAdapter, cfg *copilot.Config, ws 
 			GatewayAddress:   cfg.Gateway.Address,
 			GatewayAuthToken: cfg.Gateway.AuthToken != "",
 			CORSOrigins:      cfg.Gateway.CORSOrigins,
+
+			WebuiTLSEnabled:   cfg.WebUI.TLS.Enabled,
+			GatewayTLSEnabled: cfg.Gateway.TLS.Enabled,
+			TLSCertPath:       cfg.WebUI.TLS.CertPath,
 		}
+		// Include fingerprint if TLS is active.
+		if cfg.WebUI.TLS.Enabled || cfg.Gateway.TLS.Enabled {
+			certPath := cfg.WebUI.TLS.CertPath
+			if certPath == "" {
+				certPath = cfg.Gateway.TLS.CertPath
+			}
+			if fp, err := devtls.CertFingerprint(certPath); err == nil {
+				info.TLSFingerprint = fp
+			}
+		}
+		return info
 	}
 
 	adapter.UpdateDomainConfigFn = func(update webui.DomainConfigUpdate) error {
@@ -2096,6 +2160,9 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 		return nil
 	}
 
+	// ── Agents ──
+	wireAgentAdapter(adapter, assistant, cfg, configPath, logger)
+
 	// ── Plugins ──
 	adapter.ListPluginsFn = func() []webui.PluginInfoAPI {
 		reg := assistant.PluginRegistry()
@@ -2178,6 +2245,257 @@ func syncWhatsAppAccessToConfig(cfg *copilot.Config, waManager channels.WhatsApp
 	}
 
 	// Save to file
+	savePath := configPath
+	if savePath == "" {
+		savePath = "config.yaml"
+	}
+	return copilot.SaveConfigToFile(cfg, savePath)
+}
+
+// wireAgentAdapter connects agent management functions to the WebUI adapter.
+func wireAgentAdapter(adapter *webui.AssistantAdapter, assistant *copilot.Assistant, cfg *copilot.Config, configPath string, logger *slog.Logger) {
+	wsMgr := assistant.WorkspaceManager()
+
+	// Helper: convert Workspace to AgentInfoAPI
+	wsToAgent := func(ws *copilot.Workspace) webui.AgentInfoAPI {
+		info := webui.AgentInfoAPI{
+			ID:           ws.ID,
+			Name:         ws.Name,
+			Description:  ws.Description,
+			Model:        ws.Model,
+			Instructions: ws.Instructions,
+			Language:     ws.Language,
+			Timezone:     ws.Timezone,
+			Trigger:      ws.Trigger,
+			Skills:       ws.Skills,
+			Channels:     ws.Channels,
+			Members:      ws.Members,
+			Groups:       ws.Groups,
+			ToolProfile:  ws.ToolProfile,
+			ToolsAllow:   ws.ToolsAllow,
+			ToolsDeny:    ws.ToolsDeny,
+			MaxTurns:     ws.MaxTurns,
+			RunTimeout:   ws.RunTimeout,
+			Default:      ws.Default,
+			Active:       ws.Active,
+			Source:       ws.Source,
+			MemberCount:  len(ws.Members),
+			GroupCount:   len(ws.Groups),
+			SessionCount: wsMgr.SessionCountForWorkspace(ws.ID),
+		}
+		if !ws.CreatedAt.IsZero() {
+			info.CreatedAt = ws.CreatedAt.Format("2006-01-02T15:04:05Z")
+		}
+		if ws.Identity != nil {
+			info.Identity = &webui.AgentIdentity{
+				Name:   ws.Identity.Name,
+				Emoji:  ws.Identity.Emoji,
+				Theme:  ws.Identity.Theme,
+				Avatar: ws.Identity.Avatar,
+				Vibe:   ws.Identity.Vibe,
+			}
+		}
+		// Ensure slices are never nil for JSON
+		if info.Skills == nil {
+			info.Skills = []string{}
+		}
+		if info.Channels == nil {
+			info.Channels = []string{}
+		}
+		if info.Members == nil {
+			info.Members = []string{}
+		}
+		if info.Groups == nil {
+			info.Groups = []string{}
+		}
+		if info.ToolsAllow == nil {
+			info.ToolsAllow = []string{}
+		}
+		if info.ToolsDeny == nil {
+			info.ToolsDeny = []string{}
+		}
+		return info
+	}
+
+	adapter.ListAgentsFn = func() []webui.AgentInfoAPI {
+		workspaces := wsMgr.List()
+		result := make([]webui.AgentInfoAPI, 0, len(workspaces))
+		for _, ws := range workspaces {
+			result = append(result, wsToAgent(ws))
+		}
+
+		// Include plugin agents as read-only
+		reg := assistant.PluginRegistry()
+		if reg != nil {
+			for _, pi := range reg.List() {
+				if !pi.Enabled {
+					continue
+				}
+				for _, agentName := range pi.Agents {
+					result = append(result, webui.AgentInfoAPI{
+						ID:       pi.ID + ":" + agentName,
+						Name:     agentName,
+						Source:   "plugin",
+						Active:   pi.Enabled,
+						Skills:   []string{},
+						Channels: []string{},
+						Members:  []string{},
+						Groups:   []string{},
+						ToolsAllow: []string{},
+						ToolsDeny:  []string{},
+					})
+				}
+			}
+		}
+
+		return result
+	}
+
+	adapter.CreateAgentFn = func(req webui.CreateAgentRequest) (string, error) {
+		// Auto-generate ID from name if not provided
+		id := req.ID
+		if id == "" {
+			id = copilot.Slugify(req.Name)
+		}
+
+		ws := copilot.Workspace{
+			ID:           id,
+			Name:         req.Name,
+			Description:  req.Description,
+			Model:        req.Model,
+			Instructions: req.Instructions,
+			Language:     req.Language,
+			Skills:       req.Skills,
+			Channels:     req.Channels,
+			ToolProfile:  req.ToolProfile,
+			MaxTurns:     req.MaxTurns,
+			RunTimeout:   req.RunTimeout,
+			Source:       "api",
+		}
+		if req.Identity != nil {
+			ws.Identity = &copilot.IdentityConfig{
+				Name:  req.Identity.Name,
+				Emoji: req.Identity.Emoji,
+				Theme: req.Identity.Theme,
+				Vibe:  req.Identity.Vibe,
+			}
+		}
+
+		if err := wsMgr.Create(ws, "webui"); err != nil {
+			return "", err
+		}
+
+		// Persist to config
+		if err := persistWorkspaces(wsMgr, cfg, configPath); err != nil {
+			return "", err
+		}
+		return id, nil
+	}
+
+	adapter.GetAgentFn = func(id string) (*webui.AgentInfoAPI, error) {
+		ws, ok := wsMgr.Get(id)
+		if !ok {
+			return nil, fmt.Errorf("agent %q not found", id)
+		}
+		info := wsToAgent(ws)
+		return &info, nil
+	}
+
+	adapter.UpdateAgentFn = func(id string, req webui.UpdateAgentRequest) error {
+		err := wsMgr.Update(id, func(ws *copilot.Workspace) {
+			if req.Name != nil {
+				ws.Name = *req.Name
+			}
+			if req.Description != nil {
+				ws.Description = *req.Description
+			}
+			if req.Model != nil {
+				ws.Model = *req.Model
+			}
+			if req.Instructions != nil {
+				ws.Instructions = *req.Instructions
+			}
+			if req.Language != nil {
+				ws.Language = *req.Language
+			}
+			if req.Identity != nil {
+				ws.Identity = &copilot.IdentityConfig{
+					Name:  req.Identity.Name,
+					Emoji: req.Identity.Emoji,
+					Theme: req.Identity.Theme,
+					Vibe:  req.Identity.Vibe,
+				}
+			}
+			if req.Skills != nil {
+				ws.Skills = req.Skills
+			}
+			if req.Channels != nil {
+				ws.Channels = req.Channels
+			}
+			if req.ToolProfile != nil {
+				ws.ToolProfile = *req.ToolProfile
+			}
+			if req.ToolsAllow != nil {
+				ws.ToolsAllow = req.ToolsAllow
+			}
+			if req.ToolsDeny != nil {
+				ws.ToolsDeny = req.ToolsDeny
+			}
+			if req.MaxTurns != nil {
+				ws.MaxTurns = *req.MaxTurns
+			}
+			if req.RunTimeout != nil {
+				ws.RunTimeout = *req.RunTimeout
+			}
+			if req.Active != nil {
+				ws.Active = *req.Active
+			}
+		})
+		if err != nil {
+			return err
+		}
+
+		// Rebuild routing maps after update
+		wsMgr.RebuildMaps()
+
+		return persistWorkspaces(wsMgr, cfg, configPath)
+	}
+
+	adapter.DeleteAgentFn = func(id string) error {
+		if err := wsMgr.Delete(id, "webui"); err != nil {
+			return err
+		}
+		return persistWorkspaces(wsMgr, cfg, configPath)
+	}
+
+	adapter.SetDefaultAgentFn = func(id string) error {
+		if err := wsMgr.SetDefault(id); err != nil {
+			return err
+		}
+		return persistWorkspaces(wsMgr, cfg, configPath)
+	}
+
+	adapter.ToggleAgentFn = func(id string, active bool) error {
+		err := wsMgr.Update(id, func(ws *copilot.Workspace) {
+			ws.Active = active
+		})
+		if err != nil {
+			return err
+		}
+		return persistWorkspaces(wsMgr, cfg, configPath)
+	}
+}
+
+// persistWorkspaces saves the current workspace state back to the config file.
+func persistWorkspaces(wsMgr *copilot.WorkspaceManager, cfg *copilot.Config, configPath string) error {
+	// Rebuild workspace config from live state.
+	workspaces := wsMgr.List()
+	cfg.Workspaces.Workspaces = make([]copilot.Workspace, len(workspaces))
+	for i, ws := range workspaces {
+		cfg.Workspaces.Workspaces[i] = *ws
+	}
+	cfg.Workspaces.DefaultWorkspace = wsMgr.DefaultID()
+
 	savePath := configPath
 	if savePath == "" {
 		savePath = "config.yaml"

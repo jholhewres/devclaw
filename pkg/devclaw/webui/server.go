@@ -5,6 +5,7 @@ package webui
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -143,10 +144,91 @@ type AssistantAPI interface {
 	TogglePlugin(id string, enabled bool) error
 	InstallPlugin(source string) (*plugins.PluginInstallResult, error)
 	RemovePlugin(name string) error
+
+	// Agents
+	ListAgents() []AgentInfoAPI
+	CreateAgent(req CreateAgentRequest) (string, error)
+	GetAgent(id string) (*AgentInfoAPI, error)
+	UpdateAgent(id string, req UpdateAgentRequest) error
+	DeleteAgent(id string) error
+	SetDefaultAgent(id string) error
+	ToggleAgent(id string, active bool) error
 }
 
 // PluginInfoAPI is the plugin info type exposed via the API.
 type PluginInfoAPI = plugins.PluginInfo
+
+// AgentInfoAPI is the agent/workspace info type exposed via the API.
+type AgentInfoAPI struct {
+	ID           string         `json:"id"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description,omitempty"`
+	Model        string         `json:"model,omitempty"`
+	Instructions string         `json:"instructions,omitempty"`
+	Language     string         `json:"language,omitempty"`
+	Timezone     string         `json:"timezone,omitempty"`
+	Trigger      string         `json:"trigger,omitempty"`
+	Identity     *AgentIdentity `json:"identity,omitempty"`
+	Skills       []string       `json:"skills,omitempty"`
+	Channels     []string       `json:"channels,omitempty"`
+	Members      []string       `json:"members,omitempty"`
+	Groups       []string       `json:"groups,omitempty"`
+	ToolProfile  string         `json:"tool_profile,omitempty"`
+	ToolsAllow   []string       `json:"tools_allow,omitempty"`
+	ToolsDeny    []string       `json:"tools_deny,omitempty"`
+	MaxTurns     int            `json:"max_turns,omitempty"`
+	RunTimeout   int            `json:"run_timeout,omitempty"`
+	Default      bool           `json:"default"`
+	Active       bool           `json:"active"`
+	Source       string         `json:"source,omitempty"`
+	CreatedAt    string         `json:"created_at,omitempty"`
+	MemberCount  int            `json:"member_count"`
+	GroupCount   int            `json:"group_count"`
+	SessionCount int            `json:"session_count"`
+}
+
+// AgentIdentity holds identity/persona fields for an agent.
+type AgentIdentity struct {
+	Name   string `json:"name,omitempty"`
+	Emoji  string `json:"emoji,omitempty"`
+	Theme  string `json:"theme,omitempty"`
+	Avatar string `json:"avatar,omitempty"`
+	Vibe   string `json:"vibe,omitempty"`
+}
+
+// CreateAgentRequest is the request body for creating a new agent.
+type CreateAgentRequest struct {
+	ID           string         `json:"id"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description,omitempty"`
+	Model        string         `json:"model,omitempty"`
+	Instructions string         `json:"instructions,omitempty"`
+	Language     string         `json:"language,omitempty"`
+	Identity     *AgentIdentity `json:"identity,omitempty"`
+	Skills       []string       `json:"skills,omitempty"`
+	Channels     []string       `json:"channels,omitempty"`
+	ToolProfile  string         `json:"tool_profile,omitempty"`
+	MaxTurns     int            `json:"max_turns,omitempty"`
+	RunTimeout   int            `json:"run_timeout,omitempty"`
+}
+
+// UpdateAgentRequest is the request body for updating an agent.
+type UpdateAgentRequest struct {
+	Name         *string        `json:"name,omitempty"`
+	Description  *string        `json:"description,omitempty"`
+	Model        *string        `json:"model,omitempty"`
+	Instructions *string        `json:"instructions,omitempty"`
+	Language     *string        `json:"language,omitempty"`
+	Identity     *AgentIdentity `json:"identity,omitempty"`
+	Skills       []string       `json:"skills,omitempty"`
+	Channels     []string       `json:"channels,omitempty"`
+	ToolProfile  *string        `json:"tool_profile,omitempty"`
+	ToolsAllow   []string       `json:"tools_allow,omitempty"`
+	ToolsDeny    []string       `json:"tools_deny,omitempty"`
+	MaxTurns     *int           `json:"max_turns,omitempty"`
+	RunTimeout   *int           `json:"run_timeout,omitempty"`
+	Active       *bool          `json:"active,omitempty"`
+}
 
 // SessionInfo contains session metadata for the UI.
 type SessionInfo struct {
@@ -267,6 +349,12 @@ type DomainConfigInfo struct {
 	GatewayAuthToken bool     `json:"gateway_auth_configured"`
 	CORSOrigins      []string `json:"cors_origins"`
 
+	// TLS settings
+	WebuiTLSEnabled   bool   `json:"webui_tls_enabled"`
+	GatewayTLSEnabled bool   `json:"gateway_tls_enabled"`
+	TLSCertPath       string `json:"tls_cert_path"`
+	TLSFingerprint    string `json:"tls_fingerprint,omitempty"`
+
 	// Tailscale settings
 	TailscaleEnabled  bool   `json:"tailscale_enabled"`
 	TailscaleServe    bool   `json:"tailscale_serve"`
@@ -295,6 +383,21 @@ type DomainConfigUpdate struct {
 	TailscalePort    *int     `json:"tailscale_port,omitempty"`
 }
 
+// TLSConfig configures TLS/HTTPS for the WebUI server.
+type TLSConfig struct {
+	// Enabled turns TLS on/off (default: false).
+	Enabled bool `yaml:"enabled"`
+
+	// AutoGenerate auto-generates self-signed certificates if they don't exist (default: true).
+	AutoGenerate bool `yaml:"auto_generate"`
+
+	// CertPath is the path to the TLS certificate PEM file.
+	CertPath string `yaml:"cert_path"`
+
+	// KeyPath is the path to the TLS private key PEM file.
+	KeyPath string `yaml:"key_path"`
+}
+
 // Config holds web UI configuration.
 type Config struct {
 	// Enabled turns the web UI on/off.
@@ -305,6 +408,9 @@ type Config struct {
 
 	// AuthToken is the Bearer token for authentication (empty = no auth).
 	AuthToken string `yaml:"auth_token"`
+
+	// TLS configures HTTPS for the WebUI.
+	TLS TLSConfig `yaml:"tls"`
 }
 
 // UpdateChecker is the interface used by the web UI to query update status.
@@ -463,6 +569,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/skills/", s.authMiddleware(s.requireAssistant(s.handleAPISkillsAction)))
 	mux.HandleFunc("/api/plugins", s.authMiddleware(s.requireAssistant(s.handleAPIPlugins)))
 	mux.HandleFunc("/api/plugins/", s.authMiddleware(s.requireAssistant(s.handleAPIPluginAction)))
+	mux.HandleFunc("/api/agents", s.authMiddleware(s.requireAssistant(s.handleAPIAgents)))
+	mux.HandleFunc("/api/agents/", s.authMiddleware(s.requireAssistant(s.handleAPIAgentAction)))
 	mux.HandleFunc("/api/channels", s.authMiddleware(s.requireAssistant(s.handleAPIChannels)))
 	// WhatsApp-specific routes (must be before generic /api/channels/whatsapp/)
 	mux.HandleFunc("/api/channels/whatsapp/access", s.authMiddleware(s.requireAssistant(s.handleAPIWhatsAppAccess)))
@@ -540,12 +648,29 @@ func (s *Server) Start(ctx context.Context) error {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	s.logger.Info("web UI starting", "address", s.cfg.Address)
-	go func() {
-		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			s.logger.Error("web UI server error", "error", err)
+	if s.cfg.TLS.Enabled {
+		cert, err := tls.LoadX509KeyPair(s.cfg.TLS.CertPath, s.cfg.TLS.KeyPath)
+		if err != nil {
+			return fmt.Errorf("loading TLS certificate: %w", err)
 		}
-	}()
+		s.server.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS12,
+		}
+		s.logger.Info("web UI starting (HTTPS)", "address", s.cfg.Address)
+		go func() {
+			if err := s.server.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				s.logger.Error("web UI server TLS error", "error", err)
+			}
+		}()
+	} else {
+		s.logger.Info("web UI starting", "address", s.cfg.Address)
+		go func() {
+			if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				s.logger.Error("web UI server error", "error", err)
+			}
+		}()
+	}
 
 	return nil
 }

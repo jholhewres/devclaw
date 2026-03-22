@@ -9,6 +9,8 @@
 #   --version <tag>     Install specific version (default: auto-detect latest from S3)
 #   --port <port>       Server port (default: 47716)
 #   --no-prompt         Non-interactive mode
+#   --no-tls            Skip TLS certificate generation
+#   --github            Download from GitHub Releases instead of S3
 #   --dry-run           Show what would happen without making changes
 #   --verbose           Show detailed output
 #   --help              Show this help message
@@ -40,6 +42,9 @@ ERROR='\033[38;2;230;57;70m'
 MUTED='\033[38;2;90;100;128m'
 NC='\033[0m'
 
+# GitHub Releases base URL
+GITHUB_RELEASES_URL="https://github.com/jholhewres/devclaw/releases/download"
+
 # Flags
 STAGE="production"
 BASE_URL=""
@@ -49,6 +54,8 @@ VERSION_SPECIFIED=""
 PORT="47716"
 NO_PROMPT=0
 SKIP_DEPS=0
+SKIP_TLS=0
+USE_GITHUB=0
 DRY_RUN=0
 VERBOSE=0
 
@@ -112,6 +119,8 @@ Options:
   --port <port>       Server port (default: 47716)
   --no-prompt         Non-interactive mode (skip confirmations)
   --skip-deps         Skip dependency installation (use if already installed)
+  --no-tls            Skip TLS certificate generation
+  --github            Download from GitHub Releases instead of S3
   --dry-run           Show what would happen without making changes
   --verbose           Show detailed output (set -x)
   --help, -h          Show this help message
@@ -159,6 +168,8 @@ parse_args() {
       --port) PORT="$2"; shift 2 ;;
       --no-prompt) NO_PROMPT=1; shift ;;
       --skip-deps) SKIP_DEPS=1; shift ;;
+      --no-tls) SKIP_TLS=1; shift ;;
+      --github) USE_GITHUB=1; shift ;;
       --dry-run) DRY_RUN=1; shift ;;
       --verbose) VERBOSE=1; shift ;;
       --help|-h) print_usage; exit 0 ;;
@@ -176,6 +187,12 @@ parse_args() {
 
   if [[ "$VERBOSE" == "1" ]]; then
     set -x
+  fi
+
+  # GitHub mode: download from GitHub Releases
+  if [[ "$USE_GITHUB" == "1" && -z "$BASE_URL" && -z "$LOCAL_PATH" ]]; then
+    BASE_URL="$GITHUB_RELEASES_URL"
+    STAGE="github"
   fi
 
   # Set base URL from stage if not explicitly provided via --url or --local
@@ -655,14 +672,20 @@ download_and_install() {
   tmpdir="$(mktempdir)"
 
   # Determine which archive to download:
+  # - GitHub mode: use GoReleaser naming (devclaw_{VERSION}_{OS}_{ARCH}.tar.gz)
   # - If version was explicitly specified: use devclaw-{VERSION}.zip
   # - If version was auto-detected (latest): use latest.zip
   local archive=""
   local use_latest=0
+  local use_github_archive=0
 
   if [[ -n "$LOCAL_PATH" ]]; then
     # Local mode
     archive="devclaw-${VERSION}.zip"
+  elif [[ "$STAGE" == "github" && -n "$VERSION" ]]; then
+    # GitHub Releases mode: use GoReleaser archive naming
+    archive="devclaw_${VERSION#v}_${OS}_${ARCH}.tar.gz"
+    use_github_archive=1
   elif [[ -n "${VERSION_SPECIFIED:-}" ]]; then
     # User explicitly specified a version
     archive="devclaw-${VERSION}.zip"
@@ -734,11 +757,17 @@ download_and_install() {
     fi
   else
     # Remote mode: download via curl
-    # Add cache-busting query parameter for latest.zip to avoid stale CDN/S3 responses
-    local download_url="${BASE_URL}/${archive}"
-    if [[ "$use_latest" == "1" ]]; then
-      local cache_buster="_=$(date +%s)"
-      download_url="${download_url}?${cache_buster}"
+    local download_url=""
+    if [[ "$use_github_archive" == "1" ]]; then
+      # GitHub Releases: /download/v{VERSION}/{archive}
+      download_url="${BASE_URL}/${VERSION}/${archive}"
+    else
+      download_url="${BASE_URL}/${archive}"
+      # Add cache-busting query parameter for latest.zip to avoid stale CDN/S3 responses
+      if [[ "$use_latest" == "1" ]]; then
+        local cache_buster="_=$(date +%s)"
+        download_url="${download_url}?${cache_buster}"
+      fi
     fi
 
     ui_section "Downloading DevClaw"
@@ -746,7 +775,7 @@ download_and_install() {
     if [[ "$use_latest" == "1" ]]; then
       ui_info "Downloading latest release: ${BASE_URL}/${archive}"
     else
-      ui_info "Downloading version ${VERSION}: ${BASE_URL}/${archive}"
+      ui_info "Downloading version ${VERSION}: $download_url"
     fi
 
     if [[ "$DRY_RUN" == "1" ]]; then
@@ -759,7 +788,10 @@ download_and_install() {
     if ! curl -fsSL --progress-bar -o "${tmpdir}/${archive}" "$download_url"; then
       ui_error "Failed to download: $download_url"
       echo ""
-      if [[ "$use_latest" == "1" ]]; then
+      if [[ "$use_github_archive" == "1" ]]; then
+        echo "Make sure the release exists at:"
+        echo "  $download_url"
+      elif [[ "$use_latest" == "1" ]]; then
         echo "Make sure latest.zip exists at:"
         echo "  ${BASE_URL}/latest.zip"
       else
@@ -771,9 +803,14 @@ download_and_install() {
 
     ui_success "Download complete"
 
-    # Extract
+    # Extract (tar.gz for GitHub releases, zip for S3)
     ui_info "Extracting..."
-    unzip -q -o "${tmpdir}/${archive}" -d "${tmpdir}/extracted"
+    mkdir -p "${tmpdir}/extracted"
+    if [[ "$archive" == *.tar.gz ]]; then
+      tar xzf "${tmpdir}/${archive}" -C "${tmpdir}/extracted"
+    else
+      unzip -q -o "${tmpdir}/${archive}" -d "${tmpdir}/extracted"
+    fi
   fi
 
   # Verify we have something to install
@@ -868,6 +905,65 @@ setup_global_command() {
   fi
 
   ui_success "Global command available: devclaw"
+}
+
+generate_tls_certs() {
+  if [[ "$SKIP_TLS" == "1" ]]; then
+    ui_info "Skipping TLS certificate generation (--no-tls)"
+    return 0
+  fi
+
+  ui_section "Generating TLS Certificates"
+
+  local tls_dir="${INSTALL_DIR}/data/tls"
+  local cert_path="${tls_dir}/devclaw-cert.pem"
+  local key_path="${tls_dir}/devclaw-key.pem"
+
+  if [[ -f "$cert_path" && -f "$key_path" ]]; then
+    ui_success "TLS certificates already exist"
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" == "1" ]]; then
+    ui_info "[dry-run] Would generate TLS certificates in $tls_dir"
+    return 0
+  fi
+
+  # Method 1: Use the devclaw binary itself.
+  if [[ -x "${INSTALL_DIR}/devclaw" ]]; then
+    ui_info "Generating via devclaw binary..."
+    if "${INSTALL_DIR}/devclaw" tls generate --output "$tls_dir" 2>/dev/null; then
+      ui_success "TLS certificate generated via devclaw"
+      return 0
+    fi
+    ui_warn "devclaw tls generate failed, trying openssl fallback..."
+  fi
+
+  # Method 2: Fallback to openssl.
+  if check_command openssl; then
+    ui_info "Generating via openssl..."
+    if [[ "$(id -u)" == "0" ]]; then
+      mkdir -p "$tls_dir"
+    else
+      sudo mkdir -p "$tls_dir"
+    fi
+
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+      -keyout "$key_path" -out "$cert_path" \
+      -days 3650 -nodes \
+      -subj "/CN=devclaw/O=DevClaw Self-Signed" \
+      -addext "subjectAltName=DNS:localhost,DNS:devclaw,IP:127.0.0.1,IP:::1" 2>/dev/null
+
+    if [[ -f "$cert_path" && -f "$key_path" ]]; then
+      chmod 600 "$cert_path" "$key_path"
+      ui_success "TLS certificate generated via openssl"
+      return 0
+    fi
+    ui_warn "openssl generation failed"
+  fi
+
+  # Method 3: Skip — will auto-generate on first start.
+  ui_info "TLS certificates will be auto-generated on first start"
 }
 
 generate_config() {
@@ -1094,6 +1190,7 @@ main() {
   download_and_install
   setup_directories
   setup_global_command
+  generate_tls_certs
   generate_config
   update_pm2_config
   start_with_pm2

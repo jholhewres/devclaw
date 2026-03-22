@@ -29,7 +29,7 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
     -o devclaw ./cmd/devclaw
 
 # ── Runtime stage ──
-FROM --platform=linux/arm64 alpine:3.21
+FROM alpine:3.21
 
 # Install runtime dependencies and build tools
 RUN apk --no-cache add \

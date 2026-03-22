@@ -403,6 +403,21 @@ func (c DatabaseConfig) Effective() database.HubConfig {
 	return hub
 }
 
+// TLSConfig configures TLS/HTTPS for servers (WebUI, Gateway).
+type TLSConfig struct {
+	// Enabled turns TLS on/off (default: false).
+	Enabled bool `yaml:"enabled"`
+
+	// AutoGenerate auto-generates self-signed certificates if they don't exist (default: true).
+	AutoGenerate bool `yaml:"auto_generate"`
+
+	// CertPath is the path to the TLS certificate PEM file (default: data/tls/devclaw-cert.pem).
+	CertPath string `yaml:"cert_path"`
+
+	// KeyPath is the path to the TLS private key PEM file (default: data/tls/devclaw-key.pem).
+	KeyPath string `yaml:"key_path"`
+}
+
 // GatewayConfig configures the HTTP API gateway.
 type GatewayConfig struct {
 	// Enabled turns the gateway on/off (default: false).
@@ -416,6 +431,9 @@ type GatewayConfig struct {
 
 	// CORSOrigins lists allowed origins for CORS (empty = no CORS).
 	CORSOrigins []string `yaml:"cors_origins"`
+
+	// TLS configures HTTPS for the gateway.
+	TLS TLSConfig `yaml:"tls"`
 }
 
 // QueueConfig configures the message queue for handling bursts.
@@ -956,6 +974,11 @@ func DefaultConfig() *Config {
 		Gateway: GatewayConfig{
 			Enabled: false,
 			Address: ":8085",
+			TLS: TLSConfig{
+				AutoGenerate: true,
+				CertPath:     filepath.Join("data", "tls", "devclaw-cert.pem"),
+				KeyPath:      filepath.Join("data", "tls", "devclaw-key.pem"),
+			},
 		},
 		BlockStream: DefaultBlockStreamConfig(),
 		WebSearch: WebSearchConfig{
@@ -971,6 +994,11 @@ func DefaultConfig() *Config {
 		WebUI: webui.Config{
 			Enabled: false,
 			Address: ":47716",
+			TLS: webui.TLSConfig{
+				AutoGenerate: true,
+				CertPath:     filepath.Join("data", "tls", "devclaw-cert.pem"),
+				KeyPath:      filepath.Join("data", "tls", "devclaw-key.pem"),
+			},
 		},
 		Browser: DefaultBrowserConfig(),
 		Update: UpdateConfig{
