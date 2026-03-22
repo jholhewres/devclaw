@@ -274,8 +274,9 @@ Three strategies to keep the context within limits:
 | Tool | Description | Permission |
 |------|-------------|------------|
 | `plugin_list` | List available and active plugins | user |
-| `plugin_install` | Install a plugin (GitHub, Jira, Sentry) | admin |
+| `plugin_install` | Install a plugin | admin |
 | `plugin_call` | Call a specific plugin tool | admin |
+| `delegate_to_plugin_agent` | Delegate a task to a plugin agent | admin |
 
 #### Team & Multi-user
 
@@ -341,12 +342,36 @@ Background process lifecycle management for development workflows:
 
 ## Plugin System
 
-Extensible plugin architecture:
+YAML-first extensible plugin architecture. Plugins are directories with a
+`plugin.yaml` manifest providing agents, tools, hooks, skills, channels, and services.
 
-- **Built-in plugins**: GitHub (API), Jira (API), Sentry (API)
-- **Plugin Manager**: YAML-based plugin definitions, load/enable/disable lifecycle
-- **Webhook Dispatcher**: route events (tool_use, error, deploy) to external endpoints
-- **Custom plugins**: define tools, config, and webhook subscriptions in YAML
+### Capabilities
+
+- **Agents**: Custom LLM agents with instructions, triggers, tool profiles, and escalation
+- **Tools**: Script (bash), HTTP endpoint, or native Go handlers — namespaced as `{pluginID}_{toolName}`
+- **Hooks**: Event-driven scripts (user_prompt_submit, post_tool_use, session_end, etc.)
+- **Skills**: SKILL.md knowledge guides loaded into LLM context
+- **Channels**: Native Go channel implementations (via .so)
+- **Services**: HTTP service endpoints exposed by the plugin
+- **Config**: Typed fields (string, int, bool, secret) with vault, env var, and default resolution
+- **UI**: Declarative WebUI config panels with sections, field grouping, and quick actions
+
+### Lifecycle
+
+Discovery → Loading (config, requirements, .so) → Registration (tools, hooks, agents, skills) → Start → Stop
+
+### Agent Runtime
+
+- Trigger-based routing (keyword matching on incoming messages)
+- Tool profile filtering (allow/deny lists per agent)
+- Bidirectional communication: main agent delegates via `delegate_to_plugin_agent`, plugin agent escalates via `escalate_to_main`
+- Escalation: keyword detection, max turns, explicit-only mode
+
+### WebUI
+
+Plugin management page at `/plugins` with card grid, enable/disable toggles, and auto-generated config forms from the manifest's config schema and UI sections.
+
+→ See [docs/plugins.md](plugins.md) for complete documentation.
 
 ---
 

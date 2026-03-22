@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
+	"github.com/jholhewres/devclaw/pkg/devclaw/plugins"
 )
 
 // WhatsAppQREvent mirrors whatsapp.QREvent without importing the channel package.
@@ -167,6 +168,8 @@ type AssistantAdapter struct {
 	GetPluginInfoFn   func(id string) *PluginInfoAPI
 	ConfigurePluginFn func(id string, updates map[string]any) error
 	TogglePluginFn    func(id string, enabled bool) error
+	InstallPluginFn   func(source string) (*plugins.PluginInstallResult, error)
+	RemovePluginFn    func(name string) error
 }
 
 // ToolProfileInfo contains profile info for API responses.
@@ -682,6 +685,20 @@ func (a *AssistantAdapter) ConfigurePlugin(id string, updates map[string]any) er
 func (a *AssistantAdapter) TogglePlugin(id string, enabled bool) error {
 	if a.TogglePluginFn != nil {
 		return a.TogglePluginFn(id, enabled)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) InstallPlugin(source string) (*plugins.PluginInstallResult, error) {
+	if a.InstallPluginFn != nil {
+		return a.InstallPluginFn(source)
+	}
+	return nil, errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) RemovePlugin(name string) error {
+	if a.RemovePluginFn != nil {
+		return a.RemovePluginFn(name)
 	}
 	return errors.New("not implemented")
 }

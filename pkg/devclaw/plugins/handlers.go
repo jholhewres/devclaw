@@ -22,7 +22,7 @@ type ToolHandlerFunc func(ctx context.Context, args map[string]any) (any, error)
 func BuildToolHandler(def ToolDef, instance *PluginInstance) (ToolHandlerFunc, error) {
 	switch {
 	case def.Script != "":
-		return buildScriptHandler(def, instance.Dir), nil
+		return buildScriptHandler(def, instance.Dir, instance.Config), nil
 	case def.Endpoint != "":
 		return buildHTTPHandler(def, instance.Config), nil
 	case def.Handler != "":
@@ -33,12 +33,19 @@ func BuildToolHandler(def ToolDef, instance *PluginInstance) (ToolHandlerFunc, e
 }
 
 // buildScriptHandler creates a handler that executes a bash script.
-func buildScriptHandler(def ToolDef, pluginDir string) ToolHandlerFunc {
+// Plugin config values are injected as PLUGIN_CFG_* environment variables,
+// mirroring the pattern used by buildHTTPHandler.
+func buildScriptHandler(def ToolDef, pluginDir string, config map[string]any) ToolHandlerFunc {
 	return func(ctx context.Context, args map[string]any) (any, error) {
 		// Build environment with tool parameters, prefixed to avoid overriding system vars.
 		env := os.Environ()
 		for k, v := range args {
 			env = append(env, fmt.Sprintf("PLUGIN_%s=%v", strings.ToUpper(k), v))
+		}
+
+		// Inject plugin config as PLUGIN_CFG_* env vars.
+		for k, v := range config {
+			env = append(env, fmt.Sprintf("PLUGIN_CFG_%s=%v", strings.ToUpper(k), v))
 		}
 
 		cmd := exec.CommandContext(ctx, "bash", "-c", def.Script)

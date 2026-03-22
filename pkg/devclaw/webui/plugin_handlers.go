@@ -6,24 +6,31 @@ import (
 	"strings"
 )
 
-// handleAPIPlugins handles GET /api/plugins — list all plugins.
+// handleAPIPlugins handles /api/plugins:
+//   - GET  — list all plugins
+//   - POST — install a plugin from source
 func (s *Server) handleAPIPlugins(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-		return
-	}
+	switch r.Method {
+	case http.MethodGet:
+		list := s.api.ListPlugins()
+		if list == nil {
+			list = []PluginInfoAPI{}
+		}
+		writeJSON(w, http.StatusOK, list)
 
-	list := s.api.ListPlugins()
-	if list == nil {
-		list = []PluginInfoAPI{}
+	case http.MethodPost:
+		s.handlePluginInstall(w, r)
+
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}
-	writeJSON(w, http.StatusOK, list)
 }
 
 // handleAPIPluginAction handles /api/plugins/{id}/* actions:
 //   - GET    /api/plugins/{id}          — plugin detail
 //   - PUT    /api/plugins/{id}/config   — update config
 //   - POST   /api/plugins/{id}/toggle   — enable/disable
+//   - DELETE /api/plugins/{id}          — remove plugin
 func (s *Server) handleAPIPluginAction(w http.ResponseWriter, r *http.Request) {
 	// Parse: /api/plugins/{id} or /api/plugins/{id}/{action}
 	path := strings.TrimPrefix(r.URL.Path, "/api/plugins/")
@@ -41,6 +48,10 @@ func (s *Server) handleAPIPluginAction(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "":
+		if r.Method == http.MethodDelete {
+			s.handlePluginRemove(w, r, id)
+			return
+		}
 		s.handlePluginDetail(w, r, id)
 	case "config":
 		s.handlePluginConfig(w, r, id)
@@ -103,6 +114,39 @@ func (s *Server) handlePluginToggle(w http.ResponseWriter, r *http.Request, id s
 	}
 
 	if err := s.api.TogglePlugin(id, body.Enabled); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handlePluginInstall installs a plugin from a source (GitHub repo or local path).
+func (s *Server) handlePluginInstall(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Source string `json:"source"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+		return
+	}
+	if body.Source == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "source is required"})
+		return
+	}
+
+	result, err := s.api.InstallPlugin(body.Source)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+// handlePluginRemove removes an installed plugin.
+func (s *Server) handlePluginRemove(w http.ResponseWriter, _ *http.Request, name string) {
+	if err := s.api.RemovePlugin(name); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}

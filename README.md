@@ -158,7 +158,7 @@ All secrets are stored in the encrypted vault (`.devclaw.vault`), never in plain
 - **Persistent memory** — SQLite FTS5 + vector embeddings for long-term context
 - **Daemon manager** — start, monitor, and control background processes (dev servers, watchers)
 - **Subagents** — spawn concurrent child agents for parallel tasks (research, code, deploy simultaneously)
-- **Plugin system** — GitHub, Jira, Sentry integrations with webhook support
+- **Plugin system** — YAML-first plugins with agents, tools, hooks, skills, and WebUI management
 - **Shell hook** — auto-capture failed commands and suggest `devclaw fix`
 
 ---
@@ -225,7 +225,7 @@ All secrets are stored in the encrypted vault (`.devclaw.vault`), never in plain
 | **Product** | sprint_report, dora_metrics, project_summary |
 | **Daemons** | start_daemon, daemon_logs, daemon_list, daemon_stop, daemon_restart |
 | **Subagents** | spawn_subagent, list_subagents, wait_subagent, stop_subagent |
-| **Plugins** | plugin_list, plugin_install, plugin_call (GitHub, Jira, Sentry) |
+| **Plugins** | plugin_list, plugin_install, plugin_call, delegate_to_plugin_agent |
 | **Teams** | create/list teams & agents, tasks CRUD, @mentions, shared facts, documents, working state |
 | **Media** | describe_image (vision), transcribe_audio (Whisper), send_media (image/audio/video/document) |
 | **IDE** | ide_configure (VSCode, Cursor, JetBrains, Neovim) |
@@ -472,6 +472,43 @@ See [docs/channels.md](docs/channels.md) for setup instructions.
 
 ---
 
+## Plugins
+
+YAML-first plugin system for extending DevClaw with custom agents, tools, hooks, skills, channels, and services.
+
+```
+my-plugin/
+  plugin.yaml          # Manifest (required)
+  prompts/             # Agent instruction .md files
+  skills/              # SKILL.md knowledge guides
+  lib.so               # Optional native Go library
+```
+
+**Capabilities:**
+
+- **Agents** — custom LLM agents with instructions, triggers, tool profiles, and escalation
+- **Tools** — script (bash), HTTP endpoint, or native Go handlers — namespaced as `{pluginID}_{toolName}`
+- **Hooks** — event-driven scripts (post_tool_use, session_end, user_prompt_submit, etc.)
+- **Skills** — SKILL.md knowledge guides loaded into LLM context
+- **Config** — typed fields (string, int, bool, secret) with vault, env var, and default resolution
+- **UI** — declarative WebUI config panels with sections, field grouping, and quick actions
+
+**Minimal plugin example:**
+
+```yaml
+id: my-plugin
+name: My Plugin
+version: 1.0.0
+tools:
+  - name: greet
+    description: Say hello
+    script: echo "Hello, ${PLUGIN_NAME}!"
+```
+
+See [docs/plugins.md](docs/plugins.md) for full documentation. See [devclaw-plugin-codeflow](https://github.com/jholhewres/devclaw-plugin-codeflow) for a real-world example.
+
+---
+
 ## Security
 
 - **Encrypted vault** — AES-256-GCM + Argon2id, all secrets encrypted at rest
@@ -558,6 +595,7 @@ sudo rm -f /usr/local/bin/devclaw
 | Architecture | [docs/architecture.md](docs/architecture.md) |
 | Features | [docs/features.md](docs/features.md) |
 | Teams System | [docs/teams.md](docs/teams.md) |
+| Plugins | [docs/plugins.md](docs/plugins.md) |
 | Security | [docs/security.md](docs/security.md) |
 | Performance | [docs/performance.md](docs/performance.md) |
 | Skills Catalog | [docs/skills-catalog.md](docs/skills-catalog.md) |

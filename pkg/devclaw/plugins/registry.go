@@ -200,7 +200,7 @@ func (r *Registry) registerPlugin(inst *PluginInstance) error {
 
 			var handler func(event string, data map[string]any)
 			if hookDef.Script != "" {
-				scriptHandler := buildScriptHandler(ToolDef{Script: hookDef.Script}, inst.Dir)
+				scriptHandler := buildScriptHandler(ToolDef{Script: hookDef.Script}, inst.Dir, inst.Config)
 				handler = func(event string, data map[string]any) {
 					data["event"] = event
 					if _, err := scriptHandler(context.Background(), data); err != nil {

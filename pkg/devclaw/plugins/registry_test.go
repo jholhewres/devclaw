@@ -317,6 +317,57 @@ func TestRegistry_ToolHandlerExecution(t *testing.T) {
 	}
 }
 
+func TestRegistry_ScriptHandlerReceivesConfig(t *testing.T) {
+	dir := t.TempDir()
+
+	inst := &PluginInstance{
+		Manifest: &PluginManifest{
+			ID: "cfg-test",
+			Tools: []ToolDef{
+				{
+					Name:        "check_cfg",
+					Description: "Check config env vars",
+					Script:      `echo "stage=${PLUGIN_CFG_STAGE_PLANNING} max=${PLUGIN_CFG_MAX_FILE_CHANGES}"`,
+				},
+			},
+		},
+		Dir:     dir,
+		State:   StateLoaded,
+		Enabled: true,
+		Config: map[string]any{
+			"stage_planning":   true,
+			"max_file_changes": 20,
+		},
+	}
+
+	registry := NewRegistry(slog.Default())
+	mock := newMockToolRegistrar()
+	registry.SetToolRegistrar(mock)
+
+	registry.mu.Lock()
+	registry.plugins["cfg-test"] = inst
+	registry.mu.Unlock()
+
+	if err := registry.RegisterAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	reg, ok := mock.registered["cfg-test_check_cfg"]
+	if !ok {
+		t.Fatal("tool not registered")
+	}
+
+	result, err := reg.Handler(context.Background(), map[string]any{})
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	resultStr, _ := result.(string)
+	if resultStr != "stage=true max=20" {
+		t.Errorf("result = %q, want %q", resultStr, "stage=true max=20")
+	}
+}
+
 func TestPluginInfo_JSON(t *testing.T) {
 	inst := &PluginInstance{
 		Manifest: &PluginManifest{

@@ -2133,6 +2133,22 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 		}
 		return reg.Disable(id)
 	}
+	adapter.InstallPluginFn = func(source string) (*plugins.PluginInstallResult, error) {
+		dirs := cfg.Plugins.EffectiveDirs()
+		if len(dirs) == 0 {
+			return nil, fmt.Errorf("no plugins directory configured")
+		}
+		installer := plugins.NewPluginInstaller(dirs[0], logger)
+		return installer.Install(context.Background(), source)
+	}
+	adapter.RemovePluginFn = func(name string) error {
+		dirs := cfg.Plugins.EffectiveDirs()
+		if len(dirs) == 0 {
+			return fmt.Errorf("no plugins directory configured")
+		}
+		installer := plugins.NewPluginInstaller(dirs[0], logger)
+		return installer.Remove(name)
+	}
 
 	return adapter
 }

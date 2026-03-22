@@ -44,6 +44,7 @@ Examples:
 		newUpdateCmd(version),
 		newDoctorCmd(),
 		newHooksCmd(),
+		newPluginCmd(),
 	)
 
 	// Flags globais.

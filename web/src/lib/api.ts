@@ -522,6 +522,15 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(config),
       }),
+    install: (source: string) =>
+      request<{ id: string; name: string; version: string; source: string; path: string; is_new: boolean }>('/plugins', {
+        method: 'POST',
+        body: JSON.stringify({ source }),
+      }),
+    remove: (name: string) =>
+      request<void>(`/plugins/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      }),
   },
 
   /* Channels */

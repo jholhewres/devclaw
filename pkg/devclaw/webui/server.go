@@ -141,6 +141,8 @@ type AssistantAPI interface {
 	GetPluginInfo(id string) *PluginInfoAPI
 	ConfigurePlugin(id string, updates map[string]any) error
 	TogglePlugin(id string, enabled bool) error
+	InstallPlugin(source string) (*plugins.PluginInstallResult, error)
+	RemovePlugin(name string) error
 }
 
 // PluginInfoAPI is the plugin info type exposed via the API.

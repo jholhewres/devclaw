@@ -13,6 +13,8 @@ import {
   X,
   Eye,
   EyeOff,
+  Download,
+  Trash2,
 } from 'lucide-react'
 import { api, type PluginInfo, type PluginConfigField } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -32,6 +34,11 @@ export function Plugins() {
   const [loadError, setLoadError] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [toggleError, setToggleError] = useState<string | null>(null)
+  const [showInstall, setShowInstall] = useState(false)
+  const [installSource, setInstallSource] = useState('')
+  const [installing, setInstalling] = useState(false)
+  const [installError, setInstallError] = useState<string | null>(null)
+  const [installSuccess, setInstallSuccess] = useState<string | null>(null)
 
   useEffect(() => {
     api.plugins
@@ -59,6 +66,40 @@ export function Plugins() {
     }
   }
 
+  const handleInstall = async () => {
+    if (!installSource.trim()) return
+    setInstalling(true)
+    setInstallError(null)
+    setInstallSuccess(null)
+    try {
+      const result = await api.plugins.install(installSource.trim())
+      setInstallSuccess(`${result.is_new ? 'Installed' : 'Updated'}: ${result.name} v${result.version}`)
+      setInstallSource('')
+      // Refresh list.
+      const updated = await api.plugins.list()
+      setPlugins(updated)
+      setTimeout(() => {
+        setInstallSuccess(null)
+        setShowInstall(false)
+      }, 3000)
+    } catch (err) {
+      setInstallError(err instanceof Error ? err.message : 'Install failed')
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  const handleRemove = async (id: string) => {
+    try {
+      await api.plugins.remove(id)
+      setPlugins((prev) => prev.filter((p) => p.id !== id))
+      setSelectedId(null)
+    } catch {
+      setToggleError(id)
+      setTimeout(() => setToggleError(null), 3000)
+    }
+  }
+
   const enabledCount = plugins.filter((p) => p.enabled).length
   const selected = plugins.find((p) => p.id === selectedId)
 
@@ -75,10 +116,44 @@ export function Plugins() {
 
   return (
     <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto">
-      <PageHeader
-        title="Plugins"
-        description={`${enabledCount} ${t('skills.enabled').toLowerCase()} / ${plugins.length}`}
-      />
+      <div className="flex items-center justify-between">
+        <PageHeader
+          title="Plugins"
+          description={`${enabledCount} ${t('skills.enabled').toLowerCase()} / ${plugins.length}`}
+        />
+        <Button
+          onClick={() => setShowInstall(!showInstall)}
+          variant={showInstall ? 'ghost' : 'default'}
+        >
+          {showInstall ? <X className="h-4 w-4" /> : <Download className="h-4 w-4" />}
+          {showInstall ? t('common.cancel') : 'Install'}
+        </Button>
+      </div>
+
+      {showInstall && (
+        <Card padding="lg" className="mt-4 border-brand/30">
+          <h3 className="text-sm font-semibold text-text-primary">Install Plugin</h3>
+          <p className="mt-1 text-xs text-text-muted">
+            Enter a GitHub repository (e.g. user/repo) or local path
+          </p>
+          <div className="mt-3 flex items-center gap-2">
+            <input
+              type="text"
+              value={installSource}
+              onChange={(e) => setInstallSource(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleInstall()}
+              placeholder="user/repo or https://github.com/user/repo"
+              className="flex-1 rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-brand focus:ring-1 focus:ring-brand"
+              disabled={installing}
+            />
+            <Button onClick={handleInstall} disabled={installing || !installSource.trim()}>
+              {installing ? t('common.saving') : 'Install'}
+            </Button>
+          </div>
+          {installError && <p className="mt-2 text-xs text-error">{installError}</p>}
+          {installSuccess && <p className="mt-2 text-xs text-success">{installSuccess}</p>}
+        </Card>
+      )}
 
       <SearchInput
         value={search}
@@ -157,19 +232,31 @@ export function Plugins() {
                   </span>
                 )}
               </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleToggle(plugin.id, plugin.enabled)
-                }}
-                className="cursor-pointer text-text-muted transition-colors hover:text-text-primary"
-              >
-                {plugin.enabled ? (
-                  <ToggleRight className="h-7 w-7 text-brand" />
-                ) : (
-                  <ToggleLeft className="h-7 w-7" />
-                )}
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleRemove(plugin.id)
+                  }}
+                  className="cursor-pointer text-text-muted transition-colors hover:text-error opacity-0 group-hover:opacity-100"
+                  title="Remove plugin"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleToggle(plugin.id, plugin.enabled)
+                  }}
+                  className="cursor-pointer text-text-muted transition-colors hover:text-text-primary"
+                >
+                  {plugin.enabled ? (
+                    <ToggleRight className="h-7 w-7 text-brand" />
+                  ) : (
+                    <ToggleLeft className="h-7 w-7" />
+                  )}
+                </button>
+              </div>
             </div>
           </Card>
         ))}
