@@ -27,6 +27,7 @@ import (
 	"github.com/jholhewres/devclaw/pkg/devclaw/oauth"
 	"github.com/jholhewres/devclaw/pkg/devclaw/sandbox"
 	"github.com/jholhewres/devclaw/pkg/devclaw/scheduler"
+	"github.com/jholhewres/devclaw/pkg/devclaw/plugins"
 	"github.com/jholhewres/devclaw/pkg/devclaw/skills"
 	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
 	"github.com/jholhewres/devclaw/pkg/devclaw/tts"
@@ -154,8 +155,8 @@ type Assistant struct {
 	// daemonMgr manages background processes (dev servers, watchers, etc.).
 	daemonMgr *DaemonManager
 
-	// pluginMgr manages installed plugins (GitHub, Jira, Sentry, etc.).
-	pluginMgr *PluginManager
+	// pluginRegistry manages YAML-based plugins (agents, tools, hooks, skills).
+	pluginRegistry *plugins.Registry
 
 	// mcpBridge connects MCP servers to the ToolExecutor.
 	mcpBridge *MCPToolsBridge
@@ -768,6 +769,21 @@ func (a *Assistant) Start(ctx context.Context) error {
 	// 1e. Register system tools (needs scheduler to be created first).
 	a.registerSystemTools()
 
+	// 1f. Wire plugin registry registrars and register+start all plugins.
+	if a.pluginRegistry != nil {
+		a.pluginRegistry.SetToolRegistrar(a.toolExecutor)
+		if err := a.pluginRegistry.RegisterAll(); err != nil {
+			a.logger.Error("failed to register plugins", "error", err)
+		}
+		if err := a.pluginRegistry.StartAll(a.ctx); err != nil {
+			a.logger.Error("failed to start plugins", "error", err)
+		}
+		// Wire full plugin agent delegation (needs SubagentManager + LLMClient).
+		if a.subagentMgr != nil {
+			RegisterPluginAgentDelegation(a.toolExecutor, a.pluginRegistry, a.subagentMgr, a.llmClient)
+		}
+	}
+
 	// 2. Start channel manager (non-fatal: webui/gateway can work without channels).
 	if err := a.channelMgr.Start(a.ctx); err != nil {
 		a.logger.Warn("channels not connected yet (will retry in background)", "error", err)
@@ -1012,6 +1028,11 @@ func (a *Assistant) Stop() {
 	if a.scheduler != nil {
 		a.scheduler.Stop()
 	}
+	// Stop plugin registry before channels.
+	if a.pluginRegistry != nil {
+		a.pluginRegistry.StopAll()
+	}
+
 	a.channelMgr.Stop()
 	a.skillRegistry.ShutdownAll()
 
@@ -1110,6 +1131,16 @@ func (a *Assistant) ChannelManager() *channels.Manager {
 	return a.channelMgr
 }
 
+// SetPluginRegistry sets the unified plugin registry for the assistant.
+func (a *Assistant) SetPluginRegistry(r *plugins.Registry) {
+	a.pluginRegistry = r
+}
+
+// PluginRegistry returns the plugin registry (may be nil).
+func (a *Assistant) PluginRegistry() *plugins.Registry {
+	return a.pluginRegistry
+}
+
 // SetVault sets the unlocked vault for the assistant (enables vault tools).
 func (a *Assistant) SetVault(v *Vault) {
 	a.vault = v
@@ -1199,6 +1230,82 @@ func (a *Assistant) handleDrainedMessages(sessionID string, msgs []*channels.Inc
 	synthetic.Content = combined
 	synthetic.ID = msgs[0].ID + "-combined"
 	a.handleMessage(&synthetic)
+}
+
+// handlePluginAgentMessage spawns a plugin agent to handle a triggered message.
+func (a *Assistant) handlePluginAgentMessage(msg *channels.IncomingMessage, match *plugins.TriggerMatch, sessionID string) {
+	logger := a.logger.With(
+		"plugin", match.PluginID,
+		"agent", match.AgentID,
+		"session", sessionID,
+	)
+
+	resolved := a.pluginRegistry.GetResolvedAgent(match.PluginID, match.AgentID)
+	if resolved == nil {
+		logger.Error("resolved agent not found after trigger match")
+		return
+	}
+
+	agentDef := resolved.ResolvedAgentDef()
+
+	// Build executor with agent's tool profile.
+	if a.subagentMgr == nil {
+		logger.Error("subagent manager not available for plugin agent")
+		return
+	}
+
+	childExecutor := a.subagentMgr.CreateChildExecutorWithProfile(
+		a.toolExecutor, 1,
+		agentDef.Tools.Allow, agentDef.Tools.Deny,
+	)
+
+	// Inject escalate_to_main tool.
+	registerEscalateToMainTool(childExecutor)
+
+	// Build system prompt.
+	prompt := resolved.ResolvedSystemPrompt()
+	if prompt == "" {
+		prompt = fmt.Sprintf("You are %s. %s", agentDef.Name, agentDef.Description)
+	}
+
+	// Build escalation checker.
+	var escalationChecker func(int, string) *EscalationSignal
+	if esc := agentDef.Escalation; esc != nil && esc.Enabled && !esc.ExplicitOnly {
+		escalationChecker = buildEscalationChecker(esc.Keywords, esc.MaxTurns)
+	}
+
+	// Resolve model.
+	childLLM := a.llmClient
+	if agentDef.Model != "" && agentDef.Model != a.llmClient.model {
+		childLLM = &LLMClient{
+			baseURL:    a.llmClient.baseURL,
+			apiKey:     a.llmClient.apiKey,
+			model:      agentDef.Model,
+			httpClient: a.llmClient.httpClient,
+			logger:     a.llmClient.logger,
+		}
+	}
+
+	params := SpawnParams{
+		Task:              msg.Content,
+		Label:             fmt.Sprintf("plugin:%s/%s", match.PluginID, match.AgentID),
+		ParentSessionID:   sessionID,
+		OriginChannel:     msg.Channel,
+		OriginTo:          msg.ChatID,
+		MaxTurns:          agentDef.MaxTurns,
+		EscalationChecker: escalationChecker,
+	}
+	if agentDef.TimeoutSec > 0 {
+		params.TimeoutSeconds = agentDef.TimeoutSec
+	}
+
+	run, err := a.subagentMgr.SpawnWithExecutor(a.ctx, params, childLLM, childExecutor, prompt)
+	if err != nil {
+		logger.Error("failed to spawn plugin agent", "error", err)
+		return
+	}
+
+	logger.Info("plugin agent spawned", "run_id", run.ID)
 }
 
 // handleBusySession processes a new message when the session is already running
@@ -1910,6 +2017,21 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 				// Keep workspace context but use profile's system prompt.
 				prompt = a.composePromptWithAgent(agentProfile, workspace, session, userContent)
 			}
+		}
+	}
+
+	// ── Step 7c: Plugin agent trigger matching ──
+	// Check if the message matches a plugin agent trigger.
+	// Plugin agents take priority over the default agent profile.
+	if a.pluginRegistry != nil && agentProfile == nil {
+		if match := a.pluginRegistry.MatchTrigger(userContent, msg.Channel); match != nil {
+			logger.Info("plugin agent trigger matched",
+				"plugin", match.PluginID,
+				"agent", match.AgentID,
+				"score", match.Score,
+			)
+			go a.handlePluginAgentMessage(msg, match, sessionID)
+			return
 		}
 	}
 
@@ -3227,12 +3349,9 @@ func (a *Assistant) registerSystemTools() {
 	}
 	RegisterDaemonTools(a.toolExecutor, a.daemonMgr)
 
-	// Register plugin system (conditional on plugins being configured).
-	if a.pluginMgr == nil {
-		a.pluginMgr = NewPluginManager()
-	}
-	if a.pluginMgr.HasPlugins() {
-		RegisterPluginTools(a.toolExecutor, a.pluginMgr)
+	// Register plugin management tools (conditional on registry being set).
+	if a.pluginRegistry != nil && a.pluginRegistry.HasPlugins() {
+		RegisterPluginManagementTools(a.toolExecutor, a.pluginRegistry)
 	}
 
 	// Register MCP tools (bridge external MCP servers to ToolExecutor).

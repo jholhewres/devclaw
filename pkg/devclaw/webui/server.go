@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
+	"github.com/jholhewres/devclaw/pkg/devclaw/plugins"
 	"github.com/jholhewres/devclaw/pkg/devclaw/updater"
 )
 
@@ -134,7 +135,16 @@ type AssistantAPI interface {
 
 	// Auth Profiles for OAuth/API key management
 	GetProfileManager() profiles.ProfileManager
+
+	// Plugins
+	ListPlugins() []PluginInfoAPI
+	GetPluginInfo(id string) *PluginInfoAPI
+	ConfigurePlugin(id string, updates map[string]any) error
+	TogglePlugin(id string, enabled bool) error
 }
+
+// PluginInfoAPI is the plugin info type exposed via the API.
+type PluginInfoAPI = plugins.PluginInfo
 
 // SessionInfo contains session metadata for the UI.
 type SessionInfo struct {
@@ -449,6 +459,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/sessions/", s.authMiddleware(s.requireAssistant(s.handleAPISessionDetail)))
 	mux.HandleFunc("/api/skills", s.authMiddleware(s.requireAssistant(s.handleAPISkills)))
 	mux.HandleFunc("/api/skills/", s.authMiddleware(s.requireAssistant(s.handleAPISkillsAction)))
+	mux.HandleFunc("/api/plugins", s.authMiddleware(s.requireAssistant(s.handleAPIPlugins)))
+	mux.HandleFunc("/api/plugins/", s.authMiddleware(s.requireAssistant(s.handleAPIPluginAction)))
 	mux.HandleFunc("/api/channels", s.authMiddleware(s.requireAssistant(s.handleAPIChannels)))
 	// WhatsApp-specific routes (must be before generic /api/channels/whatsapp/)
 	mux.HandleFunc("/api/channels/whatsapp/access", s.authMiddleware(s.requireAssistant(s.handleAPIWhatsAppAccess)))

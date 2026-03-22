@@ -5,6 +5,7 @@ import {
   MessageSquare,
   Clock,
   Puzzle,
+  Blocks,
   ChevronLeft,
   ChevronRight,
   Menu,
@@ -115,6 +116,11 @@ export function Sidebar() {
       nameKey: 'sidebar.skills',
       icon: Puzzle,
       route: '/skills',
+    },
+    {
+      nameKey: 'sidebar.plugins',
+      icon: Blocks,
+      route: '/plugins',
     },
   ]
 

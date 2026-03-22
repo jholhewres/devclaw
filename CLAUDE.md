@@ -91,6 +91,61 @@ All outgoing text passes through `FormatForChannel` → `StripInternalTags`:
 - Strips `[[reply_to_*]]`, `<final>`, `<thinking>`, `<reasoning>` XML tags
 - Removes silent tokens: `NO_REPLY`, `HEARTBEAT_OK`
 
+## Plugins
+
+DevClaw supports a YAML-first plugin system. Plugins are directories with a `plugin.yaml` manifest.
+
+### Plugin Structure
+
+```
+my-plugin/
+  plugin.yaml          # Manifest (required)
+  prompts/             # Agent instruction .md files
+    agent-name.md
+  skills/              # Skill definitions
+    skill-name/
+      SKILL.md
+  lib.so               # Optional native Go library
+```
+
+### Plugin Capabilities
+
+- **Agents**: LLM agents with custom instructions, tools, triggers, and escalation
+- **Tools**: Script-based (bash), HTTP-based, or native Go handlers
+- **Hooks**: Event-driven scripts (e.g. `user_prompt_submit`)
+- **Skills**: SKILL.md-based knowledge/guides
+- **Channels**: Native Go channel implementations (via .so)
+
+### Key Files
+
+- `pkg/devclaw/plugins/manifest.go` — Manifest types + parser
+- `pkg/devclaw/plugins/loader.go` — Discovery + loading (YAML + legacy .so)
+- `pkg/devclaw/plugins/registry.go` — Central registry + agent runtime
+- `pkg/devclaw/plugins/handlers.go` — Tool handler factories (script, HTTP, native)
+- `pkg/devclaw/copilot/plugin_tools.go` — Management tools + agent delegation
+- `examples/plugins/hello-world/` — Example plugin
+
+### Config
+
+```yaml
+plugins:
+  dirs: ["./plugins", "./examples/plugins"]
+  enabled: []       # empty = all
+  disabled: []
+  overrides:
+    my-plugin:
+      api_key: "..."
+```
+
+### Creating a Plugin
+
+1. Create a directory with `plugin.yaml`
+2. Define tools (script/HTTP), agents (with triggers), hooks, skills
+3. Add to `plugins.dirs` in config
+4. Restart — plugin is discovered, loaded, registered, started
+
+See `examples/plugins/hello-world/` for a complete example.
+
 ## File Permissions
 
 - Session files, vault, config: `0600`

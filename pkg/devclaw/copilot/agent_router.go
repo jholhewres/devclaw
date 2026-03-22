@@ -170,6 +170,23 @@ func (r *AgentRouter) DefaultProfileID() string {
 	return r.defaultID
 }
 
+// AddProfile registers a new agent profile at runtime (e.g. from plugins).
+func (r *AgentRouter) AddProfile(p *AgentProfileConfig) {
+	r.profiles[p.ID] = p
+
+	for _, ch := range p.Channels {
+		r.byChannel[strings.ToLower(ch)] = p.ID
+	}
+	for _, u := range p.Users {
+		r.byUser[normalizeJID(u)] = p.ID
+	}
+	for _, g := range p.Groups {
+		r.byGroup[normalizeJID(g)] = p.ID
+	}
+
+	r.logger.Info("agent profile added at runtime", "id", p.ID)
+}
+
 // MergeConfig merges agent profile settings with the base config.
 // Returns the model, instructions, and skills to use.
 func (p *AgentProfileConfig) MergeConfig(baseModel, baseInstructions string, baseSkills []string) (model, instructions string, skills []string) {

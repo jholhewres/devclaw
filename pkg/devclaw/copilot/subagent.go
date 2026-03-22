@@ -558,6 +558,13 @@ type SpawnParams struct {
 
 	// DeliveryScope controls announcement delivery. Default: "all".
 	DeliveryScope DeliveryScope
+
+	// MaxTurns overrides the agent loop turn limit for this spawn.
+	MaxTurns int
+
+	// EscalationChecker is called after each turn to check if the agent
+	// should escalate to the main agent. Used by plugin agents.
+	EscalationChecker func(turn int, lastResponse string) *EscalationSignal
 }
 
 // Spawn creates and starts a new subagent. Returns the run ID immediately.
@@ -739,6 +746,170 @@ func (m *SubagentManager) Spawn(
 	}()
 
 	return run, nil
+}
+
+// SpawnWithExecutor is a variant of Spawn that accepts a pre-built executor
+// and custom system prompt. Used by the plugin system to spawn plugin agents
+// with filtered tools and custom instructions.
+func (m *SubagentManager) SpawnWithExecutor(
+	parentCtx context.Context,
+	params SpawnParams,
+	llmClient *LLMClient,
+	childExecutor *ToolExecutor,
+	customPrompt string,
+) (*SubagentRun, error) {
+	if !m.cfg.Enabled {
+		return nil, fmt.Errorf("subagent system is disabled")
+	}
+
+	depth := params.SpawnDepth
+	if depth <= 0 {
+		depth = 1
+	}
+
+	runID := uuid.New().String()[:8]
+	timeout := time.Duration(m.cfg.TimeoutSeconds) * time.Second
+	if params.TimeoutSeconds > 0 {
+		timeout = time.Duration(params.TimeoutSeconds) * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(parentCtx, timeout)
+
+	deliveryScope := params.DeliveryScope
+	if deliveryScope == "" {
+		deliveryScope = DeliveryScopeAll
+	}
+
+	run := &SubagentRun{
+		ID:              runID,
+		Label:           params.Label,
+		Task:            params.Task,
+		Status:          SubagentStatusRunning,
+		Model:           llmClient.model,
+		ParentSessionID: params.ParentSessionID,
+		SpawnDepth:      depth,
+		OriginChannel:   params.OriginChannel,
+		OriginTo:        params.OriginTo,
+		OriginThreadID:  params.OriginThreadID,
+		DeliveryScope:   deliveryScope,
+		StartedAt:       time.Now(),
+		cancel:          cancel,
+		done:            make(chan struct{}),
+	}
+
+	if run.Label == "" {
+		run.Label = fmt.Sprintf("plugin-agent-%s", runID)
+	}
+
+	// Check concurrency limit.
+	m.mu.Lock()
+	activeCount := 0
+	for _, r := range m.runs {
+		if r.Status == SubagentStatusRunning {
+			activeCount++
+		}
+	}
+	if activeCount >= m.cfg.MaxConcurrent {
+		m.mu.Unlock()
+		cancel()
+		return nil, fmt.Errorf("max concurrent subagents reached (%d/%d)", activeCount, m.cfg.MaxConcurrent)
+	}
+	m.runs[runID] = run
+	m.mu.Unlock()
+
+	m.persistRun(run)
+
+	m.logger.Info("spawning plugin agent",
+		"run_id", runID,
+		"label", run.Label,
+		"task_preview", truncate(params.Task, 80),
+	)
+
+	go func() {
+		defer close(run.done)
+		defer cancel()
+
+		select {
+		case m.semaphore <- struct{}{}:
+			defer func() { <-m.semaphore }()
+		case <-ctx.Done():
+			m.completeRun(run, "", fmt.Errorf("timeout waiting for semaphore slot"))
+			return
+		}
+
+		agent := NewAgentRun(llmClient, childExecutor, m.logger)
+		if params.MaxTurns > 0 {
+			agent.maxTurns = params.MaxTurns
+		} else if m.cfg.MaxTurns > 0 {
+			agent.maxTurns = m.cfg.MaxTurns
+		}
+		agent.runTimeout = timeout + 30*time.Second
+
+		// Set escalation checker if provided via params.
+		if params.EscalationChecker != nil {
+			agent.escalationChecker = params.EscalationChecker
+		}
+
+		runCtx := ContextWithSpawnDepth(ctx, depth)
+		result, err := agent.Run(runCtx, customPrompt, nil, params.Task)
+
+		if ctx.Err() == context.DeadlineExceeded {
+			if result == "" {
+				if fragments := agent.CollectedAssistantFragments(); len(fragments) > 0 {
+					result = SynthesizeProgressSummary(fragments)
+				}
+			}
+			m.completeRun(run, result, fmt.Errorf("timeout after %v", timeout))
+		} else {
+			m.completeRun(run, result, err)
+		}
+	}()
+
+	return run, nil
+}
+
+// createChildExecutorWithProfile creates a child ToolExecutor with allow/deny
+// filtering from a plugin agent's tool profile.
+func (m *SubagentManager) CreateChildExecutorWithProfile(parent *ToolExecutor, depth int, allow, deny []string) *ToolExecutor {
+	// Start from the standard child executor.
+	child := m.createChildExecutor(parent, depth)
+
+	if len(allow) == 0 && len(deny) == 0 {
+		return child
+	}
+
+	// Build additional deny set from plugin profile.
+	pluginDeny := make(map[string]bool, len(deny))
+	for _, name := range deny {
+		pluginDeny[name] = true
+	}
+
+	// If allow list is specified, remove anything not in it.
+	if len(allow) > 0 {
+		allowSet := make(map[string]bool, len(allow))
+		for _, name := range allow {
+			allowSet[name] = true
+		}
+
+		child.mu.Lock()
+		for name := range child.tools {
+			if !allowSet[name] && !pluginDeny[name] {
+				// Not in allow list — remove unless it's a core tool.
+				delete(child.tools, name)
+			}
+		}
+		child.mu.Unlock()
+	}
+
+	// Remove explicitly denied tools.
+	child.mu.Lock()
+	for name := range pluginDeny {
+		delete(child.tools, name)
+	}
+	child.toolDefsDirty = true
+	child.mu.Unlock()
+
+	return child
 }
 
 // completeRun finalizes a subagent run with its result or error.

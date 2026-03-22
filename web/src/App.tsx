@@ -6,6 +6,7 @@ import { SettingsLayout } from '@/layouts/SettingsLayout'
 import { Chat } from '@/pages/Chat'
 import { Sessions } from '@/pages/Sessions'
 import { Skills } from '@/pages/Skills'
+import { Plugins } from '@/pages/Plugins'
 import { Jobs } from '@/pages/Jobs'
 import { Login } from '@/pages/Login'
 import { SetupWizard } from '@/pages/Setup/SetupWizard'
@@ -120,6 +121,7 @@ export function App() {
           <Route path="/chat/:sessionId" element={<Chat />} />
           <Route path="/sessions" element={<Sessions />} />
           <Route path="/skills" element={<Skills />} />
+          <Route path="/plugins" element={<Plugins />} />
           <Route path="/jobs" element={<Jobs />} />
 
           {/* Settings — route-based tabs */}

@@ -106,6 +106,60 @@ export interface SkillInfo {
   tool_count: number;
 }
 
+export interface PluginConfigField {
+  key: string;
+  name: string;
+  description?: string;
+  type: string; // "string" | "int" | "bool" | "secret"
+  required?: boolean;
+  default?: unknown;
+}
+
+export interface PluginUISection {
+  title: string;
+  description?: string;
+  fields: string[];
+  collapsible?: boolean;
+}
+
+export interface PluginUIAction {
+  label: string;
+  description?: string;
+  tool: string;
+  confirm?: boolean;
+  icon?: string;
+}
+
+export interface PluginUIConfig {
+  icon?: string;
+  category?: string;
+  color?: string;
+  sections?: PluginUISection[];
+  actions?: PluginUIAction[];
+}
+
+export interface PluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  state: string;
+  enabled: boolean;
+  error?: string;
+  dir: string;
+  tools?: string[];
+  hooks?: string[];
+  agents?: string[];
+  channels?: string[];
+  skills?: string[];
+  ui?: PluginUIConfig;
+  config_schema?: { fields: PluginConfigField[] };
+  config_values?: Record<string, unknown>;
+  loaded_at: string;
+  started_at?: string;
+}
+
 export interface WhatsAppStatus {
   connected: boolean;
   needs_qr: boolean;
@@ -450,6 +504,22 @@ export const api = {
     remove: (name: string) =>
       request<void>(`/skills/${name}/remove`, {
         method: 'POST',
+      }),
+  },
+
+  /* Plugins */
+  plugins: {
+    list: () => request<PluginInfo[]>('/plugins'),
+    get: (id: string) => request<PluginInfo>(`/plugins/${encodeURIComponent(id)}`),
+    toggle: (id: string, enabled: boolean) =>
+      request<void>(`/plugins/${encodeURIComponent(id)}/toggle`, {
+        method: 'POST',
+        body: JSON.stringify({ enabled }),
+      }),
+    configure: (id: string, config: Record<string, unknown>) =>
+      request<void>(`/plugins/${encodeURIComponent(id)}/config`, {
+        method: 'PUT',
+        body: JSON.stringify(config),
       }),
   },
 

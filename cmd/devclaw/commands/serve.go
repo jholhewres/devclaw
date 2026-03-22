@@ -2037,6 +2037,44 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 		return assistant.ChannelManager().DisconnectChannel("telegram")
 	}
 
+	// ── Plugins ──
+	adapter.ListPluginsFn = func() []webui.PluginInfoAPI {
+		reg := assistant.PluginRegistry()
+		if reg == nil {
+			return nil
+		}
+		return reg.List()
+	}
+	adapter.GetPluginInfoFn = func(id string) *webui.PluginInfoAPI {
+		reg := assistant.PluginRegistry()
+		if reg == nil {
+			return nil
+		}
+		inst := reg.Get(id)
+		if inst == nil {
+			return nil
+		}
+		info := inst.Info()
+		return &info
+	}
+	adapter.ConfigurePluginFn = func(id string, updates map[string]any) error {
+		reg := assistant.PluginRegistry()
+		if reg == nil {
+			return fmt.Errorf("plugin registry not available")
+		}
+		return reg.ConfigurePlugin(id, updates)
+	}
+	adapter.TogglePluginFn = func(id string, enabled bool) error {
+		reg := assistant.PluginRegistry()
+		if reg == nil {
+			return fmt.Errorf("plugin registry not available")
+		}
+		if enabled {
+			return reg.Enable(id)
+		}
+		return reg.Disable(id)
+	}
+
 	return adapter
 }
 

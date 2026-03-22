@@ -6,7 +6,6 @@ import {
   QrCode,
   Smartphone,
   ArrowRight,
-  Clock,
   Eye,
   EyeOff,
   Check,

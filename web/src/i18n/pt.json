@@ -52,6 +52,7 @@
     "channels": "Canais",
     "jobs": "Jobs",
     "skills": "Habilidades",
+    "plugins": "Plugins",
     "statistics": "Estatísticas",
     "sessions": "Sessões",
     "noActiveSessions": "Nenhuma sessão ativa",
@@ -131,6 +132,12 @@
     "manualInstallSuccess": "\"{{name}}\" instalada com sucesso.",
     "manualInstallError": "Falha ao instalar \"{{name}}\". Verifique a URL ou slug.",
     "browseClawHub": "Explorar skills no ClawHub"
+  },
+  "pluginsPage": {
+    "empty": "Nenhum plugin instalado",
+    "emptyDesc": "Adicione diretórios de plugins no config.yaml em plugins.dirs",
+    "settings": "Configurações",
+    "discard": "Descartar"
   },
   "channelsPage": {
     "title": "Conecte um canal para conversar com o DevClaw",

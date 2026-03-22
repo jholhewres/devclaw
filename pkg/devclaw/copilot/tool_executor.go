@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/auth/profiles"
+	"github.com/jholhewres/devclaw/pkg/devclaw/plugins"
 	"github.com/jholhewres/devclaw/pkg/devclaw/skills"
 )
 
@@ -668,6 +669,40 @@ func (e *ToolExecutor) RegisterHidden(def ToolDefinition, handler ToolHandlerFun
 	e.toolDefsDirty = true
 
 	e.logger.Debug("hidden tool registered", "name", name)
+}
+
+// RegisterPluginTool registers a tool from the plugin system.
+// Adapts plugins.ToolRegistration to the internal ToolDefinition format.
+func (e *ToolExecutor) RegisterPluginTool(reg plugins.ToolRegistration) {
+	def := ToolDefinition{
+		Type: "function",
+		Function: FunctionDef{
+			Name:        reg.Name,
+			Description: reg.Description,
+			Parameters:  reg.Parameters,
+		},
+	}
+
+	if reg.Hidden {
+		e.RegisterHidden(def, reg.Handler)
+	} else {
+		e.Register(def, reg.Handler)
+	}
+}
+
+// UnregisterTool removes a tool from the executor by name.
+// Returns true if the tool was found and removed.
+func (e *ToolExecutor) UnregisterTool(name string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if _, ok := e.tools[name]; !ok {
+		return false
+	}
+	delete(e.tools, name)
+	e.toolDefsDirty = true
+	e.logger.Debug("tool unregistered", "name", name)
+	return true
 }
 
 // SetVault sets the vault reader for skill setup checking.

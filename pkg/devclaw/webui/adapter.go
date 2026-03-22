@@ -160,6 +160,12 @@ type AssistantAdapter struct {
 
 	// Auth Profiles
 	GetProfileManagerFn func() profiles.ProfileManager
+
+	// Plugins
+	ListPluginsFn     func() []PluginInfoAPI
+	GetPluginInfoFn   func(id string) *PluginInfoAPI
+	ConfigurePluginFn func(id string, updates map[string]any) error
+	TogglePluginFn    func(id string, enabled bool) error
 }
 
 // ToolProfileInfo contains profile info for API responses.
@@ -640,6 +646,36 @@ func (a *AssistantAdapter) DeleteToolProfile(name string) error {
 		return a.DeleteToolProfileFn(name)
 	}
 	return errors.New("tool profile deletion not available")
+}
+
+// ── Plugins ──
+
+func (a *AssistantAdapter) ListPlugins() []PluginInfoAPI {
+	if a.ListPluginsFn != nil {
+		return a.ListPluginsFn()
+	}
+	return nil
+}
+
+func (a *AssistantAdapter) GetPluginInfo(id string) *PluginInfoAPI {
+	if a.GetPluginInfoFn != nil {
+		return a.GetPluginInfoFn(id)
+	}
+	return nil
+}
+
+func (a *AssistantAdapter) ConfigurePlugin(id string, updates map[string]any) error {
+	if a.ConfigurePluginFn != nil {
+		return a.ConfigurePluginFn(id, updates)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) TogglePlugin(id string, enabled bool) error {
+	if a.TogglePluginFn != nil {
+		return a.TogglePluginFn(id, enabled)
+	}
+	return errors.New("not implemented")
 }
 
 // ── Media API Adapter ──

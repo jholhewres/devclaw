@@ -49,6 +49,9 @@ configs/bootstrap/USER.md
 # User-installed skills (customized — templates/builtins are in pkg/devclaw/skills/)
 /skills/
 
+# User-installed plugins (examples/ is tracked — this is for runtime plugins)
+/plugins/
+
 # Agent working directory (projects, temp files, generated content)
 /workspace/
 

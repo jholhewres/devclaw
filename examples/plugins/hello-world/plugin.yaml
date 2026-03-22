@@ -1,0 +1,62 @@
+id: hello-world
+name: Hello World Plugin
+version: 0.1.0
+description: Example plugin demonstrating agents, tools, hooks, and skills
+author: DevClaw Team
+
+config:
+  fields:
+    - key: greeting_style
+      name: Greeting Style
+      type: string
+      default: "friendly"
+
+ui:
+  icon: "hand-wave"
+  category: "examples"
+  color: "#10B981"
+  sections:
+    - title: Behavior
+      description: Customize how the plugin greets users
+      fields: ["greeting_style"]
+
+agents:
+  - id: greeter
+    name: Greeter Agent
+    description: A friendly greeting agent that welcomes users
+    instructions: prompts/greeter.md
+    triggers: ["hello", "hi", "greet"]
+    tools:
+      allow: ["read_file", "web_search", "hello-world_greet"]
+      deny: ["bash", "write_file"]
+    max_turns: 10
+    session_mode: isolated
+    escalation:
+      enabled: true
+      keywords: ["I need help", "talk to human", "escalate"]
+      max_turns: 8
+
+tools:
+  - name: greet
+    description: Generate a personalized greeting
+    parameters:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Person to greet
+      required: ["name"]
+    script: |
+      echo "Hello, ${PLUGIN_NAME}! Welcome to DevClaw."
+
+hooks:
+  - name: log-messages
+    events: ["user_prompt_submit"]
+    priority: 200
+    script: |
+      echo "[hello-world] $(date): Message received" >> /tmp/hello-world.log
+
+skills:
+  - name: greeting-guide
+    description: Guide for creating effective greetings
+    skill_md: skills/greeting/SKILL.md

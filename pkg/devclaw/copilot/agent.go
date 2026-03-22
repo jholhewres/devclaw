@@ -189,6 +189,21 @@ func DefaultAgentConfig() AgentConfig {
 	}
 }
 
+// EscalationSignal indicates that a plugin agent wants to escalate to the main agent.
+type EscalationSignal struct {
+	Reason  string // Why the agent is escalating.
+	Summary string // Summary of context/work done so far.
+}
+
+// ErrEscalation is returned when an agent run is terminated due to escalation.
+type ErrEscalation struct {
+	Signal *EscalationSignal
+}
+
+func (e *ErrEscalation) Error() string {
+	return fmt.Sprintf("escalation: %s", e.Signal.Reason)
+}
+
 // AgentRun encapsulates a single agent execution with its dependencies.
 type AgentRun struct {
 	llm                   *LLMClient
@@ -250,6 +265,10 @@ type AgentRun struct {
 	// lcmRunCtx holds the run-level context for LCM operations that need
 	// cancellation support (e.g. Assemble in buildMessages).
 	lcmRunCtx context.Context
+
+	// escalationChecker is called after each LLM response to check if the
+	// plugin agent should escalate to the main agent. Set by plugin agent spawner.
+	escalationChecker func(turn int, lastResponse string) *EscalationSignal
 
 	// loopDetector tracks tool call history and detects repetitive patterns.
 	loopDetector *ToolLoopDetector
@@ -1128,6 +1147,18 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 		if a.lcmEngine != nil && a.lcmConversationID != "" {
 			if err := a.lcmIngestNew(runCtx, messages); err != nil {
 				a.logger.Warn("lcm incremental ingest failed", "turn", totalTurns, "err", err)
+			}
+		}
+
+		// ── Escalation check (plugin agents) ──
+		// If an escalation checker is set, evaluate after each turn.
+		if a.escalationChecker != nil {
+			if signal := a.escalationChecker(totalTurns, resp.Content); signal != nil {
+				a.logger.Info("agent escalation triggered",
+					"turn", totalTurns,
+					"reason", signal.Reason,
+				)
+				return resp.Content, &totalUsage, &ErrEscalation{Signal: signal}
 			}
 		}
 
