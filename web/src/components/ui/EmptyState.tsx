@@ -27,17 +27,17 @@ export function EmptyState({
         <div
           className={cn(
             'mb-4 flex h-12 w-12 items-center justify-center',
-            'rounded-full bg-bg-subtle text-text-muted'
+            'rounded-full bg-secondary text-fg-quaternary'
           )}
         >
           {icon}
         </div>
       )}
 
-      <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+      <h3 className="text-sm font-semibold text-primary">{title}</h3>
 
       {description && (
-        <p className="mt-1.5 max-w-sm text-sm text-text-secondary">
+        <p className="mt-1.5 max-w-sm text-sm text-tertiary">
           {description}
         </p>
       )}

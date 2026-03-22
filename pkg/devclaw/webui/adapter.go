@@ -170,6 +170,15 @@ type AssistantAdapter struct {
 	TogglePluginFn    func(id string, enabled bool) error
 	InstallPluginFn   func(source string) (*plugins.PluginInstallResult, error)
 	RemovePluginFn    func(name string) error
+
+	// Agents
+	ListAgentsFn      func() []AgentInfoAPI
+	CreateAgentFn     func(req CreateAgentRequest) (string, error)
+	GetAgentFn        func(id string) (*AgentInfoAPI, error)
+	UpdateAgentFn     func(id string, req UpdateAgentRequest) error
+	DeleteAgentFn     func(id string) error
+	SetDefaultAgentFn func(id string) error
+	ToggleAgentFn     func(id string, active bool) error
 }
 
 // ToolProfileInfo contains profile info for API responses.
@@ -699,6 +708,57 @@ func (a *AssistantAdapter) InstallPlugin(source string) (*plugins.PluginInstallR
 func (a *AssistantAdapter) RemovePlugin(name string) error {
 	if a.RemovePluginFn != nil {
 		return a.RemovePluginFn(name)
+	}
+	return errors.New("not implemented")
+}
+
+// ── Agents ──
+
+func (a *AssistantAdapter) ListAgents() []AgentInfoAPI {
+	if a.ListAgentsFn != nil {
+		return a.ListAgentsFn()
+	}
+	return nil
+}
+
+func (a *AssistantAdapter) CreateAgent(req CreateAgentRequest) (string, error) {
+	if a.CreateAgentFn != nil {
+		return a.CreateAgentFn(req)
+	}
+	return "", errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) GetAgent(id string) (*AgentInfoAPI, error) {
+	if a.GetAgentFn != nil {
+		return a.GetAgentFn(id)
+	}
+	return nil, errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) UpdateAgent(id string, req UpdateAgentRequest) error {
+	if a.UpdateAgentFn != nil {
+		return a.UpdateAgentFn(id, req)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) DeleteAgent(id string) error {
+	if a.DeleteAgentFn != nil {
+		return a.DeleteAgentFn(id)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) SetDefaultAgent(id string) error {
+	if a.SetDefaultAgentFn != nil {
+		return a.SetDefaultAgentFn(id)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) ToggleAgent(id string, active bool) error {
+	if a.ToggleAgentFn != nil {
+		return a.ToggleAgentFn(id, active)
 	}
 	return errors.New("not implemented")
 }

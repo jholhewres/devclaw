@@ -81,7 +81,7 @@ export function Skills() {
   }
 
   return (
-    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto">
+    <div className="py-8 px-4 sm:px-6 lg:px-8">
       {/* Header */}
       <PageHeader
         title={t('skills.title')}
@@ -112,12 +112,12 @@ export function Skills() {
               'group relative overflow-hidden transition-all',
               skill.enabled
                 ? 'border-brand/30'
-                : 'hover:border-border-hover'
+                : 'hover:border-primary'
             )}
           >
             {skill.enabled && (
               <div className="absolute right-4 top-4">
-                <Badge className="bg-brand-subtle text-brand">
+                <Badge className="bg-brand-secondary text-brand-tertiary">
                   {t('skills.enabled').toLowerCase()}
                 </Badge>
               </div>
@@ -126,22 +126,22 @@ export function Skills() {
             <div className={cn(
               'flex h-14 w-14 items-center justify-center rounded-xl transition-colors',
               skill.enabled
-                ? 'bg-brand-subtle text-brand'
-                : 'bg-bg-subtle text-text-muted group-hover:text-text-secondary'
+                ? 'bg-brand-secondary text-brand-tertiary'
+                : 'bg-secondary text-tertiary group-hover:text-secondary'
             )}>
               <Package className="h-7 w-7" />
             </div>
 
-            <h3 className="mt-4 text-lg font-semibold text-text-primary">{skill.name}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-text-secondary line-clamp-2">{skill.description}</p>
+            <h3 className="mt-4 text-lg font-semibold text-primary">{skill.name}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-secondary line-clamp-2">{skill.description}</p>
 
             {toggleError === skill.name && (
-              <p className="mt-2 text-xs text-error">{t('common.error')}</p>
+              <p className="mt-2 text-xs text-fg-error-secondary">{t('common.error')}</p>
             )}
 
             <div className="mt-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1.5 rounded-full bg-bg-subtle px-3 py-1 text-xs font-medium text-text-muted">
+                <span className="flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 text-xs font-medium text-tertiary">
                   <Wrench className="h-3 w-3" />
                   {skill.tool_count} {t('skills.tools')}
                 </span>
@@ -149,10 +149,10 @@ export function Skills() {
               <button
                 onClick={() => handleToggle(skill.name, skill.enabled)}
                 aria-label={skill.enabled ? t('skillsPage.deactivate') : t('skillsPage.activate')}
-                className="cursor-pointer text-text-muted transition-colors hover:text-text-primary"
+                className="cursor-pointer text-tertiary transition-colors hover:text-primary"
               >
                 {skill.enabled ? (
-                  <ToggleRight className="h-7 w-7 text-brand" />
+                  <ToggleRight className="h-7 w-7 text-brand-tertiary" />
                 ) : (
                   <ToggleLeft className="h-7 w-7" />
                 )}
@@ -267,15 +267,15 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
       <div
-        className="relative w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-2xl border border-border bg-bg-surface shadow-2xl"
+        className="relative w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-2xl border border-secondary bg-primary shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4">
           <div className="flex items-center gap-4">
-            <h2 className="text-lg font-semibold text-text-primary">{t('skillsPage.manualInstallTitle')}</h2>
+            <h2 className="text-lg font-semibold text-primary">{t('skillsPage.manualInstallTitle')}</h2>
           </div>
-          <button onClick={onClose} className="cursor-pointer rounded-xl p-1.5 text-text-muted hover:bg-bg-hover hover:text-text-primary transition-colors">
+          <button onClick={onClose} className="cursor-pointer rounded-xl p-1.5 text-tertiary hover:bg-primary_hover hover:text-primary transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -296,7 +296,7 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
         {tab === 'catalog' && (
           <>
             {/* Search + categories */}
-            <div className="border-t border-border px-6 py-3">
+            <div className="border-t border-secondary px-6 py-3">
               <SearchInput
                 value={search}
                 onChange={(v) => { setSearch(v); setActiveCategory(null) }}
@@ -309,10 +309,10 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
                       key={cat}
                       onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
                       className={cn(
-                        'cursor-pointer rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
+                        'cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium transition-colors',
                         activeCategory === cat
-                          ? 'bg-brand-subtle text-brand'
-                          : 'bg-bg-subtle text-text-muted hover:bg-bg-hover hover:text-text-primary'
+                          ? 'bg-brand-secondary text-brand-tertiary'
+                          : 'bg-secondary text-tertiary hover:bg-primary_hover hover:text-primary'
                       )}
                     >
                       {cat}
@@ -326,21 +326,21 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
             <div className="overflow-y-auto px-6 py-4" style={{ maxHeight: 'calc(85vh - 200px)' }}>
               {loading ? (
                 <div className="flex flex-col items-center gap-3 py-16">
-                  <Loader2 className="h-6 w-6 animate-spin text-text-muted" />
-                  <p className="text-xs text-text-muted">{t('skillsPage.loadingCatalog')}</p>
+                  <Loader2 className="h-6 w-6 animate-spin text-tertiary" />
+                  <p className="text-xs text-tertiary">{t('skillsPage.loadingCatalog')}</p>
                 </div>
               ) : fetchError ? (
                 <div className="flex flex-col items-center py-12">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-error-subtle">
-                    <X className="h-7 w-7 text-error" />
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-error-primary">
+                    <X className="h-7 w-7 text-fg-error-secondary" />
                   </div>
-                  <p className="mt-4 text-sm font-medium text-text-primary">{t('skillsPage.errorCatalogTitle')}</p>
-                  <p className="mt-1 text-xs text-text-muted text-center max-w-xs">
+                  <p className="mt-4 text-sm font-medium text-primary">{t('skillsPage.errorCatalogTitle')}</p>
+                  <p className="mt-1 text-xs text-tertiary text-center max-w-xs">
                     {t('skillsPage.errorCatalogDesc')}
                   </p>
                   <button
                     onClick={fetchCatalog}
-                    className="mt-4 cursor-pointer rounded-lg bg-bg-subtle px-4 py-2 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+                    className="mt-4 cursor-pointer rounded-lg bg-secondary px-4 py-2 text-xs font-medium text-secondary transition-colors hover:bg-primary_hover hover:text-primary"
                   >
                     {t('skillsPage.retry')}
                   </button>
@@ -353,7 +353,7 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
                   action={!(search || activeCategory) ? (
                     <button
                       onClick={() => setTab('manual')}
-                      className="cursor-pointer text-xs font-medium text-text-muted hover:text-text-primary transition-colors"
+                      className="cursor-pointer text-xs font-medium text-tertiary hover:text-primary transition-colors"
                     >
                       {t('skillsPage.installManually')} &rarr;
                     </button>
@@ -371,38 +371,38 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
                         className={cn(
                           'flex items-center gap-4 rounded-xl px-4 py-3 transition-colors border',
                           isInstalled
-                            ? 'bg-success-subtle border-success/20'
-                            : 'bg-bg-main border-border hover:border-border-hover'
+                            ? 'bg-success-primary border-success/20'
+                            : 'bg-primary border-secondary hover:border-primary'
                         )}
                       >
                         <div className={cn(
                           'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
-                          isInstalled ? 'bg-success-subtle' : 'bg-bg-subtle'
+                          isInstalled ? 'bg-success-primary' : 'bg-secondary'
                         )}>
-                          <Package className={cn('h-4 w-4', isInstalled ? 'text-success' : 'text-text-muted')} />
+                          <Package className={cn('h-4 w-4', isInstalled ? 'text-fg-success-secondary' : 'text-tertiary')} />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <h3 className="text-sm font-semibold text-text-primary">{skill.name}</h3>
+                            <h3 className="text-sm font-semibold text-primary">{skill.name}</h3>
                             {skill.version && (
-                              <span className="text-[10px] text-text-muted">v{skill.version}</span>
+                              <span className="text-[10px] text-tertiary">v{skill.version}</span>
                             )}
                             {skill.category && (
                               <Badge>{skill.category}</Badge>
                             )}
                           </div>
                           {skill.description && (
-                            <p className="mt-0.5 text-xs text-text-muted line-clamp-1">{skill.description}</p>
+                            <p className="mt-0.5 text-xs text-tertiary line-clamp-1">{skill.description}</p>
                           )}
                         </div>
                         <div className="shrink-0">
                           {isInstalled ? (
-                            <span className="flex items-center gap-1 text-xs font-medium text-success">
+                            <span className="flex items-center gap-1 text-xs font-medium text-fg-success-secondary">
                               <CheckCircle2 className="h-3.5 w-3.5" />
                               {t('skillsPage.installed')}
                             </span>
                           ) : installError === skill.name ? (
-                            <span className="flex items-center gap-1 text-xs font-medium text-error">
+                            <span className="flex items-center gap-1 text-xs font-medium text-fg-error-secondary">
                               <X className="h-3.5 w-3.5" />
                               {t('skillsPage.installError', { name: skill.name })}
                             </span>
@@ -432,16 +432,16 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
 
         {/* Manual tab */}
         {tab === 'manual' && (
-          <div className="border-t border-border px-6 py-6">
+          <div className="border-t border-secondary px-6 py-6">
             <div className="space-y-5">
               <div>
-                <p className="text-sm text-text-primary">
+                <p className="text-sm text-primary">
                   {t('skillsPage.manualInstallDesc')}
                 </p>
               </div>
 
               <div>
-                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-text-muted">
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-quaternary">
                   {t('skillsPage.manualInstallPlaceholder')}
                 </label>
                 <div className="flex gap-2">
@@ -450,7 +450,7 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
                     onChange={(e) => setManualName(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleManualInstall()}
                     placeholder={t('skillsPage.manualInstallPlaceholder')}
-                    className="h-11 flex-1 rounded-xl border border-border bg-bg-main px-4 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all focus:border-brand/50 hover:border-border-hover"
+                    className="h-11 flex-1 rounded-xl border border-secondary bg-primary px-4 text-sm text-primary placeholder:text-quaternary outline-none transition-all focus:border-brand/50 hover:border-primary"
                   />
                   <Button
                     onClick={handleManualInstall}
@@ -466,23 +466,23 @@ function InstallModal({ onClose, onInstalled }: { onClose: () => void; onInstall
                 <div className={cn(
                   'flex items-center gap-2 rounded-lg px-3 py-2.5 text-xs border',
                   manualMsg.type === 'success'
-                    ? 'bg-success-subtle text-success border-success/20'
-                    : 'bg-error-subtle text-error border-error/20'
+                    ? 'bg-success-primary text-fg-success-secondary border-success/20'
+                    : 'bg-error-primary text-fg-error-secondary border-error/20'
                 )}>
                   {manualMsg.type === 'success' ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0" /> : <X className="h-3.5 w-3.5 shrink-0" />}
                   {manualMsg.text}
                 </div>
               )}
 
-              <Card className="bg-bg-main">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">{t('skillsPage.browseClawHub')}</p>
-                <ul className="mt-2 space-y-1.5 text-xs text-text-secondary">
+              <Card className="bg-primary">
+                <p className="text-xs font-semibold uppercase tracking-wider text-quaternary">{t('skillsPage.browseClawHub')}</p>
+                <ul className="mt-2 space-y-1.5 text-xs text-secondary">
                   <li className="flex items-start gap-2">
-                    <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-text-muted" />
+                    <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-quaternary" />
                     {t('skillsPage.aboutSkill')} — SKILL.md
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-text-muted" />
+                    <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-quaternary" />
                     ./skills/{'{name}'}/SKILL.md
                   </li>
                 </ul>

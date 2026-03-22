@@ -7,6 +7,7 @@ import { Chat } from '@/pages/Chat'
 import { Sessions } from '@/pages/Sessions'
 import { Skills } from '@/pages/Skills'
 import { Plugins } from '@/pages/Plugins'
+import { Agents } from '@/pages/Agents'
 import { Jobs } from '@/pages/Jobs'
 import { Login } from '@/pages/Login'
 import { SetupWizard } from '@/pages/Setup/SetupWizard'
@@ -82,8 +83,8 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (state.loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-bg-main">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-bg-elevated border-t-brand" />
+      <div className="bg-nav flex min-h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-secondary border-t-brand-solid" />
       </div>
     )
   }
@@ -122,6 +123,7 @@ export function App() {
           <Route path="/sessions" element={<Sessions />} />
           <Route path="/skills" element={<Skills />} />
           <Route path="/plugins" element={<Plugins />} />
+          <Route path="/agents" element={<Agents />} />
           <Route path="/jobs" element={<Jobs />} />
 
           {/* Settings — route-based tabs */}

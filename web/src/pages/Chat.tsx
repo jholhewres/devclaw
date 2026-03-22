@@ -156,10 +156,10 @@ export function Chat() {
               <div className="flex h-full flex-col items-center justify-center px-6">
                 <div className="w-full max-w-3xl space-y-8">
                   <div className="space-y-3 text-center">
-                    <h1 className="text-3xl font-bold tracking-tight text-text-primary md:text-[40px] md:leading-tight">
+                    <h1 className="text-3xl font-bold tracking-tight text-primary md:text-[40px] md:leading-tight">
                       {t('chatPage.howCanHelp')}
                     </h1>
-                    <p className="mx-auto max-w-md text-sm text-text-muted">
+                    <p className="mx-auto max-w-md text-sm text-tertiary">
                       {t('chatPage.howCanHelpDesc')}
                     </p>
                   </div>
@@ -178,12 +178,12 @@ export function Chat() {
                         key={key}
                         onClick={() => sendMessage(t(`chatPage.${key}Prompt`))}
                         className={cn(
-                          'flex items-center gap-2 rounded-full border border-border px-3.5 py-2',
-                          'text-xs font-medium text-text-secondary',
-                          'transition-all hover:border-border-hover hover:bg-bg-hover hover:text-text-primary',
+                          'flex items-center gap-2 rounded-full border border-secondary px-3.5 py-2',
+                          'text-xs font-medium text-secondary',
+                          'transition-all hover:border-primary hover:bg-primary_hover hover:text-primary',
                         )}
                       >
-                        <Icon className="h-3.5 w-3.5 text-text-muted" />
+                        <Icon className="h-3.5 w-3.5 text-tertiary" />
                         {t(`chatPage.${key}`)}
                       </button>
                     ))}
@@ -196,7 +196,7 @@ export function Chat() {
                 <div className="mx-auto max-w-3xl space-y-5 px-4 sm:px-6 lg:px-8">
                   {isLoadingHistory && (
                     <div className="flex items-center justify-center py-8">
-                      <Loader2 className="h-6 w-6 animate-spin text-text-muted" />
+                      <Loader2 className="h-6 w-6 animate-spin text-tertiary" />
                     </div>
                   )}
                   {messages.map((msg, i) => (
@@ -218,16 +218,16 @@ export function Chat() {
                     />
                   )}
                   {error && (
-                    <div className="rounded-xl border border-error/20 bg-error-subtle px-4 py-3">
-                      <p className="text-sm font-medium text-error">
+                    <div className="rounded-xl border border-error/20 bg-error-primary px-4 py-3">
+                      <p className="text-sm font-medium text-fg-error-secondary">
                         {friendlyErrorLocal(error)}
                       </p>
                       {error !== friendlyErrorLocal(error) && (
                         <details className="mt-2">
-                          <summary className="cursor-pointer text-xs text-error/60 hover:text-error/80">
+                          <summary className="cursor-pointer text-xs text-fg-error-secondary/60 hover:text-fg-error-secondary/80">
                             {t('chatPage.technicalDetails')}
                           </summary>
-                          <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap font-mono text-xs text-error/50">
+                          <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap font-mono text-xs text-fg-error-secondary/50">
                             {error}
                           </pre>
                         </details>

@@ -115,7 +115,7 @@ export function Plugins() {
   }
 
   return (
-    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto">
+    <div className="py-8 px-4 sm:px-6 lg:px-8">
       <div className="flex items-center justify-between">
         <PageHeader
           title="Plugins"
@@ -132,8 +132,8 @@ export function Plugins() {
 
       {showInstall && (
         <Card padding="lg" className="mt-4 border-brand/30">
-          <h3 className="text-sm font-semibold text-text-primary">Install Plugin</h3>
-          <p className="mt-1 text-xs text-text-muted">
+          <h3 className="text-sm font-semibold text-primary">Install Plugin</h3>
+          <p className="mt-1 text-xs text-tertiary">
             Enter a GitHub repository (e.g. user/repo) or local path
           </p>
           <div className="mt-3 flex items-center gap-2">
@@ -143,15 +143,15 @@ export function Plugins() {
               onChange={(e) => setInstallSource(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleInstall()}
               placeholder="user/repo or https://github.com/user/repo"
-              className="flex-1 rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-brand focus:ring-1 focus:ring-brand"
+              className="flex-1 rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary placeholder:text-quaternary focus:border-brand-solid focus:ring-1 focus:ring-brand-solid"
               disabled={installing}
             />
             <Button onClick={handleInstall} disabled={installing || !installSource.trim()}>
               {installing ? t('common.saving') : 'Install'}
             </Button>
           </div>
-          {installError && <p className="mt-2 text-xs text-error">{installError}</p>}
-          {installSuccess && <p className="mt-2 text-xs text-success">{installSuccess}</p>}
+          {installError && <p className="mt-2 text-xs text-fg-error-secondary">{installError}</p>}
+          {installSuccess && <p className="mt-2 text-xs text-fg-success-secondary">{installSuccess}</p>}
         </Card>
       )}
 
@@ -169,14 +169,14 @@ export function Plugins() {
             padding="lg"
             className={cn(
               'group relative overflow-hidden transition-all cursor-pointer',
-              plugin.enabled ? 'border-brand/30' : 'hover:border-border-hover',
+              plugin.enabled ? 'border-brand/30' : 'hover:border-primary',
               selectedId === plugin.id && 'ring-2 ring-brand',
             )}
             onClick={() => setSelectedId(selectedId === plugin.id ? null : plugin.id)}
           >
             {plugin.enabled && (
               <div className="absolute right-4 top-4">
-                <Badge className="bg-brand-subtle text-brand">
+                <Badge className="bg-brand-secondary text-brand-tertiary">
                   {t('skills.enabled').toLowerCase()}
                 </Badge>
               </div>
@@ -186,47 +186,47 @@ export function Plugins() {
               className={cn(
                 'flex h-14 w-14 items-center justify-center rounded-xl transition-colors',
                 plugin.enabled
-                  ? 'bg-brand-subtle text-brand'
-                  : 'bg-bg-subtle text-text-muted group-hover:text-text-secondary',
+                  ? 'bg-brand-secondary text-brand-tertiary'
+                  : 'bg-secondary text-tertiary group-hover:text-secondary',
               )}
               style={plugin.ui?.color ? { backgroundColor: plugin.ui.color + '20', color: plugin.ui.color } : undefined}
             >
               <Puzzle className="h-7 w-7" />
             </div>
 
-            <h3 className="mt-4 text-lg font-semibold text-text-primary">{plugin.name}</h3>
-            <p className="mt-1 text-xs text-text-muted">
+            <h3 className="mt-4 text-lg font-semibold text-primary">{plugin.name}</h3>
+            <p className="mt-1 text-xs text-tertiary">
               v{plugin.version}
               {plugin.author && ` by ${plugin.author}`}
             </p>
-            <p className="mt-2 text-sm leading-relaxed text-text-secondary line-clamp-2">
+            <p className="mt-2 text-sm leading-relaxed text-secondary line-clamp-2">
               {plugin.description}
             </p>
 
             {plugin.error && (
-              <p className="mt-2 text-xs text-error">{plugin.error}</p>
+              <p className="mt-2 text-xs text-fg-error-secondary">{plugin.error}</p>
             )}
 
             {toggleError === plugin.id && (
-              <p className="mt-2 text-xs text-error">{t('common.error')}</p>
+              <p className="mt-2 text-xs text-fg-error-secondary">{t('common.error')}</p>
             )}
 
             <div className="mt-4 flex items-center justify-between">
               <div className="flex items-center gap-2 flex-wrap">
                 {(plugin.tools?.length ?? 0) > 0 && (
-                  <span className="flex items-center gap-1 rounded-full bg-bg-subtle px-2.5 py-0.5 text-xs font-medium text-text-muted">
+                  <span className="flex items-center gap-1 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-tertiary">
                     <Wrench className="h-3 w-3" />
                     {plugin.tools!.length}
                   </span>
                 )}
                 {(plugin.agents?.length ?? 0) > 0 && (
-                  <span className="flex items-center gap-1 rounded-full bg-bg-subtle px-2.5 py-0.5 text-xs font-medium text-text-muted">
+                  <span className="flex items-center gap-1 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-tertiary">
                     <Bot className="h-3 w-3" />
                     {plugin.agents!.length}
                   </span>
                 )}
                 {(plugin.hooks?.length ?? 0) > 0 && (
-                  <span className="flex items-center gap-1 rounded-full bg-bg-subtle px-2.5 py-0.5 text-xs font-medium text-text-muted">
+                  <span className="flex items-center gap-1 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-tertiary">
                     <Zap className="h-3 w-3" />
                     {plugin.hooks!.length}
                   </span>
@@ -238,7 +238,7 @@ export function Plugins() {
                     e.stopPropagation()
                     handleRemove(plugin.id)
                   }}
-                  className="cursor-pointer text-text-muted transition-colors hover:text-error opacity-0 group-hover:opacity-100"
+                  className="cursor-pointer text-tertiary transition-colors hover:text-fg-error-secondary opacity-0 group-hover:opacity-100"
                   title="Remove plugin"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -248,10 +248,10 @@ export function Plugins() {
                     e.stopPropagation()
                     handleToggle(plugin.id, plugin.enabled)
                   }}
-                  className="cursor-pointer text-text-muted transition-colors hover:text-text-primary"
+                  className="cursor-pointer text-tertiary transition-colors hover:text-primary"
                 >
                   {plugin.enabled ? (
-                    <ToggleRight className="h-7 w-7 text-brand" />
+                    <ToggleRight className="h-7 w-7 text-brand-tertiary" />
                   ) : (
                     <ToggleLeft className="h-7 w-7" />
                   )}
@@ -332,22 +332,22 @@ function PluginConfigPanel({
 
     return (
       <div key={field.key} className="space-y-1.5">
-        <label className="flex items-center gap-2 text-sm font-medium text-text-primary">
+        <label className="flex items-center gap-2 text-sm font-medium text-primary">
           {field.name || field.key}
-          {field.required && <span className="text-error">*</span>}
+          {field.required && <span className="text-fg-error-secondary">*</span>}
         </label>
         {field.description && (
-          <p className="text-xs text-text-muted">{field.description}</p>
+          <p className="text-xs text-tertiary">{field.description}</p>
         )}
         <div className="relative">
           {field.type === 'bool' ? (
             <button
               type="button"
               onClick={() => setValues((v) => ({ ...v, [field.key]: !v[field.key] }))}
-              className="cursor-pointer text-text-muted transition-colors hover:text-text-primary"
+              className="cursor-pointer text-tertiary transition-colors hover:text-primary"
             >
               {value ? (
-                <ToggleRight className="h-6 w-6 text-brand" />
+                <ToggleRight className="h-6 w-6 text-brand-tertiary" />
               ) : (
                 <ToggleLeft className="h-6 w-6" />
               )}
@@ -359,7 +359,7 @@ function PluginConfigPanel({
                 value={String(value ?? '')}
                 onChange={(e) => setValues((v) => ({ ...v, [field.key]: e.target.value }))}
                 placeholder={field.default != null ? String(field.default) : undefined}
-                className="w-full rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-brand focus:ring-1 focus:ring-brand"
+                className="w-full rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary placeholder:text-quaternary focus:border-brand-solid focus:ring-1 focus:ring-brand-solid"
               />
               {isSecret && (
                 <button
@@ -367,7 +367,7 @@ function PluginConfigPanel({
                   onClick={() =>
                     setShowSecrets((s) => ({ ...s, [field.key]: !s[field.key] }))
                   }
-                  className="absolute right-2.5 top-2.5 text-text-muted hover:text-text-primary cursor-pointer"
+                  className="absolute right-2.5 top-2.5 text-tertiary hover:text-primary cursor-pointer"
                 >
                   {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -382,10 +382,10 @@ function PluginConfigPanel({
   return (
     <Card padding="lg" className="mt-6 border-brand/30">
       <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-text-primary">
+        <h3 className="text-lg font-semibold text-primary">
           {plugin.name} — {t('pluginsPage.settings')}
         </h3>
-        <button onClick={onClose} className="text-text-muted hover:text-text-primary cursor-pointer">
+        <button onClick={onClose} className="text-tertiary hover:text-primary cursor-pointer">
           <X className="h-5 w-5" />
         </button>
       </div>
@@ -412,7 +412,7 @@ function PluginConfigPanel({
         )}
       </div>
 
-      {error && <p className="mt-4 text-sm text-error">{error}</p>}
+      {error && <p className="mt-4 text-sm text-fg-error-secondary">{error}</p>}
 
       {hasChanges && (
         <div className="mt-6 flex items-center gap-3">
@@ -448,7 +448,7 @@ function ConfigSection({
   const [open, setOpen] = useState(!collapsible)
 
   return (
-    <div className="rounded-lg border border-border p-4">
+    <div className="rounded-lg border border-secondary p-4">
       <button
         type="button"
         className={cn(
@@ -458,10 +458,10 @@ function ConfigSection({
         onClick={() => collapsible && setOpen(!open)}
       >
         {collapsible &&
-          (open ? <ChevronDown className="h-4 w-4 text-text-muted" /> : <ChevronRight className="h-4 w-4 text-text-muted" />)}
+          (open ? <ChevronDown className="h-4 w-4 text-tertiary" /> : <ChevronRight className="h-4 w-4 text-tertiary" />)}
         <div>
-          <h4 className="text-sm font-semibold text-text-primary">{title}</h4>
-          {description && <p className="text-xs text-text-muted">{description}</p>}
+          <h4 className="text-sm font-semibold text-primary">{title}</h4>
+          {description && <p className="text-xs text-tertiary">{description}</p>}
         </div>
       </button>
       {open && <div className="mt-4">{children}</div>}

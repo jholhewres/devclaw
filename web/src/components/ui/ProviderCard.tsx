@@ -35,7 +35,7 @@ export function ProviderCard({
         'relative flex cursor-pointer flex-col items-center justify-center rounded-xl border transition-all',
         size === 'sm' ? 'gap-1 p-2.5' : 'gap-2 p-4',
         !isSelected &&
-          'border-border bg-bg-main hover:border-border-hover hover:bg-bg-surface',
+          'border-secondary bg-primary hover:border-primary hover:bg-primary',
       )}
       style={isSelected ? {
         borderColor: `${color}80`,
@@ -65,14 +65,14 @@ export function ProviderCard({
         className={cn(
           'font-medium',
           size === 'sm' ? 'text-[10px]' : 'text-sm',
-          isSelected ? 'text-text-primary' : 'text-text-secondary',
+          isSelected ? 'text-primary' : 'text-secondary',
         )}
       >
         {provider.label}
       </span>
 
       {showDescription && size === 'md' && (
-        <span className="line-clamp-1 text-center text-[10px] text-text-muted">
+        <span className="line-clamp-1 text-center text-[10px] text-tertiary">
           {provider.description}
         </span>
       )}
@@ -98,7 +98,7 @@ export function ProviderCardCompact({
       className={cn(
         'flex cursor-pointer flex-col items-center gap-1 rounded-xl border px-2 py-2.5 text-center transition-all',
         !isSelected &&
-          'border-border bg-bg-main hover:border-border-hover hover:bg-bg-surface',
+          'border-secondary bg-primary hover:border-primary hover:bg-primary',
       )}
       style={isSelected ? {
         borderColor: `${color}80`,
@@ -107,14 +107,14 @@ export function ProviderCardCompact({
       title={provider.description}
     >
       <div
-        className={cn(!isSelected && 'text-text-muted')}
+        className={cn(!isSelected && 'text-tertiary')}
         style={isSelected ? { color } : undefined}
       >
         {icon}
       </div>
       <span className={cn(
         'text-[10px] font-medium',
-        isSelected ? 'text-text-primary' : 'text-text-secondary',
+        isSelected ? 'text-primary' : 'text-secondary',
       )}>
         {provider.label}
       </span>

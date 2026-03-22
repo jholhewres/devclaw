@@ -175,7 +175,7 @@ export function Mcp() {
           </ConfigField>
 
           <div className="flex gap-3 pt-2">
-            <Button className="bg-success hover:opacity-90" onClick={handleAddServer}>
+            <Button className="bg-success-solid hover:opacity-90" onClick={handleAddServer}>
               <Plus className="h-4 w-4" />
               {t('mcp.createServer')}
             </Button>
@@ -225,7 +225,7 @@ export function Mcp() {
                     ) : (
                       <Button
                         size="xs"
-                        className="bg-success-subtle text-success hover:bg-success/20"
+                        className="bg-success-primary text-fg-success-secondary hover:bg-success-secondary"
                         onClick={() => handleStartServer(server.name)}
                       >
                         <Play className="h-3.5 w-3.5" />
@@ -235,7 +235,7 @@ export function Mcp() {
                     <Button
                       size="xs"
                       variant="ghost"
-                      className="hover:text-error"
+                      className="hover:text-fg-error-secondary"
                       onClick={() => handleDeleteServer(server.name)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -245,9 +245,9 @@ export function Mcp() {
                 }
               >
                 {server.error && (
-                  <div className="-mt-2 mb-4 flex items-start gap-2 rounded-xl border border-error/10 bg-error-subtle p-3">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-error" />
-                    <p className="text-xs text-error">{server.error}</p>
+                  <div className="-mt-2 mb-4 flex items-start gap-2 rounded-xl border border-error/10 bg-error-primary p-3">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-fg-error-secondary" />
+                    <p className="text-xs text-fg-error-secondary">{server.error}</p>
                   </div>
                 )}
                 <ConfigToggle

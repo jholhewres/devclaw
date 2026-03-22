@@ -124,7 +124,7 @@ export function ModelCombobox({ value, onChange, suggestions, placeholder }: Mod
           }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="h-11 w-full rounded-xl border border-border bg-bg-surface px-4 pr-10 text-sm text-text-primary outline-none transition-all placeholder:text-text-muted hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
+          className="h-11 w-full rounded-xl border border-secondary bg-primary px-4 pr-10 text-sm text-primary outline-none transition-all placeholder:text-quaternary hover:border-primary focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
         />
         <button
           type="button"
@@ -134,7 +134,7 @@ export function ModelCombobox({ value, onChange, suggestions, placeholder }: Mod
             setOpen(!open);
             inputRef.current?.focus();
           }}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer"
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-tertiary hover:text-primary cursor-pointer"
         >
           <ChevronDown
             className={cn('h-4 w-4 transition-transform', open && 'rotate-180')}
@@ -148,12 +148,12 @@ export function ModelCombobox({ value, onChange, suggestions, placeholder }: Mod
           ref={listRef}
           id={listboxId}
           role="listbox"
-          className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-border bg-bg-surface shadow-lg"
+          className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-secondary bg-primary shadow-lg"
         >
           {/* Popular models */}
           {filteredPopular.length > 0 && (
             <>
-              <li role="presentation" className="sticky top-0 z-10 bg-bg-surface px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted border-b border-border">
+              <li role="presentation" className="sticky top-0 z-10 bg-primary px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-quaternary border-b border-secondary">
                 {t('apiConfig.popularModels')}
               </li>
               {filteredPopular.map((model, i) => {
@@ -166,10 +166,10 @@ export function ModelCombobox({ value, onChange, suggestions, placeholder }: Mod
                     aria-selected={flatIdx === activeIndex}
                     onClick={() => handleSelect(model)}
                     className={cn(
-                      'cursor-pointer px-4 py-2 text-sm text-text-primary transition-colors',
+                      'cursor-pointer px-4 py-2 text-sm text-primary transition-colors',
                       flatIdx === activeIndex
-                        ? 'bg-brand/10 text-brand'
-                        : 'hover:bg-bg-subtle',
+                        ? 'bg-brand/10 text-brand-tertiary'
+                        : 'hover:bg-secondary',
                       value === model && 'font-medium',
                     )}
                   >
@@ -183,7 +183,7 @@ export function ModelCombobox({ value, onChange, suggestions, placeholder }: Mod
           {/* Free models */}
           {filteredFree.length > 0 && (
             <>
-              <li role="presentation" className="sticky top-0 z-10 bg-bg-surface px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted border-b border-border">
+              <li role="presentation" className="sticky top-0 z-10 bg-primary px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-quaternary border-b border-secondary">
                 {t('apiConfig.freeModels')}
               </li>
               {filteredFree.map((model, i) => {
@@ -196,10 +196,10 @@ export function ModelCombobox({ value, onChange, suggestions, placeholder }: Mod
                     aria-selected={flatIdx === activeIndex}
                     onClick={() => handleSelect(model)}
                     className={cn(
-                      'cursor-pointer px-4 py-2 text-sm text-text-primary transition-colors',
+                      'cursor-pointer px-4 py-2 text-sm text-primary transition-colors',
                       flatIdx === activeIndex
-                        ? 'bg-brand/10 text-brand'
-                        : 'hover:bg-bg-subtle',
+                        ? 'bg-brand/10 text-brand-tertiary'
+                        : 'hover:bg-secondary',
                       value === model && 'font-medium',
                     )}
                   >
@@ -212,14 +212,14 @@ export function ModelCombobox({ value, onChange, suggestions, placeholder }: Mod
 
           {/* No results */}
           {allFiltered.length === 0 && (
-            <li role="presentation" className="px-4 py-3 text-sm text-text-muted italic">
+            <li role="presentation" className="px-4 py-3 text-sm text-tertiary italic">
               {t('apiConfig.modelComboboxHint')}
             </li>
           )}
 
           {/* Hint footer */}
           {allFiltered.length > 0 && (
-            <li role="presentation" className="border-t border-border px-3 py-2 text-[10px] text-text-muted">
+            <li role="presentation" className="border-t border-secondary px-3 py-2 text-[10px] text-tertiary">
               {t('apiConfig.modelComboboxHint')}
             </li>
           )}

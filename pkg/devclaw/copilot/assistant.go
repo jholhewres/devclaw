@@ -3316,6 +3316,9 @@ func (a *Assistant) registerSystemTools() {
 		RegisterTeamTools(a.toolExecutor, a.teamMgr, a.devclawDB, a.scheduler, a.logger)
 	}
 
+	// Register agent management tools for creating/managing workspaces via AI.
+	RegisterAgentTools(a.toolExecutor, a.workspaceMgr)
+
 	// Register media tools (describe_image, transcribe_audio).
 	RegisterMediaTools(a.toolExecutor, a.llmClient, a.config, a.logger)
 

@@ -88,6 +88,32 @@ type Workspace struct {
 
 	// Active indicates if the workspace is enabled.
 	Active bool `yaml:"active"`
+
+	// Identity overrides the global identity for this workspace/agent.
+	Identity *IdentityConfig `yaml:"identity,omitempty" json:"identity,omitempty"`
+
+	// Channels routes all messages from these channels to this workspace.
+	// E.g. ["slack", "telegram"] means all Slack and Telegram messages go here.
+	Channels []string `yaml:"channels,omitempty" json:"channels,omitempty"`
+
+	// MaxTurns overrides the max LLM turns for this workspace (0 = use global).
+	MaxTurns int `yaml:"max_turns,omitempty" json:"max_turns,omitempty"`
+
+	// RunTimeout overrides the max run time in seconds (0 = use global).
+	RunTimeout int `yaml:"run_timeout,omitempty" json:"run_timeout,omitempty"`
+
+	// Default marks this workspace as the default for unassigned users.
+	// Only one workspace should be marked as default.
+	Default bool `yaml:"default,omitempty" json:"default,omitempty"`
+
+	// ToolsAllow overrides the allowed tools list for this workspace.
+	ToolsAllow []string `yaml:"tools_allow,omitempty" json:"tools_allow,omitempty"`
+
+	// ToolsDeny overrides the denied tools list for this workspace.
+	ToolsDeny []string `yaml:"tools_deny,omitempty" json:"tools_deny,omitempty"`
+
+	// Source indicates where this workspace was defined: "config", "api", "plugin".
+	Source string `yaml:"source,omitempty" json:"source,omitempty"`
 }
 
 // WorkspaceConfig holds the workspaces configuration.
@@ -131,6 +157,9 @@ type WorkspaceManager struct {
 	// groupMap maps group JID → workspace ID.
 	groupMap map[string]string
 
+	// channelMap maps channel name (lowercase) → workspace ID.
+	channelMap map[string]string
+
 	// sessions stores isolated SessionStores per workspace.
 	sessions map[string]*SessionStore
 
@@ -155,6 +184,7 @@ func NewWorkspaceManager(globalCfg *Config, wsCfg WorkspaceConfig, logger *slog.
 		workspaces:  make(map[string]*Workspace),
 		userMap:     make(map[string]string),
 		groupMap:    make(map[string]string),
+		channelMap:  make(map[string]string),
 		sessions:    make(map[string]*SessionStore),
 		defaultWSID: wsCfg.DefaultWorkspace,
 	}
@@ -175,6 +205,15 @@ func NewWorkspaceManager(globalCfg *Config, wsCfg WorkspaceConfig, logger *slog.
 		}
 		for _, gid := range ws.Groups {
 			wm.groupMap[normalizeJID(gid)] = ws.ID
+		}
+		// Map channels to workspace.
+		for _, ch := range ws.Channels {
+			wm.channelMap[strings.ToLower(ch)] = ws.ID
+		}
+
+		// If this workspace is marked as default, use it.
+		if ws.Default {
+			wm.defaultWSID = ws.ID
 		}
 	}
 
@@ -228,7 +267,7 @@ func (wm *WorkspaceManager) Resolve(channel, chatID, senderJID string, isGroup b
 	wm.mu.RLock()
 	defer wm.mu.RUnlock()
 
-	wsID := wm.resolveWorkspaceID(chatID, senderJID, isGroup)
+	wsID := wm.resolveWorkspaceIDWithChannel(channel, chatID, senderJID, isGroup)
 
 	ws, ok := wm.workspaces[wsID]
 	if !ok || !ws.Active {
@@ -276,6 +315,35 @@ func (wm *WorkspaceManager) resolveWorkspaceID(chatID, senderJID string, isGroup
 	}
 
 	// 3. Fallback to default.
+	return wm.defaultWSID
+}
+
+// resolveWorkspaceIDWithChannel finds the workspace for a channel/JID/group,
+// including channel-level routing.
+func (wm *WorkspaceManager) resolveWorkspaceIDWithChannel(channel, chatID, senderJID string, isGroup bool) string {
+	normSender := normalizeJID(senderJID)
+	normChat := normalizeJID(chatID)
+
+	// 1. Check group assignment first (for group messages).
+	if isGroup {
+		if wsID, ok := wm.groupMap[normChat]; ok {
+			return wsID
+		}
+	}
+
+	// 2. Check user assignment.
+	if wsID, ok := wm.userMap[normSender]; ok {
+		return wsID
+	}
+
+	// 3. Check channel routing.
+	if channel != "" {
+		if wsID, ok := wm.channelMap[strings.ToLower(channel)]; ok {
+			return wsID
+		}
+	}
+
+	// 4. Fallback to default.
 	return wm.defaultWSID
 }
 
@@ -345,6 +413,9 @@ func (wm *WorkspaceManager) Create(ws Workspace, createdBy string) error {
 	for _, gid := range ws.Groups {
 		wm.groupMap[normalizeJID(gid)] = ws.ID
 	}
+	for _, ch := range ws.Channels {
+		wm.channelMap[strings.ToLower(ch)] = ws.ID
+	}
 
 	wm.logger.Info("workspace created",
 		"id", ws.ID, "name", ws.Name, "by", createdBy)
@@ -371,6 +442,9 @@ func (wm *WorkspaceManager) Delete(wsID, deletedBy string) error {
 	}
 	for _, gid := range ws.Groups {
 		delete(wm.groupMap, normalizeJID(gid))
+	}
+	for _, ch := range ws.Channels {
+		delete(wm.channelMap, strings.ToLower(ch))
 	}
 
 	delete(wm.workspaces, wsID)
@@ -606,6 +680,70 @@ func (wm *WorkspaceManager) ExportSession(id string) *SessionExport {
 		}
 	}
 	return nil
+}
+
+// SetDefault marks a workspace as the default and unmarks all others.
+func (wm *WorkspaceManager) SetDefault(wsID string) error {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
+
+	ws, exists := wm.workspaces[wsID]
+	if !exists {
+		return fmt.Errorf("workspace %q not found", wsID)
+	}
+
+	// Unmark all workspaces as default.
+	for _, w := range wm.workspaces {
+		w.Default = false
+	}
+
+	ws.Default = true
+	wm.defaultWSID = wsID
+
+	wm.logger.Info("default workspace changed", "id", wsID)
+	return nil
+}
+
+// SessionCountForWorkspace returns the number of active sessions in a workspace.
+func (wm *WorkspaceManager) SessionCountForWorkspace(wsID string) int {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+
+	store, ok := wm.sessions[wsID]
+	if !ok {
+		return 0
+	}
+	return store.Count()
+}
+
+// DefaultID returns the current default workspace ID.
+func (wm *WorkspaceManager) DefaultID() string {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+	return wm.defaultWSID
+}
+
+// RebuildMaps rebuilds the user, group, and channel maps from all workspaces.
+// Call after Update() when member/group/channel assignments may have changed.
+func (wm *WorkspaceManager) RebuildMaps() {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
+
+	wm.userMap = make(map[string]string)
+	wm.groupMap = make(map[string]string)
+	wm.channelMap = make(map[string]string)
+
+	for _, ws := range wm.workspaces {
+		for _, jid := range ws.Members {
+			wm.userMap[normalizeJID(jid)] = ws.ID
+		}
+		for _, gid := range ws.Groups {
+			wm.groupMap[normalizeJID(gid)] = ws.ID
+		}
+		for _, ch := range ws.Channels {
+			wm.channelMap[strings.ToLower(ch)] = ws.ID
+		}
+	}
 }
 
 // --- Helpers ---

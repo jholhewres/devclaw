@@ -67,20 +67,20 @@ export function TelegramConnect() {
   ]
 
   return (
-    <div className="flex-1 overflow-y-auto bg-bg-main">
+    <div className="flex-1 overflow-y-auto bg-primary">
       <div className="mx-auto max-w-3xl px-6 py-8">
         {/* Back + Header */}
         <div className="flex flex-col gap-3">
           <button
             onClick={() => navigate('/channels')}
-            className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary transition-colors cursor-pointer w-fit"
+            className="flex items-center gap-1.5 text-sm text-tertiary hover:text-primary transition-colors cursor-pointer w-fit"
           >
             <ArrowLeft className="h-4 w-4" />
             {t('channelsPage.backToChannels')}
           </button>
           <div className="flex flex-col gap-1">
-            <h2 className="text-lg font-medium text-text-primary">{t('telegram.title')}</h2>
-            <p className="text-sm text-text-muted">{t('telegram.subtitle')}</p>
+            <h2 className="text-lg font-medium text-primary">{t('telegram.title')}</h2>
+            <p className="text-sm text-tertiary">{t('telegram.subtitle')}</p>
           </div>
         </div>
 
@@ -155,7 +155,7 @@ function ConnectionTab({
     return (
       <div className="flex flex-col items-center gap-4 py-16">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-bg-subtle border-t-brand" />
-        <p className="text-sm text-text-muted">{t('common.loading')}</p>
+        <p className="text-sm text-tertiary">{t('common.loading')}</p>
       </div>
     )
   }
@@ -163,9 +163,9 @@ function ConnectionTab({
   if (error) {
     return (
       <Card className="p-8 text-center">
-        <XCircle className="mx-auto h-10 w-10 text-error" />
-        <p className="mt-3 text-sm text-text-primary">{t('telegram.connectionError')}</p>
-        <p className="mt-1 text-xs text-text-muted">{error}</p>
+        <XCircle className="mx-auto h-10 w-10 text-fg-error-secondary" />
+        <p className="mt-3 text-sm text-primary">{t('telegram.connectionError')}</p>
+        <p className="mt-1 text-xs text-tertiary">{error}</p>
         <Button size="sm" variant="outline" className="mt-4" onClick={onReload}>
           {t('common.retry')}
         </Button>
@@ -181,21 +181,21 @@ function ConnectionTab({
       <div className="flex flex-col gap-6">
         <Card className="p-6">
           <div className="flex items-center gap-4 mb-6">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-bg-subtle">
-              <WifiOff className="h-7 w-7 text-text-muted" />
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-secondary">
+              <WifiOff className="h-7 w-7 text-tertiary" />
             </div>
             <div>
-              <h3 className="text-base font-semibold text-text-primary">
+              <h3 className="text-base font-semibold text-primary">
                 {t('telegram.notConfigured')}
               </h3>
-              <p className="mt-1 text-sm text-text-muted">
+              <p className="mt-1 text-sm text-tertiary">
                 {t('telegram.notConfiguredDesc')}
               </p>
             </div>
           </div>
 
           <div className="flex flex-col gap-3">
-            <label className="text-sm font-medium text-text-primary">
+            <label className="text-sm font-medium text-primary">
               {t('telegram.tokenLabel')}
             </label>
             <div className="relative">
@@ -204,23 +204,23 @@ function ConnectionTab({
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
                 placeholder={t('telegram.tokenPlaceholder')}
-                className="w-full rounded-lg border border-border bg-bg-main px-3 py-2.5 pr-10 text-sm text-text-primary placeholder:text-text-muted focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                className="w-full rounded-lg border border-secondarybg-primary px-3 py-2.5 pr-10 text-sm text-primary placeholder:text-tertiary focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
                 onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
               />
               <button
                 type="button"
                 onClick={() => setShowToken(!showToken)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-tertiary hover:text-primary"
               >
                 {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
-            <p className="text-xs text-text-muted">
+            <p className="text-xs text-tertiary">
               {t('telegram.tokenHint')}
             </p>
 
             {actionError && (
-              <p className="text-xs text-error">{actionError}</p>
+              <p className="text-xs text-fg-error-secondary">{actionError}</p>
             )}
 
             <Button
@@ -244,18 +244,18 @@ function ConnectionTab({
         <div className="flex items-center gap-4">
           <div className={cn(
             'flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl',
-            config.connected ? 'bg-success-subtle' : 'bg-bg-subtle'
+            config.connected ? 'bg-success-primary' : 'bg-secondary'
           )}>
             {config.connected ? (
-              <CheckCircle2 className="h-7 w-7 text-success" />
+              <CheckCircle2 className="h-7 w-7 text-fg-success-secondary" />
             ) : (
-              <WifiOff className="h-7 w-7 text-text-muted" />
+              <WifiOff className="h-7 w-7 text-tertiary" />
             )}
           </div>
 
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-3">
-              <h3 className="text-base font-semibold text-text-primary">
+              <h3 className="text-base font-semibold text-primary">
                 {config.connected ? t('telegram.connected') : t('telegram.disconnectedConfigured')}
               </h3>
               <StatusDot
@@ -265,13 +265,13 @@ function ConnectionTab({
             </div>
 
             {config.connected && config.bot_username && (
-              <p className="mt-1 text-sm text-text-muted">
+              <p className="mt-1 text-sm text-tertiary">
                 @{config.bot_username}
               </p>
             )}
 
             {!config.connected && (
-              <p className="mt-1 text-sm text-text-muted">
+              <p className="mt-1 text-sm text-tertiary">
                 {t('telegram.disconnectedConfiguredHint')}
               </p>
             )}
@@ -279,7 +279,7 @@ function ConnectionTab({
         </div>
 
         {actionError && (
-          <p className="mt-3 text-xs text-error">{actionError}</p>
+          <p className="mt-3 text-xs text-fg-error-secondary">{actionError}</p>
         )}
 
         <div className="mt-4 flex items-center gap-3">
@@ -297,8 +297,8 @@ function ConnectionTab({
 
       {/* Info */}
       <Card className="p-6">
-        <h3 className="mb-3 text-sm font-semibold text-text-primary">{t('telegram.info')}</h3>
-        <div className="space-y-2 text-sm text-text-muted">
+        <h3 className="mb-3 text-sm font-semibold text-primary">{t('telegram.info')}</h3>
+        <div className="space-y-2 text-sm text-tertiary">
           <p>{t('telegram.infoToken')}</p>
           <p>{t('telegram.infoRestart')}</p>
         </div>
@@ -322,7 +322,7 @@ function SettingsTab({
   if (!config) {
     return (
       <Card className="p-8 text-center">
-        <p className="text-sm text-text-muted">{t('telegram.settingsNotAvailable')}</p>
+        <p className="text-sm text-tertiary">{t('telegram.settingsNotAvailable')}</p>
       </Card>
     )
   }
@@ -362,14 +362,14 @@ function SettingsTab({
     <div className="flex flex-col gap-6">
       {/* Bot Settings */}
       <Card className="p-6">
-        <h3 className="mb-4 text-sm font-semibold text-text-primary">{t('telegram.settings.bot')}</h3>
+        <h3 className="mb-4 text-sm font-semibold text-primary">{t('telegram.settings.bot')}</h3>
 
-        <div className="flex items-start justify-between border-b border-border py-4">
+        <div className="flex items-start justify-between border-b border-secondarypy-4">
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-text-primary">
+            <span className="text-sm font-medium text-primary">
               {t('telegram.settings.respondToGroups')}
             </span>
-            <span className="text-xs text-text-muted">
+            <span className="text-xs text-tertiary">
               {t('telegram.settings.respondToGroupsDesc')}
             </span>
           </div>
@@ -381,12 +381,12 @@ function SettingsTab({
           />
         </div>
 
-        <div className="flex items-start justify-between border-b border-border py-4">
+        <div className="flex items-start justify-between border-b border-secondarypy-4">
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-text-primary">
+            <span className="text-sm font-medium text-primary">
               {t('telegram.settings.respondToDMs')}
             </span>
-            <span className="text-xs text-text-muted">
+            <span className="text-xs text-tertiary">
               {t('telegram.settings.respondToDMsDesc')}
             </span>
           </div>
@@ -400,10 +400,10 @@ function SettingsTab({
 
         <div className="flex items-start justify-between py-4">
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-text-primary">
+            <span className="text-sm font-medium text-primary">
               {t('telegram.settings.sendTyping')}
             </span>
-            <span className="text-xs text-text-muted">
+            <span className="text-xs text-tertiary">
               {t('telegram.settings.sendTypingDesc')}
             </span>
           </div>
@@ -418,10 +418,10 @@ function SettingsTab({
 
       {/* Reaction Notifications */}
       <Card className="p-6">
-        <h3 className="mb-2 text-sm font-semibold text-text-primary">
+        <h3 className="mb-2 text-sm font-semibold text-primary">
           {t('telegram.settings.reactions')}
         </h3>
-        <p className="mb-4 text-sm text-text-muted">
+        <p className="mb-4 text-sm text-tertiary">
           {t('telegram.settings.reactionsDesc')}
         </p>
         <Select
@@ -435,10 +435,10 @@ function SettingsTab({
 
       {/* Allowed Chats */}
       <Card className="p-6">
-        <h3 className="mb-2 text-sm font-semibold text-text-primary">
+        <h3 className="mb-2 text-sm font-semibold text-primary">
           {t('telegram.settings.allowedChats')}
         </h3>
-        <p className="mb-4 text-sm text-text-muted">
+        <p className="mb-4 text-sm text-tertiary">
           {t('telegram.settings.allowedChatsDesc')}
         </p>
         {config.allowed_chats && config.allowed_chats.length > 0 ? (
@@ -450,7 +450,7 @@ function SettingsTab({
             ))}
           </div>
         ) : (
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-tertiary">
             {t('telegram.settings.noAllowedChats')}
           </p>
         )}

@@ -191,12 +191,12 @@ export function Domain() {
                   {corsOrigins.map((origin) => (
                     <span
                       key={origin}
-                      className="group flex items-center gap-1.5 rounded-lg bg-bg-subtle px-2.5 py-1.5 text-xs font-mono text-text-primary"
+                      className="group flex items-center gap-1.5 rounded-lg bg-secondary px-2.5 py-1.5 text-xs font-mono text-primary"
                     >
                       {origin}
                       <button
                         onClick={() => setCorsOrigins(corsOrigins.filter((o) => o !== origin))}
-                        className="cursor-pointer text-text-muted transition-colors hover:text-error"
+                        className="cursor-pointer text-tertiary transition-colors hover:text-fg-error-secondary"
                       >
                         <X className="h-3 w-3" />
                       </button>
@@ -208,7 +208,7 @@ export function Domain() {
                     onKeyDown={(e) => e.key === 'Enter' && addCorsOrigin()}
                     onBlur={addCorsOrigin}
                     placeholder={t('domain.addOrigin')}
-                    className="min-w-[140px] flex-1 rounded-lg bg-transparent px-2 py-1.5 text-xs text-text-secondary outline-none placeholder:text-text-muted"
+                    className="min-w-[140px] flex-1 rounded-lg bg-transparent px-2 py-1.5 text-xs text-secondary outline-none placeholder:text-tertiary"
                   />
                 </div>
               </ConfigField>
@@ -250,16 +250,16 @@ export function Domain() {
               </div>
 
               {config?.tailscale_hostname && (
-                <div className="flex items-center gap-3 rounded-xl bg-success-subtle px-4 py-3 border border-success/20">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+                <div className="flex items-center gap-3 rounded-xl bg-success-primary px-4 py-3 border border-success/20">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-fg-success-secondary" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-text-primary truncate">{config.tailscale_hostname}</p>
+                    <p className="text-sm font-medium text-primary truncate">{config.tailscale_hostname}</p>
                     {config.tailscale_url && (
                       <a
                         href={config.tailscale_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors"
+                        className="flex items-center gap-1 text-xs text-tertiary hover:text-primary transition-colors"
                       >
                         {config.tailscale_url}
                         <ArrowUpRight className="h-3 w-3" />
@@ -280,10 +280,10 @@ export function Domain() {
 function CardHeader({ icon: Icon, title }: { icon: React.FC<{ className?: string }>; title: string }) {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-bg-subtle">
-        <Icon className="h-4 w-4 text-text-muted" />
+      <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-secondary">
+        <Icon className="h-4 w-4 text-tertiary" />
       </div>
-      <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
+      <h2 className="text-sm font-semibold text-primary">{title}</h2>
     </div>
   )
 }
@@ -305,7 +305,7 @@ function Input({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
-      className="flex h-11 w-full rounded-xl border border-border bg-bg-main px-4 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
+      className="flex h-11 w-full rounded-xl border border-secondarybg-secondary px-4 text-sm text-primary placeholder:text-tertiary outline-none transition-all hover:border-primary focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
     />
   )
 }
@@ -330,12 +330,12 @@ function PasswordInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="flex h-11 w-full rounded-xl border border-border bg-bg-main px-4 pr-9 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
+        className="flex h-11 w-full rounded-xl border border-secondarybg-secondary px-4 pr-9 text-sm text-primary placeholder:text-tertiary outline-none transition-all hover:border-primary focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
       />
       <button
         type="button"
         onClick={onToggle}
-        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors"
+        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-tertiary hover:text-primary transition-colors"
       >
         {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
       </button>
@@ -352,7 +352,7 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
       onClick={() => onChange(!value)}
       className={cn(
         'relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors',
-        value ? 'bg-brand' : 'bg-bg-subtle'
+        value ? 'bg-brand-solid' : 'bg-secondary'
       )}
     >
       <span
@@ -377,10 +377,10 @@ function ToggleRow({
   onChange: (v: boolean) => void
 }) {
   return (
-    <div className="flex items-center justify-between rounded-xl bg-bg-main px-4 py-3 border border-border">
+    <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3 border border-secondary">
       <div>
-        <span className="text-sm font-medium text-text-primary">{label}</span>
-        <p className="text-[11px] text-text-muted">{description}</p>
+        <span className="text-sm font-medium text-primary">{label}</span>
+        <p className="text-xs text-tertiary">{description}</p>
       </div>
       <Toggle value={value} onChange={onChange} />
     </div>
@@ -404,21 +404,21 @@ function Endpoint({
     <div className={cn(
       'rounded-xl px-3.5 py-2.5 border transition-colors',
       active
-        ? 'bg-bg-surface border-brand/30'
-        : 'bg-bg-surface border-border'
+        ? 'bg-primary border-brand/30'
+        : 'bg-primary border-secondary'
     )}>
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">{label}</span>
+        <span className="text-xs font-semibold uppercase tracking-wider text-tertiary">{label}</span>
         <div className="flex items-center gap-1">
           {active ? (
-            <span className="h-1.5 w-1.5 rounded-full bg-success" />
+            <span className="h-1.5 w-1.5 rounded-full bg-success-solid" />
           ) : (
-            <span className="h-1.5 w-1.5 rounded-full bg-text-muted" />
+            <span className="h-1.5 w-1.5 rounded-full bg-quaternary" />
           )}
           {active && (secure ? (
-            <Lock className="h-3 w-3 text-text-muted" />
+            <Lock className="h-3 w-3 text-tertiary" />
           ) : (
-            <Unlock className="h-3 w-3 text-warning" />
+            <Unlock className="h-3 w-3 text-fg-warning-secondary" />
           ))}
         </div>
       </div>
@@ -427,13 +427,13 @@ function Endpoint({
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-1 flex items-center gap-1 text-[11px] font-mono text-text-muted hover:text-text-primary transition-colors truncate"
+          className="mt-1 flex items-center gap-1 text-xs font-mono text-tertiary hover:text-primary transition-colors truncate"
         >
           {url.replace(/^https?:\/\//, '')}
           <ExternalLink className="h-2.5 w-2.5 shrink-0" />
         </a>
       ) : (
-        <p className="mt-1 text-[11px] text-text-muted">{active ? t('common.enabled') : t('domain.off')}</p>
+        <p className="mt-1 text-xs text-tertiary">{active ? t('common.enabled') : t('domain.off')}</p>
       )}
     </div>
   )

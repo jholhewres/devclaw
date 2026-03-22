@@ -26,39 +26,37 @@ export function ConfigPage({
   message,
 }: ConfigPageProps) {
   return (
-    <div className="flex flex-1 flex-col overflow-hidden bg-bg-main">
-      <div className="mx-auto w-full max-w-4xl flex-1 overflow-y-auto px-4 py-8 sm:px-6 sm:py-10 lg:px-8">
-        {/* Header */}
-        <div className="flex items-start justify-between">
-          <div>
-            {subtitle && (
-              <p className="text-[11px] font-bold tracking-[0.15em] text-text-muted uppercase">
-                {subtitle}
-              </p>
-            )}
-            <h1 className="mt-1 text-2xl font-bold tracking-tight text-text-primary">{title}</h1>
-            {description && <p className="mt-2 text-base text-text-muted">{description}</p>}
-          </div>
-          {actions && <div className="flex items-center gap-3">{actions}</div>}
+    <div>
+      {/* Header */}
+      <div className="flex items-start justify-between">
+        <div>
+          {subtitle && (
+            <p className="text-xs font-bold tracking-[0.15em] text-quaternary uppercase">
+              {subtitle}
+            </p>
+          )}
+          <h1 className="mt-1 text-display-xs font-semibold text-primary">{title}</h1>
+          {description && <p className="mt-2 text-md text-tertiary">{description}</p>}
         </div>
-
-        {/* Message */}
-        {message && (
-          <div
-            className={cn(
-              'mt-6 rounded-xl border px-5 py-4 text-sm',
-              message.type === 'success'
-                ? 'border-success/20 bg-success-subtle text-success'
-                : 'border-error/20 bg-error-subtle text-error'
-            )}
-          >
-            {message.text}
-          </div>
-        )}
-
-        {/* Content */}
-        <div className="mt-8">{children}</div>
+        {actions && <div className="flex items-center gap-3">{actions}</div>}
       </div>
+
+      {/* Message */}
+      {message && (
+        <div
+          className={cn(
+            'mt-6 rounded-xl border px-5 py-4 text-sm',
+            message.type === 'success'
+              ? 'border-success-primary/20 bg-success-secondary text-success-primary'
+              : 'border-error-primary/20 bg-error-secondary text-error-primary'
+          )}
+        >
+          {message.text}
+        </div>
+      )}
+
+      {/* Content */}
+      <div className="mt-8 space-y-6">{children}</div>
     </div>
   );
 }
@@ -106,7 +104,7 @@ export function ConfigSection({
   const Wrapper = canToggle && !useDiv ? 'button' : 'div';
 
   return (
-    <section className={cn('rounded-2xl border border-border', className)}>
+    <section className={cn('rounded-xl border border-secondary', className)}>
       <Wrapper
         {...(Wrapper === 'button' ? { onClick: handleHeaderClick, 'aria-expanded': open, type: 'button' as const } : { role: canToggle ? 'button' : undefined, tabIndex: canToggle ? 0 : undefined, 'aria-expanded': canToggle ? open : undefined, onClick: canToggle ? handleHeaderClick : undefined, onKeyDown: canToggle ? (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleHeaderClick(); } } : undefined })}
         className={cn(
@@ -116,18 +114,18 @@ export function ConfigSection({
       >
         {Icon && (
           <div
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-bg-subtle"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-secondary"
             style={iconColor ? { color: iconColor } : undefined}
           >
-            <Icon className={cn('h-5 w-5', !iconColor && 'text-text-primary')} />
+            <Icon className={cn('h-5 w-5', !iconColor && 'text-primary')} />
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <h2 className="text-base font-medium text-text-primary sm:text-lg sm:font-semibold">
+          <h2 className="text-base font-medium text-primary sm:text-lg sm:font-semibold">
             {title}
           </h2>
           {description && (
-            <p className="truncate text-sm text-text-muted">{description}</p>
+            <p className="truncate text-sm text-tertiary">{description}</p>
           )}
         </div>
         {trailing && (
@@ -138,14 +136,14 @@ export function ConfigSection({
         {collapsible && !trailing && (
           <ChevronDown
             className={cn(
-              'h-5 w-5 shrink-0 text-text-muted transition-transform duration-200',
+              'h-5 w-5 shrink-0 text-quaternary transition-transform duration-200',
               open && 'rotate-180',
             )}
           />
         )}
       </Wrapper>
       {open && (
-        <div className="space-y-5 border-t border-border px-5 py-4 sm:px-6 sm:py-5">
+        <div className="space-y-5 border-t border-secondary px-5 py-4 sm:px-6 sm:py-5">
           {children}
         </div>
       )}
@@ -167,11 +165,11 @@ interface ConfigFieldProps {
 export function ConfigField({ label, hint, children, className }: ConfigFieldProps) {
   return (
     <div className={cn('space-y-2', className)}>
-      <label className="block text-xs font-semibold tracking-wider text-text-muted uppercase">
+      <label className="block text-xs font-semibold tracking-wider text-quaternary uppercase">
         {label}
       </label>
       {children}
-      {hint && <p className="text-xs text-text-muted">{hint}</p>}
+      {hint && <p className="text-xs text-tertiary">{hint}</p>}
     </div>
   );
 }
@@ -205,7 +203,7 @@ export function ConfigInput({
       placeholder={placeholder}
       disabled={disabled}
       className={cn(
-        'h-11 w-full rounded-xl border border-border bg-bg-surface px-4 text-sm text-text-primary transition-all outline-none placeholder:text-text-muted hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20',
+        'h-11 w-full rounded-lg border border-primary bg-primary px-4 text-sm text-primary shadow-xs outline-none transition-all placeholder:text-quaternary hover:border-primary_hover focus:border-brand focus:ring-1 focus:ring-brand',
         disabled && 'cursor-not-allowed opacity-50',
         className
       )}
@@ -242,7 +240,7 @@ export function ConfigTextarea({
       rows={rows}
       disabled={disabled}
       className={cn(
-        'w-full resize-none rounded-xl border border-border bg-bg-surface px-4 py-3 text-sm text-text-primary transition-all outline-none placeholder:text-text-muted hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20',
+        'w-full resize-none rounded-lg border border-primary bg-primary px-4 py-3 text-sm text-primary shadow-xs outline-none transition-all placeholder:text-quaternary hover:border-primary_hover focus:border-brand focus:ring-1 focus:ring-brand',
         disabled && 'cursor-not-allowed opacity-50',
         className
       )}
@@ -282,7 +280,7 @@ export function ConfigSelect({
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       className={cn(
-        'h-11 w-full cursor-pointer appearance-none rounded-xl border border-border bg-bg-surface px-4 pr-10 text-sm text-text-primary transition-all outline-none hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20',
+        'h-11 w-full cursor-pointer appearance-none rounded-lg border border-primary bg-primary px-4 pr-10 text-sm text-primary shadow-xs outline-none transition-all hover:border-primary_hover focus:border-brand focus:ring-1 focus:ring-brand',
         disabled && 'cursor-not-allowed opacity-50',
         className
       )}
@@ -339,7 +337,7 @@ export function ConfigToggle({
       <div
         className={cn(
           'relative mt-0.5 h-6 w-11 flex-shrink-0 rounded-full transition-colors',
-          enabled ? 'bg-brand' : 'bg-bg-subtle'
+          enabled ? 'bg-brand-solid' : 'bg-quaternary'
         )}
       >
         <div
@@ -350,10 +348,10 @@ export function ConfigToggle({
         />
       </div>
       <div className="flex flex-col items-start">
-        <span className="text-sm text-text-secondary transition-colors group-hover:text-text-primary">
+        <span className="text-sm text-secondary transition-colors group-hover:text-primary">
           {label}
         </span>
-        {description && <span className="mt-0.5 text-xs text-text-muted">{description}</span>}
+        {description && <span className="mt-0.5 text-xs text-tertiary">{description}</span>}
       </div>
     </button>
   );
@@ -405,18 +403,18 @@ export function ConfigTagList({
       {/* Tags */}
       <div className="flex flex-wrap gap-2">
         {tags.length === 0 && !readOnly && (
-          <span className="text-sm text-text-muted italic">{emptyMessage}</span>
+          <span className="text-sm text-quaternary italic">{emptyMessage}</span>
         )}
         {tags.map((tag) => (
           <span
             key={tag}
-            className="group inline-flex items-center gap-1.5 rounded-lg bg-bg-subtle px-3 py-1.5 text-sm text-text-secondary"
+            className="group inline-flex items-center gap-1.5 rounded-lg bg-secondary px-3 py-1.5 text-sm text-secondary"
           >
             {tag}
             {!readOnly && onRemove && (
               <button
                 onClick={() => onRemove(tag)}
-                className="text-text-muted transition-colors hover:text-error"
+                className="text-quaternary transition-colors hover:text-error-primary"
               >
                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path
@@ -441,7 +439,7 @@ export function ConfigTagList({
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={addPlaceholder}
-            className="h-11 flex-1 rounded-xl border border-border bg-bg-surface px-4 text-sm text-text-primary transition-all outline-none placeholder:text-text-muted hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
+            className="h-11 flex-1 rounded-lg border border-primary bg-primary px-4 text-sm text-primary shadow-xs outline-none transition-all placeholder:text-quaternary hover:border-primary_hover focus:border-brand focus:ring-1 focus:ring-brand"
           />
           <Button size="lg" onClick={handleAdd} disabled={!inputValue.trim()}>
             {addLabel}
@@ -530,21 +528,21 @@ export function ConfigCard({
   className,
 }: ConfigCardProps) {
   const statusColors = {
-    success: 'bg-success-subtle',
-    error: 'bg-error-subtle',
-    warning: 'bg-warning-subtle',
-    neutral: 'bg-bg-subtle',
+    success: 'bg-success-secondary',
+    error: 'bg-error-secondary',
+    warning: 'bg-warning-secondary',
+    neutral: 'bg-secondary',
   };
 
   const iconColors = {
-    success: 'text-success',
-    error: 'text-error',
-    warning: 'text-warning',
-    neutral: 'text-text-muted',
+    success: 'text-fg-success-secondary',
+    error: 'text-fg-error-secondary',
+    warning: 'text-fg-warning-secondary',
+    neutral: 'text-fg-quaternary',
   };
 
   return (
-    <div className={cn('rounded-2xl border border-border bg-bg-surface p-6', className)}>
+    <div className={cn('rounded-xl border border-secondary bg-primary p-6', className)}>
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           {Icon && (
@@ -561,13 +559,13 @@ export function ConfigCard({
             </div>
           )}
           <div>
-            <h3 className="text-base font-semibold text-text-primary">{title}</h3>
-            {subtitle && <p className="text-sm text-text-muted">{subtitle}</p>}
+            <h3 className="text-base font-semibold text-primary">{title}</h3>
+            {subtitle && <p className="text-sm text-tertiary">{subtitle}</p>}
           </div>
         </div>
         {actions && <div className="flex items-center gap-2">{actions}</div>}
       </div>
-      {children && <div className="mt-4 border-t border-border pt-4">{children}</div>}
+      {children && <div className="mt-4 border-t border-secondary pt-4">{children}</div>}
     </div>
   );
 }
@@ -590,10 +588,10 @@ export function ConfigEmptyState({
   action,
 }: ConfigEmptyStateProps) {
   return (
-    <div className="rounded-2xl border border-border bg-bg-surface p-8 text-center">
-      {Icon && <Icon className="mx-auto mb-4 h-12 w-12 text-text-muted" />}
-      <p className="text-sm text-text-muted">{title}</p>
-      {description && <p className="mt-2 text-xs text-text-muted">{description}</p>}
+    <div className="rounded-xl border border-secondary bg-primary p-8 text-center">
+      {Icon && <Icon className="mx-auto mb-4 h-12 w-12 text-fg-quaternary" />}
+      <p className="text-sm text-tertiary">{title}</p>
+      {description && <p className="mt-2 text-xs text-quaternary">{description}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
   );
@@ -610,9 +608,9 @@ interface ConfigInfoBoxProps {
 
 export function ConfigInfoBox({ title, items }: ConfigInfoBoxProps) {
   return (
-    <div className="mb-8 rounded-2xl border border-border bg-bg-surface/50 p-6">
-      {title && <h3 className="mb-3 text-sm font-semibold text-text-muted">{title}</h3>}
-      <ul className="space-y-2 text-xs text-text-muted">
+    <div className="mb-8 rounded-xl border border-secondary bg-secondary p-6">
+      {title && <h3 className="mb-3 text-sm font-semibold text-tertiary">{title}</h3>}
+      <ul className="space-y-2 text-xs text-tertiary">
         {items.map((item, index) => (
           <li key={index}>• {item}</li>
         ))}
@@ -627,8 +625,8 @@ export function ConfigInfoBox({ title, items }: ConfigInfoBoxProps) {
 
 export function LoadingSpinner() {
   return (
-    <div className="flex flex-1 items-center justify-center bg-bg-main">
-      <div className="h-10 w-10 animate-spin rounded-full border-4 border-bg-subtle border-t-brand" />
+    <div className="flex flex-1 items-center justify-center">
+      <div className="h-10 w-10 animate-spin rounded-full border-4 border-secondary border-t-brand-solid" />
     </div>
   );
 }
@@ -648,8 +646,8 @@ export function ErrorState({ message, onRetry, retryLabel }: ErrorStateProps) {
   if (!message) message = t('common.error');
   if (!retryLabel) retryLabel = t('common.retry');
   return (
-    <div className="flex flex-1 flex-col items-center justify-center bg-bg-main">
-      <p className="text-sm text-error">{message}</p>
+    <div className="flex flex-1 flex-col items-center justify-center">
+      <p className="text-sm text-error-primary">{message}</p>
       {onRetry && (
         <Button variant="ghost" size="sm" onClick={onRetry} className="mt-3">
           {retryLabel}

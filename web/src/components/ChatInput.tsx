@@ -58,9 +58,9 @@ export function ChatInput({
   return (
     <div
       className={cn(
-        'rounded-2xl border bg-bg-surface shadow-sm transition-all',
-        'focus-within:border-border-hover focus-within:shadow-md',
-        'border-border'
+        'rounded-2xl border bg-primary shadow-sm transition-all',
+        'focus-within:border-primary focus-within:shadow-md',
+        'border-secondary'
       )}
     >
       {/* Textarea */}
@@ -74,8 +74,8 @@ export function ChatInput({
         rows={rows}
         autoFocus={autoFocus}
         className={cn(
-          'w-full resize-none border-none bg-transparent px-4 pt-3.5 pb-2 text-[15px] text-text-primary',
-          'placeholder:text-text-muted outline-none focus:ring-0',
+          'w-full resize-none border-none bg-transparent px-4 pt-3.5 pb-2 text-[15px] text-primary',
+          'placeholder:text-quaternary outline-none focus:ring-0',
           'disabled:opacity-50'
         )}
         style={{ boxShadow: 'none' }}
@@ -84,7 +84,7 @@ export function ChatInput({
       {/* Action bar */}
       <div className="flex items-center justify-between px-3 pb-3">
         {/* Left side - hint */}
-        <span className="text-[11px] text-text-muted">
+        <span className="text-xs text-tertiary">
           {t('chatPage.enterToSend')}
         </span>
 
@@ -110,8 +110,8 @@ export function ChatInput({
                 'flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-all',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50',
                 canSend
-                  ? 'bg-brand text-white hover:bg-brand-hover'
-                  : 'bg-bg-subtle text-text-muted cursor-not-allowed'
+                  ? 'bg-brand-solid text-white hover:bg-brand-hover'
+                  : 'bg-secondary text-tertiary cursor-not-allowed'
               )}
               aria-label="Send message"
             >

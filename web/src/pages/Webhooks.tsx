@@ -137,27 +137,27 @@ export function Webhooks() {
         {/* Create form */}
         {showForm && (
           <Card padding="lg" className="mb-6">
-            <h3 className="text-base font-semibold text-text-primary mb-5">{t('webhooks.newWebhook')}</h3>
+            <h3 className="text-base font-semibold text-primary mb-5">{t('webhooks.newWebhook')}</h3>
 
             <div className="space-y-5">
               {/* URL */}
               <div>
-                <label className="mb-2 block text-sm font-medium text-text-secondary">{t('webhooks.webhookUrl')}</label>
+                <label className="mb-2 block text-sm font-medium text-secondary">{t('webhooks.webhookUrl')}</label>
                 <input
                   value={newUrl}
                   onChange={(e) => setNewUrl(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
                   placeholder={t('webhooks.urlPlaceholder')}
-                  className="h-11 w-full rounded-xl border border-border bg-bg-surface px-4 text-sm text-text-primary outline-none placeholder:text-text-muted transition-all hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
+                  className="h-11 w-full rounded-xl border border-secondarybg-primary px-4 text-sm text-primary outline-none placeholder:text-tertiary transition-all hover:border-primary focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
                 />
-                <p className="mt-1.5 text-xs text-text-muted">
+                <p className="mt-1.5 text-xs text-tertiary">
                   {t('webhooks.payloadHint')}
                 </p>
               </div>
 
               {/* Events */}
               <div>
-                <label className="mb-3 block text-sm font-medium text-text-secondary">{t('webhooks.selectEvents')}</label>
+                <label className="mb-3 block text-sm font-medium text-secondary">{t('webhooks.selectEvents')}</label>
                 <div className="flex flex-wrap gap-2">
                   {validEvents.map((event) => {
                     const isSelected = selectedEvents.includes(event)
@@ -168,8 +168,8 @@ export function Webhooks() {
                         className={cn(
                           'cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium transition-all',
                           isSelected
-                            ? 'bg-brand-subtle text-brand'
-                            : 'bg-bg-subtle text-text-muted hover:bg-bg-hover hover:text-text-primary'
+                            ? 'bg-brand-secondary text-brand-tertiary'
+                            : 'bg-secondary text-tertiary hover:bg-primary_hover hover:text-primary'
                         )}
                       >
                         {event}
@@ -178,7 +178,7 @@ export function Webhooks() {
                   })}
                 </div>
                 {selectedEvents.length === 0 && (
-                  <p className="mt-2 flex items-center gap-1.5 text-xs text-warning">
+                  <p className="mt-2 flex items-center gap-1.5 text-xs text-fg-warning-secondary">
                     <AlertTriangle className="h-3 w-3" />
                     {t('webhooks.selectAtLeastOne')}
                   </p>
@@ -216,12 +216,12 @@ export function Webhooks() {
         {/* Webhook list */}
         <div>
           <div className="mb-5 flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-bg-subtle">
-              <Webhook className="h-4 w-4 text-text-muted" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-secondary">
+              <Webhook className="h-4 w-4 text-tertiary" />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-text-primary">{t('webhooks.title')} {t('webhooks.registered')}</h2>
-              <p className="text-xs text-text-muted">
+              <h2 className="text-base font-semibold text-primary">{t('webhooks.title')} {t('webhooks.registered')}</h2>
+              <p className="text-xs text-tertiary">
                 {webhooks.length === 0
                   ? t('webhooks.noWebhooks')
                   : `${webhooks.length} webhook${webhooks.length > 1 ? 's' : ''}`}
@@ -243,7 +243,7 @@ export function Webhooks() {
                   {t('webhooks.addWebhook')}
                 </Button>
               }
-              className="rounded-2xl border border-dashed border-border bg-bg-surface"
+              className="rounded-2xl border border-dashed border-secondarybg-primary"
             />
           ) : (
             <div className="space-y-3">
@@ -263,16 +263,16 @@ export function Webhooks() {
 
         {/* Quick documentation */}
         <Card padding="lg" className="mt-10 mb-6">
-          <h3 className="text-sm font-semibold text-text-secondary mb-3">{t('webhooks.availableEvents')}</h3>
+          <h3 className="text-sm font-semibold text-secondary mb-3">{t('webhooks.availableEvents')}</h3>
           <div className="grid grid-cols-2 gap-y-2 gap-x-4">
             {validEvents.map((event) => (
               <div key={event} className="flex items-center gap-2">
-                <div className="h-1.5 w-1.5 rounded-full bg-text-muted" />
-                <code className="text-xs font-mono text-text-secondary">{event}</code>
+                <div className="h-1.5 w-1.5 rounded-full bg-quaternary" />
+                <code className="text-xs font-mono text-secondary">{event}</code>
               </div>
             ))}
           </div>
-          <p className="mt-4 text-xs text-text-muted">
+          <p className="mt-4 text-xs text-tertiary">
             {t('webhooks.payloadHint')}
           </p>
         </Card>
@@ -311,15 +311,15 @@ function WebhookCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1.5">
             {webhook.active ? (
-              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-fg-success-secondary" />
             ) : (
-              <XCircle className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+              <XCircle className="h-3.5 w-3.5 shrink-0 text-tertiary" />
             )}
             <Badge variant={webhook.active ? 'success' : 'default'}>
               {webhook.active ? t('webhooks.active') : t('webhooks.inactive')}
             </Badge>
           </div>
-          <p className="truncate font-mono text-sm text-text-primary" title={webhook.url}>
+          <p className="truncate font-mono text-sm text-primary" title={webhook.url}>
             {webhook.url}
           </p>
         </div>
@@ -347,7 +347,7 @@ function WebhookCard({
             title={t('webhooks.copyId')}
           >
             {copiedId === webhook.id ? (
-              <Check className="h-4 w-4 text-success" />
+              <Check className="h-4 w-4 text-fg-success-secondary" />
             ) : (
               <Copy className="h-4 w-4" />
             )}
@@ -374,7 +374,7 @@ function WebhookCard({
                 setTimeout(() => setConfirming(false), 3000)
               }}
               title={t('common.delete')}
-              className="hover:bg-error-subtle hover:text-error"
+              className="hover:bg-error-primary hover:text-fg-error-secondary"
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -388,18 +388,18 @@ function WebhookCard({
           webhook.events.map((event) => (
             <span
               key={event}
-              className="rounded-md bg-bg-subtle px-2 py-0.5 text-[11px] font-mono text-text-secondary"
+              className="rounded-md bg-secondary px-2 py-0.5 text-xs font-mono text-secondary"
             >
               {event}
             </span>
           ))
         ) : (
-          <span className="text-[11px] text-text-muted italic">{t('webhooks.selectAtLeastOne')}</span>
+          <span className="text-xs text-tertiary italic">{t('webhooks.selectAtLeastOne')}</span>
         )}
       </div>
 
       {/* Meta: ID + created date */}
-      <div className="mt-3 flex items-center gap-4 text-[11px] text-text-muted">
+      <div className="mt-3 flex items-center gap-4 text-xs text-tertiary">
         <span>ID: {webhook.id}</span>
         <span>
           {t('webhooks.createdAtDate', {

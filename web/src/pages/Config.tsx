@@ -51,12 +51,12 @@ function PasswordInput({ value, onChange, placeholder }: {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="h-11 w-full rounded-xl border border-border bg-bg-surface px-4 pr-10 text-sm text-text-primary outline-none transition-all placeholder:text-text-muted hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
+        className="h-11 w-full rounded-xl border border-secondary bg-primary px-4 pr-10 text-sm text-primary outline-none transition-all placeholder:text-quaternary hover:border-primary focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
       />
       <button
         type="button"
         onClick={() => setShow(!show)}
-        className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer"
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-tertiary hover:text-primary cursor-pointer"
       >
         {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
       </button>

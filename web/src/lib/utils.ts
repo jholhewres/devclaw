@@ -1,10 +1,13 @@
 import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { cx } from '@/utils/cx';
 
-/** Merge Tailwind classes with conflict resolution */
+/** Merge Tailwind classes with conflict resolution (uses extended tailwind-merge) */
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+  return cx(clsx(inputs));
 }
+
+/** Re-export cx utilities for component style objects */
+export { cx, sortCx } from '@/utils/cx';
 
 /** Translator function type for timeAgo */
 type TFn = (key: string, opts?: Record<string, unknown>) => string;

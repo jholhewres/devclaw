@@ -187,20 +187,20 @@ export function WhatsAppConnect() {
   ]
 
   return (
-    <div className="flex-1 overflow-y-auto bg-bg-main">
+    <div className="flex-1 overflow-y-auto bg-primary">
       <div className="mx-auto max-w-3xl px-6 py-8">
         {/* Back + Header */}
         <div className="flex flex-col gap-3">
           <button
             onClick={() => navigate('/channels')}
-            className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary transition-colors cursor-pointer w-fit"
+            className="flex items-center gap-1.5 text-sm text-tertiary hover:text-primary transition-colors cursor-pointer w-fit"
           >
             <ArrowLeft className="h-4 w-4" />
             {t('channelsPage.backToChannels')}
           </button>
           <div className="flex flex-col gap-1">
-            <h2 className="text-lg font-medium text-text-primary">{t('whatsapp.title')}</h2>
-            <p className="text-sm text-text-muted">{t('whatsapp.subtitle')}</p>
+            <h2 className="text-lg font-medium text-primary">{t('whatsapp.title')}</h2>
+            <p className="text-sm text-tertiary">{t('whatsapp.subtitle')}</p>
           </div>
         </div>
 
@@ -258,7 +258,7 @@ function ConnectionTab({
     return (
       <div className="flex flex-col items-center gap-4 py-16">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-bg-subtle border-t-brand" />
-        <p className="text-sm text-text-muted">{t('whatsapp.checkingConnection')}</p>
+        <p className="text-sm text-tertiary">{t('whatsapp.checkingConnection')}</p>
       </div>
     )
   }
@@ -266,13 +266,13 @@ function ConnectionTab({
   if (state === 'connected') {
     return (
       <Card className="flex flex-col items-center px-6 py-6">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-success-subtle">
-          <CheckCircle2 className="h-8 w-8 text-success" />
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-success-primary">
+          <CheckCircle2 className="h-8 w-8 text-fg-success-secondary" />
         </div>
-        <h2 className="mt-4 text-center text-lg font-semibold text-text-primary">
+        <h2 className="mt-4 text-center text-lg font-semibold text-primary">
           {t('whatsapp.connected')}
         </h2>
-        <p className="mt-1 text-center text-sm text-text-muted">{message}</p>
+        <p className="mt-1 text-center text-sm text-tertiary">{message}</p>
         <div className="mt-3">
           <Badge variant="success">{t('common.online')}</Badge>
         </div>
@@ -295,18 +295,18 @@ function ConnectionTab({
     return (
       <div className="flex flex-col gap-6">
         {/* Mobile hint */}
-        <div className="md:hidden rounded-xl border border-warning/20 bg-warning-subtle px-4 py-3">
-          <p className="text-sm text-warning">{t('whatsapp.mobileHint')}</p>
+        <div className="md:hidden rounded-xl border border-warning/20 bg-warning-primary px-4 py-3">
+          <p className="text-sm text-fg-warning-secondary">{t('whatsapp.mobileHint')}</p>
         </div>
         <div className="grid items-center gap-8 md:grid-cols-[auto_1fr]">
           {/* QR side */}
           <div className="flex flex-col items-center gap-4">
             <Card className="relative rounded-2xl p-5">
               {/* Decorative corners */}
-              <div className="absolute -left-px -top-px h-6 w-6 rounded-tl-2xl border-l-2 border-t-2 border-brand" />
-              <div className="absolute -right-px -top-px h-6 w-6 rounded-tr-2xl border-r-2 border-t-2 border-brand" />
-              <div className="absolute -bottom-px -left-px h-6 w-6 rounded-bl-2xl border-b-2 border-l-2 border-brand" />
-              <div className="absolute -bottom-px -right-px h-6 w-6 rounded-br-2xl border-b-2 border-r-2 border-brand" />
+              <div className="absolute -left-px -top-px h-6 w-6 rounded-tl-2xl border-l-2 border-t-2 border-brand-solid" />
+              <div className="absolute -right-px -top-px h-6 w-6 rounded-tr-2xl border-r-2 border-t-2 border-brand-solid" />
+              <div className="absolute -bottom-px -left-px h-6 w-6 rounded-bl-2xl border-b-2 border-l-2 border-brand-solid" />
+              <div className="absolute -bottom-px -right-px h-6 w-6 rounded-br-2xl border-b-2 border-r-2 border-brand-solid" />
 
               {qrCode ? (
                 <div className="rounded-xl bg-white p-3">
@@ -321,8 +321,8 @@ function ConnectionTab({
               ) : (
                 <div className="flex h-[264px] w-[264px] items-center justify-center">
                   <div className="flex flex-col items-center gap-3">
-                    <QrCode className="h-12 w-12 animate-pulse text-text-muted" />
-                    <p className="text-xs text-text-muted">{t('whatsapp.generatingQR')}</p>
+                    <QrCode className="h-12 w-12 animate-pulse text-tertiary" />
+                    <p className="text-xs text-tertiary">{t('whatsapp.generatingQR')}</p>
                   </div>
                 </div>
               )}
@@ -330,7 +330,7 @@ function ConnectionTab({
             <button
               onClick={onRefresh}
               disabled={refreshing}
-              className="flex cursor-pointer items-center gap-1.5 text-xs text-text-muted transition-colors hover:text-text-primary disabled:opacity-50"
+              className="flex cursor-pointer items-center gap-1.5 text-xs text-tertiary transition-colors hover:text-primary disabled:opacity-50"
             >
               <RefreshCw className={cn('h-3 w-3', refreshing && 'animate-spin')} />
               {t('whatsapp.generateNew')}
@@ -339,16 +339,16 @@ function ConnectionTab({
 
           {/* Instructions side */}
           <div className="flex flex-col gap-5">
-            <h3 className="text-sm font-semibold text-text-primary">{t('whatsapp.howToConnect')}</h3>
+            <h3 className="text-sm font-semibold text-primary">{t('whatsapp.howToConnect')}</h3>
             <div className="flex flex-col gap-4">
               <StepItem number={1} text={t('whatsapp.step1')} />
               <StepItem number={2} text={t('whatsapp.step2')} />
               <StepItem number={3} text={t('whatsapp.step3')} />
               <StepItem number={4} text={t('whatsapp.step4')} />
             </div>
-            <div className="flex max-w-fit items-start gap-2 rounded-xl bg-bg-subtle px-3 py-2.5">
-              <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-text-muted" />
-              <p className="text-[11px] text-text-secondary">{t('whatsapp.e2eHint')}</p>
+            <div className="flex max-w-fit items-start gap-2 rounded-xl bg-secondary px-3 py-2.5">
+              <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-tertiary" />
+              <p className="text-xs text-secondary">{t('whatsapp.e2eHint')}</p>
             </div>
           </div>
         </div>
@@ -358,12 +358,12 @@ function ConnectionTab({
 
   if (state === 'timeout') {
     return (
-      <div className="flex flex-col items-center rounded-2xl border border-warning/20 bg-warning-subtle px-8 py-10">
-        <div className="flex h-20 w-20 items-center justify-center rounded-full bg-warning-subtle border border-warning/30">
-          <WifiOff className="h-10 w-10 text-warning" />
+      <div className="flex flex-col items-center rounded-2xl border border-warning/20 bg-warning-primary px-8 py-10">
+        <div className="flex h-20 w-20 items-center justify-center rounded-full bg-warning-primary border border-warning/30">
+          <WifiOff className="h-10 w-10 text-fg-warning-secondary" />
         </div>
-        <h2 className="mt-5 text-lg font-semibold text-text-primary">{t('whatsapp.qrExpired')}</h2>
-        <p className="mt-1 text-sm text-warning">{message}</p>
+        <h2 className="mt-5 text-lg font-semibold text-primary">{t('whatsapp.qrExpired')}</h2>
+        <p className="mt-1 text-sm text-fg-warning-secondary">{message}</p>
         <div className="mt-6">
           <Button onClick={onRefresh} disabled={refreshing} size="sm">
             {refreshing ? (
@@ -380,12 +380,12 @@ function ConnectionTab({
 
   // error
   return (
-    <div className="flex flex-col items-center rounded-2xl border border-error/20 bg-error-subtle px-8 py-10">
-      <div className="flex h-20 w-20 items-center justify-center rounded-full bg-error-subtle border border-error/30">
-        <WifiOff className="h-10 w-10 text-error" />
+    <div className="flex flex-col items-center rounded-2xl border border-error/20 bg-error-primary px-8 py-10">
+      <div className="flex h-20 w-20 items-center justify-center rounded-full bg-error-primary border border-error/30">
+        <WifiOff className="h-10 w-10 text-fg-error-secondary" />
       </div>
-      <h2 className="mt-5 text-lg font-semibold text-text-primary">{t('whatsapp.connectionError')}</h2>
-      <p className="mt-1 text-sm text-error">{message}</p>
+      <h2 className="mt-5 text-lg font-semibold text-primary">{t('whatsapp.connectionError')}</h2>
+      <p className="mt-1 text-sm text-fg-error-secondary">{message}</p>
       <div className="mt-6">
         <Button onClick={onRefresh} disabled={refreshing} size="sm">
           {refreshing ? (
@@ -481,15 +481,15 @@ function AccessTab() {
     return (
       <div className="flex flex-col items-center gap-4 py-16">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-bg-subtle border-t-brand" />
-        <p className="text-sm text-text-muted">{t('common.loading')}</p>
+        <p className="text-sm text-tertiary">{t('common.loading')}</p>
       </div>
     )
   }
 
   if (!config) {
     return (
-      <div className="rounded-xl border border-warning/20 bg-warning-subtle px-4 py-3">
-        <p className="text-sm text-text-primary">{t('whatsapp.accessNotAvailable')}</p>
+      <div className="rounded-xl border border-warning/20 bg-warning-primary px-4 py-3">
+        <p className="text-sm text-primary">{t('whatsapp.accessNotAvailable')}</p>
       </div>
     )
   }
@@ -505,7 +505,7 @@ function AccessTab() {
     <div className="flex flex-col gap-6">
       {/* Default Policy */}
       <Card className="p-6">
-        <h3 className="mb-4 text-sm font-semibold text-text-primary">{t('whatsapp.defaultPolicy')}</h3>
+        <h3 className="mb-4 text-sm font-semibold text-primary">{t('whatsapp.defaultPolicy')}</h3>
         <div className="flex gap-2">
           {['allow', 'deny'].map((policy) => (
             <button
@@ -516,7 +516,7 @@ function AccessTab() {
                 'cursor-pointer rounded-lg px-4 py-2 text-sm font-medium transition-colors',
                 config.default_policy === policy
                   ? 'bg-brand text-white'
-                  : 'bg-bg-elevated text-text-secondary hover:bg-bg-active'
+                  : 'bg-tertiary text-secondary hover:bg-active'
               )}
             >
               {t(`whatsapp.policies.${policy}`)}
@@ -528,7 +528,7 @@ function AccessTab() {
       {/* Users List */}
       <Card className="p-6">
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-text-primary">
+          <h3 className="text-sm font-semibold text-primary">
             {t('whatsapp.users')} ({allUsers.length})
           </h3>
           <Button size="sm" variant="secondary" onClick={() => setShowAddModal(true)}>
@@ -537,11 +537,11 @@ function AccessTab() {
         </div>
 
         {allUsers.length > 0 ? (
-          <div className="flex flex-col divide-y divide-border">
+          <div className="flex flex-col divide-y divide-secondary">
             {allUsers.map(({ jid, level }) => (
               <div key={jid} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
-                <UserCircle2 className="h-5 w-5 shrink-0 text-text-muted" />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-text-primary">
+                <UserCircle2 className="h-5 w-5 shrink-0 text-tertiary" />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
                   {jid.replace('@s.whatsapp.net', '')}
                 </span>
                 <Select
@@ -552,7 +552,7 @@ function AccessTab() {
                 />
                 <button
                   onClick={() => handleRemoveUser(jid, level)}
-                  className="shrink-0 cursor-pointer rounded-md p-1 text-text-muted hover:text-error transition"
+                  className="shrink-0 cursor-pointer rounded-md p-1 text-tertiary hover:text-fg-error-secondary transition"
                   title={t('common.remove')}
                 >
                   <XCircle className="h-4 w-4" />
@@ -561,7 +561,7 @@ function AccessTab() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-text-muted">{t('whatsapp.noUsers')}</p>
+          <p className="text-sm text-tertiary">{t('whatsapp.noUsers')}</p>
         )}
       </Card>
 
@@ -631,7 +631,7 @@ function AddUserModal({ isOpen, onClose, onAdd }: AddUserModalProps) {
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-text-primary">{t('whatsapp.phoneNumber')}</label>
+          <label className="text-sm font-medium text-primary">{t('whatsapp.phoneNumber')}</label>
           <Input
             value={jid}
             onChange={(e) => setJid(e.target.value)}
@@ -782,15 +782,15 @@ function GroupsTab() {
     return (
       <div className="flex flex-col items-center gap-4 py-16">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-bg-subtle border-t-brand" />
-        <p className="text-sm text-text-muted">{t('common.loading')}</p>
+        <p className="text-sm text-tertiary">{t('common.loading')}</p>
       </div>
     )
   }
 
   if (!policies) {
     return (
-      <div className="rounded-xl border border-warning/20 bg-warning-subtle px-4 py-3">
-        <p className="text-sm text-text-primary">{t('whatsapp.groupsNotAvailable')}</p>
+      <div className="rounded-xl border border-warning/20 bg-warning-primary px-4 py-3">
+        <p className="text-sm text-primary">{t('whatsapp.groupsNotAvailable')}</p>
       </div>
     )
   }
@@ -806,10 +806,10 @@ function GroupsTab() {
     <div className="flex flex-col gap-6">
       {/* Default Group Policy */}
       <Card className="p-6">
-        <h3 className="mb-2 text-sm font-semibold text-text-primary">
+        <h3 className="mb-2 text-sm font-semibold text-primary">
           {t('whatsapp.defaultGroupPolicy')}
         </h3>
-        <p className="mb-4 text-sm text-text-muted">{t('whatsapp.defaultGroupPolicyDesc')}</p>
+        <p className="mb-4 text-sm text-tertiary">{t('whatsapp.defaultGroupPolicyDesc')}</p>
         <Select
           placeholder={t('whatsapp.selectPolicy')}
           options={policySelectOptions}
@@ -823,7 +823,7 @@ function GroupsTab() {
       {/* Group List */}
       <Card className="p-6">
         <div className="mb-4 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-text-primary">
+          <h3 className="text-sm font-semibold text-primary">
             {t('whatsapp.configuredGroups')} ({(policies.groups || []).length})
           </h3>
           <Button size="sm" variant="secondary" onClick={handleLoadJoinedGroups} disabled={loadingGroups}>
@@ -837,19 +837,19 @@ function GroupsTab() {
             {(policies.groups || []).map((group) => {
               const activePolicies = group.policies || (group.policy ? [group.policy] : [])
               return (
-                <div key={group.id} className="rounded-lg bg-bg-subtle p-4">
+                <div key={group.id} className="rounded-lg bg-secondary p-4">
                   <div className="mb-3 flex items-start justify-between">
                     <div className="flex flex-col gap-1">
-                      <span className="text-sm font-medium text-text-primary">
+                      <span className="text-sm font-medium text-primary">
                         {group.name || group.id}
                       </span>
-                      <span className="text-xs text-text-muted">{group.id.replace('@g.us', '')}</span>
+                      <span className="text-xs text-tertiary">{group.id.replace('@g.us', '')}</span>
                     </div>
                   </div>
 
                   {/* Policies Checkboxes */}
                   <div className="mb-3">
-                    <label className="mb-2 block text-xs font-medium text-text-secondary">
+                    <label className="mb-2 block text-xs font-medium text-secondary">
                       {t('whatsapp.groupPoliciesLabel')}
                     </label>
                     <div className="flex flex-wrap gap-2">
@@ -864,7 +864,7 @@ function GroupsTab() {
                               'cursor-pointer rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
                               isActive
                                 ? 'bg-brand text-white'
-                                : 'bg-bg-elevated text-text-muted hover:bg-bg-active'
+                                : 'bg-tertiary text-tertiary hover:bg-active'
                             )}
                           >
                             {t(`whatsapp.groupPolicies.${policy}`)}
@@ -876,7 +876,7 @@ function GroupsTab() {
 
                   {/* Keywords */}
                   <div>
-                    <label className="mb-2 block text-xs font-medium text-text-secondary">
+                    <label className="mb-2 block text-xs font-medium text-secondary">
                       {t('whatsapp.keywordsLabel')}
                     </label>
                     {editingGroup === group.id ? (
@@ -912,20 +912,20 @@ function GroupsTab() {
                             group.keywords!.map((kw) => (
                               <span
                                 key={kw}
-                                className="rounded bg-bg-elevated px-2 py-0.5 text-xs text-text-secondary"
+                                className="rounded bg-tertiary px-2 py-0.5 text-xs text-secondary"
                               >
                                 {kw}
                               </span>
                             ))
                           ) : (
-                            <span className="text-xs text-text-muted">
+                            <span className="text-xs text-tertiary">
                               {t('whatsapp.noKeywords')}
                             </span>
                           )}
                         </div>
                         <button
                           onClick={() => startEditKeywords(group)}
-                          className="cursor-pointer text-xs text-brand hover:underline"
+                          className="cursor-pointer text-xs text-brand-tertiary hover:underline"
                         >
                           {t('common.edit')}
                         </button>
@@ -937,14 +937,14 @@ function GroupsTab() {
             })}
           </div>
         ) : (
-          <p className="text-sm text-text-muted">{t('whatsapp.noConfiguredGroups')}</p>
+          <p className="text-sm text-tertiary">{t('whatsapp.noConfiguredGroups')}</p>
         )}
       </Card>
 
       {/* Available Groups (from WhatsApp) */}
       {joinedGroups.length > 0 && (
         <Card className="p-6">
-          <h3 className="mb-4 text-sm font-semibold text-text-primary">
+          <h3 className="mb-4 text-sm font-semibold text-primary">
             {t('whatsapp.availableGroups')} ({joinedGroups.length})
           </h3>
           <div className="flex flex-col gap-2">
@@ -953,16 +953,16 @@ function GroupsTab() {
               return (
                 <div
                   key={group.jid}
-                  className="flex items-center justify-between rounded-lg bg-bg-subtle p-3"
+                  className="flex items-center justify-between rounded-lg bg-secondary p-3"
                 >
                   <div className="flex flex-col gap-1">
-                    <span className="text-sm font-medium text-text-primary">
+                    <span className="text-sm font-medium text-primary">
                       {group.name || group.jid}
                     </span>
-                    <span className="text-xs text-text-muted">{group.jid}</span>
+                    <span className="text-xs text-tertiary">{group.jid}</span>
                   </div>
                   {isConfigured ? (
-                    <span className="text-xs text-success">{t('whatsapp.groupConfigured')}</span>
+                    <span className="text-xs text-fg-success-secondary">{t('whatsapp.groupConfigured')}</span>
                   ) : (
                     <Button
                       size="sm"
@@ -1024,7 +1024,7 @@ function SettingsTab() {
     return (
       <div className="flex flex-col items-center gap-4 py-16">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-bg-subtle border-t-brand" />
-        <p className="text-sm text-text-muted">{t('common.loading')}</p>
+        <p className="text-sm text-tertiary">{t('common.loading')}</p>
       </div>
     )
   }
@@ -1033,14 +1033,14 @@ function SettingsTab() {
     <div className="flex flex-col gap-6">
       {/* Bot Settings */}
       <Card className="p-6">
-        <h3 className="mb-4 text-sm font-semibold text-text-primary">{t('whatsapp.settings.bot')}</h3>
+        <h3 className="mb-4 text-sm font-semibold text-primary">{t('whatsapp.settings.bot')}</h3>
 
-        <div className="flex items-start justify-between border-b border-border py-4">
+        <div className="flex items-start justify-between border-b border-secondarypy-4">
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-text-primary">
+            <span className="text-sm font-medium text-primary">
               {t('whatsapp.settings.respondToGroups')}
             </span>
-            <span className="text-xs text-text-muted">
+            <span className="text-xs text-tertiary">
               {t('whatsapp.settings.respondToGroupsDesc')}
             </span>
           </div>
@@ -1054,10 +1054,10 @@ function SettingsTab() {
 
         <div className="flex items-start justify-between py-4">
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-text-primary">
+            <span className="text-sm font-medium text-primary">
               {t('whatsapp.settings.respondToDMs')}
             </span>
-            <span className="text-xs text-text-muted">{t('whatsapp.settings.respondToDMsDesc')}</span>
+            <span className="text-xs text-tertiary">{t('whatsapp.settings.respondToDMsDesc')}</span>
           </div>
           <Toggle
             checked={settings.respond_to_dms}
@@ -1070,16 +1070,16 @@ function SettingsTab() {
 
       {/* Behavior Settings */}
       <Card className="p-6">
-        <h3 className="mb-4 text-sm font-semibold text-text-primary">
+        <h3 className="mb-4 text-sm font-semibold text-primary">
           {t('whatsapp.settings.behavior')}
         </h3>
 
-        <div className="flex items-start justify-between border-b border-border py-4">
+        <div className="flex items-start justify-between border-b border-secondarypy-4">
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-text-primary">
+            <span className="text-sm font-medium text-primary">
               {t('whatsapp.settings.autoRead')}
             </span>
-            <span className="text-xs text-text-muted">{t('whatsapp.settings.autoReadDesc')}</span>
+            <span className="text-xs text-tertiary">{t('whatsapp.settings.autoReadDesc')}</span>
           </div>
           <Toggle
             checked={settings.auto_read}
@@ -1091,10 +1091,10 @@ function SettingsTab() {
 
         <div className="flex items-start justify-between py-4">
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-text-primary">
+            <span className="text-sm font-medium text-primary">
               {t('whatsapp.settings.sendTyping')}
             </span>
-            <span className="text-xs text-text-muted">{t('whatsapp.settings.sendTypingDesc')}</span>
+            <span className="text-xs text-tertiary">{t('whatsapp.settings.sendTypingDesc')}</span>
           </div>
           <Toggle
             checked={settings.send_typing}
@@ -1113,10 +1113,10 @@ function SettingsTab() {
 function StepItem({ number, text }: { number: number; text: string }) {
   return (
     <div className="flex items-start gap-3">
-      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-subtle text-[11px] font-semibold text-brand">
+      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-brand-secondary text-xs font-semibold text-brand-tertiary">
         {number}
       </div>
-      <p className="text-sm text-text-secondary leading-relaxed">{text}</p>
+      <p className="text-sm text-secondary leading-relaxed">{text}</p>
     </div>
   )
 }

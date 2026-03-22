@@ -2,10 +2,10 @@ import type { HTMLAttributes } from 'react';
 import { cn } from '@/lib/utils';
 
 const variants = {
-  default: 'bg-bg-elevated text-text-primary',
-  success: 'bg-success-subtle text-success',
-  warning: 'bg-warning-subtle text-warning',
-  error: 'bg-error-subtle text-error',
+  default: 'bg-secondary text-primary',
+  success: 'bg-success-secondary text-success-primary',
+  warning: 'bg-warning-secondary text-warning-primary',
+  error: 'bg-error-secondary text-error-primary',
 };
 
 interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {

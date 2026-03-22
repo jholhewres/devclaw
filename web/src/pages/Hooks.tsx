@@ -107,12 +107,12 @@ export function Hooks() {
             {/* Filter by event */}
             {hooks.length > 0 && (
               <div className="flex items-center gap-3">
-                <Filter className="h-4 w-4 text-text-muted" />
+                <Filter className="h-4 w-4 text-tertiary" />
                 <select
                   value={filterEvent}
                   onChange={(e) => setFilterEvent(e.target.value)}
                   aria-label={t('hooks.allEvents')}
-                  className="h-11 cursor-pointer rounded-xl border border-border bg-bg-surface px-3 text-xs text-text-primary outline-none transition-all hover:border-border-hover focus:border-brand/50"
+                  className="h-11 cursor-pointer rounded-xl border border-secondary bg-primary px-3 text-xs text-primary outline-none transition-all hover:border-primary focus:border-brand/50"
                 >
                   <option value="">{t('hooks.allEvents')}</option>
                   {events
@@ -126,7 +126,7 @@ export function Hooks() {
                 {filterEvent && (
                   <button
                     onClick={() => setFilterEvent('')}
-                    className="cursor-pointer text-xs text-text-muted hover:text-text-primary transition-colors"
+                    className="cursor-pointer text-xs text-tertiary hover:text-primary transition-colors"
                   >
                     {t('hooks.clearFilter')}
                   </button>
@@ -137,12 +137,12 @@ export function Hooks() {
             {/* Hook list */}
             <div className="mt-6">
               <div className="mb-5 flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-bg-subtle">
-                  <Zap className="h-4 w-4 text-text-muted" />
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-secondary">
+                  <Zap className="h-4 w-4 text-tertiary" />
                 </div>
                 <div>
-                  <h2 className="text-base font-semibold text-text-primary">{t('hooks.tabHooks')} {t('hooks.registered')}</h2>
-                  <p className="text-xs text-text-muted">
+                  <h2 className="text-base font-semibold text-primary">{t('hooks.tabHooks')} {t('hooks.registered')}</h2>
+                  <p className="text-xs text-tertiary">
                     {filteredHooks.length === 0
                       ? t('hooks.noHooks')
                       : `${filteredHooks.length} hook${filteredHooks.length > 1 ? 's' : ''}`}
@@ -155,7 +155,7 @@ export function Hooks() {
                   icon={<Zap className="h-6 w-6" />}
                   title={filterEvent ? t('hooks.noHooksForEvent', { event: filterEvent }) : t('hooks.noHooks')}
                   description={!filterEvent ? t('hooks.noHooksHint') : undefined}
-                  className="rounded-2xl border border-dashed border-border bg-bg-surface"
+                  className="rounded-2xl border border-dashed border-secondary bg-primary"
                 />
               ) : (
                 <div className="space-y-3">
@@ -189,13 +189,13 @@ export function Hooks() {
 
         {/* Info card */}
         <Card padding="lg" className="mt-10 mb-6">
-          <h3 className="text-sm font-semibold text-text-secondary mb-3">{t('hooks.aboutTitle')}</h3>
-          <p className="text-xs text-text-muted leading-relaxed">
+          <h3 className="text-sm font-semibold text-secondary mb-3">{t('hooks.aboutTitle')}</h3>
+          <p className="text-xs text-tertiary leading-relaxed">
             {t('hooks.aboutTip1')} {t('hooks.aboutTip2')} {t('hooks.aboutTip3')}
           </p>
-          <div className="mt-3 flex items-start gap-2 rounded-xl bg-bg-subtle px-3 py-2">
-            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
-            <p className="text-xs text-warning">
+          <div className="mt-3 flex items-start gap-2 rounded-xl bg-secondary px-3 py-2">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-fg-warning-secondary" />
+            <p className="text-xs text-fg-warning-secondary">
               {t('hooks.aboutWarning')}
             </p>
           </div>
@@ -238,23 +238,23 @@ function HookCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2.5 mb-1.5">
             {hook.enabled ? (
-              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-success" />
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-fg-success-secondary" />
             ) : (
-              <XCircle className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+              <XCircle className="h-3.5 w-3.5 shrink-0 text-tertiary" />
             )}
-            <span className="text-sm font-semibold text-text-primary truncate">{hook.name}</span>
+            <span className="text-sm font-semibold text-primary truncate">{hook.name}</span>
             <Badge>{sourceLabel(hook.source)}</Badge>
           </div>
 
           {hook.description && (
-            <p className="text-xs text-text-secondary mt-1">{hook.description}</p>
+            <p className="text-xs text-secondary mt-1">{hook.description}</p>
           )}
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
           {/* Priority */}
           <span
-            className="flex h-8 items-center rounded-xl px-2 text-[11px] font-mono text-text-muted"
+            className="flex h-8 items-center rounded-xl px-2 text-xs font-mono text-tertiary"
             title={t('hooks.priority')}
           >
             P{hook.priority}
@@ -295,7 +295,7 @@ function HookCard({
                 setTimeout(() => setConfirming(false), 3000)
               }}
               title={t('common.delete')}
-              className="hover:bg-error-subtle hover:text-error"
+              className="hover:bg-error-primary hover:text-fg-error-secondary"
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -308,7 +308,7 @@ function HookCard({
         {hook.events.map((event) => (
           <span
             key={event}
-            className="rounded-md bg-bg-subtle px-2 py-0.5 text-[11px] font-mono text-text-secondary"
+            className="rounded-md bg-secondary px-2 py-0.5 text-xs font-mono text-secondary"
           >
             {event}
           </span>
@@ -340,39 +340,39 @@ function EventCard({
       >
         <div className="flex items-center gap-3">
           {expanded ? (
-            <ChevronDown className="h-4 w-4 text-text-muted" />
+            <ChevronDown className="h-4 w-4 text-tertiary" />
           ) : (
-            <ChevronRight className="h-4 w-4 text-text-muted" />
+            <ChevronRight className="h-4 w-4 text-tertiary" />
           )}
           <div className="text-left">
-            <code className="text-sm font-semibold text-text-primary">{event.event}</code>
-            <p className="text-xs text-text-muted mt-0.5">{event.description}</p>
+            <code className="text-sm font-semibold text-primary">{event.event}</code>
+            <p className="text-xs text-tertiary mt-0.5">{event.description}</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           {hasHooks ? (
-            <Badge className="bg-brand-subtle text-brand">
+            <Badge className="bg-brand-secondary text-brand-tertiary">
               {event.hooks.length} hook{event.hooks.length > 1 ? 's' : ''}
             </Badge>
           ) : (
-            <span className="text-[11px] text-text-muted">{t('hooks.noHooksAttached')}</span>
+            <span className="text-xs text-tertiary">{t('hooks.noHooksAttached')}</span>
           )}
         </div>
       </button>
 
       {expanded && hasHooks && (
-        <div className="border-t border-border px-5 py-3">
+        <div className="border-t border-secondary px-5 py-3">
           <div className="space-y-1.5">
             {event.hooks.map((hookName) => (
               <div
                 key={hookName}
-                className="flex items-center justify-between rounded-xl bg-bg-main px-3 py-2"
+                className="flex items-center justify-between rounded-xl bg-primary px-3 py-2"
               >
-                <span className="text-xs font-mono text-text-primary">{hookName}</span>
+                <span className="text-xs font-mono text-primary">{hookName}</span>
                 <button
                   onClick={() => onFilterByEvent(event.event)}
-                  className="cursor-pointer text-[11px] text-text-muted hover:text-text-primary transition-colors"
+                  className="cursor-pointer text-xs text-tertiary hover:text-primary transition-colors"
                 >
                   {t('hooks.viewInList')}
                 </button>

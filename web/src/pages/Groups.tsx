@@ -181,7 +181,7 @@ export function Groups() {
         )}
 
         {config.quiet_hours_enabled && (
-          <p className="text-xs text-text-muted">{t('groups.quietHoursHint')}</p>
+          <p className="text-xs text-quaternary">{t('groups.quietHoursHint')}</p>
         )}
       </ConfigSection>
     </ConfigPage>

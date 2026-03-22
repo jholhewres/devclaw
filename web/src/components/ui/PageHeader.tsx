@@ -26,8 +26,8 @@ export function PageHeader({
           <a
             href={backLink}
             className={cn(
-              'mb-3 inline-flex items-center gap-1.5 text-sm text-text-secondary',
-              'hover:text-text-primary transition-colors duration-150',
+              'mb-3 inline-flex items-center gap-1.5 text-sm text-secondary',
+              'hover:text-primary transition-colors duration-150',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:rounded'
             )}
           >
@@ -36,12 +36,12 @@ export function PageHeader({
           </a>
         )}
 
-        <h1 className="text-xl font-semibold tracking-tight text-text-primary">
+        <h1 className="text-display-xs font-semibold text-primary">
           {title}
         </h1>
 
         {description && (
-          <p className="mt-1 text-sm text-text-secondary">{description}</p>
+          <p className="mt-1 text-sm text-tertiary">{description}</p>
         )}
       </div>
 

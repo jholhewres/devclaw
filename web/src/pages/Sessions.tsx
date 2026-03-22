@@ -102,13 +102,13 @@ export function Sessions() {
           return (
             <div
               key={session.id}
-              className="group flex items-center rounded-xl transition-all duration-200 hover:bg-bg-hover"
+              className="group flex items-center rounded-xl transition-all duration-200 hover:bg-primary_hover"
             >
               <button
                 onClick={() => navigate(`/chat/${encodeURIComponent(chatId)}`)}
                 className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-3 text-left"
               >
-                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-bg-subtle text-text-muted">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-quaternary">
                   <MessageSquare className="size-4" />
                 </div>
                 <div className="min-w-0 flex-1">
@@ -118,9 +118,9 @@ export function Sessions() {
                         {CHANNEL_LABELS[channel] || channel}
                       </Badge>
                     )}
-                    <p className="truncate text-sm font-medium text-text-secondary">{label}</p>
+                    <p className="truncate text-sm font-medium text-secondary">{label}</p>
                   </div>
-                  <p className="mt-0.5 text-xs text-text-muted">
+                  <p className="mt-0.5 text-xs text-tertiary">
                     {session.message_count} {t('sessions.messages')} ·{' '}
                     {timeAgo(session.last_message_at, t)}
                   </p>
@@ -147,7 +147,7 @@ export function Sessions() {
                     setTimeout(() => setConfirmingDelete(null), 3000);
                   }}
                   aria-label="Delete session"
-                  className="mr-3 shrink-0 cursor-pointer rounded-xl p-1.5 text-text-muted opacity-0 transition-all group-hover:opacity-100 hover:bg-error-subtle hover:text-error"
+                  className="mr-3 shrink-0 cursor-pointer rounded-xl p-1.5 text-quaternary opacity-0 transition-all group-hover:opacity-100 hover:bg-error-primary hover:text-fg-error-secondary"
                 >
                   <Trash2 className="size-4" />
                 </button>

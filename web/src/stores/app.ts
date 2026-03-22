@@ -24,7 +24,7 @@ interface AppState {
 export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
-      sidebarOpen: true,
+      sidebarOpen: false,
       sidebarCollapsed: false,
       theme: 'light',
       activeSessionId: null,

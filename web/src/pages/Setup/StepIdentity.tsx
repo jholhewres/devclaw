@@ -73,8 +73,8 @@ export function StepIdentity({ data, updateData }: Props) {
                 className={cn(
                   'flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-all',
                   data.language === lang.value
-                    ? 'border-brand/50 bg-brand-subtle text-text-primary'
-                    : 'border-border-hover bg-bg-main text-text-secondary hover:border-text-muted hover:bg-bg-surface',
+                    ? 'border-brand/50 bg-brand-secondary text-primary'
+                    : 'border-primary bg-primary text-secondary hover:border-text-muted hover:bg-primary',
                 )}
               >
                 <span className="text-base">{lang.flag}</span>

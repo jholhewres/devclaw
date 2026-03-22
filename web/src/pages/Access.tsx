@@ -45,14 +45,14 @@ function ColoredTagList({ tags, onRemove, color = 'blue' }: {
 }) {
   const { t } = useTranslation()
   const colorClasses = {
-    blue: 'bg-brand-subtle text-brand border-brand/20',
-    green: 'bg-success-subtle text-success border-success/20',
-    red: 'bg-error-subtle text-error border-error/20',
-    yellow: 'bg-warning-subtle text-warning border-warning/20',
+    blue: 'bg-brand-secondary text-brand-tertiary border-brand/20',
+    green: 'bg-success-secondary text-fg-success-secondary border-success-primary/20',
+    red: 'bg-error-secondary text-fg-error-secondary border-error/20',
+    yellow: 'bg-warning-secondary text-fg-warning-secondary border-warning-primary/20',
   }
 
   if (tags.length === 0) {
-    return <p className="text-sm text-text-muted">{t('access.noUsers')}</p>
+    return <p className="text-sm text-tertiary">{t('access.noUsers')}</p>
   }
 
   return (
@@ -101,7 +101,7 @@ function AddTagInput({ onAdd, placeholder }: {
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAdd())}
         placeholder={placeholder}
-        className="h-11 flex-1 rounded-xl border border-border bg-bg-surface px-4 text-sm text-text-primary outline-none transition-all placeholder:text-text-muted hover:border-border-hover focus:border-brand/50"
+        className="h-11 flex-1 rounded-xl border border-secondary bg-primary px-4 text-sm text-primary outline-none transition-all placeholder:text-tertiary hover:border-primary focus:border-brand/50"
       />
       <Button variant="outline" onClick={handleAdd}>
         <UserPlus className="h-4 w-4" />
@@ -283,11 +283,11 @@ export function Access() {
 
       {/* Warning */}
       <div className="mb-10">
-        <div className="flex items-start gap-3 rounded-xl border border-warning/20 bg-warning-subtle p-4">
-          <AlertTriangle className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 rounded-xl border border-warning-primary/20 bg-warning-primary p-4">
+          <AlertTriangle className="h-5 w-5 text-fg-warning-secondary flex-shrink-0 mt-0.5" />
           <div>
-            <h3 className="text-sm font-semibold text-warning">{t('access.warning')}</h3>
-            <p className="text-xs text-text-secondary mt-1">{t('access.warningDesc')}</p>
+            <h3 className="text-sm font-semibold text-fg-warning-secondary">{t('access.warning')}</h3>
+            <p className="text-xs text-secondary mt-1">{t('access.warningDesc')}</p>
           </div>
         </div>
       </div>

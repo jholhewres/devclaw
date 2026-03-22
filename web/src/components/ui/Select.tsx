@@ -42,7 +42,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
         {label && (
           <label
             htmlFor={id}
-            className="text-sm font-medium text-text-primary"
+            className="text-sm font-medium text-primary"
           >
             {label}
           </label>
@@ -56,16 +56,16 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             disabled={disabled}
             onChange={(e) => onChange?.(e.target.value)}
             className={cn(
-              'h-11 w-full cursor-pointer appearance-none rounded-xl border bg-bg-surface px-4 pr-10 text-sm',
-              'text-text-primary placeholder:text-text-muted',
+              'h-11 w-full cursor-pointer appearance-none rounded-lg border bg-primary px-4 pr-10 text-sm shadow-xs',
+              'text-primary placeholder:text-quaternary',
               'transition-all outline-none',
-              'hover:border-border-hover',
-              'focus:border-brand/50 focus:ring-1 focus:ring-brand/20',
+              'hover:border-primary_hover',
+              'focus:border-brand focus:ring-1 focus:ring-brand',
               'disabled:cursor-not-allowed disabled:opacity-50',
               error
-                ? 'border-error focus:ring-error'
-                : 'border-border',
-              !value && placeholder && 'text-text-muted'
+                ? 'border-error-primary focus:ring-error-primary'
+                : 'border-primary',
+              !value && placeholder && 'text-quaternary'
             )}
             {...props}
           >
@@ -85,7 +85,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           <ChevronDown
             className={cn(
               'pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2',
-              'text-text-muted',
+              'text-fg-quaternary',
               disabled && 'opacity-50'
             )}
           />
@@ -96,7 +96,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           <p
             className={cn(
               'text-xs',
-              error ? 'text-error' : 'text-text-muted'
+              error ? 'text-error-primary' : 'text-tertiary'
             )}
           >
             {error || hint}

@@ -62,27 +62,27 @@ export function StepChannels({ data, updateData }: Props) {
                 className={cn(
                   'flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-all',
                   isActive
-                    ? 'border-transparent bg-bg-subtle'
-                    : 'border-border bg-bg-main/50 hover:border-border-hover hover:bg-bg-surface',
+                    ? 'border-transparent bg-secondary'
+                    : 'border-secondary bg-primary/50 hover:border-primary hover:bg-primary',
                 )}
                 style={isActive ? { borderLeftWidth: '3px', borderLeftColor: ch.color } : {}}
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-bg-subtle">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-secondary">
                   <div style={{ color: isActive ? ch.color : 'var(--color-text-muted)' }}>{ch.icon}</div>
                 </div>
                 <div className="min-w-0 flex-1">
-                  <span className="text-sm font-medium text-text-primary">
+                  <span className="text-sm font-medium text-primary">
                     {t(`setupPage.channel${ch.id.charAt(0).toUpperCase() + ch.id.slice(1)}`)}
                   </span>
-                  <p className="text-xs text-text-secondary">
+                  <p className="text-xs text-secondary">
                     {t(`setupPage.channel${ch.id.charAt(0).toUpperCase() + ch.id.slice(1)}Desc`)}
                   </p>
                 </div>
                 <div className={cn(
                   'flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-all',
                   isActive
-                    ? 'border-transparent bg-success text-white'
-                    : 'border-border-hover bg-bg-subtle',
+                    ? 'border-transparent bg-success-solid text-white'
+                    : 'border-primary bg-secondary',
                 )}>
                   {isActive && <Check className="h-3 w-3" />}
                 </div>

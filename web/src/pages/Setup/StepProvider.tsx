@@ -81,19 +81,19 @@ export function StepProvider({ data, updateData }: Props) {
                   className={cn(
                     'flex cursor-pointer flex-col items-start gap-2.5 rounded-xl border p-3 transition-colors',
                     isSelected
-                      ? 'border-brand ring-1 ring-brand ring-inset'
-                      : 'border-border-hover bg-bg-main hover:border-text-muted hover:bg-bg-surface',
+                      ? 'border-brand-solid ring-1 ring-brand ring-inset'
+                      : 'border-primary bg-primary hover:border-text-muted hover:bg-primary',
                   )}
                   title={p.description}
                 >
                   <div className="flex w-full items-start justify-between">
-                    <div className="flex h-6 w-6 items-center justify-center text-text-muted">
+                    <div className="flex h-6 w-6 items-center justify-center text-tertiary">
                       {icon}
                     </div>
                     <div
                       className={cn(
                         'flex h-4 w-4 items-center justify-center rounded-full border-2 transition-colors',
-                        isSelected ? 'border-brand bg-brand' : 'border-border-hover',
+                        isSelected ? 'border-brand-solid bg-brand-solid' : 'border-primary',
                       )}
                     >
                       {isSelected && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
@@ -101,7 +101,7 @@ export function StepProvider({ data, updateData }: Props) {
                   </div>
                   <span className={cn(
                     'text-xs font-medium',
-                    isSelected ? 'text-text-primary' : 'text-text-secondary',
+                    isSelected ? 'text-primary' : 'text-secondary',
                   )}>
                     {p.label}
                   </span>
@@ -114,10 +114,10 @@ export function StepProvider({ data, updateData }: Props) {
               <button
                 type="button"
                 onClick={() => setExpandedGrid(true)}
-                className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-border-hover p-3 transition-colors hover:border-text-muted hover:bg-bg-surface"
+                className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-primary p-3 transition-colors hover:border-text-muted hover:bg-primary"
               >
-                <Plus className="h-4 w-4 text-text-muted" />
-                <span className="text-xs font-medium text-text-muted">{t('config.seeMore')}</span>
+                <Plus className="h-4 w-4 text-tertiary" />
+                <span className="text-xs font-medium text-tertiary">{t('config.seeMore')}</span>
               </button>
             )}
           </div>
@@ -125,9 +125,9 @@ export function StepProvider({ data, updateData }: Props) {
 
         {/* Provider info with link */}
         {provider && provider.freeUrl && (
-          <div className="flex items-center gap-2 rounded-lg border border-border-hover bg-bg-main px-3 py-2">
+          <div className="flex items-center gap-2 rounded-lg border border-primary bg-primary px-3 py-2">
             <div className="flex-1">
-              <p className="text-xs text-text-secondary">
+              <p className="text-xs text-secondary">
                 {provider.freeNote || provider.description}
               </p>
             </div>
@@ -135,7 +135,7 @@ export function StepProvider({ data, updateData }: Props) {
               href={provider.freeUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs text-brand transition-colors hover:text-brand-hover"
+              className="flex items-center gap-1 text-xs text-brand-tertiary transition-colors hover:text-brand-hover"
             >
               {t('setupPage.getApiKey')}
               <ExternalLink className="h-3 w-3" />
@@ -154,18 +154,18 @@ export function StepProvider({ data, updateData }: Props) {
                   className={cn(
                     'cursor-pointer rounded-xl border px-3 py-2.5 text-left transition-all',
                     data.baseUrl === ep.value
-                      ? 'border-brand/50 bg-brand-subtle'
-                      : 'border-border-hover bg-bg-main hover:border-text-muted hover:bg-bg-surface',
+                      ? 'border-brand/50 bg-brand-secondary'
+                      : 'border-primary bg-primary hover:border-text-muted hover:bg-primary',
                   )}
                 >
                   <span className={cn(
                     'text-xs font-medium',
-                    data.baseUrl === ep.value ? 'text-text-primary' : 'text-text-secondary',
+                    data.baseUrl === ep.value ? 'text-primary' : 'text-secondary',
                   )}>
                     {ep.label}
                   </span>
                   {ep.value && (
-                    <p className="mt-0.5 truncate font-mono text-[10px] text-text-muted">
+                    <p className="mt-0.5 truncate font-mono text-[10px] text-tertiary">
                       {ep.value.replace('https://', '')}
                     </p>
                   )}
@@ -230,11 +230,11 @@ export function StepProvider({ data, updateData }: Props) {
           {testResult && (
             <div className="flex items-center gap-1.5 text-sm">
               {testResult.success ? (
-                <span className="flex items-center gap-1.5 text-success">
+                <span className="flex items-center gap-1.5 text-fg-success-secondary">
                   <CheckCircle2 className="h-4 w-4" /> {t('setupPage.connected')}
                 </span>
               ) : (
-                <span className="flex items-center gap-1.5 text-error">
+                <span className="flex items-center gap-1.5 text-fg-error-secondary">
                   <XCircle className="h-4 w-4" /> {testResult.error}
                 </span>
               )}

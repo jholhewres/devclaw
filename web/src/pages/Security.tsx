@@ -45,11 +45,11 @@ export function Security() {
   const authOk = overview?.webui_auth_configured
 
   return (
-    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+    <div>
       {/* Header */}
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-text-muted">{t('security.subtitle')}</p>
-        <h1 className="mt-1 text-2xl font-bold text-text-primary tracking-tight">{t('security.title')}</h1>
+        <p className="text-xs font-bold uppercase tracking-[0.15em] text-quaternary">{t('security.subtitle')}</p>
+        <h1 className="mt-1 text-display-xs font-semibold text-primary">{t('security.title')}</h1>
       </div>
 
       {/* Quick status */}
@@ -78,12 +78,12 @@ function StatusPill({ label, ok, text }: { label: string; ok: boolean; text: str
   return (
     <div className={cn(
       'rounded-xl px-3.5 py-2.5 border',
-      ok ? 'bg-bg-surface border-brand/30' : 'bg-bg-surface border-border'
+      ok ? 'bg-primary border-brand-primary/30' : 'bg-primary border-secondary'
     )}>
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">{label}</span>
+      <span className="text-xs font-semibold uppercase tracking-wider text-quaternary">{label}</span>
       <div className="mt-0.5 flex items-center gap-1.5">
-        <span className={cn('h-1.5 w-1.5 rounded-full', ok ? 'bg-success' : 'bg-text-muted')} />
-        <span className={cn('text-xs font-medium', ok ? 'text-text-primary' : 'text-text-muted')}>{text}</span>
+        <span className={cn('h-1.5 w-1.5 rounded-full', ok ? 'bg-success-solid' : 'bg-quaternary')} />
+        <span className={cn('text-xs font-medium', ok ? 'text-primary' : 'text-quaternary')}>{text}</span>
       </div>
     </div>
   )
@@ -119,23 +119,23 @@ function Accordion({
   }
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-border bg-bg-surface">
+    <section className="overflow-hidden rounded-xl border border-secondary bg-primary">
       <button
         onClick={toggle}
         aria-expanded={open}
-        className="flex w-full cursor-pointer items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-bg-hover"
+        className="flex w-full cursor-pointer items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-primary_hover"
       >
         <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', iconColor)}>
           {icon}
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
-          <p className="text-[11px] text-text-muted">{subtitle}</p>
+          <h3 className="text-sm font-semibold text-primary">{title}</h3>
+          <p className="text-xs text-tertiary">{subtitle}</p>
         </div>
         {badge}
-        <ChevronDown className={cn('h-4 w-4 shrink-0 text-text-muted transition-transform', open ? '' : '-rotate-90')} />
+        <ChevronDown className={cn('h-4 w-4 shrink-0 text-quaternary transition-transform', open ? '' : '-rotate-90')} />
       </button>
-      {open && <div className="border-t border-border px-5 py-5">{children}</div>}
+      {open && <div className="border-t border-secondary px-5 py-5">{children}</div>}
     </section>
   )
 }
@@ -160,12 +160,12 @@ function VaultSection({ exists, unlocked }: { exists: boolean; unlocked: boolean
     <span className={cn(
       'rounded-full px-2.5 py-0.5 text-[10px] font-semibold',
       !exists
-        ? 'bg-bg-subtle text-text-muted'
+        ? 'bg-secondary text-quaternary'
         : unlocked
-        ? 'bg-success-subtle text-success'
-        : 'bg-bg-subtle text-warning'
+        ? 'bg-success-secondary text-fg-success-secondary'
+        : 'bg-secondary text-fg-warning-secondary'
     )}>
-      {!exists ? t('security.notConfigured') : unlocked ? t('security.protected') : t('security.inaccessible')}
+      {!exists ? t('security.notConfigured') : unlocked ? t('security.guardProtected') : t('security.vaultLocked')}
     </span>
   )
 
@@ -182,38 +182,38 @@ function VaultSection({ exists, unlocked }: { exists: boolean; unlocked: boolean
         <Spinner />
       ) : !vault || !vault.exists ? (
         <EmptyState
-          icon={<Lock className="h-8 w-8 text-text-muted" />}
+          icon={<Lock className="h-8 w-8 text-fg-quaternary" />}
           title={t('security.vaultNotConfigured')}
-          description={<>{t('security.vaultNotConfiguredDesc')} <Code>devclaw config vault-init</Code></>}
+          description={<>{t('security.vaultNotConfiguredHint')} <Code>devclaw config vault-init</Code></>}
         />
       ) : !vault.unlocked ? (
         <EmptyState
-          icon={<Lock className="h-8 w-8 text-warning/40" />}
-          title={t('security.vaultInaccessible')}
-          description={t('security.vaultInaccessibleDesc')}
+          icon={<Lock className="h-8 w-8 text-fg-warning-secondary" />}
+          title={t('security.vaultLocked')}
+          description={t('security.vaultLockedHint')}
         />
       ) : (
         <div>
           {vault.keys.length === 0 ? (
             <EmptyState
-              icon={<Key className="h-8 w-8 text-text-muted" />}
+              icon={<Key className="h-8 w-8 text-fg-quaternary" />}
               title={t('security.noSecrets')}
-              description={t('security.noSecretsDesc')}
+              description={t('security.noSecretsHint')}
             />
           ) : (
             <div className="space-y-1.5">
               {vault.keys.map((key) => (
                 <div
                   key={key}
-                  className="flex items-center gap-3 rounded-xl bg-bg-main px-4 py-3 border border-border"
+                  className="flex items-center gap-3 rounded-xl bg-secondary px-4 py-3 border border-secondary"
                 >
                   <Key className="h-3.5 w-3.5 shrink-0 text-purple-400" />
-                  <span className="min-w-0 flex-1 truncate font-mono text-sm text-text-primary">{key}</span>
-                  <span className="text-xs tracking-widest text-text-muted">--------</span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-sm text-primary">{key}</span>
+                  <span className="text-xs tracking-widest text-quaternary">--------</span>
                 </div>
               ))}
-              <p className="pt-2 text-[11px] text-text-muted">
-                {vault.keys.length} secret{vault.keys.length !== 1 ? 's' : ''} {t('security.stored')}
+              <p className="pt-2 text-xs text-tertiary">
+                {t('security.secretCount', { count: vault.keys.length })}
               </p>
             </div>
           )}
@@ -271,8 +271,8 @@ function ToolGuardSection({ enabled }: { enabled: boolean }) {
     <span className={cn(
       'rounded-full px-2.5 py-0.5 text-[10px] font-semibold',
       enabled
-        ? 'bg-success-subtle text-success'
-        : 'bg-bg-subtle text-text-muted'
+        ? 'bg-success-secondary text-fg-success-secondary'
+        : 'bg-secondary text-quaternary'
     )}>
       {enabled ? t('common.enabled') : t('common.disabled')}
     </span>
@@ -280,8 +280,8 @@ function ToolGuardSection({ enabled }: { enabled: boolean }) {
 
   return (
     <Accordion
-      icon={<Shield className="h-4 w-4 text-warning" />}
-      iconColor="bg-bg-subtle"
+      icon={<Shield className="h-4 w-4 text-fg-warning-secondary" />}
+      iconColor="bg-warning-secondary"
       title={t('security.toolGuard')}
       subtitle={t('security.toolGuardDesc')}
       badge={statusBadge}
@@ -291,18 +291,18 @@ function ToolGuardSection({ enabled }: { enabled: boolean }) {
         <Spinner />
       ) : !enabled ? (
         <EmptyState
-          icon={<Shield className="h-8 w-8 text-text-muted" />}
-          title={t('security.toolGuardDisabled')}
-          description={<>{t('security.toolGuardDisabledDesc')} <Code>config.yaml</Code></>}
+          icon={<Shield className="h-8 w-8 text-fg-quaternary" />}
+          title={t('security.guardDisabled')}
+          description={<>{t('security.guardDisabledHint')} <Code>config.yaml</Code></>}
         />
       ) : (
         <div className="space-y-5">
           {/* Permission toggles */}
           <div>
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-text-muted">{t('security.dangerousPerms')}</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-quaternary">{t('security.dangerousPerms')}</p>
             <div className="grid gap-2 sm:grid-cols-3">
               <PermToggle
-                label={t('security.destructive')}
+                label={t('security.allowDestructive')}
                 hint={t('security.destructiveHint')}
                 enabled={guard.allow_destructive}
                 onChange={(v) => save({ allow_destructive: v })}
@@ -310,7 +310,7 @@ function ToolGuardSection({ enabled }: { enabled: boolean }) {
                 color="amber"
               />
               <PermToggle
-                label={t('security.sudo')}
+                label={t('security.allowSudo')}
                 hint={t('security.sudoHint')}
                 enabled={guard.allow_sudo}
                 onChange={(v) => save({ allow_sudo: v })}
@@ -318,7 +318,7 @@ function ToolGuardSection({ enabled }: { enabled: boolean }) {
                 color="red"
               />
               <PermToggle
-                label={t('security.reboot')}
+                label={t('security.allowReboot')}
                 hint={t('security.rebootHint')}
                 enabled={guard.allow_reboot}
                 onChange={(v) => save({ allow_reboot: v })}
@@ -355,10 +355,10 @@ function ToolGuardSection({ enabled }: { enabled: boolean }) {
 
           {(guard.protected_paths ?? []).length > 0 && (
             <div>
-              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-text-muted">{t('security.protectedPaths')}</p>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-quaternary">{t('security.protectedPaths')}</p>
               <div className="flex flex-wrap gap-1.5">
                 {guard.protected_paths.map((p) => (
-                  <span key={p} className="rounded-lg bg-bg-subtle px-2.5 py-1 font-mono text-xs text-text-secondary">{p}</span>
+                  <span key={p} className="rounded-lg bg-secondary px-2.5 py-1 font-mono text-xs text-secondary">{p}</span>
                 ))}
               </div>
             </div>
@@ -378,17 +378,17 @@ function APIKeysSection({ gatewayConfigured, webuiConfigured }: { gatewayConfigu
     <Accordion
       icon={<Key className="h-4 w-4 text-cyan-400" />}
       iconColor="bg-cyan-400/10"
-      title={t('security.authentication')}
-      subtitle={t('security.authenticationDesc')}
+      title={t('security.auth')}
+      subtitle={t('security.authDesc')}
     >
       <div className="space-y-2">
-        <AuthRow label={t('security.gatewayApi')} hint={t('security.gatewayApiHint')} configured={gatewayConfigured} />
-        <AuthRow label={t('security.webUi')} hint={t('security.webUiHint')} configured={webuiConfigured} warn={!webuiConfigured} />
+        <AuthRow label={t('security.gatewayAuth')} hint={t('security.gatewayAuthHint')} configured={gatewayConfigured} />
+        <AuthRow label={t('security.webuiAuth')} hint={t('security.webuiAuthHint')} configured={webuiConfigured} warn={!webuiConfigured} />
       </div>
-      <div className="mt-4 flex items-center gap-2 text-[11px] text-text-muted">
+      <div className="mt-4 flex items-center gap-2 text-xs text-tertiary">
         <span>{t('security.changeTokensIn')}</span>
-        <Link to="/domain" className="inline-flex items-center gap-1 text-text-muted hover:text-text-primary transition-colors">
-          {t('security.domainAccess')}
+        <Link to="/domain" className="inline-flex items-center gap-1 text-tertiary hover:text-primary transition-colors">
+          {t('security.domainLink')}
           <ExternalLink className="h-2.5 w-2.5" />
         </Link>
       </div>
@@ -400,21 +400,21 @@ function AuthRow({ label, hint, configured, warn }: { label: string; hint: strin
   const { t } = useTranslation()
 
   return (
-    <div className="flex items-center justify-between rounded-xl bg-bg-main px-4 py-3 border border-border">
+    <div className="flex items-center justify-between rounded-xl bg-secondary px-4 py-3 border border-secondary">
       <div>
-        <p className="text-sm font-medium text-text-primary">{label}</p>
-        <p className="text-[11px] text-text-muted">{hint}</p>
+        <p className="text-sm font-medium text-primary">{label}</p>
+        <p className="text-xs text-tertiary">{hint}</p>
       </div>
       {configured ? (
-        <span className="flex items-center gap-1.5 text-xs font-medium text-success">
+        <span className="flex items-center gap-1.5 text-xs font-medium text-fg-success-secondary">
           <CheckCircle2 className="h-3.5 w-3.5" /> {t('security.configured')}
         </span>
       ) : warn ? (
-        <span className="flex items-center gap-1.5 text-xs font-medium text-warning">
+        <span className="flex items-center gap-1.5 text-xs font-medium text-fg-warning-secondary">
           <AlertTriangle className="h-3.5 w-3.5" /> {t('security.unprotected')}
         </span>
       ) : (
-        <span className="flex items-center gap-1.5 text-xs text-text-muted">
+        <span className="flex items-center gap-1.5 text-xs text-quaternary">
           <XCircle className="h-3.5 w-3.5" /> {t('security.notConfigured')}
         </span>
       )}
@@ -440,50 +440,50 @@ function AuditLogSection({ entryCount }: { entryCount: number }) {
 
   return (
     <Accordion
-      icon={<Activity className="h-4 w-4 text-text-muted" />}
-      iconColor="bg-bg-subtle"
-      title={t('security.auditLog')}
-      subtitle={entryCount > 0 ? `${entryCount} ${t('security.records')}` : t('security.auditLogDesc')}
+      icon={<Activity className="h-4 w-4 text-fg-quaternary" />}
+      iconColor="bg-secondary"
+      title={t('security.audit')}
+      subtitle={entryCount > 0 ? `${entryCount} ${t('security.noAuditEntries')}` : t('security.auditDesc')}
       onOpen={load}
     >
       {loading ? (
         <Spinner />
       ) : entries.length === 0 ? (
         <div className="flex items-center gap-3 py-4">
-          <Activity className="h-5 w-5 shrink-0 text-text-muted" />
+          <Activity className="h-5 w-5 shrink-0 text-fg-quaternary" />
           <div>
-            <p className="text-sm text-text-secondary">{t('security.noActions')}</p>
-            <p className="text-[11px] text-text-muted">{t('security.noActionsDesc')}</p>
+            <p className="text-sm text-secondary">{t('security.noAuditEntries')}</p>
+            <p className="text-xs text-tertiary">{t('security.noAuditHint')}</p>
           </div>
         </div>
       ) : (
         <div className="max-h-[380px] overflow-y-auto -mx-5 -mb-5">
           <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-bg-surface">
+            <thead className="sticky top-0 bg-primary">
               <tr>
-                <th className="px-5 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-text-muted">{t('security.tool')}</th>
-                <th className="px-5 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-text-muted">{t('security.caller')}</th>
-                <th className="px-5 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-text-muted">{t('security.status')}</th>
-                <th className="px-5 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-text-muted">{t('security.when')}</th>
+                <th className="px-5 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-quaternary">{t('security.auditTool')}</th>
+                <th className="px-5 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-quaternary">{t('security.auditCaller')}</th>
+                <th className="px-5 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-quaternary">{t('security.auditAllowed')}</th>
+                <th className="px-5 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-quaternary">{t('security.auditTime')}</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
+            <tbody className="divide-y divide-secondary">
               {entries.map((e) => (
-                <tr key={e.id} className="transition-colors hover:bg-bg-hover">
-                  <td className="px-5 py-2.5 font-mono text-text-primary">{e.tool}</td>
-                  <td className="px-5 py-2.5 text-text-muted">{e.caller || '--'}</td>
+                <tr key={e.id} className="transition-colors hover:bg-primary_hover">
+                  <td className="px-5 py-2.5 font-mono text-primary">{e.tool}</td>
+                  <td className="px-5 py-2.5 text-tertiary">{e.caller || '--'}</td>
                   <td className="px-5 py-2.5">
                     {e.allowed ? (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-success">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-fg-success-secondary">
                         <CheckCircle2 className="h-3 w-3" /> OK
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-error">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium text-fg-error-secondary">
                         <XCircle className="h-3 w-3" /> {t('security.denied')}
                       </span>
                     )}
                   </td>
-                  <td className="px-5 py-2.5 text-right text-text-muted">{timeAgo(e.created_at, t)}</td>
+                  <td className="px-5 py-2.5 text-right text-tertiary">{timeAgo(e.created_at, t)}</td>
                 </tr>
               ))}
             </tbody>
@@ -499,7 +499,7 @@ function AuditLogSection({ entryCount }: { entryCount: number }) {
 function Spinner() {
   return (
     <div className="flex justify-center py-8">
-      <div className="h-6 w-6 rounded-full border-2 border-bg-subtle border-t-brand animate-spin" />
+      <div className="h-6 w-6 rounded-full border-2 border-secondary border-t-brand-solid animate-spin" />
     </div>
   )
 }
@@ -508,14 +508,14 @@ function EmptyState({ icon, title, description }: { icon: React.ReactNode; title
   return (
     <div className="flex flex-col items-center py-8">
       {icon}
-      <p className="mt-3 text-sm font-medium text-text-secondary">{title}</p>
-      <p className="mt-1 text-xs text-text-muted text-center max-w-xs">{description}</p>
+      <p className="mt-3 text-sm font-medium text-secondary">{title}</p>
+      <p className="mt-1 text-xs text-tertiary text-center max-w-xs">{description}</p>
     </div>
   )
 }
 
 function Code({ children }: { children: React.ReactNode }) {
-  return <code className="rounded bg-bg-subtle px-1.5 py-0.5 text-text-secondary">{children}</code>
+  return <code className="rounded bg-secondary px-1.5 py-0.5 text-secondary">{children}</code>
 }
 
 function PermToggle({
@@ -533,8 +533,8 @@ function PermToggle({
   disabled?: boolean
   color?: 'amber' | 'red'
 }) {
-  const bgActive = color === 'red' ? 'bg-error-subtle' : 'bg-warning-subtle'
-  const trackActive = color === 'red' ? 'bg-error' : 'bg-warning'
+  const bgActive = color === 'red' ? 'bg-error-secondary' : 'bg-warning-secondary'
+  const trackActive = color === 'red' ? 'bg-error-solid' : 'bg-warning-solid'
 
   return (
     <button
@@ -542,17 +542,17 @@ function PermToggle({
       disabled={disabled}
       className={cn(
         'flex cursor-pointer items-center gap-3 rounded-xl px-3.5 py-3 text-left border transition-all',
-        enabled ? `${bgActive} border-border` : 'border-border bg-bg-main hover:border-border-hover',
+        enabled ? `${bgActive} border-secondary` : 'border-secondary bg-primary hover:border-primary_hover',
         disabled && 'opacity-50 cursor-not-allowed'
       )}
     >
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold text-text-primary">{label}</p>
-        <p className="text-[10px] text-text-muted">{hint}</p>
+        <p className="text-xs font-semibold text-primary">{label}</p>
+        <p className="text-[10px] text-tertiary">{hint}</p>
       </div>
       <div className={cn(
         'inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors',
-        enabled ? trackActive : 'bg-bg-subtle'
+        enabled ? trackActive : 'bg-quaternary'
       )}>
         <div className={cn(
           'h-4 w-4 rounded-full bg-white shadow-sm transition-transform',
@@ -583,18 +583,18 @@ function TagList({
   onAdd: (v: string) => void
 }) {
   const tagClass = color === 'amber'
-    ? 'bg-warning-subtle text-warning'
-    : 'bg-success-subtle text-success'
+    ? 'bg-warning-secondary text-fg-warning-secondary'
+    : 'bg-success-secondary text-fg-success-secondary'
 
   return (
-    <div className="rounded-xl bg-bg-main px-4 py-3 border border-border">
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">{label}</p>
-      {hint && <p className="mt-0.5 text-[10px] text-text-muted">{hint}</p>}
+    <div className="rounded-xl bg-secondary px-4 py-3 border border-secondary">
+      <p className="text-xs font-semibold uppercase tracking-wider text-quaternary">{label}</p>
+      {hint && <p className="mt-0.5 text-[10px] text-tertiary">{hint}</p>}
       <div className="mt-2.5 flex flex-wrap gap-1.5">
         {items.map((t) => (
           <span key={t} className={cn('inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-mono text-xs', tagClass)}>
             {t}
-            <button onClick={() => onRemove(t)} className="cursor-pointer transition-colors hover:text-error">
+            <button onClick={() => onRemove(t)} className="cursor-pointer transition-colors hover:text-fg-error-secondary">
               <X className="h-3 w-3" />
             </button>
           </span>
@@ -604,7 +604,7 @@ function TagList({
             value={inputValue}
             onChange={(e) => onInputChange(e.target.value)}
             placeholder={items.length === 0 ? 'tool_name' : '+ add'}
-            className="h-7 w-28 rounded-lg bg-transparent px-2 text-xs text-text-secondary outline-none placeholder:text-text-muted focus:placeholder:text-text-muted"
+            className="h-7 w-28 rounded-lg bg-transparent px-2 text-xs text-secondary outline-none placeholder:text-quaternary focus:placeholder:text-quaternary"
           />
         </form>
       </div>

@@ -102,20 +102,20 @@ function StatusCard({
   status?: 'success' | 'error' | 'neutral';
 }) {
   const statusColors = {
-    success: 'text-success',
-    error: 'text-error',
-    neutral: 'text-text-primary',
+    success: 'text-fg-success-secondary',
+    error: 'text-fg-error-secondary',
+    neutral: 'text-primary',
   };
 
   return (
     <Card padding="md">
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs tracking-wide text-text-muted uppercase">{label}</span>
+        <span className="text-xs tracking-wide text-quaternary uppercase">{label}</span>
         {Icon && (
           <Icon
             className={cn(
               'h-4 w-4',
-              status === 'success' ? 'text-success' : status === 'error' ? 'text-error' : 'text-text-muted'
+              status === 'success' ? 'text-fg-success-secondary' : status === 'error' ? 'text-fg-error-secondary' : 'text-quaternary'
             )}
           />
         )}
@@ -124,12 +124,12 @@ function StatusCard({
         className={cn(
           'text-lg font-semibold',
           status && statusColors[status],
-          !status && 'text-text-primary'
+          !status && 'text-primary'
         )}
       >
         {value}
       </p>
-      {subtext && <p className="mt-1 text-xs text-text-muted">{subtext}</p>}
+      {subtext && <p className="mt-1 text-xs text-quaternary">{subtext}</p>}
     </Card>
   );
 }
@@ -274,9 +274,9 @@ export function DatabasePage() {
             />
           </div>
           {status.error && (
-            <div className="mt-4 flex items-start gap-2 rounded-xl border border-error/10 bg-error-subtle p-3">
-              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-error" />
-              <p className="text-xs text-error">{status.error}</p>
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-error/10 bg-error-primary p-3">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-fg-error-secondary" />
+              <p className="text-xs text-fg-error-secondary">{status.error}</p>
             </div>
           )}
         </ConfigSection>

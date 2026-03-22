@@ -1,4 +1,4 @@
-import { cn } from '@/lib/utils';
+import { cx } from '@/utils/cx';
 
 interface PageContainerProps {
   children: React.ReactNode;
@@ -8,8 +8,8 @@ interface PageContainerProps {
 export function PageContainer({ children, className }: PageContainerProps) {
   return (
     <div
-      className={cn(
-        'mx-auto w-full max-w-4xl px-4 pt-8 pb-20 sm:px-6 sm:pt-10 lg:px-8',
+      className={cx(
+        'w-full px-4 pt-8 pb-20 sm:px-6 sm:pt-10 lg:px-8',
         className
       )}
     >

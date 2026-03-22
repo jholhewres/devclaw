@@ -13,8 +13,8 @@ export function StepContainer({ children }: { children: ReactNode }) {
 export function StepHeader({ title, description }: { title: string; description: string }) {
   return (
     <div>
-      <h2 className="text-base font-semibold text-text-primary">{title}</h2>
-      <p className="mt-1 text-sm text-text-secondary">{description}</p>
+      <h2 className="text-base font-semibold text-primary">{title}</h2>
+      <p className="mt-1 text-sm text-secondary">{description}</p>
     </div>
   )
 }
@@ -37,12 +37,12 @@ interface FieldProps {
 export function Field({ label, icon: Icon, hint, children }: FieldProps) {
   return (
     <div>
-      <label className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
+      <label className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-quaternary">
         {Icon && <Icon className="h-3.5 w-3.5" />}
         {label}
       </label>
       {children}
-      {hint && <p className="mt-1.5 text-xs text-text-muted">{hint}</p>}
+      {hint && <p className="mt-1.5 text-xs text-tertiary">{hint}</p>}
     </div>
   )
 }
@@ -78,9 +78,9 @@ export function Input({
       data-lpignore="true"
       data-form-type="other"
       className={cn(
-        'h-11 w-full rounded-xl border border-border-hover bg-bg-main px-4 text-sm text-text-primary',
-        'placeholder:text-text-muted outline-none transition-all',
-        'hover:border-border-hover focus:border-brand/50 focus:ring-2 focus:ring-brand/20',
+        'h-11 w-full rounded-xl border border-primary bg-primary px-4 text-sm text-primary',
+        'placeholder:text-quaternary outline-none transition-all',
+        'hover:border-primary focus:border-brand/50 focus:ring-2 focus:ring-brand/20',
         mono && 'font-mono',
         className,
       )}
@@ -114,15 +114,15 @@ export function PasswordInput({ value, onChange, placeholder }: PasswordInputPro
         data-1p-ignore=""
         readOnly={!focused}
         className={cn(
-          'h-11 w-full rounded-xl border border-border-hover bg-bg-main px-4 pr-10 text-sm text-text-primary',
-          'placeholder:text-text-muted outline-none transition-all',
-          'hover:border-border-hover focus:border-brand/50 focus:ring-2 focus:ring-brand/20',
+          'h-11 w-full rounded-xl border border-primary bg-primary px-4 pr-10 text-sm text-primary',
+          'placeholder:text-quaternary outline-none transition-all',
+          'hover:border-primary focus:border-brand/50 focus:ring-2 focus:ring-brand/20',
         )}
       />
       <button
         type="button"
         onMouseDown={(e) => { e.preventDefault(); setShow(!show) }}
-        className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-text-muted transition-colors hover:text-text-primary"
+        className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-tertiary transition-colors hover:text-primary"
       >
         {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
       </button>
@@ -144,9 +144,9 @@ export function Select({ value, onChange, placeholder, options = [], groups }: S
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className={cn(
-        'h-11 w-full cursor-pointer rounded-xl border border-border-hover bg-bg-main px-4 text-sm text-text-primary',
+        'h-11 w-full cursor-pointer rounded-xl border border-primary bg-primary px-4 text-sm text-primary',
         'outline-none transition-all',
-        'hover:border-border-hover focus:border-brand/50 focus:ring-2 focus:ring-brand/20',
+        'hover:border-primary focus:border-brand/50 focus:ring-2 focus:ring-brand/20',
       )}
     >
       {placeholder && <option value="">{placeholder}</option>}
@@ -176,10 +176,10 @@ interface CardProps {
 
 export function Card({ children, className = '', highlight }: CardProps) {
   const highlightStyles = {
-    blue: 'border-brand/30 bg-brand-subtle',
-    green: 'border-success/30 bg-success-subtle',
-    amber: 'border-warning/30 bg-warning-subtle',
-    red: 'border-error/30 bg-error-subtle',
+    blue: 'border-brand/30 bg-brand-secondary',
+    green: 'border-success/30 bg-success-primary',
+    amber: 'border-warning/30 bg-warning-primary',
+    red: 'border-error/30 bg-error-primary',
   }
 
   return (
@@ -187,7 +187,7 @@ export function Card({ children, className = '', highlight }: CardProps) {
       'rounded-xl border p-4 transition-all',
       highlight
         ? highlightStyles[highlight]
-        : 'border-border bg-bg-main/50',
+        : 'border-secondary bg-primary/50',
       className,
     )}>
       {children}
@@ -220,28 +220,28 @@ export function SelectableCard({
       className={cn(
         'flex w-full cursor-pointer items-start gap-3 rounded-xl border px-4 py-3 text-left transition-all',
         selected
-          ? 'border-brand/50 bg-brand-subtle'
-          : 'border-border bg-bg-main/50 hover:border-border-hover hover:bg-bg-surface',
+          ? 'border-brand/50 bg-brand-secondary'
+          : 'border-secondary bg-primary/50 hover:border-primary hover:bg-primary',
       )}
       style={selected && accentColor ? { borderColor: accentColor, backgroundColor: `${accentColor}15` } : undefined}
     >
       {Icon && (
         <div className={cn(
           'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg',
-          selected ? 'bg-white/5' : 'bg-bg-subtle',
+          selected ? 'bg-white/5' : 'bg-secondary',
         )}>
           <Icon className={cn(
             'h-3.5 w-3.5',
-            selected ? (iconColor || 'text-brand') : 'text-text-muted',
+            selected ? (iconColor || 'text-brand-tertiary') : 'text-tertiary',
           )} />
         </div>
       )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-text-primary">{title}</span>
-          {selected && <span className="h-1.5 w-1.5 rounded-full bg-brand" />}
+          <span className="text-sm font-medium text-primary">{title}</span>
+          {selected && <span className="h-1.5 w-1.5 rounded-full bg-brand-solid" />}
         </div>
-        {description && <p className="mt-0.5 text-xs text-text-secondary">{description}</p>}
+        {description && <p className="mt-0.5 text-xs text-secondary">{description}</p>}
       </div>
     </button>
   )
@@ -266,14 +266,14 @@ export function Toggle({ enabled, onChange, label }: ToggleProps) {
     >
       <div className={cn(
         'relative h-5 w-9 rounded-full transition-colors',
-        enabled ? 'bg-brand' : 'bg-bg-subtle',
+        enabled ? 'bg-brand-solid' : 'bg-secondary',
       )}>
         <span className={cn(
           'absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform',
           enabled ? 'translate-x-4' : 'translate-x-0.5',
         )} />
       </div>
-      {label && <span className="text-xs text-text-secondary">{label}</span>}
+      {label && <span className="text-xs text-secondary">{label}</span>}
     </button>
   )
 }
@@ -290,8 +290,8 @@ export function Checkbox({ checked, onChange, children }: CheckboxProps) {
       <div className={cn(
         'flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-all',
         checked
-          ? 'border-transparent bg-brand text-white'
-          : 'border-border-hover bg-bg-subtle hover:border-text-muted',
+          ? 'border-transparent bg-brand-solid text-white'
+          : 'border-primary bg-secondary hover:border-text-muted',
       )}>
         {checked && (
           <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
@@ -328,9 +328,9 @@ export function Button({
   icon: Icon,
 }: ButtonProps) {
   const variants = {
-    primary: 'bg-text-primary text-text-inverse shadow-lg hover:bg-white',
-    secondary: 'border border-border-hover bg-bg-subtle text-text-primary hover:border-text-muted hover:bg-bg-elevated',
-    ghost: 'text-text-muted hover:text-text-primary',
+    primary: 'bg-text-primary text-inverse shadow-lg hover:bg-white',
+    secondary: 'border border-primary bg-secondary text-primary hover:border-text-muted hover:bg-tertiary',
+    ghost: 'text-tertiary hover:text-primary',
   }
 
   const sizes = {
@@ -377,8 +377,8 @@ export function OptionButton({ selected, onClick, children, className = '' }: Op
       className={cn(
         'flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2.5 text-left transition-all',
         selected
-          ? 'border-brand/50 bg-brand-subtle text-text-primary'
-          : 'border-border-hover bg-bg-main text-text-secondary hover:border-text-muted hover:bg-bg-surface',
+          ? 'border-brand/50 bg-brand-secondary text-primary'
+          : 'border-primary bg-primary text-secondary hover:border-text-muted hover:bg-primary',
         className,
       )}
     >
@@ -398,13 +398,13 @@ interface InfoBoxProps {
 
 export function InfoBox({ icon: Icon, children }: InfoBoxProps) {
   return (
-    <div className="flex items-start gap-2.5 rounded-xl border border-border bg-bg-main/50 px-4 py-3">
+    <div className="flex items-start gap-2.5 rounded-xl border border-secondary bg-primary/50 px-4 py-3">
       {Icon && (
-        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-bg-subtle">
-          <Icon className="h-3.5 w-3.5 text-text-muted" />
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-secondary">
+          <Icon className="h-3.5 w-3.5 text-tertiary" />
         </div>
       )}
-      <p className="text-xs text-text-secondary">{children}</p>
+      <p className="text-xs text-secondary">{children}</p>
     </div>
   )
 }

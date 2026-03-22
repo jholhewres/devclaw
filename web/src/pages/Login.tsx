@@ -57,7 +57,7 @@ export function Login() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-bg-main p-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-primary p-4">
       {/* Subtle radial gradient backdrop */}
       <div
         className="pointer-events-none absolute inset-0"
@@ -71,16 +71,16 @@ export function Login() {
         {/* Logo */}
         <div className="mb-8 flex flex-col items-center gap-4">
           <Logo size="lg" />
-          <p className="text-sm text-text-muted">{t('login.subtitle')}</p>
+          <p className="text-sm text-tertiary">{t('login.subtitle')}</p>
         </div>
 
         {/* Card */}
-        <div className="rounded-2xl border border-border bg-bg-surface p-6 shadow-lg">
+        <div className="rounded-2xl border border-secondary bg-primary p-6 shadow-lg">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label
                 htmlFor="password"
-                className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted"
+                className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-quaternary"
               >
                 <Lock className="h-3.5 w-3.5" />
                 {t('login.password')}
@@ -98,16 +98,16 @@ export function Login() {
                   autoComplete="current-password"
                   autoFocus
                   className={cn(
-                    'w-full rounded-xl border bg-bg-subtle px-4 py-3 pr-11 text-sm text-text-primary',
-                    'placeholder:text-text-muted outline-none transition-all',
-                    'focus:border-brand focus:ring-1 focus:ring-brand/30',
-                    error ? 'border-error/50' : 'border-border'
+                    'w-full rounded-xl border bg-secondary px-4 py-3 pr-11 text-sm text-primary',
+                    'placeholder:text-quaternary outline-none transition-all',
+                    'focus:border-brand-solid focus:ring-1 focus:ring-brand/30',
+                    error ? 'border-error/50' : 'border-secondary'
                   )}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted transition-colors hover:text-text-primary"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-tertiary transition-colors hover:text-primary"
                   tabIndex={-1}
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
@@ -121,7 +121,7 @@ export function Login() {
             </div>
 
             {error && (
-              <div className="rounded-xl border border-error/20 bg-error-subtle px-4 py-3 text-sm text-error">
+              <div className="rounded-xl border border-error/20 bg-error-primary px-4 py-3 text-sm text-fg-error-secondary">
                 {error}
               </div>
             )}
@@ -140,7 +140,7 @@ export function Login() {
         </div>
 
         {/* Footer */}
-        <p className="mt-6 text-center text-xs text-text-muted">
+        <p className="mt-6 text-center text-xs text-tertiary">
           DevClaw v{version}
         </p>
       </div>

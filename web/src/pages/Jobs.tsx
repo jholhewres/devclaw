@@ -29,7 +29,7 @@ export function Jobs() {
   const inactive = jobs.filter((j) => !j.enabled)
 
   return (
-    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+    <div className="py-8 px-4 sm:px-6 lg:px-8">
       {/* Header */}
       <PageHeader
         title={t('jobs.title')}
@@ -48,7 +48,7 @@ export function Jobs() {
           {inactive.length > 0 && (
             <div>
               {active.length > 0 && (
-                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-text-muted">{t('common.disabled')}</p>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-quaternary">{t('common.disabled')}</p>
               )}
               <div className="space-y-2">
                 {inactive.map((job) => <JobCard key={job.id} job={job} />)}
@@ -71,9 +71,9 @@ function EmptyJobs() {
         description={t('jobs.noJobsDescription')}
       />
 
-      <div className="mt-6 mx-auto max-w-md rounded-xl bg-bg-main px-4 py-3 border border-border">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">config.yaml</p>
-        <pre className="mt-2 overflow-x-auto font-mono text-xs leading-relaxed text-text-secondary">
+      <div className="mt-6 mx-auto max-w-md rounded-xl bg-primary px-4 py-3 border border-secondary">
+        <p className="text-xs font-semibold uppercase tracking-wider text-quaternary">config.yaml</p>
+        <pre className="mt-2 overflow-x-auto font-mono text-xs leading-relaxed text-secondary">
 {`scheduler:
   jobs:
     - id: backup-daily
@@ -83,14 +83,14 @@ function EmptyJobs() {
       enabled: true`}</pre>
       </div>
 
-      <div className="mt-4 flex items-center justify-center gap-4 text-[11px] text-text-muted">
+      <div className="mt-4 flex items-center justify-center gap-4 text-xs text-tertiary">
         <span className="flex items-center gap-1.5">
-          <Clock className="h-3 w-3 text-text-muted" />
+          <Clock className="h-3 w-3 text-tertiary" />
           {t('jobs.cronExpression')}
         </span>
         <span className="h-3 w-px bg-border" />
         <span className="flex items-center gap-1.5">
-          <FileCode className="h-3 w-3 text-text-muted" />
+          <FileCode className="h-3 w-3 text-tertiary" />
           {t('jobs.typePrompt')}, {t('jobs.typeCommand')}, {t('jobs.typeSkill')}
         </span>
       </div>
@@ -113,27 +113,27 @@ function JobCard({ job }: { job: JobInfo }) {
       <div className="flex items-start gap-4">
         <div className={cn(
           'mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
-          job.enabled ? 'bg-success-subtle' : 'bg-bg-subtle'
+          job.enabled ? 'bg-success-primary' : 'bg-secondary'
         )}>
-          {job.enabled ? <Play className="h-4 w-4 text-success" /> : <Pause className="h-4 w-4 text-text-muted" />}
+          {job.enabled ? <Play className="h-4 w-4 text-fg-success-secondary" /> : <Pause className="h-4 w-4 text-tertiary" />}
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
-            <h3 className="text-sm font-semibold text-text-primary">{job.id}</h3>
-            <span className="rounded bg-bg-subtle px-1.5 py-0.5 font-mono text-[10px] text-text-secondary">
+            <h3 className="text-sm font-semibold text-primary">{job.id}</h3>
+            <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-secondary">
               {job.schedule}
             </span>
             <Badge>{job.type}</Badge>
           </div>
 
           {job.command && (
-            <pre className="mt-2 overflow-x-auto rounded-lg bg-bg-main px-3 py-2 font-mono text-xs text-text-secondary">
+            <pre className="mt-2 overflow-x-auto rounded-lg bg-primary px-3 py-2 font-mono text-xs text-secondary">
               {job.command}
             </pre>
           )}
 
-          <div className="mt-2.5 flex flex-wrap items-center gap-3 text-[11px] text-text-muted">
+          <div className="mt-2.5 flex flex-wrap items-center gap-3 text-xs text-tertiary">
             <span className="flex items-center gap-1">
               <Wrench className="h-3 w-3" />
               {t('jobs.runCount', { count: job.run_count })}
@@ -145,7 +145,7 @@ function JobCard({ job }: { job: JobInfo }) {
               </span>
             )}
             {job.last_error && (
-              <span className="flex items-center gap-1 text-warning">
+              <span className="flex items-center gap-1 text-fg-warning-secondary">
                 <AlertCircle className="h-3 w-3" />
                 {job.last_error}
               </span>

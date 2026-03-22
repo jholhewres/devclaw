@@ -1,8 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
-  ArrowLeft,
   Eye,
   EyeOff,
   Sparkles,
@@ -85,12 +83,12 @@ function PasswordInput({ value, onChange, placeholder }: {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="h-11 w-full rounded-xl border border-border bg-bg-surface px-4 pr-10 text-sm text-text-primary outline-none transition-all placeholder:text-text-muted hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
+        className="h-11 w-full rounded-xl border border-secondary bg-primary px-4 pr-10 text-sm text-primary outline-none transition-all placeholder:text-quaternary hover:border-primary focus:border-brand/50 focus:ring-1 focus:ring-brand/20"
       />
       <button
         type="button"
         onClick={() => setShow(!show)}
-        className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-text-muted hover:text-text-primary"
+        className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-tertiary hover:text-primary"
       >
         {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
       </button>
@@ -104,8 +102,8 @@ function Radio({ checked }: { checked: boolean }) {
       className={cn(
         'flex h-4 w-4 items-center justify-center rounded-full border-2 transition-colors',
         checked
-          ? 'border-brand bg-brand'
-          : 'border-border-hover',
+          ? 'border-brand-solid bg-brand-solid'
+          : 'border-primary',
       )}
     >
       {checked && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
@@ -117,7 +115,6 @@ function Radio({ checked }: { checked: boolean }) {
 
 export function ApiConfig() {
   const { t } = useTranslation()
-  const navigate = useNavigate()
   const [config, setConfig] = useState<ConfigData | null>(null)
   const [original, setOriginal] = useState<ConfigData | null>(null)
   const [saving, setSaving] = useState(false)
@@ -303,21 +300,10 @@ export function ApiConfig() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Back button */}
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => navigate('/dev')}
-        className="mb-2 self-start"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        {t('common.backToSettings')}
-      </Button>
-
       {/* Page header */}
       <div className="flex flex-col gap-1 mb-2">
-        <h1 className="text-lg font-medium text-text-primary">{t('config.pageTitle')}</h1>
-        <p className="text-sm text-text-muted">{t('config.pageDescription')}</p>
+        <h1 className="text-lg font-medium text-primary">{t('config.pageTitle')}</h1>
+        <p className="text-sm text-tertiary">{t('config.pageDescription')}</p>
       </div>
 
       {/* ═══ Provider & Model ═══ */}
@@ -341,17 +327,17 @@ export function ApiConfig() {
                   className={cn(
                     'flex cursor-pointer flex-col items-start gap-3 rounded-xl border p-4 transition-colors',
                     isSelected
-                      ? 'border-brand ring-1 ring-brand ring-inset'
-                      : 'border-border hover:border-border-hover',
+                      ? 'border-brand-solid ring-1 ring-brand ring-inset'
+                      : 'border-secondary hover:border-primary',
                   )}
                 >
                   <div className="flex w-full items-start justify-between">
-                    <div className="flex h-7 w-7 items-center justify-center text-text-muted">
+                    <div className="flex h-7 w-7 items-center justify-center text-tertiary">
                       {icon}
                     </div>
                     <Radio checked={isSelected} />
                   </div>
-                  <span className="text-sm font-medium text-text-primary">{p.label}</span>
+                  <span className="text-sm font-medium text-primary">{p.label}</span>
                 </button>
               )
             })}
@@ -361,10 +347,10 @@ export function ApiConfig() {
               <button
                 type="button"
                 onClick={() => setExpandedGrid(true)}
-                className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border p-4 transition-colors hover:border-border-hover hover:bg-bg-subtle"
+                className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-secondary p-4 transition-colors hover:border-primary hover:bg-secondary"
               >
-                <Plus className="h-5 w-5 text-text-muted" />
-                <span className="text-sm font-medium text-text-muted">{t('config.seeMore')}</span>
+                <Plus className="h-5 w-5 text-tertiary" />
+                <span className="text-sm font-medium text-tertiary">{t('config.seeMore')}</span>
               </button>
             )}
           </div>
@@ -375,7 +361,7 @@ export function ApiConfig() {
           {/* Endpoint selector */}
           {provider?.baseUrls && (
             <div className="flex flex-col gap-1.5">
-              <p className="text-sm font-medium text-text-secondary">{t('apiConfig.endpoint')}</p>
+              <p className="text-sm font-medium text-secondary">{t('apiConfig.endpoint')}</p>
               <div className="grid grid-cols-2 gap-3">
                 {provider.baseUrls.map((ep) => {
                   const isActive = selectedEndpoint === ep.value
@@ -387,18 +373,18 @@ export function ApiConfig() {
                       className={cn(
                         'cursor-pointer rounded-xl border px-4 py-3 text-left transition-colors',
                         isActive
-                          ? 'border-brand ring-1 ring-brand ring-inset'
-                          : 'border-border hover:border-border-hover',
+                          ? 'border-brand-solid ring-1 ring-brand ring-inset'
+                          : 'border-secondary hover:border-primary',
                       )}
                     >
                       <span className={cn(
                         'text-sm font-medium',
-                        isActive ? 'text-text-primary' : 'text-text-secondary',
+                        isActive ? 'text-primary' : 'text-secondary',
                       )}>
                         {ep.label}
                       </span>
                       {ep.value && (
-                        <p className="mt-0.5 truncate font-mono text-xs text-text-muted">
+                        <p className="mt-0.5 truncate font-mono text-xs text-tertiary">
                           {ep.value.replace('https://', '')}
                         </p>
                       )}
@@ -502,7 +488,7 @@ export function ApiConfig() {
                 href={provider.freeUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand transition-opacity hover:opacity-80"
+                className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-tertiary transition-opacity hover:opacity-80"
               >
                 {t('apiConfig.getApiKey')}
                 <ExternalLink className="h-4 w-4" />
@@ -513,7 +499,7 @@ export function ApiConfig() {
               {testResult && (
                 <span className={cn(
                   'flex items-center gap-1.5 text-sm',
-                  testResult.success ? 'text-success' : 'text-error',
+                  testResult.success ? 'text-fg-success-secondary' : 'text-fg-error-secondary',
                 )}>
                   {testResult.success ? (
                     <>

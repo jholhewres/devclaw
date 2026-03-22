@@ -116,10 +116,10 @@ export function UnsavedChangesBar({
           className={cn(
             'flex w-max items-center gap-4 rounded-full px-4 py-2.5 shadow-lg transition-all',
             isSuccess
-              ? 'bg-success-subtle'
+              ? 'bg-success-primary'
               : isError
-                ? 'bg-error-subtle'
-                : 'border border-border bg-bg-surface',
+                ? 'bg-error-primary'
+                : 'border border-secondary bg-primary',
             shouldShow
               ? 'translate-y-0 opacity-100'
               : 'pointer-events-none translate-y-4 opacity-0',
@@ -128,18 +128,18 @@ export function UnsavedChangesBar({
           {/* Icon + message */}
           <div className="flex items-center gap-2">
             {isSuccess ? (
-              <CheckCircle2 className="h-5 w-5 shrink-0 text-success" />
+              <CheckCircle2 className="h-5 w-5 shrink-0 text-fg-success-secondary" />
             ) : (
-              <AlertCircle className="h-5 w-5 shrink-0 text-text-muted" />
+              <AlertCircle className="h-5 w-5 shrink-0 text-tertiary" />
             )}
             <span
               className={cn(
                 'whitespace-nowrap text-sm font-medium',
                 isSuccess
-                  ? 'text-success'
+                  ? 'text-fg-success-secondary'
                   : isError
-                    ? 'text-error'
-                    : 'text-text-secondary',
+                    ? 'text-fg-error-secondary'
+                    : 'text-secondary',
               )}
             >
               {isSuccess
@@ -157,7 +157,7 @@ export function UnsavedChangesBar({
                 type="button"
                 onClick={handleDiscard}
                 disabled={saving}
-                className="cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-subtle hover:text-text-primary disabled:opacity-50"
+                className="cursor-pointer rounded-lg px-3 py-1.5 text-sm font-medium text-secondary transition-colors hover:bg-secondary hover:text-primary disabled:opacity-50"
               >
                 {t('unsavedChanges.discard')}
               </button>
@@ -165,7 +165,7 @@ export function UnsavedChangesBar({
                 type="button"
                 onClick={handleSave}
                 disabled={saving}
-                className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-hover disabled:opacity-50"
+                className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-brand-solid px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-brand-hover disabled:opacity-50"
               >
                 {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                 {isError ? t('unsavedChanges.retry') : t('unsavedChanges.save')}

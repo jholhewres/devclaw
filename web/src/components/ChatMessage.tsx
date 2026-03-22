@@ -121,13 +121,13 @@ export const ChatMessage = memo(function ChatMessage({
     return (
       <div className="flex items-start justify-end gap-3 animate-fade-in">
         <div className="max-w-[80%]">
-          <div className="rounded-2xl rounded-tr-md bg-brand-subtle px-4 py-3">
-            <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-text-primary">
+          <div className="rounded-2xl rounded-tr-md bg-brand-secondary px-4 py-3">
+            <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-primary">
               {content}
             </p>
           </div>
         </div>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-solid">
           <User className="h-4 w-4 text-white" />
         </div>
       </div>
@@ -153,11 +153,11 @@ export const ChatMessage = memo(function ChatMessage({
         className={cn(
           'flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-300',
           isStreaming
-            ? 'bg-brand ring-2 ring-brand/30 ring-offset-2 ring-offset-bg-main'
-            : 'bg-bg-elevated',
+            ? 'bg-brand-solid ring-2 ring-brand/30 ring-offset-2 ring-offset-primary'
+            : 'bg-tertiary',
         )}
       >
-        <Bot className={cn('h-4 w-4 transition-colors', isStreaming ? 'text-white' : 'text-text-muted')} />
+        <Bot className={cn('h-4 w-4 transition-colors', isStreaming ? 'text-white' : 'text-tertiary')} />
       </div>
       <div className="relative min-w-0 flex-1">
         {isStreaming && isEmpty ? (
@@ -171,7 +171,7 @@ export const ChatMessage = memo(function ChatMessage({
             {hasText && (
               <div
                 className={cn(
-                  'copilot-markdown text-[15px] leading-[1.7] text-text-primary',
+                  'copilot-markdown text-[15px] leading-[1.7] text-primary',
                   isStreaming && 'stream-shimmer',
                 )}
               >
@@ -179,7 +179,7 @@ export const ChatMessage = memo(function ChatMessage({
                   {cleanContent}
                 </ReactMarkdown>
                 {isStreaming && (
-                  <span className="ml-0.5 inline-block h-[18px] w-[2px] rounded-full bg-brand align-text-bottom animate-pulse" />
+                  <span className="ml-0.5 inline-block h-[18px] w-[2px] rounded-full bg-brand-solid align-text-bottom animate-pulse" />
                 )}
               </div>
             )}
@@ -218,15 +218,15 @@ function CopyMessageButton({ content }: { content: string }) {
       onClick={handleCopy}
       className={cn(
         'absolute -bottom-6 left-0 flex items-center gap-1 rounded-md px-2 py-1 text-xs transition-all',
-        'text-text-muted hover:text-text-primary hover:bg-bg-hover',
+        'text-tertiary hover:text-primary hover:bg-primary_hover',
         'opacity-0 group-hover:opacity-100'
       )}
       aria-label={t('common.copy')}
     >
       {copied ? (
         <>
-          <Check className="h-3 w-3 text-success" />
-          <span className="text-success">{t('common.copied')}</span>
+          <Check className="h-3 w-3 text-fg-success-secondary" />
+          <span className="text-fg-success-secondary">{t('common.copied')}</span>
         </>
       ) : (
         <>
@@ -261,12 +261,12 @@ function MediaBlock({ media }: { media: MediaAttachment }) {
           <img
             src={safeUrl}
             alt={media.filename || 'Image'}
-            className="max-w-sm rounded-xl border border-border shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+            className="max-w-sm rounded-xl border border-secondary shadow-sm hover:shadow-md transition-shadow cursor-pointer"
             loading="lazy"
           />
         </a>
         {media.caption && (
-          <p className="mt-1 text-xs text-text-muted">{media.caption}</p>
+          <p className="mt-1 text-xs text-tertiary">{media.caption}</p>
         )}
       </div>
     )
@@ -279,7 +279,7 @@ function MediaBlock({ media }: { media: MediaAttachment }) {
           <source src={safeUrl} type={media.mime_type} />
         </audio>
         {media.caption && (
-          <p className="mt-1 text-xs text-text-muted">{media.caption}</p>
+          <p className="mt-1 text-xs text-tertiary">{media.caption}</p>
         )}
       </div>
     )
@@ -290,13 +290,13 @@ function MediaBlock({ media }: { media: MediaAttachment }) {
       <div className="mt-2">
         <video
           controls
-          className="max-w-sm rounded-xl border border-border"
+          className="max-w-sm rounded-xl border border-secondary"
           preload="metadata"
         >
           <source src={safeUrl} type={media.mime_type} />
         </video>
         {media.caption && (
-          <p className="mt-1 text-xs text-text-muted">{media.caption}</p>
+          <p className="mt-1 text-xs text-tertiary">{media.caption}</p>
         )}
       </div>
     )
@@ -310,25 +310,25 @@ function MediaBlock({ media }: { media: MediaAttachment }) {
         href={safeUrl}
         download={media.filename}
         className={cn(
-          'inline-flex items-center gap-3 rounded-xl border border-border bg-bg-subtle px-4 py-3',
-          'hover:bg-bg-hover transition-colors'
+          'inline-flex items-center gap-3 rounded-xl border border-secondary bg-secondary px-4 py-3',
+          'hover:bg-primary_hover transition-colors'
         )}
       >
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-subtle">
-          <Icon className="h-5 w-5 text-brand" />
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand-secondary">
+          <Icon className="h-5 w-5 text-brand-tertiary" />
         </div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-text-primary">
+          <p className="truncate text-sm font-medium text-primary">
             {media.filename || 'Download'}
           </p>
-          <p className="text-xs text-text-muted">
+          <p className="text-xs text-tertiary">
             {formatFileSize(media.size)}
           </p>
         </div>
-        <Download className="h-4 w-4 shrink-0 text-text-muted" />
+        <Download className="h-4 w-4 shrink-0 text-tertiary" />
       </a>
       {media.caption && (
-        <p className="mt-1 text-xs text-text-muted">{media.caption}</p>
+        <p className="mt-1 text-xs text-tertiary">{media.caption}</p>
       )}
     </div>
   )
@@ -338,12 +338,12 @@ function TypingDots() {
   const { t } = useTranslation()
   return (
     <div className="flex items-center gap-2 py-2">
-      <div className="copilot-thinking-dots text-brand">
+      <div className="copilot-thinking-dots text-brand-tertiary">
         <span />
         <span />
         <span />
       </div>
-      <span className="text-sm text-text-muted">{t('chatPage.thinking')}</span>
+      <span className="text-sm text-tertiary">{t('chatPage.thinking')}</span>
     </div>
   )
 }
@@ -362,43 +362,43 @@ function ToolMessage({ toolName, toolInput, content, isError }: { toolName?: str
 
   return (
     <div className="ml-11 animate-fade-in py-1">
-      <div className="rounded-xl border border-border bg-bg-subtle overflow-hidden">
+      <div className="rounded-xl border border-secondary bg-secondary overflow-hidden">
         {/* Header */}
         <button
           onClick={() => setExpanded(!expanded)}
           className={cn(
             'flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-left text-xs transition-colors',
-            'hover:bg-bg-hover'
+            'hover:bg-primary_hover'
           )}
         >
-          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-subtle">
-            <Icon className="h-3.5 w-3.5 text-brand" />
+          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-secondary">
+            <Icon className="h-3.5 w-3.5 text-brand-tertiary" />
           </div>
-          <span className="min-w-0 flex-1 truncate font-medium text-text-primary">
+          <span className="min-w-0 flex-1 truncate font-medium text-primary">
             {summary}
           </span>
           {/* Status indicator */}
-          <span className={cn('flex h-1.5 w-1.5 shrink-0 rounded-full', isError ? 'bg-error' : 'bg-success')} />
+          <span className={cn('flex h-1.5 w-1.5 shrink-0 rounded-full', isError ? 'bg-error' : 'bg-success-solid')} />
           {hasContent && (
             expanded
-              ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-text-muted" />
-              : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+              ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-tertiary" />
+              : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-tertiary" />
           )}
         </button>
 
         {/* Expanded content with tabs */}
         {expanded && hasContent && (
-          <div className="border-t border-border">
+          <div className="border-t border-secondary">
             {/* Tabs */}
             {hasInput && hasOutput && (
-              <div className="flex border-b border-border">
+              <div className="flex border-b border-secondary">
                 <button
                   onClick={() => setActiveTab('input')}
                   className={cn(
-                    'px-3.5 py-2 text-[11px] font-medium uppercase tracking-wider transition-colors',
+                    'px-3.5 py-2 text-xs font-medium uppercase tracking-wider transition-colors',
                     activeTab === 'input'
-                      ? 'text-brand border-b-2 border-brand -mb-px'
-                      : 'text-text-muted hover:text-text-secondary'
+                      ? 'text-brand-tertiary border-b-2 border-brand-solid -mb-px'
+                      : 'text-tertiary hover:text-secondary'
                   )}
                 >
                   Input
@@ -406,10 +406,10 @@ function ToolMessage({ toolName, toolInput, content, isError }: { toolName?: str
                 <button
                   onClick={() => setActiveTab('output')}
                   className={cn(
-                    'px-3.5 py-2 text-[11px] font-medium uppercase tracking-wider transition-colors',
+                    'px-3.5 py-2 text-xs font-medium uppercase tracking-wider transition-colors',
                     activeTab === 'output'
-                      ? 'text-brand border-b-2 border-brand -mb-px'
-                      : 'text-text-muted hover:text-text-secondary'
+                      ? 'text-brand-tertiary border-b-2 border-brand-solid -mb-px'
+                      : 'text-tertiary hover:text-secondary'
                   )}
                 >
                   Output
@@ -420,11 +420,11 @@ function ToolMessage({ toolName, toolInput, content, isError }: { toolName?: str
             {/* Content */}
             <div className="px-3.5 py-3">
               {(activeTab === 'input' && hasInput) ? (
-                <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-text-secondary">
+                <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-secondary">
                   {toolInput}
                 </pre>
               ) : (
-                <pre className="max-h-48 overflow-x-auto overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-text-secondary">
+                <pre className="max-h-48 overflow-x-auto overflow-y-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-secondary">
                   {content}
                 </pre>
               )}
@@ -443,7 +443,7 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
   if (isInline) {
     return (
       <code
-        className="rounded-md bg-bg-subtle px-1.5 py-0.5 text-[13px] text-text-primary"
+        className="rounded-md bg-secondary px-1.5 py-0.5 text-[13px] text-primary"
         {...props}
       >
         {children}
@@ -467,22 +467,22 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
   return (
     <div className="group/code relative not-prose my-3">
       {lang && (
-        <div className="flex items-center justify-between rounded-t-xl border border-b-0 border-border bg-bg-subtle px-3 py-2">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
+        <div className="flex items-center justify-between rounded-t-xl border border-b-0 border-secondary bg-secondary px-3 py-2">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-quaternary">
             {lang}
           </span>
           <button
             onClick={handleCopy}
             aria-label="Copy code"
-            className="cursor-pointer text-text-muted transition-colors hover:text-text-primary"
+            className="cursor-pointer text-tertiary transition-colors hover:text-primary"
           >
-            {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
+            {copied ? <Check className="h-3 w-3 text-fg-success-secondary" /> : <Copy className="h-3 w-3" />}
           </button>
         </div>
       )}
       <pre
         className={cn(
-          'overflow-x-auto border border-border bg-bg-subtle p-3 text-[13px] leading-relaxed text-text-primary',
+          'overflow-x-auto border border-secondary bg-secondary p-3 text-[13px] leading-relaxed text-primary',
           lang ? 'rounded-b-xl' : 'rounded-xl',
         )}
       >
@@ -494,11 +494,11 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
           aria-label="Copy code"
           className={cn(
             'absolute right-2 top-2 cursor-pointer rounded-xl p-1.5 transition-all',
-            'text-text-muted hover:bg-bg-hover hover:text-text-primary',
+            'text-tertiary hover:bg-primary_hover hover:text-primary',
             'opacity-0 group-hover/code:opacity-100'
           )}
         >
-          {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
+          {copied ? <Check className="h-3 w-3 text-fg-success-secondary" /> : <Copy className="h-3 w-3" />}
         </button>
       )}
     </div>

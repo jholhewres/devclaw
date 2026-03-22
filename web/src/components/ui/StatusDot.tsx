@@ -4,20 +4,20 @@ type Status = 'online' | 'offline' | 'error' | 'warning';
 
 const statusColors: Record<Status, { dot: string; pulse: string }> = {
   online: {
-    dot: 'bg-success',
-    pulse: 'bg-success/40',
+    dot: 'bg-success-solid',
+    pulse: 'bg-success-solid/40',
   },
   offline: {
-    dot: 'bg-text-muted',
-    pulse: 'bg-text-muted/40',
+    dot: 'bg-quaternary',
+    pulse: 'bg-quaternary/40',
   },
   error: {
-    dot: 'bg-error',
-    pulse: 'bg-error/40',
+    dot: 'bg-error-solid',
+    pulse: 'bg-error-solid/40',
   },
   warning: {
-    dot: 'bg-warning',
-    pulse: 'bg-warning/40',
+    dot: 'bg-warning-solid',
+    pulse: 'bg-warning-solid/40',
   },
 };
 
@@ -59,7 +59,7 @@ export function StatusDot({
       </span>
 
       {label && (
-        <span className="text-sm text-text-secondary">{label}</span>
+        <span className="text-sm text-secondary">{label}</span>
       )}
     </span>
   );

@@ -465,6 +465,76 @@ export interface VersionInfo {
   update?: UpdateInfo;
 }
 
+/* ── Agent Types ── */
+
+export interface AgentIdentity {
+  name?: string;
+  emoji?: string;
+  theme?: string;
+  avatar?: string;
+  vibe?: string;
+}
+
+export interface AgentInfo {
+  id: string;
+  name: string;
+  description?: string;
+  model?: string;
+  instructions?: string;
+  language?: string;
+  timezone?: string;
+  trigger?: string;
+  identity?: AgentIdentity;
+  skills?: string[];
+  channels?: string[];
+  members?: string[];
+  groups?: string[];
+  tool_profile?: string;
+  tools_allow?: string[];
+  tools_deny?: string[];
+  max_turns?: number;
+  run_timeout?: number;
+  default: boolean;
+  active: boolean;
+  source?: string;
+  created_at?: string;
+  member_count: number;
+  group_count: number;
+  session_count: number;
+}
+
+export interface CreateAgentRequest {
+  id?: string;
+  name: string;
+  description?: string;
+  model?: string;
+  instructions?: string;
+  language?: string;
+  identity?: AgentIdentity;
+  skills?: string[];
+  channels?: string[];
+  tool_profile?: string;
+  max_turns?: number;
+  run_timeout?: number;
+}
+
+export interface UpdateAgentRequest {
+  name?: string;
+  description?: string;
+  model?: string;
+  instructions?: string;
+  language?: string;
+  identity?: AgentIdentity;
+  skills?: string[];
+  channels?: string[];
+  tool_profile?: string;
+  tools_allow?: string[];
+  tools_deny?: string[];
+  max_turns?: number;
+  run_timeout?: number;
+  active?: boolean;
+}
+
 /* ── API Methods ── */
 
 export const api = {
@@ -530,6 +600,35 @@ export const api = {
     remove: (name: string) =>
       request<void>(`/plugins/${encodeURIComponent(name)}`, {
         method: 'DELETE',
+      }),
+  },
+
+  /* Agents */
+  agents: {
+    list: () => request<AgentInfo[]>('/agents'),
+    get: (id: string) => request<AgentInfo>(`/agents/${encodeURIComponent(id)}`),
+    create: (req: CreateAgentRequest) =>
+      request<{ status: string; id: string }>('/agents', {
+        method: 'POST',
+        body: JSON.stringify(req),
+      }),
+    update: (id: string, req: UpdateAgentRequest) =>
+      request<{ status: string }>(`/agents/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(req),
+      }),
+    delete: (id: string) =>
+      request<{ status: string }>(`/agents/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      }),
+    toggle: (id: string, active: boolean) =>
+      request<{ status: string }>(`/agents/${encodeURIComponent(id)}/toggle`, {
+        method: 'POST',
+        body: JSON.stringify({ active }),
+      }),
+    setDefault: (id: string) =>
+      request<{ status: string }>(`/agents/${encodeURIComponent(id)}/default`, {
+        method: 'POST',
       }),
   },
 

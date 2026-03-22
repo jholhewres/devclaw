@@ -107,16 +107,16 @@ export function SetupWizard() {
                 disabled={id > step}
                 className={cn(
                   'group flex items-center gap-2 rounded-full px-3 py-1.5 transition-all duration-300',
-                  id === step && 'bg-brand text-white shadow-lg shadow-brand/25',
-                  id < step && 'cursor-pointer bg-success-subtle text-success hover:bg-success/20',
-                  id > step && 'bg-bg-subtle/50 text-text-muted',
+                  id === step && 'bg-brand-solid text-white shadow-lg shadow-brand/25',
+                  id < step && 'cursor-pointer bg-success-primary text-fg-success-secondary hover:bg-success/20',
+                  id > step && 'bg-secondary/50 text-tertiary',
                 )}
               >
                 <span className={cn(
-                  'flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold',
+                  'flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold',
                   id === step && 'bg-white/20',
                   id < step && 'bg-success/20',
-                  id > step && 'bg-bg-subtle',
+                  id > step && 'bg-secondary',
                 )}>
                   {id < step ? (
                     <CheckCircle2 className="h-3 w-3" />
@@ -129,9 +129,9 @@ export function SetupWizard() {
 
               {/* Connector line */}
               {index < STEPS.length - 1 && (
-                <div className="relative mx-1 h-0.5 w-4 overflow-hidden rounded-full bg-bg-subtle sm:w-6">
+                <div className="relative mx-1 h-0.5 w-4 overflow-hidden rounded-full bg-secondary sm:w-6">
                   <div
-                    className="absolute inset-y-0 left-0 rounded-full bg-success transition-all duration-500 ease-out"
+                    className="absolute inset-y-0 left-0 rounded-full bg-success-solid transition-all duration-500 ease-out"
                     style={{ width: id < step ? '100%' : '0%' }}
                   />
                 </div>
@@ -150,7 +150,7 @@ export function SetupWizard() {
 
       {/* Error */}
       {error && (
-        <div className="mt-4 rounded-xl border border-error/20 bg-error-subtle px-4 py-3 text-sm text-error">
+        <div className="mt-4 rounded-xl border border-error/20 bg-error-primary px-4 py-3 text-sm text-fg-error-secondary">
           {error}
         </div>
       )}
@@ -160,7 +160,7 @@ export function SetupWizard() {
         <button
           onClick={prev}
           disabled={step === 1}
-          className="flex cursor-pointer items-center gap-1.5 text-sm text-text-muted transition-colors hover:text-text-primary disabled:pointer-events-none disabled:opacity-0"
+          className="flex cursor-pointer items-center gap-1.5 text-sm text-tertiary transition-colors hover:text-primary disabled:pointer-events-none disabled:opacity-0"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           {t('setupPage.back')}
@@ -174,9 +174,9 @@ export function SetupWizard() {
                 key={id}
                 className={cn(
                   'h-1.5 rounded-full transition-all duration-300',
-                  id === step && 'w-5 bg-brand',
-                  id < step && 'w-1.5 bg-success',
-                  id > step && 'w-1.5 bg-bg-subtle',
+                  id === step && 'w-5 bg-brand-solid',
+                  id < step && 'w-1.5 bg-success-solid',
+                  id > step && 'w-1.5 bg-secondary',
                 )}
               />
             ))}
@@ -185,7 +185,7 @@ export function SetupWizard() {
           {step < 3 ? (
             <button
               onClick={next}
-              className="group flex cursor-pointer items-center gap-2 rounded-xl bg-text-primary px-5 py-2.5 text-sm font-semibold text-text-inverse shadow-lg transition-all hover:bg-white"
+              className="group flex cursor-pointer items-center gap-2 rounded-xl bg-text-primary px-5 py-2.5 text-sm font-semibold text-inverse shadow-lg transition-all hover:bg-white"
             >
               {t('setupPage.next')}
               <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
@@ -194,7 +194,7 @@ export function SetupWizard() {
             <button
               onClick={handleFinalize}
               disabled={submitting}
-              className="group flex cursor-pointer items-center gap-2 rounded-xl bg-success px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-success/25 transition-all hover:brightness-110 disabled:cursor-wait disabled:opacity-50"
+              className="group flex cursor-pointer items-center gap-2 rounded-xl bg-success-solid px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-success/25 transition-all hover:brightness-110 disabled:cursor-wait disabled:opacity-50"
             >
               {submitting ? (
                 <>
@@ -256,20 +256,20 @@ function SetupComplete({ hasPassword }: { hasPassword: boolean }) {
       <div className={cn(
         'flex h-14 w-14 items-center justify-center rounded-full transition-all duration-500',
         phase === 'restarting'
-          ? 'bg-bg-subtle'
-          : 'bg-success-subtle ring-1 ring-success/30',
+          ? 'bg-secondary'
+          : 'bg-success-primary ring-1 ring-success/30',
       )}>
         {phase === 'restarting' ? (
-          <Loader2 className="h-7 w-7 animate-spin text-text-muted" />
+          <Loader2 className="h-7 w-7 animate-spin text-tertiary" />
         ) : (
-          <CheckCircle2 className="h-7 w-7 text-success" />
+          <CheckCircle2 className="h-7 w-7 text-fg-success-secondary" />
         )}
       </div>
       <div>
-        <h2 className="text-lg font-semibold text-text-primary">
+        <h2 className="text-lg font-semibold text-primary">
           {phase === 'restarting' ? t('setupPage.startingUp') : t('setupPage.allSet')}
         </h2>
-        <p className="mt-1.5 max-w-sm text-sm text-text-secondary">
+        <p className="mt-1.5 max-w-sm text-sm text-secondary">
           {phase === 'restarting'
             ? t('setupPage.restartingDesc')
             : t('setupPage.redirecting')
@@ -278,17 +278,17 @@ function SetupComplete({ hasPassword }: { hasPassword: boolean }) {
       </div>
 
       {/* Progress bar */}
-      <div className="h-1 w-40 overflow-hidden rounded-full bg-bg-subtle">
+      <div className="h-1 w-40 overflow-hidden rounded-full bg-secondary">
         <div className={cn(
           'h-full rounded-full transition-all duration-1000',
           phase === 'restarting'
-            ? 'w-2/3 animate-pulse bg-brand'
-            : 'w-full bg-success',
+            ? 'w-2/3 animate-pulse bg-brand-solid'
+            : 'w-full bg-success-solid',
         )} />
       </div>
 
       {hasPassword && phase === 'ready' && (
-        <p className="text-xs text-text-muted">
+        <p className="text-xs text-tertiary">
           {t('setupPage.usePasswordHint')}
         </p>
       )}

@@ -49,7 +49,7 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
       ref={containerRef}
       role="tablist"
       className={cn(
-        'relative flex border-b border-border',
+        'relative flex border-b border-secondary',
         className
       )}
     >
@@ -66,8 +66,8 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
             'transition-colors duration-150 cursor-pointer',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset',
             activeTab === tab.id
-              ? 'text-text-primary'
-              : 'text-text-muted hover:text-text-secondary'
+              ? 'text-primary'
+              : 'text-quaternary hover:text-secondary'
           )}
         >
           {tab.icon && (
@@ -82,7 +82,7 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
       {/* Sliding underline indicator */}
       <span
         aria-hidden="true"
-        className="absolute bottom-0 h-0.5 bg-brand rounded-full transition-all duration-200 ease-out"
+        className="absolute bottom-0 h-0.5 bg-brand-solid rounded-full transition-all duration-200 ease-out"
         style={{
           left: indicator.left,
           width: indicator.width,

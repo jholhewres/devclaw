@@ -56,7 +56,7 @@ function Slider({ label, value, onChange, hint }: {
 }) {
   return (
     <div>
-      <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-text-muted">
+      <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-quaternary">
         {label}
       </label>
       <div className="flex items-center gap-4">
@@ -67,13 +67,13 @@ function Slider({ label, value, onChange, hint }: {
           step="0.1"
           value={value}
           onChange={(e) => onChange(parseFloat(e.target.value))}
-          className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-bg-subtle accent-brand"
+          className="flex-1 h-2 rounded-lg appearance-none cursor-pointer bg-secondary accent-brand"
         />
-        <span className="text-sm text-text-primary w-12 text-right">
+        <span className="text-sm text-primary w-12 text-right">
           {(value * 100).toFixed(0)}%
         </span>
       </div>
-      {hint && <p className="mt-2 text-xs text-text-muted">{hint}</p>}
+      {hint && <p className="mt-2 text-xs text-quaternary">{hint}</p>}
     </div>
   )
 }

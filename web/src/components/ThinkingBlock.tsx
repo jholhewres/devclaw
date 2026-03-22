@@ -19,7 +19,7 @@ export function ThinkingBlock({ content }: ThinkingBlockProps) {
       {/* Toggle button */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="text-text-muted hover:text-text-secondary flex cursor-pointer items-center gap-2 text-sm transition-colors"
+        className="text-tertiary hover:text-secondary flex cursor-pointer items-center gap-2 text-sm transition-colors"
       >
         <span>{t('chat.showReasoning')}</span>
         {isExpanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
@@ -28,14 +28,14 @@ export function ThinkingBlock({ content }: ThinkingBlockProps) {
       {/* Content */}
       {isExpanded && (
         <>
-          <div className="text-text-secondary mt-2 text-sm">
+          <div className="text-secondary mt-2 text-sm">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={{
                 // Estilos simplificados para o markdown dentro do thinking
                 p: ({ children }) => <p className="mb-2 leading-5 last:mb-0">{children}</p>,
                 strong: ({ children }) => (
-                  <strong className="text-text-primary font-medium">{children}</strong>
+                  <strong className="text-primary font-medium">{children}</strong>
                 ),
                 ul: ({ children }) => <ul className="my-2 ml-4 list-disc space-y-1">{children}</ul>,
                 ol: ({ children }) => (
@@ -46,7 +46,7 @@ export function ThinkingBlock({ content }: ThinkingBlockProps) {
                   const isInline = !className;
                   if (isInline) {
                     return (
-                      <code className="bg-bg-elevated rounded px-1 py-0.5 text-xs" {...props}>
+                      <code className="bg-tertiary rounded px-1 py-0.5 text-xs" {...props}>
                         {children}
                       </code>
                     );
@@ -63,7 +63,7 @@ export function ThinkingBlock({ content }: ThinkingBlockProps) {
             </ReactMarkdown>
           </div>
           {/* Divider */}
-          <div className="border-border mt-3 h-px w-full border-b" />
+          <div className="border-secondary mt-3 h-px w-full border-b" />
         </>
       )}
     </div>

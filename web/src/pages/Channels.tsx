@@ -86,7 +86,7 @@ export function Channels() {
   }
 
   return (
-    <div className="py-8 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
+    <div className="py-8 px-4 sm:px-6 lg:px-8">
       <PageHeader
         title={t('channels.title')}
         description={t('channelsPage.subtitle')}
@@ -123,23 +123,23 @@ function WhatsAppCard({ channel, onNavigate }: { channel: ChannelHealth; onNavig
       <div className="flex items-start gap-4">
         <div className={cn(
           'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl transition-colors',
-          connected ? 'bg-success-subtle' : 'bg-bg-subtle'
+          connected ? 'bg-success-primary' : 'bg-secondary'
         )}>
-          <div className={cn(connected ? 'text-success' : 'text-text-muted')}>
+          <div className={cn(connected ? 'text-fg-success-secondary' : 'text-tertiary')}>
             {meta.icon}
           </div>
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
-            <h3 className="text-base font-semibold text-text-primary">{t('channels.whatsapp')}</h3>
+            <h3 className="text-base font-semibold text-primary">{t('channels.whatsapp')}</h3>
             <StatusDot
               status={connected ? 'online' : 'offline'}
               label={connected ? t('common.online') : t('common.offline')}
             />
           </div>
 
-          <p className="mt-1 text-sm text-text-muted">
+          <p className="mt-1 text-sm text-tertiary">
             {connected
               ? hasLastMsg
                 ? `${t('channelsPage.manage')} - ${timeAgo(channel.last_msg_at, t)}`
@@ -238,7 +238,7 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
       <Card
         padding="md"
         className={cn(
-          'transition-all cursor-pointer hover:border-border-hover',
+          'transition-all cursor-pointer hover:border-primary',
           !connected && 'opacity-80'
         )}
         onClick={() => navigate(`/channels/${channel.name}`)}
@@ -246,22 +246,22 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
         <div className="flex items-center gap-4">
           <div className={cn(
             'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors',
-            connected ? 'bg-bg-subtle' : 'bg-bg-subtle/50'
+            connected ? 'bg-secondary' : 'bg-secondary/50'
           )} style={connected ? { color: meta.color } : undefined}>
-            <div className={cn(!connected && 'text-text-muted')}>
+            <div className={cn(!connected && 'text-tertiary')}>
               {meta.icon}
             </div>
           </div>
 
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2.5">
-              <h3 className="text-sm font-semibold text-text-primary">{displayName}</h3>
+              <h3 className="text-sm font-semibold text-primary">{displayName}</h3>
               <StatusDot
                 status={connected ? 'online' : 'offline'}
                 label={connected ? t('common.online') : t('common.offline')}
               />
             </div>
-            <p className="mt-0.5 text-xs text-text-muted">
+            <p className="mt-0.5 text-xs text-tertiary">
               {connected
                 ? hasLastMsg
                   ? `${t('channelsPage.manage')} - ${timeAgo(channel.last_msg_at, t)}`
@@ -272,7 +272,7 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
 
           <div className="flex items-center gap-3">
             {channel.error_count > 0 && (
-              <span className="flex items-center gap-1 text-xs text-warning">
+              <span className="flex items-center gap-1 text-xs text-fg-warning-secondary">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 {channel.error_count}
               </span>
@@ -283,7 +283,7 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
                 {t('channelsPage.restartRequired')}
               </Badge>
             )}
-            <ArrowRight className="h-4 w-4 text-text-muted" />
+            <ArrowRight className="h-4 w-4 text-tertiary" />
           </div>
         </div>
       </Card>
@@ -294,19 +294,19 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
   return (
     <Card padding="lg" className="transition-all">
       <div className="flex items-start gap-4">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-bg-subtle text-text-muted">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-secondary text-tertiary">
           {meta.icon}
         </div>
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
-            <h3 className="text-base font-semibold text-text-primary">{displayName}</h3>
+            <h3 className="text-base font-semibold text-primary">{displayName}</h3>
             <Badge variant="default" className="text-xs">
               {t('channelsPage.notConfigured')}
             </Badge>
           </div>
 
-          <p className="mt-1 text-sm text-text-muted">
+          <p className="mt-1 text-sm text-tertiary">
             {t(meta.descKey)}
           </p>
 
@@ -314,7 +314,7 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
           <div className="mt-4 space-y-3">
             {meta.tokenFields.map((field) => (
               <div key={field.key}>
-                <label className="block text-xs font-medium text-text-secondary mb-1.5">
+                <label className="block text-xs font-medium text-secondary mb-1.5">
                   {t(field.labelKey)}
                 </label>
                 <div className="relative">
@@ -323,12 +323,12 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
                     value={tokens[field.key] || ''}
                     onChange={(e) => updateToken(field.key, e.target.value)}
                     placeholder={field.placeholder}
-                    className="flex h-10 w-full rounded-lg border border-border bg-bg-main px-3 pr-10 text-sm text-text-primary placeholder:text-text-muted outline-none transition-all hover:border-border-hover focus:border-brand/50 focus:ring-1 focus:ring-brand/20 font-mono"
+                    className="flex h-10 w-full rounded-lg border border-secondary bg-primary px-3 pr-10 text-sm text-primary placeholder:text-quaternary outline-none transition-all hover:border-primary focus:border-brand/50 focus:ring-1 focus:ring-brand/20 font-mono"
                   />
                   <button
                     type="button"
                     onClick={() => toggleShow(field.key)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-tertiary hover:text-primary cursor-pointer"
                   >
                     {showTokens[field.key]
                       ? <EyeOff className="h-4 w-4" />
@@ -366,7 +366,7 @@ function ConfigurableChannelCard({ channel, onSaved }: { channel: ChannelHealth;
                 href={meta.tokenHintUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-xs text-text-muted hover:text-brand transition-colors"
+                className="flex items-center gap-1.5 text-xs text-tertiary hover:text-brand-tertiary transition-colors"
               >
                 {t(meta.tokenHintKey)}
                 <ExternalLink className="h-3 w-3" />
