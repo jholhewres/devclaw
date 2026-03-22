@@ -505,6 +505,33 @@ func (r *Registry) MatchTrigger(content, channel string) *TriggerMatch {
 	return bestMatch
 }
 
+// PluginAgentSummary holds minimal info about a plugin agent for prompt injection.
+type PluginAgentSummary struct {
+	PluginID    string
+	AgentID     string
+	Name        string
+	Description string
+	Triggers    []string
+}
+
+// ListAgentSummaries returns summaries of all registered plugin agents.
+func (r *Registry) ListAgentSummaries() []PluginAgentSummary {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	summaries := make([]PluginAgentSummary, 0, len(r.agentIndex))
+	for _, agent := range r.agentIndex {
+		summaries = append(summaries, PluginAgentSummary{
+			PluginID:    agent.pluginID,
+			AgentID:     agent.ID,
+			Name:        agent.Name,
+			Description: agent.Description,
+			Triggers:    agent.Triggers,
+		})
+	}
+	return summaries
+}
+
 // GetResolvedAgent returns the resolved agent for a given plugin/agent ID pair.
 func (r *Registry) GetResolvedAgent(pluginID, agentID string) *resolvedAgent {
 	r.mu.RLock()

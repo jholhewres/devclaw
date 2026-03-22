@@ -782,6 +782,23 @@ func (a *Assistant) Start(ctx context.Context) error {
 		if a.subagentMgr != nil {
 			RegisterPluginAgentDelegation(a.toolExecutor, a.pluginRegistry, a.subagentMgr, a.llmClient)
 		}
+
+		// Wire plugin agent lister so the main agent's prompt lists available plugin agents.
+		reg := a.pluginRegistry
+		a.promptComposer.SetPluginAgentLister(func() []pluginAgentInfo {
+			summaries := reg.ListAgentSummaries()
+			infos := make([]pluginAgentInfo, len(summaries))
+			for i, s := range summaries {
+				infos[i] = pluginAgentInfo{
+					PluginID:    s.PluginID,
+					AgentID:     s.AgentID,
+					Name:        s.Name,
+					Description: s.Description,
+					Triggers:    s.Triggers,
+				}
+			}
+			return infos
+		})
 	}
 
 	// 2. Start channel manager (non-fatal: webui/gateway can work without channels).

@@ -59,6 +59,7 @@ const (
 	LayerThinking       PromptLayer = 12 // Extended thinking level hint (from /think).
 	LayerBootstrap      PromptLayer = 15 // SOUL.md, AGENTS.md, etc.
 	LayerBuiltinSkills  PromptLayer = 18 // Built-in tool guides (memory, teams, etc.)
+	LayerPluginAgents   PromptLayer = 19 // Available plugin agents for delegation.
 	LayerBusiness       PromptLayer = 20 // User/workspace context.
 	LayerProjectContext PromptLayer = 25 // Auto-discovered project context.
 	LayerSkills         PromptLayer = 40 // Active skill instructions.
@@ -117,7 +118,8 @@ type PromptComposer struct {
 	skillGetter   func(name string) (interface{ SystemPrompt() string }, bool)
 	skillLister   func() []SkillInfo // Returns all available skills with name, description, tools
 	builtinSkills *BuiltinSkills
-	toolExecutor  *ToolExecutor // For dynamic tool list generation
+	toolExecutor     *ToolExecutor // For dynamic tool list generation
+	pluginAgentLister func() []pluginAgentInfo // Lists available plugin agents.
 	isSubagent    bool // When true, only AGENTS.md + TOOLS.md are loaded.
 	contextEngines *ContextEngineRegistry // Pluggable context engines.
 
@@ -150,6 +152,15 @@ type SkillInfo struct {
 	Location      string   // Absolute path to SKILL.md ("" for built-in skills)
 	HasReferences bool     // True if the skill has a references/ directory
 	Tools         []string
+}
+
+// pluginAgentInfo holds minimal info about a plugin agent for prompt injection.
+type pluginAgentInfo struct {
+	PluginID    string
+	AgentID     string
+	Name        string
+	Description string
+	Triggers    []string
 }
 
 // MemoryPromptSectionBuilder is implemented by memory plugins that want to
@@ -218,6 +229,11 @@ func (p *PromptComposer) SetSkillLister(lister func() []SkillInfo) {
 // SetBuiltinSkills sets the built-in skills for the prompt composer.
 func (p *PromptComposer) SetBuiltinSkills(skills *BuiltinSkills) {
 	p.builtinSkills = skills
+}
+
+// SetPluginAgentLister sets the function used to list available plugin agents.
+func (p *PromptComposer) SetPluginAgentLister(lister func() []pluginAgentInfo) {
+	p.pluginAgentLister = lister
 }
 
 // SetToolExecutor sets the tool executor for dynamic tool list generation.
@@ -298,6 +314,9 @@ func (p *PromptComposer) Compose(session *Session, input string) string {
 	}
 	if builtinSkills := p.buildBuiltinSkillsLayer(); builtinSkills != "" {
 		layers = append(layers, layerEntry{layer: LayerBuiltinSkills, content: builtinSkills})
+	}
+	if pluginAgents := p.buildPluginAgentsLayer(); pluginAgents != "" {
+		layers = append(layers, layerEntry{layer: LayerPluginAgents, content: pluginAgents})
 	}
 	if skills != "" {
 		layers = append(layers, layerEntry{layer: LayerSkills, content: skills})
@@ -1440,6 +1459,37 @@ func (p *PromptComposer) buildBuiltinSkillsLayer() string {
 	return b.String()
 }
 
+// buildPluginAgentsLayer creates a section listing available plugin agents
+// so the main agent knows it can delegate tasks to them.
+func (p *PromptComposer) buildPluginAgentsLayer() string {
+	if p.pluginAgentLister == nil {
+		return ""
+	}
+
+	agents := p.pluginAgentLister()
+	if len(agents) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("## Available Plugin Agents\n\n")
+	b.WriteString("The following plugin agents are available. They are automatically triggered when user messages match their trigger keywords. ")
+	b.WriteString("You can also explicitly delegate tasks to them using the `delegate_to_plugin_agent` tool.\n\n")
+
+	for _, agent := range agents {
+		b.WriteString(fmt.Sprintf("- **%s** (plugin: `%s`, agent: `%s`)", agent.Name, agent.PluginID, agent.AgentID))
+		if agent.Description != "" {
+			b.WriteString(fmt.Sprintf(" — %s", agent.Description))
+		}
+		if len(agent.Triggers) > 0 {
+			b.WriteString(fmt.Sprintf("\n  Triggers: `%s`", strings.Join(agent.Triggers, "`, `")))
+		}
+		b.WriteString("\n")
+	}
+
+	return b.String()
+}
+
 // buildRuntimeLayer creates the runtime info line (last in prompt).
 func (p *PromptComposer) buildRuntimeLayer(session *Session) string {
 	hostname, _ := os.Hostname()
@@ -1573,6 +1623,7 @@ func (p *PromptComposer) assembleLayers(layers []layerEntry) string {
 		LayerThinking:      200,  // thinking hint
 		LayerBootstrap:     4000, // bootstrap files
 		LayerBuiltinSkills: 2000, // built-in tool guides
+		LayerPluginAgents:  500,  // plugin agent summaries
 		LayerBusiness:      1000, // workspace context
 		LayerSkills:        p.config.TokenBudget.Skills,
 		LayerMemory:        p.config.TokenBudget.Memory,
