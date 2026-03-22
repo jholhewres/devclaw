@@ -2,7 +2,7 @@
 
 All notable changes to DevClaw are documented in this file.
 
-## [Unreleased]
+## [1.16.0] — 2026-03-22
 
 ### Channels — Multi-Instance & QR Lifecycle
 
