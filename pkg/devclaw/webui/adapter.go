@@ -108,6 +108,7 @@ type AssistantAdapter struct {
 	// Telegram
 	GetTelegramConfigFn    func() TelegramConfig
 	UpdateTelegramConfigFn func(config map[string]any) error
+	ConnectTelegramFn      func(token string) error
 	DisconnectTelegramFn   func() error
 
 	// Security: Audit Log
@@ -409,6 +410,13 @@ func (a *AssistantAdapter) GetTelegramConfig() TelegramConfig {
 func (a *AssistantAdapter) UpdateTelegramConfig(config map[string]any) error {
 	if a.UpdateTelegramConfigFn != nil {
 		return a.UpdateTelegramConfigFn(config)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) ConnectTelegram(token string) error {
+	if a.ConnectTelegramFn != nil {
+		return a.ConnectTelegramFn(token)
 	}
 	return errors.New("not implemented")
 }

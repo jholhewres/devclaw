@@ -1992,6 +1992,7 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 	// Get Telegram channel from the channel manager if registered.
 	adapter.GetTelegramConfigFn = func() webui.TelegramConfig {
 		result := webui.TelegramConfig{
+			Configured:            cfg.Channels.Telegram.Token != "",
 			RespondToGroups:       cfg.Channels.Telegram.RespondToGroups,
 			RespondToDMs:          cfg.Channels.Telegram.RespondToDMs,
 			SendTyping:            cfg.Channels.Telegram.SendTyping,
@@ -2033,8 +2034,66 @@ func buildWebUIAdapter(assistant *copilot.Assistant, cfg *copilot.Config, wa *wh
 		return copilot.SaveConfigToFile(cfg, savePath)
 	}
 
+	adapter.ConnectTelegramFn = func(token string) error {
+		wasEmpty := cfg.Channels.Telegram.Token == ""
+
+		// Store token in vault if available.
+		v := assistant.Vault()
+		if v != nil && v.IsUnlocked() {
+			if err := v.Set("TELEGRAM_BOT_TOKEN", token); err != nil {
+				return fmt.Errorf("failed to store Telegram token in vault: %w", err)
+			}
+			os.Setenv("TELEGRAM_BOT_TOKEN", token)
+		}
+		cfg.Channels.Telegram.Token = token
+
+		// Persist to config file.
+		savePath := configPath
+		if savePath == "" {
+			savePath = "config.yaml"
+		}
+		if err := copilot.SaveConfigToFile(cfg, savePath); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
+
+		// Hot-reload: register and connect the channel.
+		if wasEmpty {
+			tg := telegram.New(cfg.Channels.Telegram, logger)
+			if err := assistant.ChannelManager().RegisterAndConnect(tg); err != nil {
+				return fmt.Errorf("failed to connect Telegram: %w", err)
+			}
+			logger.Info("Telegram channel connected via UI")
+		}
+		return nil
+	}
+
 	adapter.DisconnectTelegramFn = func() error {
-		return assistant.ChannelManager().DisconnectChannel("telegram")
+		// Disconnect the channel if running.
+		if ch, exists := assistant.ChannelManager().Channel("telegram"); exists && ch.IsConnected() {
+			if err := assistant.ChannelManager().DisconnectChannel("telegram"); err != nil {
+				return err
+			}
+		}
+
+		// Clear token from config and persist.
+		cfg.Channels.Telegram.Token = ""
+		savePath := configPath
+		if savePath == "" {
+			savePath = "config.yaml"
+		}
+		if err := copilot.SaveConfigToFile(cfg, savePath); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
+
+		// Clear from vault if available.
+		v := assistant.Vault()
+		if v != nil && v.IsUnlocked() {
+			_ = v.Delete("TELEGRAM_BOT_TOKEN")
+		}
+		os.Unsetenv("TELEGRAM_BOT_TOKEN")
+
+		logger.Info("Telegram channel disconnected and token removed via UI")
+		return nil
 	}
 
 	// ── Plugins ──

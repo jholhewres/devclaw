@@ -8,6 +8,9 @@ import {
   CheckCircle2,
   WifiOff,
   XCircle,
+  Eye,
+  EyeOff,
+  Trash2,
 } from 'lucide-react'
 import { api, type TelegramConfig } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -114,15 +117,35 @@ function ConnectionTab({
   onReload: () => void
 }) {
   const { t } = useTranslation()
+  const [token, setToken] = useState('')
+  const [showToken, setShowToken] = useState(false)
+  const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
+  const [actionError, setActionError] = useState('')
+
+  const handleConnect = async () => {
+    if (!token.trim()) return
+    setConnecting(true)
+    setActionError('')
+    try {
+      await api.channels.telegram.connect(token.trim())
+      setToken('')
+      onReload()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : t('common.error'))
+    } finally {
+      setConnecting(false)
+    }
+  }
 
   const handleDisconnect = async () => {
     setDisconnecting(true)
+    setActionError('')
     try {
       await api.channels.telegram.disconnect()
       onReload()
     } catch (err) {
-      console.error('Failed to disconnect Telegram:', err)
+      setActionError(err instanceof Error ? err.message : t('common.error'))
     } finally {
       setDisconnecting(false)
     }
@@ -152,9 +175,71 @@ function ConnectionTab({
 
   if (!config) return null
 
+  // Not configured — show token input form
+  if (!config.configured && !config.connected) {
+    return (
+      <div className="flex flex-col gap-6">
+        <Card className="p-6">
+          <div className="flex items-center gap-4 mb-6">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-bg-subtle">
+              <WifiOff className="h-7 w-7 text-text-muted" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-text-primary">
+                {t('telegram.notConfigured')}
+              </h3>
+              <p className="mt-1 text-sm text-text-muted">
+                {t('telegram.notConfiguredDesc')}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            <label className="text-sm font-medium text-text-primary">
+              {t('telegram.tokenLabel')}
+            </label>
+            <div className="relative">
+              <input
+                type={showToken ? 'text' : 'password'}
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder={t('telegram.tokenPlaceholder')}
+                className="w-full rounded-lg border border-border bg-bg-main px-3 py-2.5 pr-10 text-sm text-text-primary placeholder:text-text-muted focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
+                onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
+              />
+              <button
+                type="button"
+                onClick={() => setShowToken(!showToken)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary"
+              >
+                {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+            <p className="text-xs text-text-muted">
+              {t('telegram.tokenHint')}
+            </p>
+
+            {actionError && (
+              <p className="text-xs text-error">{actionError}</p>
+            )}
+
+            <Button
+              size="sm"
+              onClick={handleConnect}
+              disabled={!token.trim() || connecting}
+              className="w-fit"
+            >
+              {connecting ? t('telegram.connecting') : t('telegram.connect')}
+            </Button>
+          </div>
+        </Card>
+      </div>
+    )
+  }
+
+  // Configured — show connection status
   return (
     <div className="flex flex-col gap-6">
-      {/* Connection Status */}
       <Card className="p-6">
         <div className="flex items-center gap-4">
           <div className={cn(
@@ -171,7 +256,7 @@ function ConnectionTab({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-3">
               <h3 className="text-base font-semibold text-text-primary">
-                {config.connected ? t('telegram.connected') : t('telegram.disconnected')}
+                {config.connected ? t('telegram.connected') : t('telegram.disconnectedConfigured')}
               </h3>
               <StatusDot
                 status={config.connected ? 'online' : 'offline'}
@@ -187,24 +272,27 @@ function ConnectionTab({
 
             {!config.connected && (
               <p className="mt-1 text-sm text-text-muted">
-                {t('telegram.disconnectedHint')}
+                {t('telegram.disconnectedConfiguredHint')}
               </p>
             )}
           </div>
         </div>
 
-        {config.connected && (
-          <div className="mt-4 flex items-center gap-3">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleDisconnect}
-              disabled={disconnecting}
-            >
-              {disconnecting ? t('telegram.disconnecting') : t('telegram.disconnect')}
-            </Button>
-          </div>
+        {actionError && (
+          <p className="mt-3 text-xs text-error">{actionError}</p>
         )}
+
+        <div className="mt-4 flex items-center gap-3">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleDisconnect}
+            disabled={disconnecting}
+          >
+            <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+            {disconnecting ? t('telegram.removing') : t('telegram.removeToken')}
+          </Button>
+        </div>
       </Card>
 
       {/* Info */}

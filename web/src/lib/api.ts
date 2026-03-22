@@ -203,6 +203,7 @@ export interface WhatsAppSettings {
 
 export interface TelegramConfig {
   connected: boolean;
+  configured: boolean;
   bot_username?: string;
   bot_id?: number;
   respond_to_groups: boolean;
@@ -611,6 +612,11 @@ export const api = {
         request<{ status: string }>('/channels/telegram/config', {
           method: 'PATCH',
           body: JSON.stringify(config),
+        }),
+      connect: (token: string) =>
+        request<{ status: string }>('/channels/telegram/connect', {
+          method: 'POST',
+          body: JSON.stringify({ token }),
         }),
       disconnect: () =>
         request<{ status: string }>('/channels/telegram/disconnect', {
