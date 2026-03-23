@@ -198,6 +198,12 @@ func (t *Telegram) Connect(ctx context.Context) error {
 
 	t.ctx, t.cancel = context.WithCancel(ctx)
 
+	// Reinitialize the messages channel if it was closed by a previous Disconnect.
+	if t.messagesClosed.Load() {
+		t.messages = make(chan *channels.IncomingMessage, 256)
+		t.messagesClosed.Store(false)
+	}
+
 	// Verify token by calling getMe.
 	me, err := t.getMe()
 	if err != nil {

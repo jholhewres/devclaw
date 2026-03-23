@@ -481,6 +481,14 @@ func (w *WhatsApp) getDBPath() string {
 func (w *WhatsApp) Connect(ctx context.Context) error {
 	w.ctx, w.cancel = context.WithCancel(ctx)
 
+	// Reinitialize the messages channel if it was closed by a previous Disconnect.
+	// Without this, emitMessage silently drops all incoming messages and
+	// the manager's listener goroutine exits immediately on the closed channel.
+	if w.messagesClosed.Load() {
+		w.messages = make(chan *channels.IncomingMessage, 256)
+		w.messagesClosed.Store(false)
+	}
+
 	w.setState(StateConnecting)
 	w.logger.Info("whatsapp: initializing connection...")
 
