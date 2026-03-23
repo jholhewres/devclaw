@@ -279,9 +279,35 @@ func New(cfg Config, logger *slog.Logger) *WhatsApp {
 		logger = slog.Default()
 	}
 
-	// Apply defaults.
+	// Apply defaults for zero-valued fields.
+	defaults := DefaultConfig()
+	if cfg.SessionDir == "" {
+		cfg.SessionDir = defaults.SessionDir
+	}
+	if cfg.Trigger == "" {
+		cfg.Trigger = defaults.Trigger
+	}
+	if cfg.MediaDir == "" {
+		cfg.MediaDir = defaults.MediaDir
+	}
+	if cfg.MaxMediaSizeMB == 0 {
+		cfg.MaxMediaSizeMB = defaults.MaxMediaSizeMB
+	}
 	if cfg.ReconnectBackoff == 0 {
-		cfg.ReconnectBackoff = 5 * time.Second
+		cfg.ReconnectBackoff = defaults.ReconnectBackoff
+	}
+	if cfg.MaxReconnectAttempts == 0 {
+		cfg.MaxReconnectAttempts = defaults.MaxReconnectAttempts
+	}
+	// Bool fields all default to true. When ALL four are false it indicates
+	// the config was zero-initialized (previous bug) rather than intentionally
+	// disabled — no user would disable DMs, groups, typing AND read receipts
+	// at the same time. Apply defaults in that case.
+	if !cfg.RespondToDMs && !cfg.RespondToGroups && !cfg.SendTyping && !cfg.AutoRead {
+		cfg.RespondToDMs = defaults.RespondToDMs
+		cfg.RespondToGroups = defaults.RespondToGroups
+		cfg.SendTyping = defaults.SendTyping
+		cfg.AutoRead = defaults.AutoRead
 	}
 
 	w := &WhatsApp{

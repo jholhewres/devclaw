@@ -154,8 +154,20 @@ func New(cfg Config, logger *slog.Logger) *Telegram {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	// Apply defaults for zero-valued fields.
+	defaults := DefaultConfig()
 	if cfg.ParseMode == "" {
-		cfg.ParseMode = "HTML"
+		cfg.ParseMode = defaults.ParseMode
+	}
+	if cfg.ReactionNotifications == "" {
+		cfg.ReactionNotifications = defaults.ReactionNotifications
+	}
+	// Bool fields all default to true. When ALL three are false it indicates
+	// the config was zero-initialized rather than intentionally disabled.
+	if !cfg.RespondToDMs && !cfg.RespondToGroups && !cfg.SendTyping {
+		cfg.RespondToDMs = defaults.RespondToDMs
+		cfg.RespondToGroups = defaults.RespondToGroups
+		cfg.SendTyping = defaults.SendTyping
 	}
 	return &Telegram{
 		cfg:             cfg,
