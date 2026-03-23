@@ -381,6 +381,7 @@ func (m *Manager) UnregisterChannel(name string) error {
 	}
 
 	delete(m.channels, name)
+	delete(m.activeListeners, name)
 	m.logger.Info("channel unregistered", "channel", name)
 	return nil
 }

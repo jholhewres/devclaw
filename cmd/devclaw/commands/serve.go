@@ -91,6 +91,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// Returns unlocked vault (if available) for agent vault tools.
 	vault := copilot.ResolveAPIKey(cfg, logger)
 
+	// Re-resolve secrets now that vault has injected env vars.
+	// The initial load ran before vault was unlocked, so channel tokens
+	// like ${TELEGRAM_BOT_TOKEN} were not yet in the environment.
+	copilot.ResolveSecrets(cfg)
+
 	// ── Run startup verification ──
 	verifier := copilot.NewStartupVerifier(cfg, vault, logger)
 	startupReport := verifier.RunAll()

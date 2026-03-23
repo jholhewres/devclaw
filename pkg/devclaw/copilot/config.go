@@ -944,6 +944,7 @@ func DefaultConfig() *Config {
 		Workspaces: DefaultWorkspaceConfig(),
 		Channels: ChannelsConfig{
 			WhatsApp: whatsapp.DefaultConfig(),
+			Telegram: telegram.DefaultConfig(),
 		},
 		Memory: MemoryConfig{
 			Type:                "sqlite",

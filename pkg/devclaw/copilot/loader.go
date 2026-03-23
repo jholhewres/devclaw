@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/jholhewres/devclaw/pkg/devclaw/channels/telegram"
 	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v3"
 )
@@ -54,7 +55,7 @@ func LoadConfigFromFile(path string) (*Config, error) {
 	}
 
 	// Resolve secrets from environment (override empty/placeholder values).
-	resolveSecrets(cfg)
+	ResolveSecrets(cfg)
 
 	// Resolve relative paths based on config file location.
 	resolveRelativePaths(cfg, path)
@@ -95,6 +96,25 @@ func ParseConfig(data []byte) (*Config, error) {
 		}
 		if _, set := mediaMap["transcription_enabled"]; !set {
 			cfg.Media.TranscriptionEnabled = defaults.TranscriptionEnabled
+		}
+	}
+
+	// Same for Telegram: respond_to_groups and respond_to_dms default to true,
+	// but YAML unmarshal zeros them when absent from config.
+	if channels, hasChannels := raw["channels"]; hasChannels {
+		chMap, _ := channels.(map[string]any)
+		if tgRaw, hasTg := chMap["telegram"]; hasTg {
+			tgMap, _ := tgRaw.(map[string]any)
+			tgDefaults := telegram.DefaultConfig()
+			if _, set := tgMap["respond_to_groups"]; !set {
+				cfg.Channels.Telegram.RespondToGroups = tgDefaults.RespondToGroups
+			}
+			if _, set := tgMap["respond_to_dms"]; !set {
+				cfg.Channels.Telegram.RespondToDMs = tgDefaults.RespondToDMs
+			}
+			if _, set := tgMap["send_typing"]; !set {
+				cfg.Channels.Telegram.SendTyping = tgDefaults.SendTyping
+			}
 		}
 	}
 
@@ -455,9 +475,10 @@ func expandEnvVarsWithValidation(input string) (string, error) {
 	return result, nil
 }
 
-// resolveSecrets fills in config secrets from environment variables
+// ResolveSecrets fills in config secrets from environment variables
 // when the config value is empty or a placeholder.
-func resolveSecrets(cfg *Config) {
+// Called during initial config load and again after vault injection.
+func ResolveSecrets(cfg *Config) {
 	// API key: DEVCLAW_API_KEY or OPENAI_API_KEY.
 	if cfg.API.APIKey == "" || IsEnvReference(cfg.API.APIKey) {
 		if key := os.Getenv("DEVCLAW_API_KEY"); key != "" {
@@ -466,6 +487,25 @@ func resolveSecrets(cfg *Config) {
 			cfg.API.APIKey = key
 		} else if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
 			cfg.API.APIKey = key
+		}
+	}
+
+	// Channel tokens: resolve from environment when empty or placeholder.
+	// SaveConfigToFile replaces real tokens with ${ENV_VAR} references.
+	// On restart the vault injects env vars AFTER config is loaded, so
+	// these fields need a second pass once the env is populated.
+	resolveChannelToken(&cfg.Channels.Telegram.Token, "TELEGRAM_BOT_TOKEN")
+	resolveChannelToken(&cfg.Channels.Discord.Token, "DISCORD_BOT_TOKEN")
+	resolveChannelToken(&cfg.Channels.Slack.BotToken, "SLACK_BOT_TOKEN")
+	resolveChannelToken(&cfg.Channels.Slack.AppToken, "SLACK_APP_TOKEN")
+}
+
+// resolveChannelToken resolves a single channel token from an env var
+// when the current value is empty or an unresolved ${VAR} reference.
+func resolveChannelToken(field *string, envVar string) {
+	if *field == "" || IsEnvReference(*field) {
+		if tok := os.Getenv(envVar); tok != "" {
+			*field = tok
 		}
 	}
 }
