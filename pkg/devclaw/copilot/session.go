@@ -324,8 +324,15 @@ func (s *Session) LastActiveAt() time.Time {
 // ClearHistory limpa o histórico de conversa mantendo fatos de longo prazo.
 func (s *Session) ClearHistory() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	p := s.persistence
+	id := s.ID
 	s.history = nil
+	s.mu.Unlock()
+
+	// Also clear persisted history so it doesn't resurface after memory eviction.
+	if p != nil {
+		_ = p.Rotate(id, 0)
+	}
 }
 
 // ClearFacts removes all session facts. Used by /reset.
@@ -579,6 +586,7 @@ func (ss *SessionStore) GetOrCreate(channel, chatID string) *Session {
 				maxHistory:   DefaultMaxHistory,
 				CreatedAt:    time.Now(),
 				lastActiveAt: time.Now(),
+				persistence:  persistence,
 			}
 			ss.sessions[key] = session
 			ss.logger.Info("sessão restaurada do disco",
