@@ -341,10 +341,12 @@ install_deps_linux() {
         # Detect if we need t64 suffix (Ubuntu 22.04+) or not (Debian, older Ubuntu)
         local t64_suffix=""
         if [[ -f /etc/os-release ]]; then
-          . /etc/os-release
-          if [[ "$ID" == "ubuntu" ]]; then
+          local _os_id _os_version_id
+          _os_id=$(. /etc/os-release && echo "$ID")
+          _os_version_id=$(. /etc/os-release && echo "$VERSION_ID")
+          if [[ "$_os_id" == "ubuntu" ]]; then
             local ubuntu_version
-            ubuntu_version=$(echo "$VERSION_ID" | cut -d. -f1 2>/dev/null || echo "0")
+            ubuntu_version=$(echo "$_os_version_id" | cut -d. -f1 2>/dev/null || echo "0")
             if [[ "$ubuntu_version" -ge 22 ]]; then
               t64_suffix="t64"
             fi
