@@ -839,6 +839,19 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 
 		// ── No tool calls → final response ──
 		if len(resp.ToolCalls) == 0 {
+			// Check for context overflow returned as finish_reason (safety net).
+			// Some providers (Z.AI Anthropic proxy) may return this as a
+			// stop_reason in a 200 OK instead of an HTTP error. The LLM client
+			// converts it to an error, but if it somehow slips through, catch it here.
+			if resp.Content == "" && IsLikelyContextOverflowError(resp.FinishReason) {
+				a.logger.Warn("context overflow detected via finish_reason, compacting",
+					"finish_reason", resp.FinishReason,
+					"turn", totalTurns,
+				)
+				messages = a.aggressiveCompaction(runCtx, messages)
+				continue
+			}
+
 			// Check for truncated response (finish_reason="length").
 			// If the response was cut mid-generation by context limit, compact
 			// and retry instead of returning a truncated answer.

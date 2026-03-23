@@ -1793,6 +1793,13 @@ func (c *LLMClient) completeOnceAnthropic(ctx context.Context, model string, mes
 		"tool_calls", len(result.ToolCalls),
 	)
 
+	// Anthropic (and Z.AI proxy) may return context overflow as a stop_reason
+	// in a 200 OK response instead of an HTTP error. Convert to an error so
+	// the overflow retry / compaction logic in the agent can handle it.
+	if IsLikelyContextOverflowError(result.FinishReason) {
+		return nil, fmt.Errorf("context overflow: stop_reason=%s", anthResp.StopReason)
+	}
+
 	return result, nil
 }
 
@@ -2226,6 +2233,13 @@ func (c *LLMClient) completeOnceStreamAnthropic(ctx context.Context, model strin
 
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("reading stream: %w", err)
+	}
+
+	// Anthropic (and Z.AI proxy) may return context overflow as a stop_reason
+	// in a 200 OK response instead of an HTTP error. Convert to an error so
+	// the overflow retry / compaction logic in the agent can handle it.
+	if IsLikelyContextOverflowError(finishReason) {
+		return nil, fmt.Errorf("context overflow: stop_reason=%s", finishReason)
 	}
 
 	// Map Anthropic stop reasons to OpenAI finish reasons.
