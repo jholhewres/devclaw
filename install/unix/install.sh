@@ -493,16 +493,13 @@ install_dependencies() {
 # =============================================================================
 
 detect_latest_version() {
-  ui_info "Detecting latest version from GitHub Releases..." >&2
-
+  # NOTE: This function's stdout is captured via $(). All UI output must go to stderr.
   if [[ "$DRY_RUN" == "1" ]]; then
     echo "v1.0.0-dryrun"
     return 0
   fi
 
   local latest_version=""
-
-  # Use GitHub API to get the latest release tag
   latest_version=$(curl -fsSL "${GITHUB_API}/releases/latest" 2>/dev/null \
     | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' \
     | head -1 \
@@ -527,6 +524,7 @@ resolve_version() {
 
   # Auto-detect latest from GitHub Releases
   if [[ -z "$VERSION" ]]; then
+    ui_info "Detecting latest version from GitHub Releases..."
     VERSION=$(detect_latest_version)
     ui_kv "Version" "$VERSION (latest)"
   fi
