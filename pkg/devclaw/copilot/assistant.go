@@ -2294,8 +2294,30 @@ func (a *Assistant) composeWorkspacePrompt(ws *Workspace, session *Session, inpu
 	a.composeMu.Lock()
 	defer a.composeMu.Unlock()
 
+	// Non-main workspaces with custom instructions: replace global instructions
+	// instead of stacking both. This matches composePromptWithAgent behavior
+	// and prevents prompt bloat that exceeds smaller models' context windows.
+	isNonMain := ws.ID != a.workspaceMgr.DefaultID()
+	if isNonMain && ws.Instructions != "" {
+		a.configMu.Lock()
+		originalInstructions := a.config.Instructions
+		a.config.Instructions = ws.Instructions
+		a.configMu.Unlock()
+
+		defer func() {
+			a.configMu.Lock()
+			a.config.Instructions = originalInstructions
+			a.configMu.Unlock()
+		}()
+
+		// Clear BusinessContext since instructions are now in the primary slot.
+		cfg := session.GetConfig()
+		cfg.BusinessContext = ""
+		session.SetConfig(cfg)
+	}
+
 	// Set workspace context for non-main file-backed agents.
-	if ws.ID != a.workspaceMgr.DefaultID() && hasWorkspaceDir(ws.ID) {
+	if isNonMain && hasWorkspaceDir(ws.ID) {
 		wsDir := paths.ResolveWorkspaceDir(ws.ID)
 		a.promptComposer.SetWorkspaceContext(ws.ID, []string{wsDir})
 		defer a.promptComposer.SetWorkspaceContext("", nil)
