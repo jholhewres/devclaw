@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/channels/telegram"
+	"github.com/jholhewres/devclaw/pkg/devclaw/channels/whatsapp"
 	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v3"
 )
@@ -99,26 +100,80 @@ func ParseConfig(data []byte) (*Config, error) {
 		}
 	}
 
-	// Same for Telegram: respond_to_groups and respond_to_dms default to true,
-	// but YAML unmarshal zeros them when absent from config.
+	// Same for channel bool fields: respond_to_groups, respond_to_dms, etc.
+	// default to true but YAML unmarshal zeros them when absent from config.
 	if channels, hasChannels := raw["channels"]; hasChannels {
 		chMap, _ := channels.(map[string]any)
+
+		// WhatsApp (default instance)
+		if waRaw, hasWa := chMap["whatsapp"]; hasWa {
+			mergeWhatsAppBoolDefaults(waRaw, &cfg.Channels.WhatsApp)
+		}
+
+		// WhatsApp instances
+		if instsRaw, hasInsts := chMap["whatsapp_instances"]; hasInsts {
+			instsMap, _ := instsRaw.(map[string]any)
+			for id, instRaw := range instsMap {
+				if inst, ok := cfg.Channels.WhatsAppInstances[id]; ok {
+					mergeWhatsAppBoolDefaults(instRaw, &inst)
+					cfg.Channels.WhatsAppInstances[id] = inst
+				}
+			}
+		}
+
+		// Telegram (default instance)
 		if tgRaw, hasTg := chMap["telegram"]; hasTg {
-			tgMap, _ := tgRaw.(map[string]any)
-			tgDefaults := telegram.DefaultConfig()
-			if _, set := tgMap["respond_to_groups"]; !set {
-				cfg.Channels.Telegram.RespondToGroups = tgDefaults.RespondToGroups
-			}
-			if _, set := tgMap["respond_to_dms"]; !set {
-				cfg.Channels.Telegram.RespondToDMs = tgDefaults.RespondToDMs
-			}
-			if _, set := tgMap["send_typing"]; !set {
-				cfg.Channels.Telegram.SendTyping = tgDefaults.SendTyping
+			mergeTelegramBoolDefaults(tgRaw, &cfg.Channels.Telegram)
+		}
+
+		// Telegram instances
+		if instsRaw, hasInsts := chMap["telegram_instances"]; hasInsts {
+			instsMap, _ := instsRaw.(map[string]any)
+			for id, instRaw := range instsMap {
+				if inst, ok := cfg.Channels.TelegramInstances[id]; ok {
+					mergeTelegramBoolDefaults(instRaw, &inst)
+					cfg.Channels.TelegramInstances[id] = inst
+				}
 			}
 		}
 	}
 
 	return cfg, nil
+}
+
+// mergeWhatsAppBoolDefaults restores WhatsApp bool defaults that YAML unmarshal
+// zeroed when the field was absent from the config file.
+func mergeWhatsAppBoolDefaults(rawSection any, cfg *whatsapp.Config) {
+	m, _ := rawSection.(map[string]any)
+	defaults := whatsapp.DefaultConfig()
+	if _, set := m["respond_to_groups"]; !set {
+		cfg.RespondToGroups = defaults.RespondToGroups
+	}
+	if _, set := m["respond_to_dms"]; !set {
+		cfg.RespondToDMs = defaults.RespondToDMs
+	}
+	if _, set := m["auto_read"]; !set {
+		cfg.AutoRead = defaults.AutoRead
+	}
+	if _, set := m["send_typing"]; !set {
+		cfg.SendTyping = defaults.SendTyping
+	}
+}
+
+// mergeTelegramBoolDefaults restores Telegram bool defaults that YAML unmarshal
+// zeroed when the field was absent from the config file.
+func mergeTelegramBoolDefaults(rawSection any, cfg *telegram.Config) {
+	m, _ := rawSection.(map[string]any)
+	defaults := telegram.DefaultConfig()
+	if _, set := m["respond_to_groups"]; !set {
+		cfg.RespondToGroups = defaults.RespondToGroups
+	}
+	if _, set := m["respond_to_dms"]; !set {
+		cfg.RespondToDMs = defaults.RespondToDMs
+	}
+	if _, set := m["send_typing"]; !set {
+		cfg.SendTyping = defaults.SendTyping
+	}
 }
 
 // SaveConfigToFile writes a Config as YAML to the specified path.
