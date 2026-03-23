@@ -630,6 +630,9 @@ func (p *PromptComposer) buildCoreLayer() string {
 	if p.config.Heartbeat.WorkspaceDir != "" && p.config.Heartbeat.WorkspaceDir != "." {
 		searchDirs = append([]string{p.config.Heartbeat.WorkspaceDir}, searchDirs...)
 	}
+	if len(p.workspaceBootstrapDirs) > 0 {
+		searchDirs = append(p.workspaceBootstrapDirs, searchDirs...)
+	}
 	identityContent := p.loadBootstrapFileCached(p.bootstrapCacheKey("IDENTITY.md"), "IDENTITY.md", searchDirs)
 	identity := ResolveIdentity(p.config, p.agentProfile, identityContent)
 	name := identity.EffectiveName(p.config.Name)
