@@ -1246,6 +1246,7 @@
     "settingsNotAvailable": "Configurações não disponíveis. Certifique-se de que o Telegram está configurado.",
     "tabs": {
       "connection": "Conexão",
+      "access": "Acesso",
       "settings": "Configurações"
     },
     "settings": {

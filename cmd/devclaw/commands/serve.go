@@ -147,7 +147,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Telegram (core channel — supports multiple instances).
-	if shouldEnable("telegram", channelFilter, false) {
+	if shouldEnable("telegram", channelFilter, true) {
 		for instanceID, tgCfg := range cfg.Channels.TelegramAll() {
 			if tgCfg.Token == "" {
 				continue

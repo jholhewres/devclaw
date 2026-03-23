@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import {
@@ -11,22 +11,27 @@ import {
   Eye,
   EyeOff,
   Trash2,
+  Users,
+  UserCircle2,
+  Loader2,
 } from 'lucide-react'
-import { api, type TelegramConfig } from '@/lib/api'
+import { api, type TelegramConfig, type WhatsAppAccessConfig } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
 import { Select } from '@/components/ui/Select'
+import { Input } from '@/components/ui/Input'
 import { Tabs } from '@/components/ui/Tabs'
 import { Card } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
+import { Modal } from '@/components/ui/Modal'
 import { StatusDot } from '@/components/ui/StatusDot'
 
-type Tab = 'connection' | 'settings'
+type Tab = 'connection' | 'access' | 'settings'
 
 const tabFromHash = (): Tab => {
   const hash = window.location.hash.replace('#', '')
-  if (['connection', 'settings'].includes(hash)) {
+  if (['connection', 'access', 'settings'].includes(hash)) {
     return hash as Tab
   }
   return 'connection'
@@ -85,6 +90,7 @@ export function TelegramConnect() {
 
   const tabs = [
     { id: 'connection', label: t('telegram.tabs.connection'), icon: <Monitor className="h-4 w-4" /> },
+    { id: 'access', label: t('telegram.tabs.access'), icon: <Users className="h-4 w-4" /> },
     { id: 'settings', label: t('telegram.tabs.settings'), icon: <Settings className="h-4 w-4" /> },
   ]
 
@@ -116,6 +122,7 @@ export function TelegramConnect() {
           {activeTab === 'connection' && (
             <ConnectionTab config={config} loading={loading} error={error} onReload={loadConfig} instanceId={instanceId} />
           )}
+          {activeTab === 'access' && <AccessTab />}
           {activeTab === 'settings' && (
             <SettingsTab config={config} onConfigChange={setConfig} />
           )}
@@ -332,6 +339,255 @@ function ConnectionTab({
         </div>
       </Card>
     </div>
+  )
+}
+
+/* ── Access Tab ── */
+
+type UserLevel = 'owner' | 'admin' | 'user' | 'blocked'
+
+function AccessTab() {
+  const { t } = useTranslation()
+  const [config, setConfig] = useState<WhatsAppAccessConfig | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [showAddModal, setShowAddModal] = useState(false)
+
+  const levelOptions = [
+    { value: 'owner', label: t('whatsapp.owner') },
+    { value: 'admin', label: t('whatsapp.admin') },
+    { value: 'user', label: t('whatsapp.allowed') },
+    { value: 'blocked', label: t('whatsapp.blocked') },
+  ]
+
+  const loadConfig = useCallback(() => {
+    setLoading(true)
+    api.channels.whatsapp
+      .getAccess()
+      .then(setConfig)
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    loadConfig()
+  }, [loadConfig])
+
+  const handleDefaultPolicyChange = async (policy: string) => {
+    if (!config) return
+    setSaving(true)
+    try {
+      await api.channels.whatsapp.updateAccessDefaultPolicy(policy)
+      setConfig({ ...config, default_policy: policy })
+    } catch (err) {
+      console.error('Failed to update default policy:', err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleAddUser = async (jid: string, level: string) => {
+    if (level === 'blocked') {
+      await api.channels.whatsapp.blockUser(jid)
+    } else {
+      await api.channels.whatsapp.grantUser(jid, level)
+    }
+    loadConfig()
+  }
+
+  const handleRemoveUser = async (jid: string, currentLevel: UserLevel) => {
+    if (currentLevel === 'blocked') {
+      await api.channels.whatsapp.unblockUser(jid)
+    } else {
+      await api.channels.whatsapp.revokeUser(jid)
+    }
+    loadConfig()
+  }
+
+  const handleChangeLevel = async (jid: string, currentLevel: UserLevel, newLevel: UserLevel) => {
+    if (currentLevel === newLevel) return
+    if (currentLevel === 'blocked') {
+      await api.channels.whatsapp.unblockUser(jid)
+    } else {
+      await api.channels.whatsapp.revokeUser(jid)
+    }
+    if (newLevel === 'blocked') {
+      await api.channels.whatsapp.blockUser(jid)
+    } else {
+      await api.channels.whatsapp.grantUser(jid, newLevel)
+    }
+    loadConfig()
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center gap-4 py-16">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-bg-subtle border-t-brand" />
+        <p className="text-sm text-tertiary">{t('common.loading')}</p>
+      </div>
+    )
+  }
+
+  if (!config) {
+    return (
+      <div className="rounded-xl border border-warning/20 bg-warning-primary px-4 py-3">
+        <p className="text-sm text-primary">{t('whatsapp.accessNotAvailable')}</p>
+      </div>
+    )
+  }
+
+  const allUsers: { jid: string; level: UserLevel }[] = [
+    ...(config.owners || []).map((jid) => ({ jid, level: 'owner' as UserLevel })),
+    ...(config.admins || []).map((jid) => ({ jid, level: 'admin' as UserLevel })),
+    ...(config.allowed_users || []).map((jid) => ({ jid, level: 'user' as UserLevel })),
+    ...(config.blocked_users || []).map((jid) => ({ jid, level: 'blocked' as UserLevel })),
+  ]
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* Default Policy */}
+      <Card className="p-6">
+        <h3 className="mb-4 text-sm font-semibold text-primary">{t('whatsapp.defaultPolicy')}</h3>
+        <div className="flex gap-2">
+          {['allow', 'deny'].map((policy) => (
+            <button
+              key={policy}
+              onClick={() => handleDefaultPolicyChange(policy)}
+              disabled={saving}
+              className={cn(
+                'cursor-pointer rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+                config.default_policy === policy
+                  ? 'bg-brand text-white'
+                  : 'bg-tertiary text-secondary hover:bg-active'
+              )}
+            >
+              {t(`whatsapp.policies.${policy}`)}
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      {/* Users List */}
+      <Card className="p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-primary">
+            {t('whatsapp.users')} ({allUsers.length})
+          </h3>
+          <Button size="sm" variant="secondary" onClick={() => setShowAddModal(true)}>
+            {t('common.add')}
+          </Button>
+        </div>
+
+        {allUsers.length > 0 ? (
+          <div className="flex flex-col divide-y divide-secondary">
+            {allUsers.map(({ jid, level }) => (
+              <div key={jid} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+                <UserCircle2 className="h-5 w-5 shrink-0 text-tertiary" />
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
+                  {jid.replace('@s.whatsapp.net', '')}
+                </span>
+                <Select
+                  options={levelOptions}
+                  value={level}
+                  onChange={(val) => handleChangeLevel(jid, level, val as UserLevel)}
+                  className="w-36 shrink-0"
+                />
+                <button
+                  onClick={() => handleRemoveUser(jid, level)}
+                  className="shrink-0 cursor-pointer rounded-md p-1 text-tertiary hover:text-fg-error-secondary transition"
+                  title={t('common.remove')}
+                >
+                  <XCircle className="h-4 w-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-tertiary">{t('whatsapp.noUsers')}</p>
+        )}
+      </Card>
+
+      <AddUserModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onAdd={handleAddUser}
+      />
+    </div>
+  )
+}
+
+/* ── Add User Modal ── */
+
+interface AddUserModalProps {
+  isOpen: boolean
+  onClose: () => void
+  onAdd: (jid: string, level: string) => Promise<void>
+}
+
+function AddUserModal({ isOpen, onClose, onAdd }: AddUserModalProps) {
+  const { t } = useTranslation()
+  const [jid, setJid] = useState('')
+  const [level, setLevel] = useState<UserLevel>('user')
+  const [loading, setLoading] = useState(false)
+
+  const levelOptions = [
+    { value: 'owner', label: t('whatsapp.owner') },
+    { value: 'admin', label: t('whatsapp.admin') },
+    { value: 'user', label: t('whatsapp.allowed') },
+    { value: 'blocked', label: t('whatsapp.blocked') },
+  ]
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!jid.trim()) return
+    setLoading(true)
+    try {
+      await onAdd(jid.trim(), level)
+      setJid('')
+      setLevel('user')
+      onClose()
+    } catch (err) {
+      console.error('Failed to add user:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={t('whatsapp.addUser.title')}
+      size="sm"
+      footer={
+        <>
+          <Button variant="secondary" size="sm" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button size="sm" onClick={handleSubmit} disabled={loading || !jid.trim()}>
+            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+            {t('common.add')}
+          </Button>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-primary">{t('whatsapp.phoneNumber')}</label>
+          <Input
+            value={jid}
+            onChange={(e) => setJid(e.target.value)}
+            placeholder={t('whatsapp.jidPlaceholder')}
+          />
+        </div>
+        <Select
+          label={t('whatsapp.permission')}
+          options={levelOptions}
+          value={level}
+          onChange={(val) => setLevel(val as UserLevel)}
+        />
+      </form>
+    </Modal>
   )
 }
 
