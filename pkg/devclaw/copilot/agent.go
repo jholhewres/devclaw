@@ -13,6 +13,7 @@ package copilot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -2052,12 +2053,15 @@ func (a *AgentRun) pruneOldToolResults(messages []chatMessage, currentTurn int) 
 // is the run-level context passed in ctx.
 //
 // Compaction strategy:
-//  1. First attempt: truncate oversized tool results (>4K chars).
-//  2. Second attempt: compact messages (keep last N) + truncate tool results harder.
-//  3. Third attempt: aggressive compaction (keep fewer messages).
-//  4. Final attempt: emergency compression (keep only system + last user message).
+//  0. Pre-flight: if estimated tokens (messages + tool defs) exceed 90% of context, thin tool definitions.
+//  1. On overflow: thin tool definitions (strip descriptions, then param descriptions).
+//  2. Truncate oversized tool results (>4K chars).
+//  3. Managed compaction: compact messages (keep last N) + truncate tool results harder.
+//  4. Aggressive compaction (keep fewer messages).
+//  5. Emergency compression (keep only system + last user message).
 func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []chatMessage, tools []ToolDefinition) (*LLMResponse, error) {
 	toolResultTruncated := false
+	toolDefThinLevel := -1 // -1 = not thinned, 0 = descriptions stripped, 1 = param descriptions stripped
 
 	// Deduplicate tool call IDs: some providers (OpenAI-compatible) reject
 	// requests with duplicate tool_call_id values. This can happen after
@@ -2075,6 +2079,28 @@ func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []ch
 
 	// Prune old images to prevent token accumulation from multimodal content.
 	messages = pruneOldImages(messages, DefaultImagePruneAfterTurns)
+
+	// Pre-flight: estimate total tokens including tool definitions.
+	// If the base payload (system prompt + tools + messages) is already near
+	// the context window, proactively thin tool definitions before the first
+	// LLM call. Message compaction won't help when tools dominate the budget.
+	toolDefTokens := estimateToolDefTokens(tools, a.modelOverride)
+	msgTokens := a.estimateTokens(messages)
+	if toolDefTokens+msgTokens > int(float64(ctxTokens)*0.90) {
+		a.logger.Info("pre-flight: estimated tokens near context limit, thinning tool definitions",
+			"tool_def_tokens", toolDefTokens,
+			"msg_tokens", msgTokens,
+			"total_estimated", toolDefTokens+msgTokens,
+			"context_window", ctxTokens,
+		)
+		tools = thinToolDefinitions(tools, 0)
+		toolDefThinLevel = 0
+		newToolDefTokens := estimateToolDefTokens(tools, a.modelOverride)
+		if newToolDefTokens+msgTokens > int(float64(ctxTokens)*0.90) {
+			tools = thinToolDefinitions(tools, 1)
+			toolDefThinLevel = 1
+		}
+	}
 
 	prevTokenEstimate := a.estimateTokens(messages)
 
@@ -2107,9 +2133,24 @@ func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []ch
 			"attempt", attempt+1,
 			"max_attempts", a.maxCompactionAttempts,
 			"messages_before", len(messages),
+			"tool_def_thin_level", toolDefThinLevel,
 		)
 
 		// ── Compaction strategy ──
+
+		// Step 0: Thin tool definitions (cheap, no LLM call).
+		// Tool definitions can consume 30-50% of the context window with 80+ tools.
+		// Thinning is applied alongside message compaction in the same attempt so
+		// it doesn't consume the limited compaction budget on its own.
+		if toolDefThinLevel < 1 {
+			toolDefThinLevel++
+			tools = thinToolDefinitions(tools, toolDefThinLevel)
+			a.logger.Info("thinned tool definitions to reduce context",
+				"level", toolDefThinLevel,
+				"tools_count", len(tools),
+			)
+		}
+
 		// Step 1: Try truncating oversized tool results first (cheap operation).
 		if !toolResultTruncated {
 			if hasOversizedToolResults(messages, 2000) {
@@ -2170,6 +2211,101 @@ func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []ch
 	}
 
 	return nil, fmt.Errorf("context overflow: compacted %d times but still exceeded context limit", a.maxCompactionAttempts)
+}
+
+// ---------------------------------------------------------------------------
+// Tool definition thinning — reduces the token cost of tool definitions
+// when context overflow cannot be resolved by message compaction alone.
+// ---------------------------------------------------------------------------
+
+// estimateToolDefTokens estimates the token cost of tool definitions.
+// Tool definitions are serialized as JSON in the API request and count against
+// the context window, but message-based compaction never touches them.
+func estimateToolDefTokens(tools []ToolDefinition, model string) int {
+	totalChars := 0
+	for _, t := range tools {
+		// Fixed JSON overhead: {"type":"function","function":{...}}
+		totalChars += 40 + len(t.Function.Name) + len(t.Function.Description)
+		totalChars += len(t.Function.Parameters)
+	}
+	// JSON/schema content tokenizes at ~60% of natural language rate
+	// due to repeated structural tokens ({, }, "type", "string", etc.).
+	ratio := charsPerToken(model) * 0.65
+	if ratio < 1.5 {
+		ratio = 1.5
+	}
+	return int(float64(totalChars)/ratio + 0.5)
+}
+
+// thinToolDefinitions progressively strips tool definitions to reduce token cost.
+//
+//	level 0: strip tool descriptions (biggest win — up to 400 chars × N tools).
+//	level 1: also strip parameter descriptions from JSON schemas.
+//
+// Returns a new slice; the originals are not modified.
+func thinToolDefinitions(tools []ToolDefinition, level int) []ToolDefinition {
+	result := make([]ToolDefinition, len(tools))
+	for i, t := range tools {
+		result[i] = ToolDefinition{
+			Type: t.Type,
+			Function: FunctionDef{
+				Name:       t.Function.Name,
+				Description: t.Function.Description,
+				Parameters: append(json.RawMessage(nil), t.Function.Parameters...),
+			},
+		}
+	}
+
+	if level >= 0 {
+		// Strip tool descriptions.
+		for i := range result {
+			result[i].Function.Description = ""
+		}
+	}
+
+	if level >= 1 {
+		// Strip parameter descriptions from JSON schemas.
+		for i := range result {
+			result[i].Function.Parameters = stripParamDescriptions(result[i].Function.Parameters)
+		}
+	}
+
+	return result
+}
+
+// stripParamDescriptions removes "description" fields from a JSON Schema
+// parameter definition to reduce token cost. Falls back to the original
+// if parsing fails.
+func stripParamDescriptions(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+	var schema map[string]interface{}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return raw
+	}
+	stripDescriptionsRecursive(schema)
+	out, err := json.Marshal(schema)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// stripDescriptionsRecursive removes "description" keys from a nested map,
+// handling "properties" and "items" sub-schemas.
+func stripDescriptionsRecursive(m map[string]interface{}) {
+	delete(m, "description")
+	if props, ok := m["properties"].(map[string]interface{}); ok {
+		for _, v := range props {
+			if prop, ok := v.(map[string]interface{}); ok {
+				stripDescriptionsRecursive(prop)
+			}
+		}
+	}
+	if items, ok := m["items"].(map[string]interface{}); ok {
+		stripDescriptionsRecursive(items)
+	}
 }
 
 // truncateOversizedToolResultsInHistory applies progressive truncation to oversized tool results.
