@@ -137,8 +137,14 @@ var BuiltInProfiles = map[string]ToolProfile{
 // InferProfileForChannel returns the default tool profile name for a channel.
 // Messaging channels (WhatsApp, Discord, Telegram, Slack) get "messaging"
 // to avoid exposing filesystem/runtime tools. WebUI and CLI get "full".
+// Named instances (e.g. "whatsapp:business") are matched by their base type.
 func InferProfileForChannel(channel string) string {
-	switch strings.ToLower(channel) {
+	ch := strings.ToLower(channel)
+	// Strip instance suffix (e.g. "whatsapp:business" → "whatsapp").
+	if idx := strings.IndexByte(ch, ':'); idx > 0 {
+		ch = ch[:idx]
+	}
+	switch ch {
 	case "whatsapp", "discord", "telegram", "slack":
 		return "messaging"
 	case "webui", "cli":

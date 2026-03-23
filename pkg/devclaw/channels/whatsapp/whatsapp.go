@@ -173,6 +173,9 @@ func DefaultConfig() Config {
 		ReconnectBackoff:     5 * time.Second,
 		MaxReconnectAttempts: 10,
 		HealthMonitor:        DefaultHealthMonitorConfig(),
+		Access: AccessControlConfig{
+			DefaultPolicy: "allow",
+		},
 	}
 }
 
@@ -298,6 +301,9 @@ func New(cfg Config, logger *slog.Logger) *WhatsApp {
 	}
 	if cfg.MaxReconnectAttempts == 0 {
 		cfg.MaxReconnectAttempts = defaults.MaxReconnectAttempts
+	}
+	if cfg.Access.DefaultPolicy == "" {
+		cfg.Access.DefaultPolicy = defaults.Access.DefaultPolicy
 	}
 	// Bool fields all default to true. When ALL four are false it indicates
 	// the config was zero-initialized (previous bug) rather than intentionally
