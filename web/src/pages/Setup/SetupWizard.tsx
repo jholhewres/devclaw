@@ -185,7 +185,7 @@ export function SetupWizard() {
           {step < 3 ? (
             <button
               onClick={next}
-              className="group flex cursor-pointer items-center gap-2 rounded-xl bg-text-primary px-5 py-2.5 text-sm font-semibold text-inverse shadow-lg transition-all hover:bg-white"
+              className="group flex cursor-pointer items-center gap-2 rounded-xl bg-brand-solid px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-brand/25 transition-all hover:brightness-110"
             >
               {t('setupPage.next')}
               <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
