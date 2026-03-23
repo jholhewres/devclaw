@@ -493,7 +493,7 @@ install_dependencies() {
 # =============================================================================
 
 detect_latest_version() {
-  ui_info "Detecting latest version from GitHub Releases..."
+  ui_info "Detecting latest version from GitHub Releases..." >&2
 
   if [[ "$DRY_RUN" == "1" ]]; then
     echo "v1.0.0-dryrun"
