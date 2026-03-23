@@ -1807,7 +1807,8 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 
 		switch channelType {
 		case "whatsapp":
-			waCfg := whatsapp.Config{InstanceID: instanceID}
+			waCfg := whatsapp.DefaultConfig()
+			waCfg.InstanceID = instanceID
 			if cfg.Database.Path != "" {
 				waCfg.DatabasePath = cfg.Database.Path
 			}
@@ -1825,7 +1826,8 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 			cfg.Channels.WhatsAppInstances[instanceID] = waCfg
 
 		case "telegram":
-			tgCfg := telegram.Config{InstanceID: instanceID}
+			tgCfg := telegram.DefaultConfig()
+			tgCfg.InstanceID = instanceID
 			if tok, ok := config["token"].(string); ok {
 				tgCfg.Token = tok
 			}
