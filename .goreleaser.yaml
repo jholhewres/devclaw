@@ -78,7 +78,7 @@ dockers:
   - image_templates:
       - "ghcr.io/jholhewres/devclaw:{{ .Version }}"
       - "ghcr.io/jholhewres/devclaw:latest"
-    dockerfile: install/docker/Dockerfile
+    dockerfile: install/docker/Dockerfile.goreleaser
     build_flag_templates:
       - "--pull"
       - "--label=org.opencontainers.image.title=devclaw"
