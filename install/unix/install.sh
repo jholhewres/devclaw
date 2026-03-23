@@ -629,6 +629,12 @@ download_and_install() {
     exit 1
   fi
 
+  # Stop running instance before overwriting binary
+  if command -v pm2 &>/dev/null && pm2 describe devclaw &>/dev/null 2>&1; then
+    ui_info "Stopping running devclaw process..."
+    pm2 stop devclaw &>/dev/null || true
+  fi
+
   # Create install directory
   ui_info "Installing to $INSTALL_DIR..."
   if [[ "$(id -u)" == "0" ]]; then
