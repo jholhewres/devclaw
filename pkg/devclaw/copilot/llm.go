@@ -2782,7 +2782,9 @@ func (c *LLMClient) completeWithCoordinator(ctx context.Context, modelOverride s
 		}
 
 		// Context overflow should NOT trigger model rotation.
-		if IsLikelyContextOverflowError(body) {
+		// Check both the apiError body (HTTP error responses) and the full
+		// error message (covers stop_reason-based errors from Anthropic proxy).
+		if IsLikelyContextOverflowError(body) || IsLikelyContextOverflowError(callErr.Error()) {
 			return nil, callErr
 		}
 

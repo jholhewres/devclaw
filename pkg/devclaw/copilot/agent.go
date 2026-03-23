@@ -1141,6 +1141,8 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 		// After each tool execution round, estimate total tokens. If above
 		// 85% of the context window, truncate old tool results in-place to
 		// prevent the next LLM call from hitting context_length_exceeded.
+		// If still over budget after tool result pruning, escalate to
+		// managed compaction of the full conversation history.
 		{
 			ctxWindow := ResolveContextWindowTokens(a.cfg.ContextTokens, a.modelOverride)
 			estimated := a.estimateTokens(messages)
@@ -1151,6 +1153,14 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 				messages = GuardToolResultContext(messages, ctxWindow)
 				pcfg := resolvedCompactionConfig(a.cfg.Compaction).ContextPruning
 				messages = pruneByContextRatio(messages, a.estimateTokens(messages), ctxWindow, pcfg)
+
+				// If tool result pruning wasn't enough, escalate to managed compaction.
+				afterPrune := a.estimateTokens(messages)
+				if afterPrune > ctxWindow {
+					a.logger.Warn("preemptive context guard: still over budget after tool pruning, compacting messages",
+						"estimated_tokens", afterPrune, "context_window", ctxWindow)
+					messages = a.managedCompaction(runCtx, messages)
+				}
 			}
 		}
 
