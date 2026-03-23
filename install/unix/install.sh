@@ -799,33 +799,54 @@ generate_config() {
   CONFIG_WAS_CREATED=1
 }
 
-update_pm2_config() {
+generate_pm2_config() {
   ui_section "Configuring PM2"
 
   local ecosystem_file="${INSTALL_DIR}/ecosystem.config.js"
 
-  if [[ ! -f "$ecosystem_file" ]]; then
-    ui_warn "ecosystem.config.js not found, skipping PM2 setup"
-    return 0
-  fi
-
   if [[ "$DRY_RUN" == "1" ]]; then
-    ui_info "[dry-run] Would update ecosystem.config.js with:"
-    ui_info "  PORT=$PORT"
-    ui_info "  DEVCLAW_STATE_DIR=$INSTALL_DIR"
+    ui_info "[dry-run] Would generate ecosystem.config.js"
     return 0
   fi
 
-  # Update paths in ecosystem.config.js
+  # Generate ecosystem.config.js
+  local config_content="const path = require('path');
+const installDir = '${INSTALL_DIR}';
+const port = '${PORT}';
+
+module.exports = {
+  apps: [{
+    name: 'devclaw',
+    script: path.join(installDir, 'devclaw'),
+    args: 'serve',
+    cwd: installDir,
+    instances: 1,
+    autorestart: true,
+    watch: false,
+    max_memory_restart: '1G',
+    kill_timeout: 5000,
+    wait_ready: true,
+    listen_timeout: 10000,
+    time: true,
+    log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+    error_file: path.join(installDir, 'logs', 'error.log'),
+    out_file: path.join(installDir, 'logs', 'out.log'),
+    merge_logs: true,
+    env: {
+      NODE_ENV: 'production',
+      DEVCLAW_STATE_DIR: installDir,
+      PORT: port
+    }
+  }]
+};"
+
   if [[ "$(id -u)" == "0" ]]; then
-    sed -i.bak "s|/opt/devclaw|${INSTALL_DIR}|g" "$ecosystem_file"
-    rm -f "${ecosystem_file}.bak"
+    echo "$config_content" > "$ecosystem_file"
   else
-    sudo sed -i.bak "s|/opt/devclaw|${INSTALL_DIR}|g" "$ecosystem_file"
-    sudo rm -f "${ecosystem_file}.bak"
+    echo "$config_content" | sudo tee "$ecosystem_file" > /dev/null
   fi
 
-  ui_success "PM2 config updated"
+  ui_success "PM2 config generated"
 }
 
 start_with_pm2() {
@@ -986,7 +1007,7 @@ main() {
   setup_global_command
   generate_tls_certs
   generate_config
-  update_pm2_config
+  generate_pm2_config
   start_with_pm2
 
   print_success
