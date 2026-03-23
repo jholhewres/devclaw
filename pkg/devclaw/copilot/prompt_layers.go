@@ -1033,7 +1033,7 @@ func (p *PromptComposer) loadBootstrapFileCached(cacheKey, filename string, sear
 func (p *PromptComposer) buildSkillsLayer(session *Session) string {
 	// Reference model: use skillLister to list all available skills.
 	if p.skillLister != nil {
-		return p.buildSkillsLayerReference()
+		return p.buildSkillsLayerReference(session.GetActiveSkills())
 	}
 
 	// Legacy fallback: inject active skill prompts directly.
@@ -1043,10 +1043,28 @@ func (p *PromptComposer) buildSkillsLayer(session *Session) string {
 // buildSkillsLayerReference builds the skills section using the reference model.
 // Skills are listed as compact XML entries with name + description + tools.
 // The LLM loads full instructions on demand via get_skill_instructions(name).
-func (p *PromptComposer) buildSkillsLayerReference() string {
+func (p *PromptComposer) buildSkillsLayerReference(activeSkills []string) string {
 	allSkills := p.skillLister()
 	if len(allSkills) == 0 {
 		return ""
+	}
+
+	// If the session has workspace-scoped active skills, filter to only those.
+	if len(activeSkills) > 0 {
+		allowed := make(map[string]bool, len(activeSkills))
+		for _, name := range activeSkills {
+			allowed[name] = true
+		}
+		filtered := make([]SkillInfo, 0, len(activeSkills))
+		for _, s := range allSkills {
+			if allowed[s.Name] {
+				filtered = append(filtered, s)
+			}
+		}
+		allSkills = filtered
+		if len(allSkills) == 0 {
+			return ""
+		}
 	}
 
 	// Apply limits from config (aligned with OpenClaw defaults: 150 skills, 30k chars).
