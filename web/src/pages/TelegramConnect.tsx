@@ -15,7 +15,7 @@ import {
   UserCircle2,
   Loader2,
 } from 'lucide-react'
-import { api, type TelegramConfig, type WhatsAppAccessConfig } from '@/lib/api'
+import { api, type TelegramConfig, type TelegramAccessConfig } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/Button'
 import { Toggle } from '@/components/ui/Toggle'
@@ -348,21 +348,20 @@ type UserLevel = 'owner' | 'admin' | 'user' | 'blocked'
 
 function AccessTab() {
   const { t } = useTranslation()
-  const [config, setConfig] = useState<WhatsAppAccessConfig | null>(null)
+  const [config, setConfig] = useState<TelegramAccessConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
 
   const levelOptions = [
-    { value: 'owner', label: t('whatsapp.owner') },
-    { value: 'admin', label: t('whatsapp.admin') },
-    { value: 'user', label: t('whatsapp.allowed') },
-    { value: 'blocked', label: t('whatsapp.blocked') },
+    { value: 'admin', label: t('telegram.access.admin') },
+    { value: 'user', label: t('telegram.access.allowed') },
+    { value: 'blocked', label: t('telegram.access.blocked') },
   ]
 
   const loadConfig = useCallback(() => {
     setLoading(true)
-    api.channels.whatsapp
+    api.channels.telegram
       .getAccess()
       .then(setConfig)
       .catch(() => {})
@@ -377,7 +376,7 @@ function AccessTab() {
     if (!config) return
     setSaving(true)
     try {
-      await api.channels.whatsapp.updateAccessDefaultPolicy(policy)
+      await api.channels.telegram.updateAccessDefaultPolicy(policy)
       setConfig({ ...config, default_policy: policy })
     } catch (err) {
       console.error('Failed to update default policy:', err)
@@ -386,35 +385,35 @@ function AccessTab() {
     }
   }
 
-  const handleAddUser = async (jid: string, level: string) => {
+  const handleAddUser = async (id: string, level: string) => {
     if (level === 'blocked') {
-      await api.channels.whatsapp.blockUser(jid)
+      await api.channels.telegram.blockUser(id)
     } else {
-      await api.channels.whatsapp.grantUser(jid, level)
+      await api.channels.telegram.grantUser(id, level)
     }
     loadConfig()
   }
 
-  const handleRemoveUser = async (jid: string, currentLevel: UserLevel) => {
+  const handleRemoveUser = async (id: string, currentLevel: UserLevel) => {
     if (currentLevel === 'blocked') {
-      await api.channels.whatsapp.unblockUser(jid)
+      await api.channels.telegram.unblockUser(id)
     } else {
-      await api.channels.whatsapp.revokeUser(jid)
+      await api.channels.telegram.revokeUser(id)
     }
     loadConfig()
   }
 
-  const handleChangeLevel = async (jid: string, currentLevel: UserLevel, newLevel: UserLevel) => {
+  const handleChangeLevel = async (id: string, currentLevel: UserLevel, newLevel: UserLevel) => {
     if (currentLevel === newLevel) return
     if (currentLevel === 'blocked') {
-      await api.channels.whatsapp.unblockUser(jid)
+      await api.channels.telegram.unblockUser(id)
     } else {
-      await api.channels.whatsapp.revokeUser(jid)
+      await api.channels.telegram.revokeUser(id)
     }
     if (newLevel === 'blocked') {
-      await api.channels.whatsapp.blockUser(jid)
+      await api.channels.telegram.blockUser(id)
     } else {
-      await api.channels.whatsapp.grantUser(jid, newLevel)
+      await api.channels.telegram.grantUser(id, newLevel)
     }
     loadConfig()
   }
@@ -431,23 +430,23 @@ function AccessTab() {
   if (!config) {
     return (
       <div className="rounded-xl border border-warning/20 bg-warning-primary px-4 py-3">
-        <p className="text-sm text-primary">{t('whatsapp.accessNotAvailable')}</p>
+        <p className="text-sm text-primary">{t('telegram.access.notAvailable')}</p>
       </div>
     )
   }
 
-  const allUsers: { jid: string; level: UserLevel }[] = [
-    ...(config.owners || []).map((jid) => ({ jid, level: 'owner' as UserLevel })),
-    ...(config.admins || []).map((jid) => ({ jid, level: 'admin' as UserLevel })),
-    ...(config.allowed_users || []).map((jid) => ({ jid, level: 'user' as UserLevel })),
-    ...(config.blocked_users || []).map((jid) => ({ jid, level: 'blocked' as UserLevel })),
+  const allUsers: { id: string; level: UserLevel }[] = [
+    ...(config.owners || []).map((id) => ({ id, level: 'owner' as UserLevel })),
+    ...(config.admins || []).map((id) => ({ id, level: 'admin' as UserLevel })),
+    ...(config.allowed_users || []).map((id) => ({ id, level: 'user' as UserLevel })),
+    ...(config.blocked_users || []).map((id) => ({ id, level: 'blocked' as UserLevel })),
   ]
 
   return (
     <div className="flex flex-col gap-6">
       {/* Default Policy */}
       <Card className="p-6">
-        <h3 className="mb-4 text-sm font-semibold text-primary">{t('whatsapp.defaultPolicy')}</h3>
+        <h3 className="mb-4 text-sm font-semibold text-primary">{t('telegram.access.defaultPolicy')}</h3>
         <div className="flex gap-2">
           {['allow', 'deny'].map((policy) => (
             <button
@@ -461,7 +460,7 @@ function AccessTab() {
                   : 'bg-tertiary text-secondary hover:bg-active'
               )}
             >
-              {t(`whatsapp.policies.${policy}`)}
+              {t(`telegram.access.policies.${policy}`)}
             </button>
           ))}
         </div>
@@ -471,7 +470,7 @@ function AccessTab() {
       <Card className="p-6">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-sm font-semibold text-primary">
-            {t('whatsapp.users')} ({allUsers.length})
+            {t('telegram.access.users')} ({allUsers.length})
           </h3>
           <Button size="sm" variant="secondary" onClick={() => setShowAddModal(true)}>
             {t('common.add')}
@@ -480,20 +479,20 @@ function AccessTab() {
 
         {allUsers.length > 0 ? (
           <div className="flex flex-col divide-y divide-secondary">
-            {allUsers.map(({ jid, level }) => (
-              <div key={jid} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+            {allUsers.map(({ id, level }) => (
+              <div key={id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
                 <UserCircle2 className="h-5 w-5 shrink-0 text-tertiary" />
-                <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary">
-                  {jid.replace('@s.whatsapp.net', '')}
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-primary font-mono">
+                  {id}
                 </span>
                 <Select
                   options={levelOptions}
                   value={level}
-                  onChange={(val) => handleChangeLevel(jid, level, val as UserLevel)}
+                  onChange={(val) => handleChangeLevel(id, level, val as UserLevel)}
                   className="w-36 shrink-0"
                 />
                 <button
-                  onClick={() => handleRemoveUser(jid, level)}
+                  onClick={() => handleRemoveUser(id, level)}
                   className="shrink-0 cursor-pointer rounded-md p-1 text-tertiary hover:text-fg-error-secondary transition"
                   title={t('common.remove')}
                 >
@@ -503,7 +502,7 @@ function AccessTab() {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-tertiary">{t('whatsapp.noUsers')}</p>
+          <p className="text-sm text-tertiary">{t('telegram.access.noUsers')}</p>
         )}
       </Card>
 
@@ -526,24 +525,23 @@ interface AddUserModalProps {
 
 function AddUserModal({ isOpen, onClose, onAdd }: AddUserModalProps) {
   const { t } = useTranslation()
-  const [jid, setJid] = useState('')
+  const [userId, setUserId] = useState('')
   const [level, setLevel] = useState<UserLevel>('user')
   const [loading, setLoading] = useState(false)
 
   const levelOptions = [
-    { value: 'owner', label: t('whatsapp.owner') },
-    { value: 'admin', label: t('whatsapp.admin') },
-    { value: 'user', label: t('whatsapp.allowed') },
-    { value: 'blocked', label: t('whatsapp.blocked') },
+    { value: 'admin', label: t('telegram.access.admin') },
+    { value: 'user', label: t('telegram.access.allowed') },
+    { value: 'blocked', label: t('telegram.access.blocked') },
   ]
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!jid.trim()) return
+    if (!userId.trim()) return
     setLoading(true)
     try {
-      await onAdd(jid.trim(), level)
-      setJid('')
+      await onAdd(userId.trim(), level)
+      setUserId('')
       setLevel('user')
       onClose()
     } catch (err) {
@@ -557,14 +555,14 @@ function AddUserModal({ isOpen, onClose, onAdd }: AddUserModalProps) {
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={t('whatsapp.addUser.title')}
+      title={t('telegram.access.addUser')}
       size="sm"
       footer={
         <>
           <Button variant="secondary" size="sm" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button size="sm" onClick={handleSubmit} disabled={loading || !jid.trim()}>
+          <Button size="sm" onClick={handleSubmit} disabled={loading || !userId.trim()}>
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}
             {t('common.add')}
           </Button>
@@ -573,15 +571,15 @@ function AddUserModal({ isOpen, onClose, onAdd }: AddUserModalProps) {
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-primary">{t('whatsapp.phoneNumber')}</label>
+          <label className="text-sm font-medium text-primary">{t('telegram.access.userId')}</label>
           <Input
-            value={jid}
-            onChange={(e) => setJid(e.target.value)}
-            placeholder={t('whatsapp.jidPlaceholder')}
+            value={userId}
+            onChange={(e) => setUserId(e.target.value)}
+            placeholder={t('telegram.access.userIdPlaceholder')}
           />
         </div>
         <Select
-          label={t('whatsapp.permission')}
+          label={t('telegram.access.permission')}
           options={levelOptions}
           value={level}
           onChange={(val) => setLevel(val as UserLevel)}

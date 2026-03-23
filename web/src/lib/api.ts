@@ -214,6 +214,14 @@ export interface WhatsAppSettings {
   send_typing: boolean;
 }
 
+export interface TelegramAccessConfig {
+  default_policy: string;
+  owners: string[];
+  admins: string[];
+  allowed_users: string[];
+  blocked_users: string[];
+}
+
 export interface TelegramConfig {
   connected: boolean;
   configured: boolean;
@@ -801,6 +809,42 @@ export const api = {
         request<{ status: string }>('/channels/telegram/disconnect', {
           method: 'POST',
         }),
+      // Access control
+      getAccess: () => request<TelegramAccessConfig>('/channels/telegram/access'),
+      updateAccessDefaultPolicy: (policy: string) =>
+        request<{ status: string }>('/channels/telegram/access', {
+          method: 'PATCH',
+          body: JSON.stringify({ default_policy: policy }),
+        }),
+      grantUser: (id: string, level: string) =>
+        request<{ status: string; id: string; level: string }>(
+          `/channels/telegram/access/users/${encodeURIComponent(id)}`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ level }),
+          }
+        ),
+      revokeUser: (id: string) =>
+        request<{ status: string; id: string }>(
+          `/channels/telegram/access/users/${encodeURIComponent(id)}`,
+          {
+            method: 'DELETE',
+          }
+        ),
+      blockUser: (id: string) =>
+        request<{ status: string; id: string }>(
+          `/channels/telegram/access/blocked/${encodeURIComponent(id)}`,
+          {
+            method: 'POST',
+          }
+        ),
+      unblockUser: (id: string) =>
+        request<{ status: string; id: string }>(
+          `/channels/telegram/access/blocked/${encodeURIComponent(id)}`,
+          {
+            method: 'DELETE',
+          }
+        ),
     },
   },
 

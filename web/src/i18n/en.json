@@ -1267,6 +1267,23 @@
       "off": "Off",
       "own": "Bot messages only",
       "all": "All reactions"
+    },
+    "access": {
+      "admin": "Admin",
+      "allowed": "Allowed",
+      "blocked": "Blocked",
+      "defaultPolicy": "Default Policy",
+      "policies": {
+        "allow": "Allow All",
+        "deny": "Deny All"
+      },
+      "users": "Users",
+      "noUsers": "No users configured",
+      "notAvailable": "Access control not available. Make sure Telegram is configured.",
+      "addUser": "Add User",
+      "userId": "Telegram User ID",
+      "userIdPlaceholder": "Numeric user ID (e.g., 123456789)",
+      "permission": "Permission"
     }
   },
   "devSettingsPage": {

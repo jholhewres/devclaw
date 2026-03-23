@@ -5,6 +5,15 @@ import (
 	"net/http"
 )
 
+// TelegramAccessConfig holds the Telegram access control configuration for the UI.
+type TelegramAccessConfig struct {
+	DefaultPolicy string   `json:"default_policy"`
+	Owners        []string `json:"owners"`
+	Admins        []string `json:"admins"`
+	AllowedUsers  []string `json:"allowed_users"`
+	BlockedUsers  []string `json:"blocked_users"`
+}
+
 // TelegramConfig holds Telegram settings exposed to the UI.
 type TelegramConfig struct {
 	Connected             bool    `json:"connected"`

@@ -2385,6 +2385,10 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 		ch, exists := assistant.ChannelManager().Channel("telegram")
 		if exists {
 			result.Connected = ch.IsConnected()
+			if tg, ok := ch.(*telegram.Telegram); ok {
+				result.BotUsername = tg.BotUsername()
+				result.BotID = tg.BotID()
+			}
 		}
 		return result
 	}
@@ -2410,6 +2414,25 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 		if !changed {
 			return nil
 		}
+
+		// Hot-reload settings on the live Telegram instance.
+		if ch, exists := assistant.ChannelManager().Channel("telegram"); exists {
+			if tg, ok := ch.(*telegram.Telegram); ok {
+				if v, ok := config["respond_to_groups"].(bool); ok {
+					tg.SetRespondToGroups(v)
+				}
+				if v, ok := config["respond_to_dms"].(bool); ok {
+					tg.SetRespondToDMs(v)
+				}
+				if v, ok := config["send_typing"].(bool); ok {
+					tg.SetSendTyping(v)
+				}
+				if v, ok := config["reaction_notifications"].(string); ok {
+					tg.SetReactionNotifications(v)
+				}
+			}
+		}
+
 		savePath := configPath
 		if savePath == "" {
 			savePath = "config.yaml"
@@ -2478,6 +2501,65 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 		os.Unsetenv("TELEGRAM_BOT_TOKEN")
 
 		logger.Info("Telegram channel disconnected and token removed via UI")
+		return nil
+	}
+
+	// ── Telegram Access adapter wiring ──
+	// These operate on the global AccessManager with @telegram-suffixed IDs.
+	adapter.GetTelegramAccessConfigFn = func() webui.TelegramAccessConfig {
+		accessMgr := assistant.AccessManager()
+		entries := accessMgr.ListUsersByChannel("@telegram")
+
+		result := webui.TelegramAccessConfig{
+			DefaultPolicy: string(accessMgr.DefaultPolicy()),
+		}
+		for _, e := range entries {
+			// Strip @telegram suffix for the UI.
+			id := strings.TrimSuffix(e.JID, "@telegram")
+			switch e.Level {
+			case copilot.AccessOwner:
+				result.Owners = append(result.Owners, id)
+			case copilot.AccessAdmin:
+				result.Admins = append(result.Admins, id)
+			case copilot.AccessUser:
+				result.AllowedUsers = append(result.AllowedUsers, id)
+			case copilot.AccessBlocked:
+				result.BlockedUsers = append(result.BlockedUsers, id)
+			}
+		}
+		return result
+	}
+
+	adapter.UpdateTelegramAccessDefaultPolicyFn = func(policy string) error {
+		accessMgr := assistant.AccessManager()
+		accessMgr.SetDefaultPolicy(copilot.AccessPolicy(policy))
+		return nil
+	}
+
+	adapter.GrantTelegramUserAccessFn = func(id, level string) error {
+		accessMgr := assistant.AccessManager()
+		normalized := copilot.NormalizeTelegramID(id)
+		return accessMgr.Grant(normalized, copilot.AccessLevel(level), "webui")
+	}
+
+	adapter.RevokeTelegramUserAccessFn = func(id string) error {
+		accessMgr := assistant.AccessManager()
+		normalized := copilot.NormalizeTelegramID(id)
+		accessMgr.Revoke(normalized, "webui")
+		return nil
+	}
+
+	adapter.BlockTelegramUserFn = func(id string) error {
+		accessMgr := assistant.AccessManager()
+		normalized := copilot.NormalizeTelegramID(id)
+		accessMgr.Block(normalized, "webui")
+		return nil
+	}
+
+	adapter.UnblockTelegramUserFn = func(id string) error {
+		accessMgr := assistant.AccessManager()
+		normalized := copilot.NormalizeTelegramID(id)
+		accessMgr.Unblock(normalized, "webui")
 		return nil
 	}
 

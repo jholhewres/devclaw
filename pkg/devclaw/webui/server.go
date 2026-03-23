@@ -609,6 +609,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// Generic WhatsApp routes
 	mux.HandleFunc("/api/channels/whatsapp/", s.authMiddleware(s.requireAssistant(s.handleAPIWhatsAppQR)))
 	// Telegram routes
+	mux.HandleFunc("/api/channels/telegram/access", s.authMiddleware(s.requireAssistant(s.handleAPITelegramAccess)))
+	mux.HandleFunc("/api/channels/telegram/access/users/", s.authMiddleware(s.requireAssistant(s.handleAPITelegramAccessUser)))
+	mux.HandleFunc("/api/channels/telegram/access/blocked/", s.authMiddleware(s.requireAssistant(s.handleAPITelegramBlockedUser)))
 	mux.HandleFunc("/api/channels/telegram/config", s.authMiddleware(s.requireAssistant(s.handleAPITelegramConfig)))
 	mux.HandleFunc("/api/channels/telegram/connect", s.authMiddleware(s.requireAssistant(s.handleAPITelegramConnect)))
 	mux.HandleFunc("/api/channels/telegram/disconnect", s.authMiddleware(s.requireAssistant(s.handleAPITelegramDisconnect)))

@@ -1267,6 +1267,23 @@
       "off": "Desligado",
       "own": "Apenas mensagens do bot",
       "all": "Todas as reações"
+    },
+    "access": {
+      "admin": "Admin",
+      "allowed": "Permitido",
+      "blocked": "Bloqueado",
+      "defaultPolicy": "Politica Padrao",
+      "policies": {
+        "allow": "Permitir Todos",
+        "deny": "Negar Todos"
+      },
+      "users": "Usuarios",
+      "noUsers": "Nenhum usuario configurado",
+      "notAvailable": "Controle de acesso nao disponivel. Certifique-se de que o Telegram esta configurado.",
+      "addUser": "Adicionar Usuario",
+      "userId": "ID do Usuario Telegram",
+      "userIdPlaceholder": "ID numerico do usuario (ex: 123456789)",
+      "permission": "Permissao"
     }
   },
   "devSettingsPage": {

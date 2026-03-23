@@ -207,8 +207,8 @@ func (am *AccessManager) Check(msg *channels.IncomingMessage) CheckResult {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 
-	from := normalizeJID(msg.From)
-	chatID := normalizeJID(msg.ChatID)
+	from := normalizeChannelID(msg.Channel, msg.From)
+	chatID := normalizeChannelID(msg.Channel, msg.ChatID)
 
 	// 1. Check if sender is explicitly blocked.
 	if entry, ok := am.users[from]; ok && entry.Level == AccessBlocked {
@@ -477,6 +477,21 @@ func (am *AccessManager) ApplyConfig(cfg AccessConfig) {
 	)
 }
 
+// DefaultPolicy returns the current default access policy.
+func (am *AccessManager) DefaultPolicy() AccessPolicy {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	return am.cfg.DefaultPolicy
+}
+
+// SetDefaultPolicy updates the default access policy at runtime.
+func (am *AccessManager) SetDefaultPolicy(policy AccessPolicy) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	am.cfg.DefaultPolicy = policy
+	am.logger.Info("default policy updated", "policy", policy)
+}
+
 // PendingMessage returns the message to send to unknown contacts.
 func (am *AccessManager) PendingMessage() string {
 	if am.cfg.PendingMessage != "" {
@@ -485,7 +500,68 @@ func (am *AccessManager) PendingMessage() string {
 	return "Access not authorized. Please contact an admin."
 }
 
+// ListUsersByChannel returns access entries filtered by channel suffix.
+// For Telegram, pass "@telegram"; for WhatsApp, pass "@s.whatsapp.net".
+// An empty suffix returns all entries.
+func (am *AccessManager) ListUsersByChannel(suffix string) []*AccessEntry {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	entries := make([]*AccessEntry, 0)
+	for _, e := range am.users {
+		if suffix == "" || strings.HasSuffix(e.JID, suffix) {
+			entries = append(entries, e)
+		}
+	}
+	return entries
+}
+
+// ListGroupsByChannel returns group access entries filtered by channel suffix.
+func (am *AccessManager) ListGroupsByChannel(suffix string) []*AccessEntry {
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+
+	entries := make([]*AccessEntry, 0)
+	for _, e := range am.groups {
+		if suffix == "" || strings.HasSuffix(e.JID, suffix) {
+			entries = append(entries, e)
+		}
+	}
+	return entries
+}
+
 // --- Helpers ---
+
+// normalizeChannelID dispatches to the correct normalizer based on channel type.
+func normalizeChannelID(channel, id string) string {
+	if strings.HasPrefix(channel, "telegram") {
+		return normalizeTelegramID(id)
+	}
+	return normalizeJID(id)
+}
+
+// normalizeTelegramID normalizes a Telegram user or chat ID by appending
+// the @telegram suffix for consistent access-list lookups.
+func normalizeTelegramID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return id
+	}
+	// Already has @telegram suffix.
+	if strings.HasSuffix(id, "@telegram") {
+		return id
+	}
+	// Has other @ suffix — keep as-is (shouldn't happen for Telegram).
+	if strings.Contains(id, "@") {
+		return id
+	}
+	return id + "@telegram"
+}
+
+// NormalizeTelegramID is exported for use by API handlers.
+func NormalizeTelegramID(id string) string {
+	return normalizeTelegramID(id)
+}
 
 // normalizeJID strips whitespace and ensures consistent format.
 func normalizeJID(jid string) string {

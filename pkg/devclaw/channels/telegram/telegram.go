@@ -136,6 +136,14 @@ type Telegram struct {
 	// lastLatencyMs tracks the last measured API latency in milliseconds.
 	lastLatencyMs atomic.Int64
 
+	// messagesClosed prevents double-close on the messages channel.
+	messagesClosed atomic.Bool
+
+	// botUsername is the bot's @username, populated after successful Connect via getMe.
+	botUsername string
+	// botID is the bot's numeric user ID, populated after successful Connect via getMe.
+	botID int64
+
 	ctx    context.Context
 	cancel context.CancelFunc
 	mu     sync.RWMutex
@@ -196,6 +204,10 @@ func (t *Telegram) Connect(ctx context.Context) error {
 		return fmt.Errorf("telegram: failed to verify token: %w", err)
 	}
 	t.logger.Info("telegram: connected", "bot", me.Username, "id", me.ID)
+	t.mu.Lock()
+	t.botUsername = me.Username
+	t.botID = me.ID
+	t.mu.Unlock()
 	t.connected.Store(true)
 
 	// Start polling loop.
@@ -207,14 +219,75 @@ func (t *Telegram) Connect(ctx context.Context) error {
 	return nil
 }
 
-// Disconnect stops the polling loop.
+// Disconnect stops the polling loop and closes the messages channel.
 func (t *Telegram) Disconnect() error {
 	if t.cancel != nil {
 		t.cancel()
 	}
 	t.connected.Store(false)
+	// Close the messages channel so the manager's listener goroutine exits.
+	// The atomic guard prevents double-close panics on repeated Disconnect calls.
+	if t.messagesClosed.CompareAndSwap(false, true) {
+		close(t.messages)
+	}
 	t.logger.Info("telegram: disconnected")
 	return nil
+}
+
+// BotUsername returns the bot's @username (available after Connect).
+func (t *Telegram) BotUsername() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.botUsername
+}
+
+// BotID returns the bot's numeric user ID (available after Connect).
+func (t *Telegram) BotID() int64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.botID
+}
+
+// trySend attempts to send a message to the incoming messages channel.
+// Returns false if the channel is closed (Disconnect was called) or full.
+func (t *Telegram) trySend(msg *channels.IncomingMessage) bool {
+	if t.messagesClosed.Load() {
+		return false
+	}
+	select {
+	case t.messages <- msg:
+		return true
+	default:
+		return false
+	}
+}
+
+// SetRespondToGroups updates the respond-to-groups setting on the live instance.
+func (t *Telegram) SetRespondToGroups(v bool) {
+	t.mu.Lock()
+	t.cfg.RespondToGroups = v
+	t.mu.Unlock()
+}
+
+// SetRespondToDMs updates the respond-to-DMs setting on the live instance.
+func (t *Telegram) SetRespondToDMs(v bool) {
+	t.mu.Lock()
+	t.cfg.RespondToDMs = v
+	t.mu.Unlock()
+}
+
+// SetSendTyping updates the typing indicator setting on the live instance.
+func (t *Telegram) SetSendTyping(v bool) {
+	t.mu.Lock()
+	t.cfg.SendTyping = v
+	t.mu.Unlock()
+}
+
+// SetReactionNotifications updates the reaction notifications setting on the live instance.
+func (t *Telegram) SetReactionNotifications(v string) {
+	t.mu.Lock()
+	t.cfg.ReactionNotifications = v
+	t.mu.Unlock()
 }
 
 // Send sends a text message to the specified chat.
@@ -637,7 +710,11 @@ func (t *Telegram) applyButtonStyle(b InlineButton) string {
 
 // processMessageReaction handles message_reaction updates and surfaces them as system events.
 func (t *Telegram) processMessageReaction(r *tgMessageReaction) {
-	mode := strings.ToLower(strings.TrimSpace(t.cfg.ReactionNotifications))
+	t.mu.RLock()
+	reactionMode := t.cfg.ReactionNotifications
+	allowedChats := t.cfg.AllowedChats
+	t.mu.RUnlock()
+	mode := strings.ToLower(strings.TrimSpace(reactionMode))
 	if mode == "" {
 		mode = "off"
 	}
@@ -651,9 +728,9 @@ func (t *Telegram) processMessageReaction(r *tgMessageReaction) {
 	}
 
 	// Apply AllowedChats filter.
-	if len(t.cfg.AllowedChats) > 0 {
+	if len(allowedChats) > 0 {
 		allowed := false
-		for _, id := range t.cfg.AllowedChats {
+		for _, id := range allowedChats {
 			if id == r.Chat.ID {
 				allowed = true
 				break
@@ -710,10 +787,8 @@ func (t *Telegram) processMessageReaction(r *tgMessageReaction) {
 	}
 
 	t.lastMsg.Store(time.Now())
-	select {
-	case t.messages <- incoming:
-	default:
-		t.logger.Warn("telegram: message buffer full, dropping reaction", "msg_id", r.MessageID)
+	if !t.trySend(incoming) {
+		t.logger.Warn("telegram: message buffer full or closed, dropping reaction", "msg_id", r.MessageID)
 	}
 }
 
@@ -762,11 +837,8 @@ func (t *Telegram) processCallbackQuery(cq *tgCallbackQuery) {
 	}
 
 	t.lastMsg.Store(time.Now())
-
-	select {
-	case t.messages <- incoming:
-	default:
-		t.logger.Warn("telegram: message buffer full, dropping callback query", "cb_id", cq.ID)
+	if !t.trySend(incoming) {
+		t.logger.Warn("telegram: message buffer full or closed, dropping callback query", "cb_id", cq.ID)
 	}
 }
 
@@ -935,10 +1007,17 @@ func (t *Telegram) processUpdate(u tgUpdate) {
 	chatIDStr := strconv.FormatInt(msg.Chat.ID, 10)
 	isGroup := msg.Chat.Type == "group" || msg.Chat.Type == "supergroup"
 
+	// Read config under lock since settings can be hot-reloaded.
+	t.mu.RLock()
+	allowedChats := t.cfg.AllowedChats
+	respondToGroups := t.cfg.RespondToGroups
+	respondToDMs := t.cfg.RespondToDMs
+	t.mu.RUnlock()
+
 	// Apply chat filter.
-	if len(t.cfg.AllowedChats) > 0 {
+	if len(allowedChats) > 0 {
 		allowed := false
-		for _, id := range t.cfg.AllowedChats {
+		for _, id := range allowedChats {
 			if id == msg.Chat.ID {
 				allowed = true
 				break
@@ -949,11 +1028,10 @@ func (t *Telegram) processUpdate(u tgUpdate) {
 		}
 	}
 
-	// Apply group/DM filter.
-	if isGroup && !t.cfg.RespondToGroups {
+	if isGroup && !respondToGroups {
 		return
 	}
-	if !isGroup && !t.cfg.RespondToDMs {
+	if !isGroup && !respondToDMs {
 		return
 	}
 
@@ -1061,11 +1139,8 @@ func (t *Telegram) processUpdate(u tgUpdate) {
 	}
 
 	t.lastMsg.Store(time.Now())
-
-	select {
-	case t.messages <- incoming:
-	default:
-		t.logger.Warn("telegram: message buffer full, dropping message", "msg_id", incoming.ID)
+	if !t.trySend(incoming) {
+		t.logger.Warn("telegram: message buffer full or closed, dropping message", "msg_id", incoming.ID)
 	}
 }
 

@@ -135,6 +135,14 @@ type AssistantAdapter struct {
 	ConnectTelegramFn      func(token string) error
 	DisconnectTelegramFn   func() error
 
+	// Telegram Access
+	GetTelegramAccessConfigFn           func() TelegramAccessConfig
+	UpdateTelegramAccessDefaultPolicyFn func(policy string) error
+	GrantTelegramUserAccessFn           func(id, level string) error
+	RevokeTelegramUserAccessFn          func(id string) error
+	BlockTelegramUserFn                 func(id string) error
+	UnblockTelegramUserFn               func(id string) error
+
 	// Security: Audit Log
 	GetAuditLogFn   func(limit int) []AuditEntry
 	GetAuditCountFn func() int
@@ -473,6 +481,50 @@ func (a *AssistantAdapter) ConnectTelegram(token string) error {
 func (a *AssistantAdapter) DisconnectTelegram() error {
 	if a.DisconnectTelegramFn != nil {
 		return a.DisconnectTelegramFn()
+	}
+	return errors.New("not implemented")
+}
+
+// ── Telegram Access ──
+
+func (a *AssistantAdapter) GetTelegramAccessConfig() TelegramAccessConfig {
+	if a.GetTelegramAccessConfigFn != nil {
+		return a.GetTelegramAccessConfigFn()
+	}
+	return TelegramAccessConfig{}
+}
+
+func (a *AssistantAdapter) UpdateTelegramAccessDefaultPolicy(policy string) error {
+	if a.UpdateTelegramAccessDefaultPolicyFn != nil {
+		return a.UpdateTelegramAccessDefaultPolicyFn(policy)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) GrantTelegramUserAccess(id, level string) error {
+	if a.GrantTelegramUserAccessFn != nil {
+		return a.GrantTelegramUserAccessFn(id, level)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) RevokeTelegramUserAccess(id string) error {
+	if a.RevokeTelegramUserAccessFn != nil {
+		return a.RevokeTelegramUserAccessFn(id)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) BlockTelegramUser(id string) error {
+	if a.BlockTelegramUserFn != nil {
+		return a.BlockTelegramUserFn(id)
+	}
+	return errors.New("not implemented")
+}
+
+func (a *AssistantAdapter) UnblockTelegramUser(id string) error {
+	if a.UnblockTelegramUserFn != nil {
+		return a.UnblockTelegramUserFn(id)
 	}
 	return errors.New("not implemented")
 }
