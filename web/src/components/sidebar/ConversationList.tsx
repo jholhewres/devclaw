@@ -58,12 +58,11 @@ export function ConversationList({ collapsed }: ConversationListProps) {
     setSidebarOpen(false);
   };
 
-  if (sessions.length === 0) return null;
-
-  // Collapsed mode: just show a conversations icon that navigates to sessions
+  // Collapsed mode: show icon or just a spacer
   if (collapsed) {
+    if (sessions.length === 0) return <div className="flex-1" />;
     return (
-      <div className="px-3 pt-4">
+      <div className="flex-1 px-3 pt-4">
         <Tooltip title={t('sidebar.recent')} placement="right" delay={200}>
           <AriaButton
             onPress={() => {
@@ -78,6 +77,9 @@ export function ConversationList({ collapsed }: ConversationListProps) {
       </div>
     );
   }
+
+  // Expanded: always render flex-1 container to push footer to bottom
+  if (sessions.length === 0) return <div className="flex-1" />;
 
   return (
     <div className="flex-1 overflow-y-auto px-3 pt-4">

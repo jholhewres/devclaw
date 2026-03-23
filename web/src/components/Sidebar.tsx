@@ -110,15 +110,8 @@ export function Sidebar() {
           </div>
         </nav>
 
-        {/* Conversations */}
-        {showFull ? (
-          <ConversationList collapsed={false} />
-        ) : (
-          <ConversationList collapsed />
-        )}
-
-        {/* Spacer when collapsed and no conversations fill the space */}
-        {!showFull && <div className="flex-1" />}
+        {/* Conversations + flex spacer */}
+        <ConversationList collapsed={!showFull} />
 
         {/* User card (theme, language, settings, logout) */}
         <UserCard collapsed={!showFull} />

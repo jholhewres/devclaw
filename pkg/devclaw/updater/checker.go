@@ -2,10 +2,12 @@ package updater
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -81,7 +83,11 @@ func (c *Checker) Start(ctx context.Context) {
 	}()
 }
 
-// CheckNow performs an immediate update check against the remote latest.txt.
+// githubRepoPattern matches GitHub releases URLs to extract owner/repo.
+var githubRepoPattern = regexp.MustCompile(`github\.com/([^/]+)/([^/]+)`)
+
+// CheckNow performs an immediate update check.
+// Supports both GitHub releases URLs and plain latest.txt endpoints.
 func (c *Checker) CheckNow() (UpdateInfo, error) {
 	if c.currentVersion == "dev" {
 		info := UpdateInfo{
@@ -94,23 +100,18 @@ func (c *Checker) CheckNow() (UpdateInfo, error) {
 		return info, nil
 	}
 
-	url := c.assetsURL + "/latest.txt"
-	resp, err := c.client.Get(url)
+	var latestStr string
+	var err error
+
+	if m := githubRepoPattern.FindStringSubmatch(c.assetsURL); len(m) == 3 {
+		latestStr, err = c.fetchGitHubLatest(m[1], m[2])
+	} else {
+		latestStr, err = c.fetchLatestTxt()
+	}
 	if err != nil {
-		return c.LastCheck(), fmt.Errorf("fetch latest.txt: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return c.LastCheck(), fmt.Errorf("fetch latest.txt: HTTP %d", resp.StatusCode)
+		return c.LastCheck(), err
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 256))
-	if err != nil {
-		return c.LastCheck(), fmt.Errorf("read latest.txt: %w", err)
-	}
-
-	latestStr := strings.TrimSpace(string(body))
 	latest, err := ParseVersion(latestStr)
 	if err != nil {
 		return c.LastCheck(), fmt.Errorf("parse remote version %q: %w", latestStr, err)
@@ -139,6 +140,56 @@ func (c *Checker) CheckNow() (UpdateInfo, error) {
 	}
 
 	return info, nil
+}
+
+// fetchGitHubLatest gets the latest version from GitHub releases API.
+func (c *Checker) fetchGitHubLatest(owner, repo string) (string, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases/latest", owner, repo)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetch GitHub release: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("fetch GitHub release: HTTP %d", resp.StatusCode)
+	}
+
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&release); err != nil {
+		return "", fmt.Errorf("parse GitHub release: %w", err)
+	}
+
+	return strings.TrimPrefix(release.TagName, "v"), nil
+}
+
+// fetchLatestTxt gets the latest version from a plain-text latest.txt endpoint.
+func (c *Checker) fetchLatestTxt() (string, error) {
+	url := c.assetsURL + "/latest.txt"
+	resp, err := c.client.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("fetch latest.txt: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("fetch latest.txt: HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256))
+	if err != nil {
+		return "", fmt.Errorf("read latest.txt: %w", err)
+	}
+
+	return strings.TrimSpace(string(body)), nil
 }
 
 // LastCheck returns the result of the most recent update check (thread-safe).

@@ -1053,7 +1053,7 @@ func DefaultConfig() *Config {
 		Browser: DefaultBrowserConfig(),
 		Update: UpdateConfig{
 			Enabled:       true,
-			AssetsURL:     "https://assets.devclaw.dev",
+			AssetsURL:     "https://github.com/jholhewres/devclaw/releases",
 			CheckInterval: "1h",
 		},
 	}

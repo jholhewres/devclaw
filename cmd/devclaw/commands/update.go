@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultAssetsURL = "https://assets.devclaw.dev"
+const defaultAssetsURL = "https://github.com/jholhewres/devclaw/releases"
 
 func newUpdateCmd(version string) *cobra.Command {
 	var assetsURL string

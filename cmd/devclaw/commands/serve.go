@@ -438,7 +438,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		if cfg.Update.Enabled {
 			assetsURL := cfg.Update.AssetsURL
 			if assetsURL == "" {
-				assetsURL = "https://assets.devclaw.dev"
+				assetsURL = "https://github.com/jholhewres/devclaw/releases"
 			}
 			checkInterval := 1 * time.Hour
 			if cfg.Update.CheckInterval != "" {

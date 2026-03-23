@@ -328,7 +328,7 @@ export function Button({
   icon: Icon,
 }: ButtonProps) {
   const variants = {
-    primary: 'bg-text-primary text-inverse shadow-lg hover:bg-white',
+    primary: 'bg-brand-solid text-white shadow-lg shadow-brand/25 hover:brightness-110',
     secondary: 'border border-primary bg-secondary text-primary hover:border-text-muted hover:bg-tertiary',
     ghost: 'text-tertiary hover:text-primary',
   }
