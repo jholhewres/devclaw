@@ -25,7 +25,7 @@ Open-source AI agent for tech teams — devs, DevOps, QA, PMs, designers, and ev
 
 **Linux/macOS:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/install.sh | bash -s -- --url https://github.com/jholhewres/devclaw/releases/latest/download
+bash <(curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/install.sh)
 ```
 
 **What the installer does:**
@@ -50,16 +50,16 @@ open http://localhost:47716/setup
 **Install options:**
 ```bash
 # Install specific version
-curl -fsSL ... | bash -s -- --url https://... --version v1.2.3
+bash <(curl -fsSL ...) -- --version v1.16.0
 
 # Non-interactive mode (skip confirmations)
-curl -fsSL ... | bash -s -- --url https://... --no-prompt
+bash <(curl -fsSL ...) -- --no-prompt
 
 # Custom port
-curl -fsSL ... | bash -s -- --url https://... --port 3000
+bash <(curl -fsSL ...) -- --port 3000
 
 # Dry run (see what would happen)
-curl -fsSL ... | bash -s -- --url https://... --dry-run
+bash <(curl -fsSL ...) -- --dry-run
 ```
 
 **Install from local directory (for testing/development):**
@@ -131,7 +131,7 @@ http://localhost:47716/setup
 
 It guides you through:
 1. API provider and key configuration
-2. Channel setup (WhatsApp, Discord, Telegram, Slack)
+2. Channel setup (WhatsApp, Telegram)
 3. Security settings (vault password, access control)
 4. Skills installation
 
@@ -146,12 +146,12 @@ All secrets are stored in the encrypted vault (`.devclaw.vault`), never in plain
 - **N-provider fallback chain** — rate-limited model → fallback → local Ollama, with per-model cooldowns and budget tracking
 - **90+ built-in tools** — Git, Docker, databases, testing, deploy, DORA metrics, team coordination, and much more
 - **Native media** — receive/send images, audio, documents with auto-enrichment (vision, transcription, text extraction)
-- **Teams system** — persistent agents with roles, shared memory, tasks, documents, and @mention notifications
+- **Plugin agents** — persistent agents with custom instructions, triggers, and bidirectional communication
 - **MCP server** — any IDE (Cursor, VSCode, Claude Code, Windsurf) connects via Model Context Protocol
 - **Pipe mode** — `git diff | devclaw diff` or `npm build 2>&1 | devclaw fix`
 - **Quick commands** — `devclaw fix`, `devclaw explain .`, `devclaw commit`, `devclaw how "task"`
 - **Extensible skills** — install from [ClawHub](https://clawhub.ai/) or create your own
-- **4 channels** — WhatsApp, Discord, Telegram, Slack
+- **2 channels** — WhatsApp, Telegram
 - **WebUI** — React dashboard with SSE streaming, session management, and setup wizard
 - **Gateway API** — OpenAI-compatible HTTP API + WebSocket JSON-RPC
 - **Encrypted vault** — AES-256-GCM + Argon2id for all secrets
@@ -168,7 +168,7 @@ All secrets are stored in the encrypted vault (`.devclaw.vault`), never in plain
 ```
 ┌──────────────────────────────────────────────────────┐
 │                    Interfaces                        │
-│  CLI   WebUI   WhatsApp   Discord   Telegram   Slack │
+│  CLI   WebUI   WhatsApp   Telegram                   │
 └──────────────────────┬───────────────────────────────┘
                        │
         ┌──────────────▼──────────────┐
@@ -185,12 +185,6 @@ All secrets are stored in the encrypted vault (`.devclaw.vault`), never in plain
     │          Subagent Manager         │
     │  (up to 8 concurrent child agents │
     │   with isolated sessions + tools) │
-    └───────────────────────────────────┘
-           │
-    ┌──────▼────────────────────────────┐
-    │          Teams System             │
-    │  (persistent agents with roles,   │
-    │   shared memory, tasks, @mentions)│
     └───────────────────────────────────┘
            │
     ┌──────▼────────────────────────────────┐
@@ -226,7 +220,7 @@ All secrets are stored in the encrypted vault (`.devclaw.vault`), never in plain
 | **Daemons** | start_daemon, daemon_logs, daemon_list, daemon_stop, daemon_restart |
 | **Subagents** | spawn_subagent, list_subagents, wait_subagent, stop_subagent |
 | **Plugins** | plugin_list, plugin_install, plugin_call, delegate_to_plugin_agent |
-| **Teams** | create/list teams & agents, tasks CRUD, @mentions, shared facts, documents, working state |
+| **Agents** | delegate_to_plugin_agent, escalate_to_main, plugin agent lifecycle |
 | **Media** | describe_image (vision), transcribe_audio (Whisper), send_media (image/audio/video/document) |
 | **IDE** | ide_configure (VSCode, Cursor, JetBrains, Neovim) |
 | **Remote** | SSH exec, SCP upload/download |
@@ -407,66 +401,12 @@ subagents:
 
 ---
 
-## Teams System
-
-DevClaw Teams adds **persistent agents** with roles, shared memory, and real-time collaboration:
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                     TeamManager                          │
-│  - Create teams and persistent agents                   │
-│  - Agent roles: junior, mid, senior, lead               │
-│  - Heartbeat scheduling for proactive behavior          │
-│  - @mention parsing and active notification push        │
-└──────────────────────────┬──────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────┐
-│                     TeamMemory                           │
-│  - Tasks (CRUD, status workflow)                        │
-│  - Messages (@mentions, thread subscriptions)           │
-│  - Facts (shared key-value store)                       │
-│  - Documents (deliverables with versioning)             │
-│  - Working State (WORKING.md pattern)                   │
-└──────────────────────────────────────────────────────────┘
-```
-
-**Key features:**
-
-- **Persistent agents**: Long-lived agents with personalities and instructions
-- **Team memory**: Shared tasks, facts, documents accessible by all team members
-- **Thread subscriptions**: Auto-subscribe to threads for continuous notifications
-- **Working state**: Agents persist work-in-progress across heartbeats
-- **Active push**: Agents triggered immediately on @mentions (not just on heartbeat)
-
-**Example workflow:**
-
-```bash
-# Create a team
-team_create(name="Engineering", description="Dev team")
-
-# Create agents with roles
-team_create_agent(team_id="abc123", name="Friday", role="Squad Lead", level="lead")
-team_create_agent(team_id="abc123", name="Hobbs", role="Writer", level="mid")
-
-# Assign tasks with @mentions
-team_create_task(title="Write API docs", assignees=["hobbs"])
-team_comment(thread_id="task-123", content="@hobbs please start with auth endpoints")
-
-# Agent receives notification immediately and on heartbeat
-```
-
-See [docs/teams.md](docs/teams.md) for full documentation.
-
----
-
 ## Channels
 
 | Channel | Status | Protocol |
 |---------|--------|----------|
 | WhatsApp | Stable | whatsmeow (native Go) |
-| Discord | Stable | discordgo |
 | Telegram | Stable | telebot |
-| Slack | Stable | slack-go |
 
 See [docs/channels.md](docs/channels.md) for setup instructions.
 
@@ -529,8 +469,7 @@ See [docs/security.md](docs/security.md) for details.
 The install script handles the complete setup:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/install.sh | \
-  bash -s -- --url https://github.com/jholhewres/devclaw/releases/latest/download
+bash <(curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/install.sh)
 ```
 
 **What happens:**
@@ -594,7 +533,6 @@ sudo rm -f /usr/local/bin/devclaw
 |-------|------|
 | Architecture | [docs/architecture.md](docs/architecture.md) |
 | Features | [docs/features.md](docs/features.md) |
-| Teams System | [docs/teams.md](docs/teams.md) |
 | Plugins | [docs/plugins.md](docs/plugins.md) |
 | Security | [docs/security.md](docs/security.md) |
 | Performance | [docs/performance.md](docs/performance.md) |
