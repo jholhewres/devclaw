@@ -1,7 +1,7 @@
 ---
 name: agents
 description: "Create and manage agents with isolated sessions and routing"
-trigger: on-demand
+trigger: automatic
 ---
 
 # Agents
