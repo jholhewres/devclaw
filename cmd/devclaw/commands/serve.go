@@ -1172,7 +1172,6 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 					if tgRaw, ok := channelsMap["telegram"]; ok {
 						if tgMap, ok := tgRaw.(map[string]any); ok {
 							if v, ok := tgMap["token"].(string); ok && v != "" {
-								wasEmpty := cfg.Channels.Telegram.Token == ""
 								if vaultOK {
 									if err := vault.Set("TELEGRAM_BOT_TOKEN", v); err != nil {
 										return fmt.Errorf("failed to store Telegram token in vault: %w", err)
@@ -1181,14 +1180,15 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 								}
 								cfg.Channels.Telegram.Token = v
 
-								// Hot-reload: register and connect if not already registered.
-								if wasEmpty {
-									tg := telegram.New(cfg.Channels.Telegram, logger)
-									if err := assistant.ChannelManager().RegisterAndConnect(tg); err != nil {
-										logger.Error("failed to hot-reload Telegram channel", "error", err)
-									} else {
-										logger.Info("Telegram channel connected via hot-reload")
-									}
+								// Hot-reload: unregister stale channel, then register with new config.
+								if _, exists := assistant.ChannelManager().Channel("telegram"); exists {
+									_ = assistant.ChannelManager().UnregisterChannel("telegram")
+								}
+								tg := telegram.New(cfg.Channels.Telegram, logger)
+								if err := assistant.ChannelManager().RegisterAndConnect(tg); err != nil {
+									logger.Error("failed to hot-reload Telegram channel", "error", err)
+								} else {
+									logger.Info("Telegram channel connected via hot-reload")
 								}
 							}
 						}
@@ -2418,8 +2418,6 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 	}
 
 	adapter.ConnectTelegramFn = func(token string) error {
-		wasEmpty := cfg.Channels.Telegram.Token == ""
-
 		// Store token in vault if available.
 		v := assistant.Vault()
 		if v != nil && v.IsUnlocked() {
@@ -2439,21 +2437,25 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 			return fmt.Errorf("failed to save config: %w", err)
 		}
 
-		// Hot-reload: register and connect the channel.
-		if wasEmpty {
-			tg := telegram.New(cfg.Channels.Telegram, logger)
-			if err := assistant.ChannelManager().RegisterAndConnect(tg); err != nil {
-				return fmt.Errorf("failed to connect Telegram: %w", err)
-			}
-			logger.Info("Telegram channel connected via UI")
+		// Unregister stale channel if present (e.g. from a previous disconnect that
+		// left it registered, or from boot registration with an old token).
+		if _, exists := assistant.ChannelManager().Channel("telegram"); exists {
+			_ = assistant.ChannelManager().UnregisterChannel("telegram")
 		}
+
+		// Register and connect with the new token.
+		tg := telegram.New(cfg.Channels.Telegram, logger)
+		if err := assistant.ChannelManager().RegisterAndConnect(tg); err != nil {
+			return fmt.Errorf("failed to connect Telegram: %w", err)
+		}
+		logger.Info("Telegram channel connected via UI")
 		return nil
 	}
 
 	adapter.DisconnectTelegramFn = func() error {
-		// Disconnect the channel if running.
-		if ch, exists := assistant.ChannelManager().Channel("telegram"); exists && ch.IsConnected() {
-			if err := assistant.ChannelManager().DisconnectChannel("telegram"); err != nil {
+		// Unregister (disconnects + removes) the channel so it can be re-registered later.
+		if _, exists := assistant.ChannelManager().Channel("telegram"); exists {
+			if err := assistant.ChannelManager().UnregisterChannel("telegram"); err != nil {
 				return err
 			}
 		}
