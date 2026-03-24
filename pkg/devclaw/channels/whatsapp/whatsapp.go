@@ -303,7 +303,18 @@ func New(cfg Config, logger *slog.Logger) *WhatsApp {
 		cfg.MaxReconnectAttempts = defaults.MaxReconnectAttempts
 	}
 	if cfg.Access.DefaultPolicy == "" {
-		cfg.Access.DefaultPolicy = defaults.Access.DefaultPolicy
+		// If any access entries are configured, default to "deny" so that
+		// only explicitly listed users/groups are allowed.  Otherwise keep
+		// the permissive "allow" default for zero-config setups.
+		hasEntries := len(cfg.Access.Owners) > 0 ||
+			len(cfg.Access.Admins) > 0 ||
+			len(cfg.Access.AllowedUsers) > 0 ||
+			len(cfg.Access.AllowedGroups) > 0
+		if hasEntries {
+			cfg.Access.DefaultPolicy = "deny"
+		} else {
+			cfg.Access.DefaultPolicy = defaults.Access.DefaultPolicy
+		}
 	}
 	// Bool fields all default to true. When ALL four are false it indicates
 	// the config was zero-initialized (previous bug) rather than intentionally
@@ -1769,6 +1780,9 @@ func (w *WhatsApp) seedAccessFromConfig() {
 	}
 	for _, jid := range w.cfg.Access.AllowedUsers {
 		w.accessUsers[normalizeJID(jid)] = "user"
+	}
+	for _, jid := range w.cfg.Access.AllowedGroups {
+		w.accessGroups[normalizeJID(jid)] = "user"
 	}
 	for _, jid := range w.cfg.Access.BlockedUsers {
 		w.blockedUsers[normalizeJID(jid)] = struct{}{}
