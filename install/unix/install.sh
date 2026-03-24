@@ -3,6 +3,8 @@
 # Usage: bash <(curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/install.sh)
 #
 # Options:
+#   --name <name>       Service name and namespace (default: devclaw)
+#                       Affects install dir, symlink, and PM2 process name
 #   --local <path>      Use local directory instead of downloading (for testing)
 #   --version <tag>     Install specific version (default: latest from GitHub Releases)
 #   --port <port>       Server port (default: 47716)
@@ -20,16 +22,17 @@ set -euo pipefail
 
 BINARY="devclaw"
 SCRIPT_VERSION="3.0.0"
+SERVICE_NAME="devclaw"
 
 # GitHub
 GITHUB_REPO="jholhewres/devclaw"
 GITHUB_API="https://api.github.com/repos/${GITHUB_REPO}"
 GITHUB_RELEASES_URL="https://github.com/${GITHUB_REPO}/releases/download"
 
-# Installation directories
-LINUX_INSTALL_DIR="/opt/devclaw"
-MACOS_INSTALL_DIR="/usr/local/opt/devclaw"
-BIN_SYMLINK="/usr/local/bin/devclaw"
+# Installation directories (derived from SERVICE_NAME after parse_args)
+LINUX_INSTALL_DIR=""
+MACOS_INSTALL_DIR=""
+BIN_SYMLINK=""
 
 # Colors
 BOLD='\033[1m'
@@ -44,6 +47,7 @@ NC='\033[0m'
 LOCAL_PATH=""
 VERSION=""
 VERSION_SPECIFIED=""
+NAME=""
 PORT="47716"
 NO_PROMPT=0
 SKIP_DEPS=0
@@ -104,6 +108,8 @@ Usage:
   ./install.sh --local <path> [--version <tag>]
 
 Options:
+  --name <name>       Service name and namespace (default: devclaw)
+                      Affects install dir (/opt/<name>), symlink, and PM2 process name
   --local <path>      Use local directory instead of downloading (for testing)
   --version <tag>     Install specific version (default: latest from GitHub Releases)
   --port <port>       Server port (default: 47716)
@@ -115,6 +121,7 @@ Options:
   --help, -h          Show this help message
 
 Environment:
+  DEVCLAW_NAME        Service name (same as --name)
   DEVCLAW_VERSION     Version to install (same as --version)
   DEVCLAW_PORT        Server port (same as --port)
   DEVCLAW_NO_PROMPT   Set to 1 for non-interactive mode
@@ -126,6 +133,9 @@ Examples:
 
   # Install specific version
   bash <(curl -fsSL ...) -- --version v1.16.0
+
+  # Install second instance with different name and port
+  bash <(curl -fsSL ...) -- --name devclaw-2 --port 47718
 
   # Install from local directory (for testing)
   ./install.sh --local ./dist --version v1.0.0
@@ -145,6 +155,7 @@ EOF
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --name) NAME="$2"; shift 2 ;;
       --local) LOCAL_PATH="$2"; shift 2 ;;
       --version) VERSION="$2"; VERSION_SPECIFIED="1"; shift 2 ;;
       --port) PORT="$2"; shift 2 ;;
@@ -159,10 +170,16 @@ parse_args() {
   done
 
   # Environment variable fallbacks
+  SERVICE_NAME="${NAME:-${DEVCLAW_NAME:-devclaw}}"
   VERSION="${VERSION:-${DEVCLAW_VERSION:-}}"
   PORT="${PORT:-${DEVCLAW_PORT:-47716}}"
   NO_PROMPT="${NO_PROMPT:-${DEVCLAW_NO_PROMPT:-0}}"
   SKIP_DEPS="${SKIP_DEPS:-${DEVCLAW_SKIP_DEPS:-0}}"
+
+  # Derive installation paths from SERVICE_NAME
+  LINUX_INSTALL_DIR="/opt/${SERVICE_NAME}"
+  MACOS_INSTALL_DIR="/usr/local/opt/${SERVICE_NAME}"
+  BIN_SYMLINK="/usr/local/bin/${SERVICE_NAME}"
 
   if [[ "$VERBOSE" == "1" ]]; then
     set -x
@@ -209,6 +226,7 @@ detect_platform() {
   esac
 
   ui_kv "Platform" "${OS}/${ARCH}"
+  ui_kv "Service" "$SERVICE_NAME"
   ui_kv "Install dir" "$INSTALL_DIR"
 }
 
@@ -630,9 +648,9 @@ download_and_install() {
   fi
 
   # Stop running instance before overwriting binary
-  if command -v pm2 &>/dev/null && pm2 describe devclaw &>/dev/null 2>&1; then
-    ui_info "Stopping running devclaw process..."
-    pm2 stop devclaw &>/dev/null || true
+  if command -v pm2 &>/dev/null && pm2 describe "$SERVICE_NAME" &>/dev/null 2>&1; then
+    ui_info "Stopping running ${SERVICE_NAME} process..."
+    pm2 stop "$SERVICE_NAME" &>/dev/null || true
   fi
 
   # Create install directory
@@ -720,7 +738,7 @@ setup_global_command() {
     sudo ln -sf "${INSTALL_DIR}/devclaw" "$BIN_SYMLINK"
   fi
 
-  ui_success "Global command available: devclaw"
+  ui_success "Global command available: ${SERVICE_NAME}"
 }
 
 generate_tls_certs() {
@@ -822,7 +840,7 @@ const port = '${PORT}';
 
 module.exports = {
   apps: [{
-    name: 'devclaw',
+    name: '${SERVICE_NAME}',
     script: path.join(installDir, 'devclaw'),
     args: 'serve',
     cwd: installDir,
@@ -868,13 +886,13 @@ start_with_pm2() {
   cd "$INSTALL_DIR"
 
   # Stop existing process if running
-  if pm2 describe devclaw &>/dev/null; then
-    ui_info "Stopping existing devclaw process..."
-    pm2 delete devclaw &>/dev/null || true
+  if pm2 describe "$SERVICE_NAME" &>/dev/null; then
+    ui_info "Stopping existing ${SERVICE_NAME} process..."
+    pm2 delete "$SERVICE_NAME" &>/dev/null || true
   fi
 
   # Start with PM2
-  ui_info "Starting devclaw..."
+  ui_info "Starting ${SERVICE_NAME}..."
   pm2 start ecosystem.config.js
 
   # Save PM2 configuration
@@ -914,18 +932,19 @@ start_with_pm2() {
   fi
 
   if [[ "$CONFIG_WAS_CREATED" == "1" ]]; then
-    ui_success "DevClaw started with PM2 (First Run Setup mode)"
+    ui_success "${SERVICE_NAME} started with PM2 (First Run Setup mode)"
     ui_info "Access http://0.0.0.0:${PORT}/setup to complete configuration"
   else
-    ui_success "DevClaw started with PM2"
+    ui_success "${SERVICE_NAME} started with PM2"
   fi
 }
 
 print_success() {
   printf "\n"
-  printf "${SUCCESS}${BOLD}  ✓ DevClaw installed successfully!${NC}\n"
+  printf "${SUCCESS}${BOLD}  ✓ ${SERVICE_NAME} installed successfully!${NC}\n"
   printf "\n"
   printf "  Installation:\n"
+  printf "    Service:    %s\n" "${SERVICE_NAME}"
   printf "    Binary:     %s\n" "${INSTALL_DIR}/devclaw"
   printf "    Config:     %s\n" "${INSTALL_DIR}/config.yaml"
   printf "    Data:       %s\n" "${INSTALL_DIR}/data/"
@@ -935,23 +954,23 @@ print_success() {
   if [[ "$CONFIG_WAS_CREATED" == "1" ]]; then
     printf "  ${ACCENT}${BOLD}→ First Run Setup${NC}\n"
     printf "\n"
-    printf "  DevClaw is running in setup mode.\n"
+    printf "  ${SERVICE_NAME} is running in setup mode.\n"
     printf "  Complete the configuration by accessing:\n"
     printf "\n"
     printf "    http://0.0.0.0:%s/setup\n" "${PORT}"
     printf "\n"
     printf "  Or run manually:\n"
-    printf "    devclaw setup\n"
+    printf "    %s setup\n" "${SERVICE_NAME}"
     printf "\n"
   fi
 
   printf "  Commands:\n"
-  printf "    devclaw --version    # Check version\n"
-  printf "    devclaw serve        # Start server (foreground)\n"
-  printf "    pm2 status           # Check PM2 status\n"
-  printf "    pm2 logs devclaw     # View logs\n"
-  printf "    pm2 restart devclaw  # Restart service\n"
-  printf "    pm2 stop devclaw     # Stop service\n"
+  printf "    %s --version           # Check version\n" "${SERVICE_NAME}"
+  printf "    %s serve               # Start server (foreground)\n" "${SERVICE_NAME}"
+  printf "    pm2 status                # Check PM2 status\n"
+  printf "    pm2 logs %-16s # View logs\n" "${SERVICE_NAME}"
+  printf "    pm2 restart %-13s # Restart service\n" "${SERVICE_NAME}"
+  printf "    pm2 stop %-16s # Stop service\n" "${SERVICE_NAME}"
   printf "\n"
   printf "  Web UI:\n"
   printf "    http://0.0.0.0:%s\n" "${PORT}"
@@ -965,6 +984,8 @@ print_success() {
 
 print_install_plan() {
   ui_section "Install Plan"
+
+  ui_kv "Service name" "$SERVICE_NAME"
 
   if [[ -n "$LOCAL_PATH" ]]; then
     ui_kv "Source" "local directory"
