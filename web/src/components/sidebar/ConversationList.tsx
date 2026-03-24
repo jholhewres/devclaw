@@ -101,13 +101,14 @@ export function ConversationList({ collapsed }: ConversationListProps) {
         {/* Session list */}
         <div className="space-y-0.5">
           {sessions.map((session) => {
-            const active = location.pathname === `/chat/${encodeURIComponent(session.id)}`;
+            const navId = session.chat_id || session.id;
+            const active = location.pathname === `/chat/${encodeURIComponent(navId)}`;
             const channel = session.channel && channelLabels[session.channel];
 
             return (
               <AriaButton
                 key={session.id}
-                onPress={() => handleNavigate(session.id)}
+                onPress={() => handleNavigate(navId)}
                 className={cx(
                   'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left outline-hidden transition-all duration-150 cursor-pointer',
                   active

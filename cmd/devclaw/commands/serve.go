@@ -69,6 +69,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return runWebSetupMode()
 	}
 
+	// ── Apply PORT env override ──
+	// The PM2 ecosystem.config.js passes the user-specified port via the PORT
+	// env var, but the config file may still contain the default address.
+	// Let the env var win so that --port at install time is honoured.
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		cfg.WebUI.Address = ":" + strings.TrimLeft(envPort, ":")
+	}
+
 	// ── Configure logger ──
 	verbose, _ := cmd.Root().PersistentFlags().GetBool("verbose")
 	logLevel := slog.LevelInfo
@@ -596,6 +604,12 @@ func runWebSetupMode() error {
 		serverIP = ip
 	}
 
+	// Respect PORT env var (set by PM2 ecosystem config via --port install flag).
+	setupPort := "47716"
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		setupPort = strings.TrimLeft(envPort, ":")
+	}
+
 	fmt.Println()
 	fmt.Println("  ╭──────────────────────────────────────────────╮")
 	fmt.Println("  │  🐾 DevClaw — First Run Setup                 │")
@@ -603,7 +617,7 @@ func runWebSetupMode() error {
 	fmt.Println("  │  No config.yaml found.                       │")
 	fmt.Println("  │  Starting web setup wizard...                │")
 	fmt.Println("  │                                              │")
-	fmt.Printf("  │  Open:  http://%s:47716/setup          │\n", serverIP)
+	fmt.Printf("  │  Open:  http://%s:%s/setup          │\n", serverIP, setupPort)
 	fmt.Println("  ╰──────────────────────────────────────────────╯")
 	fmt.Println()
 
@@ -612,7 +626,7 @@ func runWebSetupMode() error {
 	// Start a webui server in setup-only mode (no assistant needed).
 	webuiCfg := webui.Config{
 		Enabled: true,
-		Address: ":47716",
+		Address: ":" + setupPort,
 	}
 	webServer := webui.New(webuiCfg, nil, logger)
 	webServer.SetSetupMode(true)
@@ -1226,21 +1240,23 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 		GetSessionMessagesFn: func(sessionID string) []webui.MessageInfo {
 			store := assistant.SessionStore()
 
-			// Parse channel from sessionID (e.g. "webui:abc123" → channel="webui").
-			channel := "webui"
-			if idx := strings.IndexByte(sessionID, ':'); idx > 0 {
-				channel = sessionID[:idx]
-			}
+			// First, try direct hash-ID lookup (handles bookmarked hash URLs).
+			session := store.GetByID(sessionID)
 
-			// Try in-memory lookup first with the parsed channel.
-			session := store.Get(channel, sessionID)
+			if session == nil {
+				// Parse channel from sessionID (e.g. "webui:abc123" → channel="webui").
+				channel := "webui"
+				if idx := strings.IndexByte(sessionID, ':'); idx > 0 {
+					channel = sessionID[:idx]
+				}
+				session = store.Get(channel, sessionID)
+			}
 
 			if session == nil {
 				// Session not in memory. Search all sessions (memory + persistence)
-				// to find the correct channel — handles whatsapp, scheduler, etc.
-				// where the chatID doesn't contain a channel prefix.
+				// matching by hash ID or chatID.
 				for _, meta := range store.ListAllSessions() {
-					if meta.ChatID == sessionID {
+					if meta.ID == sessionID || meta.ChatID == sessionID {
 						session = store.GetOrCreate(meta.Channel, meta.ChatID)
 						break
 					}
@@ -1409,7 +1425,15 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 			return assistant.ProfileManager()
 		},
 		SendChatMessageFn: func(sessionID, content string) (string, error) {
-			session := assistant.SessionStore().GetOrCreate("webui", sessionID)
+			store := assistant.SessionStore()
+			session := store.GetByID(sessionID)
+			if session == nil {
+				channel := "webui"
+				if idx := strings.IndexByte(sessionID, ':'); idx > 0 {
+					channel = sessionID[:idx]
+				}
+				session = store.GetOrCreate(channel, sessionID)
+			}
 			prompt := assistant.ComposePrompt(session, content)
 			ctx := copilot.ContextWithDelivery(context.Background(), "webui", sessionID)
 			resp := assistant.ExecuteAgent(ctx, prompt, session, content)
@@ -1417,7 +1441,18 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 			return resp, nil
 		},
 		StartChatStreamFn: func(_ context.Context, sessionID, content string) (*webui.RunHandle, error) {
-			session := assistant.SessionStore().GetOrCreate("webui", sessionID)
+			store := assistant.SessionStore()
+
+			// Resolve session: try hash-ID first, then channel:chatID.
+			session := store.GetByID(sessionID)
+			if session == nil {
+				// Parse channel from sessionID (e.g. "webui:abc123" → channel="webui").
+				channel := "webui"
+				if idx := strings.IndexByte(sessionID, ':'); idx > 0 {
+					channel = sessionID[:idx]
+				}
+				session = store.GetOrCreate(channel, sessionID)
+			}
 			prompt := assistant.ComposePrompt(session, content)
 
 			runID := fmt.Sprintf("run-%d", time.Now().UnixNano())

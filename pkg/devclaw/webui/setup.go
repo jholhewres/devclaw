@@ -829,7 +829,11 @@ func generateConfigYAML(s *SetupRequest) string {
 	b.WriteString("# -- Web UI -----------------------------------------------\n")
 	b.WriteString("webui:\n")
 	b.WriteString("  enabled: true\n")
-	b.WriteString("  address: \"0.0.0.0:47716\"\n")
+	webuiPort := "47716"
+	if envPort := os.Getenv("PORT"); envPort != "" {
+		webuiPort = strings.TrimLeft(envPort, ":")
+	}
+	b.WriteString(fmt.Sprintf("  address: \"0.0.0.0:%s\"\n", webuiPort))
 	if s.WebuiPassword != "" {
 		b.WriteString("  auth_token: \"${DEVCLAW_WEBUI_TOKEN}\"\n")
 	}
