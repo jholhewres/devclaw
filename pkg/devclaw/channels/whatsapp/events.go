@@ -403,6 +403,11 @@ func (w *WhatsApp) handleMessageEvt(evt *events.Message) {
 		return
 	}
 
+	// Skip newsletter/channel messages (read-only, cannot reply).
+	if evt.Info.Chat.Server == "newsletter" {
+		return
+	}
+
 	// Check group/DM filtering.
 	isGroup := evt.Info.IsGroup
 	if isGroup && !w.cfg.RespondToGroups {
