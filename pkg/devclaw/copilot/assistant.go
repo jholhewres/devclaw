@@ -332,8 +332,8 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 		switch run.Status {
 		case SubagentStatusCompleted:
 			result := run.Result
-			if len(result) > 4000 {
-				result = result[:4000] + "\n... (truncated)"
+			if len(result) > 12000 {
+				result = result[:12000] + "\n... (truncated)"
 			}
 			// Sanitize subagent result to prevent prompt injection into parent context.
 			// Use StripDangerousTags (not SanitizeMemoryContent) to avoid HTML-escaping
@@ -2686,8 +2686,8 @@ func (a *Assistant) collectPendingSubagentResults(ctx context.Context) string {
 			status = "failed: " + completed.Error
 		}
 		result := completed.Result
-		if len(result) > 2000 {
-			result = result[:2000] + "..."
+		if len(result) > 8000 {
+			result = result[:8000] + "..."
 		}
 		results = append(results, fmt.Sprintf("- Subagent %s (%s) [%s]: %s", run.ID, run.Task, status, result))
 	}
@@ -2699,8 +2699,8 @@ func (a *Assistant) collectPendingSubagentResults(ctx context.Context) string {
 			status = "failed: " + run.Error
 		}
 		result := run.Result
-		if len(result) > 2000 {
-			result = result[:2000] + "..."
+		if len(result) > 8000 {
+			result = result[:8000] + "..."
 		}
 		a.logger.Info("collecting already-completed subagent result via yield",
 			"run_id", run.ID, "label", run.Label)

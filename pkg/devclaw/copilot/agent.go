@@ -622,6 +622,7 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 	const maxConsecutiveBlockedTurns = 3
 	var consecutiveBlockedTurns int
 	var thinkingFallbackApplied bool
+	var thinkRetries int
 
 	// ── Main agent loop ──
 	// Loop until: (1) LLM produces no tool calls, (2) run timeout fires, or
@@ -804,21 +805,30 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 
 		// ── Strict <think> Parsing ──
 		if strings.Contains(resp.Content, "<think>") && !strings.Contains(resp.Content, "</think>") {
-			a.logger.Warn("llm missed closing </think> tag, prompting retry without executing tools")
+			thinkRetries++
+			if thinkRetries > 3 {
+				// Give up retrying: strip the unclosed tag and proceed normally.
+				a.logger.Warn("llm repeatedly missed closing </think> tag, stripping and proceeding",
+					"retries", thinkRetries)
+				resp.Content = strings.Replace(resp.Content, "<think>", "", 1)
+			} else {
+				a.logger.Warn("llm missed closing </think> tag, prompting retry without executing tools",
+					"retry", thinkRetries)
 
-			// Append assistant message so the user message makes sense in context
-			messages = append(messages, chatMessage{
-				Role:      "assistant",
-				Content:   resp.Content,
-				ToolCalls: resp.ToolCalls,
-			})
+				// Append assistant message so the user message makes sense in context
+				messages = append(messages, chatMessage{
+					Role:      "assistant",
+					Content:   resp.Content,
+					ToolCalls: resp.ToolCalls,
+				})
 
-			messages = append(messages, chatMessage{
-				Role:    "user",
-				Content: "[System: You opened a <think> tag but did not close it with </think>. Please close your <think> tag, and place any tool calls or final responses AFTER the </think> tag. Do not execute tools until you finish thinking.]",
-			})
-			// Loop again without executing any returned tool calls or triggering final response
-			continue
+				messages = append(messages, chatMessage{
+					Role:    "user",
+					Content: "[System: You opened a <think> tag but did not close it with </think>. Please close your <think> tag, and place any tool calls or final responses AFTER the </think> tag. Do not execute tools until you finish thinking.]",
+				})
+				// Loop again without executing any returned tool calls or triggering final response
+				continue
+			}
 		}
 
 		// ── Validate tool calls from LLM response ──
@@ -855,7 +865,7 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 			// Check for truncated response (finish_reason="length").
 			// If the response was cut mid-generation by context limit, compact
 			// and retry instead of returning a truncated answer.
-			if resp.FinishReason == "length" && totalTurns > 1 && len(messages) > 10 {
+			if resp.FinishReason == "length" && len(messages) > 4 {
 				a.logger.Warn("response truncated (finish_reason=length), compacting and retrying",
 					"turn", totalTurns,
 					"response_len", len(resp.Content),
