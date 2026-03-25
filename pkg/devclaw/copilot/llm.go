@@ -607,7 +607,7 @@ func (c *LLMClient) applyModelDefaults(req *chatRequest) {
 	// Anthropic and Z.AI (anthropic proxy) support it natively.
 	// OpenRouter passes cache_control through to Anthropic backends when the model
 	// is a Claude model — the field is forwarded in the API request as-is.
-	if c.supportsCacheControl() {
+	if c.supportsCacheControl() && !c.isAnthropicAPI() {
 		c.applyPromptCaching(req)
 		if c.provider == "openrouter" {
 			c.logger.Debug("prompt caching applied via OpenRouter pass-through",
@@ -779,6 +779,95 @@ func (c *LLMClient) applyPromptCaching(req *chatRequest) {
 	}
 }
 
+// applyAnthropicCaching marks system, tools, and user messages with
+// cache_control on an already-converted anthropicRequest. This is separate
+// from applyPromptCaching which operates on OpenAI-format chatRequests.
+//
+// Anthropic allows max 4 cache breakpoints:
+//   - "short" (default): system(1) + last tool(1) + second-to-last user(1) = 3
+//   - "long": system(1) + last tool(1) + first user(1) + second-to-last user(1) = 4
+//   - "none": skip caching entirely
+func (c *LLMClient) applyAnthropicCaching(req *anthropicRequest) {
+	retention := c.paramString("cache_retention")
+	if retention == "none" {
+		return
+	}
+
+	// 1. System prompt → convert string to []anthropicSystemBlock with cache_control.
+	if sysStr, ok := req.System.(string); ok && sysStr != "" {
+		req.System = []anthropicSystemBlock{{
+			Type:         "text",
+			Text:         sysStr,
+			CacheControl: &cacheControl{Type: "ephemeral"},
+		}}
+	}
+
+	// 2. Tools → mark the last tool with cache_control.
+	if n := len(req.Tools); n > 0 {
+		req.Tools[n-1].CacheControl = &cacheControl{Type: "ephemeral"}
+	}
+
+	// 3. User messages.
+	firstUserIdx := -1
+	if retention == "long" {
+		// Mark the first user message as a deep cache prefix.
+		for i := range req.Messages {
+			if req.Messages[i].Role == "user" {
+				markLastAnthropicContentBlock(&req.Messages[i])
+				firstUserIdx = i
+				break
+			}
+		}
+	}
+
+	// Mark second-to-last user message (both "short" and "long" modes).
+	// Skip if it's the same message already marked as first in "long" mode.
+	userCount := 0
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == "user" {
+			userCount++
+			if userCount == 2 && i != firstUserIdx {
+				markLastAnthropicContentBlock(&req.Messages[i])
+				break
+			}
+		}
+	}
+}
+
+// markLastAnthropicContentBlock sets cache_control on the last content block
+// of an anthropicMessage, handling both string and []anthropicContent Content.
+func markLastAnthropicContentBlock(msg *anthropicMessage) {
+	switch v := msg.Content.(type) {
+	case string:
+		// Convert string to []anthropicContent so we can attach cache_control.
+		msg.Content = []anthropicContent{{
+			Type:         "text",
+			Text:         v,
+			CacheControl: &cacheControl{Type: "ephemeral"},
+		}}
+	case []anthropicContent:
+		if len(v) > 0 {
+			v[len(v)-1].CacheControl = &cacheControl{Type: "ephemeral"}
+		}
+	}
+}
+
+// anthropicSystemLen returns the length of the system content regardless of type.
+func anthropicSystemLen(sys any) int {
+	switch v := sys.(type) {
+	case string:
+		return len(v)
+	case []anthropicSystemBlock:
+		total := 0
+		for _, b := range v {
+			total += len(b.Text)
+		}
+		return total
+	default:
+		return 0
+	}
+}
+
 // streamChoice represents a single choice in a streaming chunk.
 type streamChoice struct {
 	Index int `json:"index"`
@@ -843,7 +932,7 @@ type chatResponse struct {
 type anthropicRequest struct {
 	Model       string             `json:"model"`
 	MaxTokens   int                `json:"max_tokens"`
-	System      string             `json:"system,omitempty"`
+	System      any                `json:"system,omitempty"` // string or []anthropicSystemBlock
 	Messages    []anthropicMessage `json:"messages"`
 	Tools       []anthropicTool    `json:"tools,omitempty"`
 	Stream      bool               `json:"stream,omitempty"`
@@ -866,7 +955,8 @@ type anthropicContent struct {
 	Input     json.RawMessage `json:"input,omitempty"`       // for type=tool_use
 	ToolUseID string          `json:"tool_use_id,omitempty"` // for type=tool_result
 	Content   string          `json:"content,omitempty"`     // for type=tool_result (string shorthand)
-	Source    *anthropicImage `json:"source,omitempty"`      // for type=image
+	Source       *anthropicImage `json:"source,omitempty"`      // for type=image
+	CacheControl *cacheControl   `json:"cache_control,omitempty"`
 }
 
 // anthropicImage holds base64 image data for vision.
@@ -876,11 +966,20 @@ type anthropicImage struct {
 	Data      string `json:"data"`
 }
 
+// anthropicSystemBlock is a typed content block for the Anthropic system field.
+// Required instead of a plain string when cache_control is used.
+type anthropicSystemBlock struct {
+	Type         string        `json:"type"`
+	Text         string        `json:"text"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
+}
+
 // anthropicTool is a tool definition in the Anthropic format.
 type anthropicTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"input_schema"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description"`
+	InputSchema  json.RawMessage `json:"input_schema"`
+	CacheControl *cacheControl   `json:"cache_control,omitempty"`
 }
 
 // anthropicResponse is the Anthropic Messages API response.
@@ -933,15 +1032,16 @@ func convertToAnthropicRequest(model string, messages []chatMessage, tools []Too
 	}
 
 	// Extract system message (Anthropic uses a top-level field, not a message).
+	var systemText string
 	var anthropicMsgs []anthropicMessage
 	for _, m := range messages {
 		if m.Role == "system" {
 			switch v := m.Content.(type) {
 			case string:
-				if req.System != "" {
-					req.System += "\n\n"
+				if systemText != "" {
+					systemText += "\n\n"
 				}
-				req.System += v
+				systemText += v
 			}
 			continue
 		}
@@ -992,6 +1092,10 @@ func convertToAnthropicRequest(model string, messages []chatMessage, tools []Too
 			Role:    m.Role,
 			Content: m.Content,
 		})
+	}
+
+	if systemText != "" {
+		req.System = systemText
 	}
 
 	// Anthropic requires alternating user/assistant. Merge consecutive same-role messages.
@@ -1707,6 +1811,9 @@ func (c *LLMClient) completeOnceAnthropic(ctx context.Context, model string, mes
 	if fastModeFromCtx(ctx) {
 		reqBody.ServiceTier = "auto"
 	}
+	if c.supportsCacheControl() {
+		c.applyAnthropicCaching(reqBody)
+	}
 
 	bodyBytes, err := json.Marshal(reqBody)
 	if err != nil {
@@ -1734,7 +1841,7 @@ func (c *LLMClient) completeOnceAnthropic(ctx context.Context, model string, mes
 		"messages", len(reqBody.Messages),
 		"tools", len(reqBody.Tools),
 		"endpoint", endpoint,
-		"system_len", len(reqBody.System),
+		"system_len", anthropicSystemLen(reqBody.System),
 	)
 
 	start := time.Now()
@@ -2045,6 +2152,9 @@ func (c *LLMClient) completeOnceStreamAnthropic(ctx context.Context, model strin
 	reqBody.Stream = true
 	if fastModeFromCtx(ctx) {
 		reqBody.ServiceTier = "auto"
+	}
+	if c.supportsCacheControl() {
+		c.applyAnthropicCaching(reqBody)
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)

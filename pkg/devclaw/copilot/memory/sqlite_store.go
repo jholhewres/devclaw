@@ -33,9 +33,10 @@ type SQLiteStore struct {
 	ftsAvailable bool
 
 	// vectorCache holds all chunk embeddings in memory for fast cosine search.
-	// Refreshed on index operations.
-	vectorCacheMu sync.RWMutex
-	vectorCache   []vectorCacheEntry
+	// Populated on startup, then updated incrementally per-file on index operations.
+	vectorCacheMu     sync.RWMutex
+	vectorCacheByID   map[int64]vectorCacheEntry // chunkID → entry
+	vectorCacheByFile map[string][]int64         // fileID → []chunkID
 }
 
 // vectorCacheEntry holds a chunk embedding for in-memory vector search.
@@ -61,9 +62,11 @@ func NewSQLiteStore(dbPath string, embedder EmbeddingProvider, logger *slog.Logg
 	}
 
 	store := &SQLiteStore{
-		db:       db,
-		embedder: embedder,
-		logger:   logger,
+		db:                db,
+		embedder:          embedder,
+		logger:            logger,
+		vectorCacheByID:   make(map[int64]vectorCacheEntry),
+		vectorCacheByFile: make(map[string][]int64),
 	}
 
 	if err := store.initSchema(); err != nil {
@@ -72,7 +75,7 @@ func NewSQLiteStore(dbPath string, embedder EmbeddingProvider, logger *slog.Logg
 	}
 
 	// Load vector cache into memory.
-	if err := store.refreshVectorCache(); err != nil {
+	if err := store.loadVectorCache(); err != nil {
 		logger.Warn("failed to load vector cache", "error", err)
 	}
 
@@ -260,23 +263,37 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 		chunkToEmbed[idx] = j
 	}
 
+	var newCacheEntries []vectorCacheEntry
 	for i, chunk := range chunks {
 		var embJSON sql.NullString
+		var embVec []float32
 
 		// Try to reuse existing embedding.
 		if existing, ok := existingChunks[chunk.Hash]; ok && existing != "" {
 			embJSON = sql.NullString{String: existing, Valid: true}
+			_ = json.Unmarshal([]byte(existing), &embVec)
 		} else if newEmbeddings != nil {
 			// Look up the new embedding for this chunk.
 			if j, ok := chunkToEmbed[i]; ok && j < len(newEmbeddings) && newEmbeddings[j] != nil {
 				data, _ := json.Marshal(newEmbeddings[j])
 				embJSON = sql.NullString{String: string(data), Valid: true}
+				embVec = newEmbeddings[j]
 			}
 		}
 
-		_, err := stmt.Exec(fileID, chunk.Index, chunk.Text, chunk.Hash, embJSON)
+		result, err := stmt.Exec(fileID, chunk.Index, chunk.Text, chunk.Hash, embJSON)
 		if err != nil {
 			return fmt.Errorf("insert chunk: %w", err)
+		}
+
+		if embVec != nil {
+			chunkID, _ := result.LastInsertId()
+			newCacheEntries = append(newCacheEntries, vectorCacheEntry{
+				chunkID:   chunkID,
+				fileID:    fileID,
+				text:      chunk.Text,
+				embedding: embVec,
+			})
 		}
 	}
 
@@ -284,8 +301,9 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 		return err
 	}
 
-	// Refresh vector cache.
-	return s.refreshVectorCache()
+	// Update vector cache incrementally for this file only.
+	s.updateVectorCacheForFile(fileID, newCacheEntries)
+	return nil
 }
 
 // SearchBM25 performs a keyword search using FTS5 BM25 ranking.
@@ -422,9 +440,12 @@ func (s *SQLiteStore) SearchVector(ctx context.Context, query string, maxResults
 	}
 	queryVec := embeddings[0]
 
-	// Search in-memory cache.
+	// Snapshot in-memory cache for lock-free iteration.
 	s.vectorCacheMu.RLock()
-	cache := s.vectorCache
+	cache := make([]vectorCacheEntry, 0, len(s.vectorCacheByID))
+	for _, entry := range s.vectorCacheByID {
+		cache = append(cache, entry)
+	}
 	s.vectorCacheMu.RUnlock()
 
 	if len(cache) == 0 {
@@ -770,15 +791,17 @@ func (s *SQLiteStore) setEmbeddingCache(text string, embedding []float32) {
 	`, hash, s.embedder.Name(), s.embedder.Model(), string(data))
 }
 
-// refreshVectorCache loads all chunk embeddings into memory for fast search.
-func (s *SQLiteStore) refreshVectorCache() error {
+// loadVectorCache loads all chunk embeddings into memory for fast search.
+// Called once on startup. Subsequent index operations use updateVectorCacheForFile.
+func (s *SQLiteStore) loadVectorCache() error {
 	rows, err := s.db.Query("SELECT id, file_id, text, embedding FROM chunks WHERE embedding IS NOT NULL")
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 
-	var cache []vectorCacheEntry
+	byID := make(map[int64]vectorCacheEntry)
+	byFile := make(map[string][]int64)
 	for rows.Next() {
 		var e vectorCacheEntry
 		var embJSON string
@@ -788,15 +811,45 @@ func (s *SQLiteStore) refreshVectorCache() error {
 		if err := json.Unmarshal([]byte(embJSON), &e.embedding); err != nil {
 			continue
 		}
-		cache = append(cache, e)
+		byID[e.chunkID] = e
+		byFile[e.fileID] = append(byFile[e.fileID], e.chunkID)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("scan vector cache rows: %w", err)
 	}
 
 	s.vectorCacheMu.Lock()
-	s.vectorCache = cache
+	s.vectorCacheByID = byID
+	s.vectorCacheByFile = byFile
 	s.vectorCacheMu.Unlock()
 
-	s.logger.Debug("vector cache refreshed", "chunks", len(cache))
+	s.logger.Debug("vector cache loaded", "chunks", len(byID))
 	return nil
+}
+
+// updateVectorCacheForFile replaces all cached entries for a single file.
+// This avoids a full table scan on every IndexChunks call.
+func (s *SQLiteStore) updateVectorCacheForFile(fileID string, newEntries []vectorCacheEntry) {
+	s.vectorCacheMu.Lock()
+	defer s.vectorCacheMu.Unlock()
+
+	// Remove old entries for this fileID.
+	if oldIDs, ok := s.vectorCacheByFile[fileID]; ok {
+		for _, id := range oldIDs {
+			delete(s.vectorCacheByID, id)
+		}
+		delete(s.vectorCacheByFile, fileID)
+	}
+
+	// Add new entries.
+	newIDs := make([]int64, 0, len(newEntries))
+	for _, e := range newEntries {
+		s.vectorCacheByID[e.chunkID] = e
+		newIDs = append(newIDs, e.chunkID)
+	}
+	if len(newIDs) > 0 {
+		s.vectorCacheByFile[fileID] = newIDs
+	}
 }
 
 // Close closes the database connection.
