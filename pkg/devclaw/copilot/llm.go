@@ -509,6 +509,9 @@ func getModelDefaults(model, provider string) modelDefaults {
 		d.MaxOutputTokens = 8192
 
 	// ── GLM models (Z.AI) ──
+	case strings.HasPrefix(model, "glm-5.1"):
+		d.DefaultTemperature = 0.7
+		d.MaxOutputTokens = 16384
 	case strings.HasPrefix(model, "glm-5-turbo"):
 		d.DefaultTemperature = 0.7
 		d.MaxOutputTokens = 16384
