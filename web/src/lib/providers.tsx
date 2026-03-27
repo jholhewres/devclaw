@@ -303,7 +303,7 @@ export const PROVIDERS: ProviderDef[] = [
       {
         value: 'https://api.z.ai/api/anthropic',
         label: 'Z.Ai Proxy',
-        extraModels: ['glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.7-flash', 'glm-4.7-flashx'],
+        extraModels: ['glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.7-flash', 'glm-4.7-flashx'],
       },
     ],
     freeUrl: 'https://console.anthropic.com/settings/keys',
@@ -312,8 +312,8 @@ export const PROVIDERS: ProviderDef[] = [
   {
     value: 'zai',
     label: 'Z.Ai',
-    models: ['glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.7-flash', 'glm-4.7-flashx'],
-    description: 'GLM-5, GLM-5-Turbo',
+    models: ['glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.7-flash', 'glm-4.7-flashx'],
+    description: 'GLM-5.1, GLM-5-Turbo',
     keyPlaceholder: 'API key',
     baseUrls: [
       { value: 'https://api.z.ai/api/paas/v4', label: 'Global (paas)' },
