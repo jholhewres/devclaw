@@ -3405,6 +3405,10 @@ func (a *Assistant) registerSystemTools() {
 	}
 	RegisterMultiUserTools(a.toolExecutor, a.userMgr)
 
+	// Apply default concurrency annotations to all registered tools.
+	// This marks read-only tools (grep, ls, git_log, etc.) as safe for parallel execution.
+	a.toolExecutor.ApplyDefaultConcurrency()
+
 	toolNames := a.toolExecutor.ToolNames()
 	visibleDefs := a.toolExecutor.Tools()
 	visibleNames := make([]string, 0, len(visibleDefs))
