@@ -111,39 +111,36 @@ func (v *StopHookVerifier) VerifyCompletion(messages []chatMessage) []Incomplete
 		return nil
 	}
 
-	// Only analyze the recent portion of the conversation.
-	// Older work is assumed to be complete or no longer relevant.
-	startIdx := len(messages) - 40
+	// Analyze a generous window of recent messages to catch work from
+	// longer sessions (agent can run 25+ turns producing 75+ messages).
+	startIdx := len(messages) - 80
 	if startIdx < 0 {
 		startIdx = 0
 	}
 	recent := messages[startIdx:]
 
-	// Build a combined text corpus from recent messages for pattern matching.
-	var toolContent, assistantContent strings.Builder
+	// Build separate text corpora: triggers are matched against tool output
+	// only (not assistant text) to avoid false positives when the agent
+	// merely discusses using a tool without actually executing it.
+	var toolContent strings.Builder
 	for _, m := range recent {
 		content, ok := m.Content.(string)
 		if !ok {
 			continue
 		}
-		switch m.Role {
-		case "tool":
+		if m.Role == "tool" {
 			toolContent.WriteString(content)
 			toolContent.WriteString("\n")
-		case "assistant":
-			assistantContent.WriteString(content)
-			assistantContent.WriteString("\n")
 		}
 	}
 
-	allContent := toolContent.String() + assistantContent.String()
 	toolText := toolContent.String()
 
 	var incomplete []IncompleteWork
 	for _, check := range v.checks {
 		triggered := false
 		for _, pattern := range check.TriggerPatterns {
-			if strings.Contains(allContent, pattern) {
+			if strings.Contains(toolText, pattern) {
 				triggered = true
 				break
 			}
@@ -154,7 +151,7 @@ func (v *StopHookVerifier) VerifyCompletion(messages []chatMessage) []Incomplete
 
 		completed := false
 		for _, pattern := range check.CompletionPatterns {
-			if strings.Contains(toolText, pattern) || strings.Contains(allContent, pattern) {
+			if strings.Contains(toolText, pattern) {
 				completed = true
 				break
 			}
