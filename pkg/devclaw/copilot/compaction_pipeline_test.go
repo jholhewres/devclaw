@@ -132,13 +132,25 @@ func TestShouldCompact(t *testing.T) {
 		}
 	})
 
-	t.Run("cheap levels always allowed", func(t *testing.T) {
+	t.Run("cheap levels allowed on first application", func(t *testing.T) {
 		if !p.ShouldCompact(CompactCollapse) {
-			t.Error("expected ShouldCompact(Collapse) = true")
+			t.Error("expected ShouldCompact(Collapse) = true on first call")
 		}
 		if !p.ShouldCompact(CompactMicro) {
-			t.Error("expected ShouldCompact(Micro) = true")
+			t.Error("expected ShouldCompact(Micro) = true on first call")
 		}
+	})
+
+	t.Run("cheap levels suppressed on repeat", func(t *testing.T) {
+		p.SetLastLevel(CompactCollapse)
+		if p.ShouldCompact(CompactCollapse) {
+			t.Error("expected ShouldCompact(Collapse) = false when same as lastLevel")
+		}
+		// But a higher level should still be allowed.
+		if !p.ShouldCompact(CompactMicro) {
+			t.Error("expected ShouldCompact(Micro) = true even after Collapse was last")
+		}
+		p.SetLastLevel(CompactNone) // Reset for next tests.
 	})
 
 	t.Run("expensive levels check breaker", func(t *testing.T) {

@@ -741,7 +741,7 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 				case CompactAuto:
 					// Apply cheap levels first, then LLM summarization.
 					CollapseToolResults(messages, 3000)
-					MicroCompact(messages, 10)
+					messages, _ = MicroCompact(messages, 10)
 					before := len(messages)
 					messages = a.managedCompaction(runCtx, messages)
 					if len(messages) < before {
@@ -753,7 +753,7 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 				case CompactMemory:
 					// Extract memories before compacting.
 					CollapseToolResults(messages, 2000)
-					MicroCompact(messages, 6)
+					messages, _ = MicroCompact(messages, 6)
 					a.maybeMemoryFlush(runCtx, messages, estimatedTokens)
 					before := len(messages)
 					messages = a.aggressiveCompaction(runCtx, messages)

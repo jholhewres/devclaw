@@ -27,19 +27,19 @@ const (
 
 	// CompactCollapse truncates oversized tool results in-place.
 	// Cheapest operation — no LLM calls. Triggered at ~70% context usage.
-	CompactCollapse CompactLevel = iota
+	CompactCollapse CompactLevel = 0
 
 	// CompactMicro clears old tool results with a placeholder.
 	// Still cheap — no LLM calls. Triggered at ~80% context usage.
-	CompactMicro
+	CompactMicro CompactLevel = 1
 
 	// CompactAuto triggers full LLM-based summarization.
 	// Expensive — requires LLM call. Triggered at ~93% context usage.
-	CompactAuto
+	CompactAuto CompactLevel = 2
 
 	// CompactMemory extracts memories before summarizing.
 	// Most expensive — multiple LLM calls. Triggered at ~97% context usage.
-	CompactMemory
+	CompactMemory CompactLevel = 3
 )
 
 // String returns a human-readable name for the compaction level.
@@ -157,17 +157,30 @@ func (p *CompactionPipeline) Evaluate(tokenCount, contextWindow int) ContextPres
 }
 
 // ShouldCompact returns true if compaction should be attempted at the given level.
-// Checks the circuit breaker and ensures we don't re-apply the same level.
+// Checks the circuit breaker and suppresses repeat application of the same
+// cheap level to avoid wasteful re-runs on consecutive turns at the same pressure.
 func (p *CompactionPipeline) ShouldCompact(level CompactLevel) bool {
 	if level == CompactNone {
 		return false
 	}
-	// Cheap levels (Collapse, Micro) always allowed — no circuit breaker needed.
-	if level <= CompactMicro {
-		return true
+
+	// Suppress re-application of the same cheap level on consecutive turns.
+	// If we already applied Collapse last turn and pressure is still at Collapse,
+	// skip — the data was already collapsed and re-running won't help.
+	// Higher levels always override (e.g. if last was Collapse but now we need Micro).
+	p.mu.Lock()
+	last := p.lastLevel
+	p.mu.Unlock()
+	if level <= CompactMicro && level == last {
+		return false
 	}
-	// Expensive levels check circuit breaker.
-	return p.breaker.Allow()
+
+	// Expensive levels (Auto, Memory) also check the circuit breaker.
+	if level > CompactMicro {
+		return p.breaker.Allow()
+	}
+
+	return true
 }
 
 // RecordSuccess records a successful compaction for circuit breaker tracking.
