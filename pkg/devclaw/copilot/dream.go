@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -107,6 +108,7 @@ func NewDreamConsolidator(config DreamConfig, store memory.Store, stateDir strin
 func (d *DreamConsolidator) Start(ctx context.Context) {
 	if !d.config.Enabled {
 		d.logger.Info("dream system disabled")
+		close(d.done) // Prevent Stop() deadlock.
 		return
 	}
 
@@ -196,10 +198,16 @@ func (d *DreamConsolidator) shouldDream() bool {
 	}
 
 	// Gate 3: File lock (prevent concurrent dreams).
+	// Check if lock exists and is still valid (not stale from a crash).
 	lockPath := filepath.Join(d.stateDir, "dream.lock")
-	if _, err := os.Stat(lockPath); err == nil {
-		// Lock file exists — another instance is dreaming.
-		return false
+	if info, err := os.Stat(lockPath); err == nil {
+		// Lock file exists — check if it's stale (older than 30 minutes).
+		if time.Since(info.ModTime()) < 30*time.Minute {
+			return false
+		}
+		// Stale lock — remove it and proceed.
+		d.logger.Warn("removing stale dream lock file", "age", time.Since(info.ModTime()))
+		os.Remove(lockPath)
 	}
 
 	return true
@@ -211,12 +219,19 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 	start := time.Now()
 	result := DreamResult{}
 
-	// Acquire lock.
+	// Acquire lock atomically using O_CREATE|O_EXCL to prevent TOCTOU races.
 	lockPath := filepath.Join(d.stateDir, "dream.lock")
-	if err := os.WriteFile(lockPath, []byte(fmt.Sprintf("pid=%d,time=%s", os.Getpid(), start.Format(time.RFC3339))), 0o600); err != nil {
-		result.Error = fmt.Errorf("acquire dream lock: %w", err)
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		if os.IsExist(err) {
+			result.Error = fmt.Errorf("dream already running (lock exists)")
+		} else {
+			result.Error = fmt.Errorf("acquire dream lock: %w", err)
+		}
 		return result
 	}
+	fmt.Fprintf(lockFile, "pid=%d,time=%s", os.Getpid(), start.Format(time.RFC3339))
+	lockFile.Close()
 	defer os.Remove(lockPath)
 
 	// Phase 1: Orient — gather all memories.
@@ -360,8 +375,8 @@ type contradiction struct {
 // Uses simple heuristic: entries about the same topic with opposing sentiment.
 func (d *DreamConsolidator) findContradictions(entries []memory.Entry) []contradiction {
 	negators := []string{
-		"not ", "don't ", "doesn't ", "shouldn't ", "never ",
-		"avoid ", "instead of ", "replaced ", "deprecated ",
+		" not ", " don't ", " doesn't ", " shouldn't ", " never ",
+		" avoid ", " instead of ", " replaced ", " deprecated ",
 	}
 
 	var found []contradiction
@@ -377,8 +392,8 @@ func (d *DreamConsolidator) findContradictions(entries []memory.Entry) []contrad
 
 			// Check if one negates the other.
 			for _, neg := range negators {
-				aHasNeg := containsWord(a, neg)
-				bHasNeg := containsWord(b, neg)
+				aHasNeg := strings.Contains(a, neg)
+				bHasNeg := strings.Contains(b, neg)
 				if aHasNeg != bHasNeg {
 					found = append(found, contradiction{
 						entryA: entries[i].Content,
