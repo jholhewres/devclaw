@@ -271,6 +271,9 @@ type AgentRun struct {
 	// plugin agent should escalate to the main agent. Set by plugin agent spawner.
 	escalationChecker func(turn int, lastResponse string) *EscalationSignal
 
+	// compactionPipeline manages multi-level proactive context compaction.
+	compactionPipeline *CompactionPipeline
+
 	// loopDetector tracks tool call history and detects repetitive patterns.
 	loopDetector *ToolLoopDetector
 
@@ -419,6 +422,7 @@ func NewAgentRunWithConfig(llm *LLMClient, executor *ToolExecutor, cfg AgentConf
 		ar.maxCompactionAttempts = cfg.MaxCompactionAttempts
 	}
 	ar.cfg = cfg
+	ar.compactionPipeline = NewCompactionPipeline(DefaultCompactThresholds())
 	return ar
 }
 
@@ -701,21 +705,66 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 			}
 		}
 
-		// ── Proactive context compaction ──
-		// Instead of dropping old messages entirely (which causes amnesia), we
-		// compact the context if it grows too large. Only trigger compaction
-		// when estimated token usage exceeds 60% of context window — avoids
-		// wasting LLM summarization calls on short conversations.
-		if totalTurns > 5 && len(messages) > 15 {
+		// ── Proactive context compaction (multi-level pipeline) ──
+		// Evaluate context pressure and apply the appropriate compaction level.
+		// Cheaper levels (collapse, micro-compact) run first to avoid expensive
+		// LLM summarization calls unless truly necessary.
+		if totalTurns > 3 && len(messages) > 8 && a.compactionPipeline != nil {
 			estimatedTokens := a.estimateTokens(messages)
-			compactionThreshold := int(float64(ctxTokens) * 0.6)
-			if estimatedTokens > compactionThreshold {
-				a.logger.Debug("proactive compaction triggered",
-					"messages_len", len(messages),
-					"estimated_tokens", estimatedTokens,
-					"threshold", compactionThreshold,
+			pressure := a.compactionPipeline.Evaluate(estimatedTokens, ctxTokens)
+
+			if pressure.RecommendedLevel > CompactNone && a.compactionPipeline.ShouldCompact(pressure.RecommendedLevel) {
+				a.logger.Info("proactive compaction triggered",
+					"level", pressure.RecommendedLevel.String(),
+					"ratio", fmt.Sprintf("%.1f%%", pressure.Ratio*100),
+					"tokens", estimatedTokens,
+					"window", ctxTokens,
+					"tokens_until_blocking", pressure.TokensUntilBlocking,
 				)
-				messages = a.managedCompaction(runCtx, messages)
+
+				switch pressure.RecommendedLevel {
+				case CompactCollapse:
+					n := CollapseToolResults(messages, 4000)
+					if n > 0 {
+						a.logger.Info("collapse compaction applied", "collapsed", n)
+					}
+
+				case CompactMicro:
+					// First collapse, then micro-compact for maximum effect.
+					CollapseToolResults(messages, 4000)
+					var n int
+					messages, n = MicroCompact(messages, 10)
+					if n > 0 {
+						a.logger.Info("micro-compact applied", "cleared", n)
+					}
+
+				case CompactAuto:
+					// Apply cheap levels first, then LLM summarization.
+					CollapseToolResults(messages, 3000)
+					MicroCompact(messages, 10)
+					before := len(messages)
+					messages = a.managedCompaction(runCtx, messages)
+					if len(messages) < before {
+						a.compactionPipeline.RecordSuccess()
+					} else {
+						a.compactionPipeline.RecordFailure()
+					}
+
+				case CompactMemory:
+					// Extract memories before compacting.
+					CollapseToolResults(messages, 2000)
+					MicroCompact(messages, 6)
+					a.maybeMemoryFlush(runCtx, messages, estimatedTokens)
+					before := len(messages)
+					messages = a.aggressiveCompaction(runCtx, messages)
+					if len(messages) < before {
+						a.compactionPipeline.RecordSuccess()
+					} else {
+						a.compactionPipeline.RecordFailure()
+					}
+				}
+
+				a.compactionPipeline.SetLastLevel(pressure.RecommendedLevel)
 			}
 		}
 
