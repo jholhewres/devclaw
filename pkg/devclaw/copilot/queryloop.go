@@ -251,12 +251,15 @@ func (d *DecisionPhase) Execute(ctx context.Context, state *TurnState) (NextActi
 
 // StopCheckPhase runs completion verification before allowing stop.
 type StopCheckPhase struct {
-	verifier *StopHookVerifier
+	verifier     *StopHookVerifier
+	maxInjects   int // Max injection attempts before giving up (default: 3).
+	injectCount  int
 }
 
 // NewStopCheckPhase creates a stop check phase with the given verifier.
+// Limits injection to 3 attempts to prevent infinite loops.
 func NewStopCheckPhase(v *StopHookVerifier) *StopCheckPhase {
-	return &StopCheckPhase{verifier: v}
+	return &StopCheckPhase{verifier: v, maxInjects: 3}
 }
 
 func (s *StopCheckPhase) Name() string { return "stop_check" }
@@ -266,12 +269,18 @@ func (s *StopCheckPhase) Execute(ctx context.Context, state *TurnState) (NextAct
 		return ActionStop, nil
 	}
 
+	// Cap injections to prevent infinite loops.
+	if s.injectCount >= s.maxInjects {
+		return ActionStop, nil
+	}
+
 	incomplete := s.verifier.VerifyCompletion(state.Messages)
 	if len(incomplete) == 0 {
 		return ActionStop, nil
 	}
 
 	// Inject a reminder and continue.
+	s.injectCount++
 	state.InjectedMessage = FormatIncompleteWorkMessage(incomplete)
 	return ActionInject, nil
 }

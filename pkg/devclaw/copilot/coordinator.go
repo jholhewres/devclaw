@@ -17,6 +17,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -286,37 +287,23 @@ func (c *Coordinator) RunPhase(ctx context.Context, phase CoordinatorPhase, task
 
 // SynthesizeFindings combines research results into a summary for the coordinator.
 func SynthesizeFindings(results []WorkerResult) string {
-	var sb fmt.Stringer = &synthBuilder{}
-	b := sb.(*synthBuilder)
+	var sb strings.Builder
 
-	b.WriteString("## Research Findings\n\n")
+	sb.WriteString("## Research Findings\n\n")
 	for i, r := range results {
-		b.WriteString(fmt.Sprintf("### %d. %s\n", i+1, r.Label))
+		sb.WriteString(fmt.Sprintf("### %d. %s\n", i+1, r.Label))
 		if r.Error != nil {
-			b.WriteString(fmt.Sprintf("**Error:** %v\n\n", r.Error))
+			sb.WriteString(fmt.Sprintf("**Error:** %v\n\n", r.Error))
 		} else {
 			// Truncate long results.
 			content := r.Result
 			if len(content) > 2000 {
 				content = content[:2000] + "\n... (truncated)"
 			}
-			b.WriteString(content)
-			b.WriteString("\n\n")
+			sb.WriteString(content)
+			sb.WriteString("\n\n")
 		}
 	}
 
-	return b.String()
-}
-
-// synthBuilder is a simple string builder that implements fmt.Stringer.
-type synthBuilder struct {
-	data []byte
-}
-
-func (b *synthBuilder) WriteString(s string) {
-	b.data = append(b.data, s...)
-}
-
-func (b *synthBuilder) String() string {
-	return string(b.data)
+	return sb.String()
 }

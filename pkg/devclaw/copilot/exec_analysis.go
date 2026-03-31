@@ -282,7 +282,9 @@ func (a *ExecAnalyzer) isSafeBin(command string) bool {
 	}
 
 	// Check common safe commands by name.
-	safeCommands := []string{"ls", "cat", "echo", "grep", "find", "head", "tail", "wc", "sort", "uniq", "cut", "awk", "sed", "tr", "date", "pwd", "whoami", "id", "uname"}
+	// Note: find, awk, sed are intentionally excluded — they can execute
+	// arbitrary code (find -exec, awk system(), sed -e with shell commands).
+	safeCommands := []string{"ls", "cat", "echo", "grep", "head", "tail", "wc", "sort", "uniq", "cut", "tr", "date", "pwd", "whoami", "id", "uname"}
 	for _, safe := range safeCommands {
 		if bin == safe || strings.HasSuffix(bin, "/"+safe) {
 			return true
@@ -397,7 +399,7 @@ func DefaultExecAnalysisConfig() ExecAnalysisConfig {
 					"docker volume rm*", "docker network rm*",
 					// SQL destructive
 					"*DROP TABLE*", "*DROP DATABASE*", "*TRUNCATE*",
-					"*DELETE FROM*WHERE 1*", "*DELETE FROM*;",
+					"*DELETE FROM*WHERE 1*", "*DELETE FROM*;*",
 					// Process control
 					"kill -9*", "killall*", "pkill*",
 				},
