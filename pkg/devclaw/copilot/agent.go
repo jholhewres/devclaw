@@ -17,6 +17,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -2472,16 +2474,24 @@ func (a *AgentRun) maybeMemoryFlush(ctx context.Context, messages []chatMessage,
 		return
 	}
 
-	// Format and persist the extracted memories.
+	// Format and persist the extracted memories to the memory directory.
+	// The MemoryIndexer watches this directory and will index the file,
+	// making extracted memories searchable in future sessions.
 	formatted := FormatMemoriesForStorage(memories, a.sessionID)
-	if formatted != "" && a.memoryIndexer != nil {
-		a.logger.Info("pre-compaction memories saved",
-			"count", len(memories),
-			"session", a.sessionID,
-		)
-		// Trigger async memory index so the extracted memories are
-		// searchable in future sessions.
-		go a.memoryIndexer.IndexNow()
+	if formatted != "" && a.memoryIndexer != nil && a.memoryIndexer.MemoryDir() != "" {
+		filename := fmt.Sprintf("pre-compact-%s-%s.md",
+			a.sessionID, time.Now().Format("20060102-150405"))
+		filePath := filepath.Join(a.memoryIndexer.MemoryDir(), filename)
+		if err := os.WriteFile(filePath, []byte(formatted), 0o600); err != nil {
+			a.logger.Warn("failed to write extracted memories", "path", filePath, "error", err)
+		} else {
+			a.logger.Info("pre-compaction memories saved",
+				"count", len(memories),
+				"path", filePath,
+			)
+			// Trigger async memory index so the file is indexed immediately.
+			go a.memoryIndexer.IndexNow()
+		}
 	}
 
 	a.logger.Info("memory flush completed", "extracted", len(memories))

@@ -119,6 +119,11 @@ func (m *MemoryIndexer) SetMemoryDir(dir string) {
 	m.memoryDir = dir
 }
 
+// MemoryDir returns the configured memory directory path.
+func (m *MemoryIndexer) MemoryDir() string {
+	return m.memoryDir
+}
+
 // Start begins periodic memory indexing.
 func (m *MemoryIndexer) Start(ctx context.Context) error {
 	if m.memoryDir == "" {
