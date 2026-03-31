@@ -2460,52 +2460,31 @@ func (a *AgentRun) maybeMemoryFlush(ctx context.Context, messages []chatMessage,
 		return
 	}
 
-	// Build flush prompt
-	flushPrompt := a.cfg.MemoryFlush.Prompt
-	if flushPrompt == "" {
-		flushPrompt = `Session nearing compaction. Review the conversation and write any important facts, decisions, or context to long-term memory using memory_save(content='...', category='summary'). Save to memory/YYYY-MM-DD.md if needed. If there's nothing worth saving, reply with NO_REPLY.`
-	}
+	a.logger.Info("executing pre-compaction memory extraction", "token_estimate", tokenEstimate)
 
-	sysPrompt := a.cfg.MemoryFlush.SystemPrompt
-	if sysPrompt == "" {
-		sysPrompt = "You are a memory preservation assistant. Your task is to save important information before context compaction. Be selective - only save truly valuable information."
-	}
+	// Use structured memory extraction: extract categorized memories
+	// (decisions, preferences, facts, learnings) from the conversation.
+	extractor := NewMemoryExtractor(a.llm, a.logger)
+	memories := extractor.Extract(ctx, messages, a.modelOverride)
 
-	// Build conversation for the silent flush turn
-	flushMessages := make([]chatMessage, 0, len(messages)+1)
-	flushMessages = append(flushMessages, chatMessage{Role: "system", Content: sysPrompt})
-
-	// Include recent conversation context (last 10 messages)
-	startIdx := len(messages) - 10
-	if startIdx < 0 {
-		startIdx = 0
-	}
-	for i := startIdx; i < len(messages); i++ {
-		flushMessages = append(flushMessages, messages[i])
-	}
-	flushMessages = append(flushMessages, chatMessage{Role: "user", Content: flushPrompt})
-
-	// Execute silent turn
-	a.logger.Info("executing pre-compaction memory flush", "token_estimate", tokenEstimate)
-
-	callCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-
-	resp, err := a.llm.CompleteWithFallbackUsingModel(callCtx, a.modelOverride, flushMessages, nil)
-	if err != nil {
-		a.logger.Warn("memory flush failed", "error", err)
+	if len(memories) == 0 {
+		a.logger.Debug("memory flush: no memories extracted")
 		return
 	}
 
-	// Check for NO_REPLY - if so, don't process further
-	if strings.TrimSpace(strings.ToUpper(resp.Content)) == "NO_REPLY" {
-		a.logger.Debug("memory flush: no memories to save")
-		return
+	// Format and persist the extracted memories.
+	formatted := FormatMemoriesForStorage(memories, a.sessionID)
+	if formatted != "" && a.memoryIndexer != nil {
+		a.logger.Info("pre-compaction memories saved",
+			"count", len(memories),
+			"session", a.sessionID,
+		)
+		// Trigger async memory index so the extracted memories are
+		// searchable in future sessions.
+		go a.memoryIndexer.IndexNow()
 	}
 
-	// The LLM may have triggered memory saves via tool calls
-	// We don't need to do anything special here - the tools executed normally
-	a.logger.Info("memory flush completed", "response_length", len(resp.Content))
+	a.logger.Info("memory flush completed", "extracted", len(memories))
 }
 
 // estimateTokens provides a rough token estimate for a slice of messages.
