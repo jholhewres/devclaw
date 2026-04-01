@@ -2,6 +2,21 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [1.17.0] — 2026-03-31
+
+### Core — Agent Intelligence
+
+- **Streaming tool executor**: Read-only tools (grep, ls, git_log, read_file, etc.) now execute in parallel within the same turn. Serial tools (bash, write_file) form barriers between concurrent groups. Abort cascade cancels siblings on non-recoverable errors. Results always returned in original call order. 25 tools marked concurrent-safe by default
+- **Multi-level proactive compaction pipeline**: 4-level context management triggered by pressure thresholds — Collapse (70%, truncate tool results), MicroCompact (80%, clear old results), AutoCompact (93%, LLM summarization), MemoryCompact (97%, extract memories + aggressive compaction). Circuit breaker prevents compaction loops (3 failures → 5min cooldown)
+- **Structured memory extraction**: Pre-compaction memory extractor analyzes conversation and saves categorized memories (decisions, preferences, facts, learnings) as structured JSON before context is compressed. Memories persisted as files in memory directory and indexed for future session search
+- **Dream system**: Background memory consolidation goroutine runs when daemon is idle. 3-gate trigger (6h minimum + 2 sessions + file lock). Detects duplicate memories (prefix matching) and contradictions (semantic overlap + negation). Atomic lock acquisition prevents concurrent dreams. State persists across restarts
+- **Phase-based query loop**: Defines Phase interface and QueryLoop orchestrator for incremental migration from monolithic agent loop. 5 phases: Prepare → APICall → ToolExec → Decision → StopCheck. Supports LoopBack (tool_use), Stop (text response), and Inject (re-inject message) actions. StopCheckPhase integrates with completion verification (capped at 3 injections)
+- **Coordinator protocol**: 4-phase multi-agent orchestration — Research (parallel read-only workers) → Synthesis (coordinator analyzes) → Implementation (write workers) → Verification (test workers). Per-phase tool restrictions prevent unintended side effects. Configurable concurrency limits per phase
+- **Stop hooks**: Pre-stop completion verification analyzes recent tool output for incomplete work patterns (code edited but tests not run, build not verified). Injects reminder messages to prompt the agent to finish. Matched against tool output only to avoid false positives
+- **Enhanced bash command analyzer**: Expanded risk patterns for git safety (push --force, reset --hard, clean -f), SQL safety (DROP TABLE, TRUNCATE, DELETE FROM), Docker (rm, prune), and process control (kill -9). Removed find/awk/sed from safe command list (can execute arbitrary code). Added suspicious pattern detection for curl|sh, eval, --no-verify, --force
+
+---
+
 ## [1.16.0] — 2026-03-22
 
 ### Channels — Multi-Instance & QR Lifecycle

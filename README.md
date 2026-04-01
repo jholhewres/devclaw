@@ -11,7 +11,7 @@
   <img src="web/public/assets/devclaw-horizontal.png" alt="DevClaw" width="430">
 </p>
 
-Open-source AI agent for tech teams — devs, DevOps, QA, PMs, designers, and everyone in between. Single Go binary with CLI, WebUI, MCP server, and messaging channels. Full system access, persistent memory, encrypted vault, and 70+ built-in tools.
+Open-source AI agent for tech teams. Single Go binary with CLI, WebUI, MCP server, and messaging channels. Full system access, persistent memory, encrypted vault, and 90+ built-in tools.
 
 **Not a chatbot. Not an IDE. Not a framework.** DevClaw is the AI backend that IDEs, terminals, and channels access — giving any tool persistent memory, infrastructure access, and integrations.
 
@@ -21,226 +21,74 @@ Open-source AI agent for tech teams — devs, DevOps, QA, PMs, designers, and ev
 
 ## Quick Start
 
-### One-Command Install (Recommended)
-
-**Linux/macOS:**
 ```bash
+# Linux/macOS — one-command install
 bash <(curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/install.sh)
-```
 
-**What the installer does:**
-- Downloads and installs the binary to `/opt/devclaw` (Linux) or `/usr/local/opt/devclaw` (macOS)
-- Installs dependencies (Node.js, PM2) if missing
-- Sets up PM2 process manager with auto-restart
-- Starts DevClaw in "First Run Setup" mode
-- Creates global `devclaw` command
-
-**After installation:**
-```bash
-# Check service status
-pm2 status
-
-# View logs
-pm2 logs devclaw
-
-# Access setup wizard (configure API key)
-open http://localhost:47716/setup
-```
-
-**Install options:**
-```bash
-# Install specific version
-bash <(curl -fsSL ...) -- --version v1.16.0
-
-# Non-interactive mode (skip confirmations)
-bash <(curl -fsSL ...) -- --no-prompt
-
-# Custom port
-bash <(curl -fsSL ...) -- --port 3000
-
-# Dry run (see what would happen)
-bash <(curl -fsSL ...) -- --dry-run
-```
-
-**Install from local directory (for testing/development):**
-```bash
-# Build release package first
-make release-package
-
-# Install from local dist/
-sudo ./install/unix/install.sh --local ./dist --version v1.0.0
-```
-
-**Uninstall:**
-```bash
-# Download and run uninstaller
-curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/uninstall.sh | sudo bash
-
-# Or if you have the repo cloned:
-sudo ./install/unix/uninstall.sh
-```
-
-**Windows (PowerShell):**
-```powershell
-iwr -useb https://raw.githubusercontent.com/jholhewres/devclaw/master/install/windows/install.ps1 | iex
-```
-
-### Docker
-
-No Go, Node, or build tools required — just Docker:
-
-```bash
+# Docker
 git clone https://github.com/jholhewres/devclaw.git && cd devclaw
 docker compose up -d
-```
 
-Open **http://localhost:47716/setup** to configure your API key and start using DevClaw.
-
-The container includes bash, python, node, git, and other tools the agent needs to execute scripts.
-
-### From Source
-
-Requires **Go 1.24+** and **Node 22+**:
-
-```bash
+# From source (Go 1.24+ & Node 22+)
 git clone https://github.com/jholhewres/devclaw.git && cd devclaw
-make build                  # builds frontend + Go binary
-./bin/devclaw serve         # starts server
+make build && ./bin/devclaw serve
 ```
 
-See [install/source/README.md](install/source/README.md) for detailed build instructions.
+Open **http://localhost:47716/setup** to configure your API key.
 
-### Go Install
-
-Requires **Go 1.24+** (CGO enabled, SQLite dependency):
-
-```bash
-CGO_ENABLED=1 go install -tags 'sqlite_fts5' github.com/jholhewres/devclaw/cmd/devclaw@latest
-devclaw serve
-```
-
-> **Note:** This builds without the WebUI. For full functionality (dashboard, setup wizard), use Docker or build from source.
-
-### Setup Wizard
-
-After starting the server, the setup wizard is available at:
-
-```
-http://localhost:47716/setup
-```
-
-It guides you through:
-1. API provider and key configuration
-2. Channel setup (WhatsApp, Telegram)
-3. Security settings (vault password, access control)
-4. Skills installation
-
-All secrets are stored in the encrypted vault (`.devclaw.vault`), never in plain text.
+See [install/DEPLOYMENT.md](install/DEPLOYMENT.md) for all install options (Docker, systemd, Ansible, Windows, uninstall).
 
 ---
 
 ## Highlights
 
-- **Single binary** — one `go build`, zero runtime dependencies
-- **9 LLM providers** — OpenAI, Anthropic, Ollama, Groq, Google AI, Z.AI, xAI, OpenRouter, and any OpenAI-compatible endpoint
-- **N-provider fallback chain** — rate-limited model → fallback → local Ollama, with per-model cooldowns and budget tracking
-- **90+ built-in tools** — Git, Docker, databases, testing, deploy, DORA metrics, team coordination, and much more
-- **Native media** — receive/send images, audio, documents with auto-enrichment (vision, transcription, text extraction)
-- **Plugin agents** — persistent agents with custom instructions, triggers, and bidirectional communication
-- **MCP server** — any IDE (Cursor, VSCode, Claude Code, Windsurf) connects via Model Context Protocol
+```
+Interfaces: CLI / WebUI / WhatsApp / Telegram
+     │
+     ▼
+Assistant (agent loop) ─── LLM Client (9 providers, N-fallback)
+     │
+     ├── Tools (90+)        — files, git, docker, databases, testing, deploy
+     ├── Memory (SQLite)    — FTS5 + vector embeddings, persistent across sessions
+     ├── Subagents (8x)     — concurrent child agents with isolated sessions
+     ├── MCP Server         — stdio + SSE for IDE integration
+     └── Plugin System      — YAML-first agents, tools, hooks, skills
+```
+
+- **9 LLM providers** with N-provider fallback chain and budget tracking
+- **90+ tools** across 22 categories (files, git, docker, databases, testing, ops, media, web)
+- **MCP server** for IDE integration (Cursor, VSCode, Windsurf, Zed, Neovim)
+- **Plugin agents** with custom instructions, triggers, and bidirectional escalation
+- **Encrypted vault** (AES-256-GCM + Argon2id) for all secrets
 - **Pipe mode** — `git diff | devclaw diff` or `npm build 2>&1 | devclaw fix`
-- **Quick commands** — `devclaw fix`, `devclaw explain .`, `devclaw commit`, `devclaw how "task"`
-- **Extensible skills** — install from [ClawHub](https://clawhub.ai/) or create your own
-- **2 channels** — WhatsApp, Telegram
-- **WebUI** — React dashboard with SSE streaming, session management, and setup wizard
-- **Gateway API** — OpenAI-compatible HTTP API + WebSocket JSON-RPC
-- **Encrypted vault** — AES-256-GCM + Argon2id for all secrets
-- **Persistent memory** — SQLite FTS5 + vector embeddings for long-term context
-- **Daemon manager** — start, monitor, and control background processes (dev servers, watchers)
-- **Subagents** — spawn concurrent child agents for parallel tasks (research, code, deploy simultaneously)
-- **Plugin system** — YAML-first plugins with agents, tools, hooks, skills, and WebUI management
-- **Shell hook** — auto-capture failed commands and suggest `devclaw fix`
+- **Skills** — install from [ClawHub](https://clawhub.ai/) or create your own
 
 ---
 
-## How It Works
+## CLI
 
-```
-┌──────────────────────────────────────────────────────┐
-│                    Interfaces                        │
-│  CLI   WebUI   WhatsApp   Telegram                   │
-└──────────────────────┬───────────────────────────────┘
-                       │
-        ┌──────────────▼──────────────┐
-        │         Assistant           │
-        │       (agent loop)          │
-        └──┬──────┬──────────┬────┬───┘
-           │      │          │    │
-    ┌──────▼──┐ ┌─▼──────┐ ┌▼──────────┐
-    │  Tools  │ │  LLM   │ │  Memory   │
-    │  (90+)  │ │ Client │ │ (SQLite)  │
-    └─────────┘ └────────┘ └───────────┘
-           │
-    ┌──────▼────────────────────────────┐
-    │          Subagent Manager         │
-    │  (up to 8 concurrent child agents │
-    │   with isolated sessions + tools) │
-    └───────────────────────────────────┘
-           │
-    ┌──────▼────────────────────────────────┐
-    │            MCP Server                 │
-    │  (stdio + SSE — for IDE integration)  │
-    └───────────────────────────────────────┘
-           │
-    ┌──────▼──────────────────────────────┐
-    │  Cursor  VSCode  Claude Code  Aider │
-    │  OpenCode  Windsurf  Zed  Neovim    │
-    └─────────────────────────────────────┘
+```bash
+devclaw serve                  # Start daemon with channels + WebUI
+devclaw chat "message"         # Single message or interactive REPL
+devclaw mcp serve              # MCP server for IDE integration
+
+devclaw fix [file]             # Analyze and fix errors
+devclaw explain [path]         # Explain code or directories
+devclaw diff [--staged]        # AI review of git changes
+devclaw commit [--dry-run]     # Generate commit message and commit
+devclaw how "task"             # Generate shell commands
+
+git diff | devclaw "review"    # Pipe mode
 ```
 
 ---
 
-## Tools
-
-90+ built-in tools across 22 categories:
-
-| Category | Tools |
-|----------|-------|
-| **Files** | read, write, edit, list, search, glob |
-| **Shell** | bash, environment variables |
-| **Git** | status, diff, log, commit, branch, stash, blame (structured JSON) |
-| **Docker** | ps, logs, exec, images, compose (up/down/ps/logs), stop, rm |
-| **Database** | query, execute, schema, connections (PostgreSQL, MySQL, SQLite) |
-| **Dev Utils** | json_format, jwt_decode, regex_test, base64, hash, uuid, url_parse, timestamp |
-| **System** | env_info, port_scan, process_list |
-| **Codebase** | index (file tree), code_search (ripgrep), symbols, cursor_rules_generate |
-| **Testing** | test_run (auto-detect framework), api_test, test_coverage |
-| **Ops** | server_health (HTTP/TCP/DNS), deploy_run, tunnel_manage, ssh_exec |
-| **Product** | sprint_report, dora_metrics, project_summary |
-| **Daemons** | start_daemon, daemon_logs, daemon_list, daemon_stop, daemon_restart |
-| **Subagents** | spawn_subagent, list_subagents, wait_subagent, stop_subagent |
-| **Plugins** | plugin_list, plugin_install, plugin_call, delegate_to_plugin_agent |
-| **Agents** | delegate_to_plugin_agent, escalate_to_main, plugin agent lifecycle |
-| **Media** | describe_image (vision), transcribe_audio (Whisper), send_media (image/audio/video/document) |
-| **IDE** | ide_configure (VSCode, Cursor, JetBrains, Neovim) |
-| **Remote** | SSH exec, SCP upload/download |
-| **Web** | search, fetch, browser automation |
-| **Memory** | save, search, list facts |
-| **Scheduler** | create, list, delete cron jobs |
-| **Vault** | save, get, list, delete secrets |
-
----
-
-## MCP Server (IDE Integration)
-
-DevClaw exposes all tools via the [Model Context Protocol](https://modelcontextprotocol.io/), making it a backend for any AI coding tool:
+## MCP Server
 
 ```bash
 devclaw mcp serve    # starts MCP server on stdio
 ```
 
-**Cursor / VSCode** (`.cursor/mcp.json` or `.vscode/mcp.json`):
-
 ```json
 {
   "mcpServers": {
@@ -252,278 +100,7 @@ devclaw mcp serve    # starts MCP server on stdio
 }
 ```
 
-**Claude Code** (`.mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "devclaw": {
-      "command": "devclaw",
-      "args": ["mcp", "serve"]
-    }
-  }
-}
-```
-
-Works with: Cursor, VSCode, Claude Code, OpenCode, Windsurf, Zed, Neovim, and any MCP-compatible client.
-
----
-
-## CLI Reference
-
-```
-devclaw serve                  Start daemon with channels + WebUI
-devclaw chat "message"         Single message or interactive REPL
-devclaw setup                  Web-based setup wizard
-devclaw mcp serve              Start MCP server for IDE integration
-
-devclaw fix [file]             Analyze and fix errors
-devclaw explain [path]         Explain code, files, or directories
-devclaw diff [--staged]        AI review of git changes
-devclaw commit [--dry-run]     Generate commit message and commit
-devclaw how "task"             Generate shell commands without executing
-
-devclaw config init            Create default config.yaml
-devclaw config vault-init      Initialize encrypted vault
-devclaw config vault-set       Store API key in vault
-devclaw skill install <name>   Install a skill
-devclaw skill list             List installed skills
-devclaw schedule list          Show scheduled jobs
-devclaw health                 Health check (Docker/monitoring)
-devclaw shell-hook bash        Generate shell integration
-devclaw completion bash        Generate shell completions
-```
-
-**Pipe mode:**
-
-```bash
-git diff | devclaw "review this"
-npm run build 2>&1 | devclaw fix
-cat error.log | devclaw "what went wrong?"
-```
-
----
-
-## Configuration
-
-Minimal `config.yaml`:
-
-```yaml
-name: "DevClaw"
-trigger: "@devclaw"
-model: "gpt-4.1-mini"
-
-api:
-  base_url: "https://api.openai.com/v1"
-  api_key: "${DEVCLAW_API_KEY}"
-
-webui:
-  enabled: true
-  address: ":47716"
-```
-
-See [`configs/devclaw.example.yaml`](configs/devclaw.example.yaml) for the full reference.
-
----
-
-## Database
-
-DevClaw uses **SQLite by default** — zero configuration required. Just run and it works.
-
-For production or multi-user setups, you can optionally switch to **PostgreSQL or Supabase** with pgvector support for faster vector search at scale.
-
-The agent can manage the database through 8 built-in tools: check status, run queries, view schema, create backups, and more. All database operations include security protections against SQL injection and abuse.
-
----
-
-## Skills
-
-Extend DevClaw with installable skills:
-
-```bash
-devclaw skill install github
-devclaw skill install docker
-devclaw skill search kubernetes
-devclaw skill list
-```
-
-Browse the catalog: [ClawHub](https://clawhub.ai/)
-
----
-
-## Subagents
-
-DevClaw can spawn **concurrent child agents** to handle multiple tasks in parallel. The main agent delegates work to subagents, each running in its own goroutine with an isolated session and filtered tool set.
-
-```
-Main Agent
-  ├── spawn_subagent("research API docs")     → runs concurrently
-  ├── spawn_subagent("write unit tests")      → runs concurrently
-  └── spawn_subagent("check deploy status")   → runs concurrently
-         │
-         ▼
-  Results announced back to parent when done
-```
-
-**How it works:**
-
-- `spawn_subagent` — creates a child agent with a specific task, returns a `run_id` immediately
-- `list_subagents` — check status of all running/completed subagents
-- `wait_subagent` — block until a subagent finishes and get its result
-- `stop_subagent` — cancel a running subagent
-
-**Key properties:**
-
-- Up to **8 concurrent** subagents (configurable)
-- Each subagent gets its own **isolated session** and **filtered tools** (no recursion, no memory writes)
-- Configurable **timeout** (default: 10min) and optional **model override** per subagent
-- Results are **persisted to SQLite** — survive process restarts
-- **Push-style announce** — parent is notified immediately when a subagent completes
-
-**Example use cases:**
-
-- Research multiple topics simultaneously while the main agent continues working
-- Run tests in background while writing code
-- Deploy to staging while generating release notes
-- Audit dependencies across multiple languages in parallel
-
-```yaml
-# config.yaml
-subagents:
-  enabled: true
-  max_concurrent: 8
-  timeout_seconds: 600
-  denied_tools:
-    - spawn_subagent    # no recursion
-    - memory_save       # no memory pollution
-    - cron_add          # no scheduling
-```
-
----
-
-## Channels
-
-| Channel | Status | Protocol |
-|---------|--------|----------|
-| WhatsApp | Stable | whatsmeow (native Go) |
-| Telegram | Stable | telebot |
-
-See [docs/channels.md](docs/channels.md) for setup instructions.
-
----
-
-## Plugins
-
-YAML-first plugin system for extending DevClaw with custom agents, tools, hooks, skills, channels, and services.
-
-```
-my-plugin/
-  plugin.yaml          # Manifest (required)
-  prompts/             # Agent instruction .md files
-  skills/              # SKILL.md knowledge guides
-  lib.so               # Optional native Go library
-```
-
-**Capabilities:**
-
-- **Agents** — custom LLM agents with instructions, triggers, tool profiles, and escalation
-- **Tools** — script (bash), HTTP endpoint, or native Go handlers — namespaced as `{pluginID}_{toolName}`
-- **Hooks** — event-driven scripts (post_tool_use, session_end, user_prompt_submit, etc.)
-- **Skills** — SKILL.md knowledge guides loaded into LLM context
-- **Config** — typed fields (string, int, bool, secret) with vault, env var, and default resolution
-- **UI** — declarative WebUI config panels with sections, field grouping, and quick actions
-
-**Minimal plugin example:**
-
-```yaml
-id: my-plugin
-name: My Plugin
-version: 1.0.0
-tools:
-  - name: greet
-    description: Say hello
-    script: echo "Hello, ${PLUGIN_NAME}!"
-```
-
-See [docs/plugins.md](docs/plugins.md) for full documentation. See [devclaw-plugin-codeflow](https://github.com/jholhewres/devclaw-plugin-codeflow) for a real-world example.
-
----
-
-## Security
-
-- **Encrypted vault** — AES-256-GCM + Argon2id, all secrets encrypted at rest
-- **Tool guard** — ACL-based permission system with dangerous command blocking
-- **Sandbox** — skill scripts run in isolated environment
-- **Audit logging** — all tool executions logged
-- **SSRF protection** — web_fetch blocks internal network access
-- **Budget tracking** — monthly cost limits with configurable alerts
-
-See [docs/security.md](docs/security.md) for details.
-
----
-
-## Deployment
-
-### Install Script (Recommended for Production)
-
-The install script handles the complete setup:
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/install.sh)
-```
-
-**What happens:**
-1. Binary installed to `/opt/devclaw`
-2. PM2 configured with auto-restart
-3. Service starts automatically in "First Run Setup" mode
-4. Access `http://localhost:47716/setup` to configure API key
-
-**PM2 management:**
-```bash
-pm2 status              # Check status
-pm2 logs devclaw        # View logs
-pm2 restart devclaw     # Restart service
-pm2 stop devclaw        # Stop service
-
-# Enable auto-start on boot:
-pm2 startup             # Follow the printed command
-```
-
-### Other Methods
-
-| Method | Best For | Quick Start |
-|--------|----------|-------------|
-| **Docker Compose** | Development, isolated envs | `docker compose up -d` |
-| **systemd** | Traditional Linux servers | `sudo systemctl enable --now devclaw` |
-| **Ansible** | Multi-server deployment | See `install/ansible/` |
-
-See [install/DEPLOYMENT.md](install/DEPLOYMENT.md) for detailed instructions.
-
-### Uninstall
-
-**Via uninstall script:**
-```bash
-curl -fsSL https://raw.githubusercontent.com/jholhewres/devclaw/master/install/unix/uninstall.sh | sudo bash
-
-# Or skip confirmation:
-curl -fsSL ... | sudo bash -s -- --yes
-```
-
-**What is removed:**
-- DevClaw binary and all data in `/opt/devclaw`
-- PM2 process configuration
-- Global `devclaw` command
-
-**Manual uninstall (if script unavailable):**
-```bash
-# Stop and remove PM2 process
-pm2 delete devclaw
-pm2 save
-
-# Remove files
-sudo rm -rf /opt/devclaw
-sudo rm -f /usr/local/bin/devclaw
-```
+Works with Cursor, VSCode, Windsurf, Zed, Neovim, and any MCP-compatible client.
 
 ---
 
@@ -533,10 +110,14 @@ sudo rm -f /usr/local/bin/devclaw
 |-------|------|
 | Architecture | [docs/architecture.md](docs/architecture.md) |
 | Features | [docs/features.md](docs/features.md) |
+| Tools (90+) | [docs/features.md#tools](docs/features.md) |
+| Channels | [docs/channels.md](docs/channels.md) |
 | Plugins | [docs/plugins.md](docs/plugins.md) |
 | Security | [docs/security.md](docs/security.md) |
 | Performance | [docs/performance.md](docs/performance.md) |
 | Skills Catalog | [docs/skills-catalog.md](docs/skills-catalog.md) |
+| Deployment | [install/DEPLOYMENT.md](install/DEPLOYMENT.md) |
+| Configuration | [configs/devclaw.example.yaml](configs/devclaw.example.yaml) |
 
 ---
 
