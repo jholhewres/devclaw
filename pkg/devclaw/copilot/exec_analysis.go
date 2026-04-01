@@ -282,7 +282,9 @@ func (a *ExecAnalyzer) isSafeBin(command string) bool {
 	}
 
 	// Check common safe commands by name.
-	safeCommands := []string{"ls", "cat", "echo", "grep", "find", "head", "tail", "wc", "sort", "uniq", "cut", "awk", "sed", "tr", "date", "pwd", "whoami", "id", "uname"}
+	// Note: find, awk, sed are intentionally excluded — they can execute
+	// arbitrary code (find -exec, awk system(), sed -e with shell commands).
+	safeCommands := []string{"ls", "cat", "echo", "grep", "head", "tail", "wc", "sort", "uniq", "cut", "tr", "date", "pwd", "whoami", "id", "uname"}
 	for _, safe := range safeCommands {
 		if bin == safe || strings.HasSuffix(bin, "/"+safe) {
 			return true
@@ -368,17 +370,54 @@ func DefaultExecAnalysisConfig() ExecAnalysisConfig {
 				Action:   ActionAllow,
 			},
 			RiskModerate: {
-				Patterns: []string{"npm *", "yarn *", "git *", "docker *", "go *", "python *", "node *", "make *"},
-				Action:   ActionAllowLog,
+				Patterns: []string{
+					"npm *", "yarn *", "pnpm *",
+					"git add*", "git commit*", "git checkout*", "git branch*", "git merge*", "git rebase*", "git stash*",
+					"docker build*", "docker run*", "docker compose*", "docker exec*",
+					"go build*", "go install*", "go mod*",
+					"python *", "python3 *", "node *", "make *",
+					"pip install*", "pip3 install*",
+					"cargo build*", "cargo install*",
+				},
+				Action: ActionAllowLog,
 			},
 			RiskDangerous: {
-				Patterns: []string{"rm *", "sudo *", "chmod *", "chown *", "mv /*", "cp /*"},
-				Action:   ActionRequireApproval,
+				Patterns: []string{
+					// Filesystem destructive
+					"rm *", "rm -rf *", "rmdir *",
+					"sudo *", "chmod 777*", "chown *",
+					"mv /* *", "cp /* *",
+					// Git destructive
+					"git push*--force*", "git push*-f *",
+					"git reset --hard*",
+					"git clean -fd*", "git clean -f*",
+					"git branch -D*",
+					"git checkout -- .",
+					"git restore .",
+					// Docker destructive
+					"docker rm*", "docker rmi*", "docker system prune*",
+					"docker volume rm*", "docker network rm*",
+					// SQL destructive
+					"*DROP TABLE*", "*DROP DATABASE*", "*TRUNCATE*",
+					"*DELETE FROM*WHERE 1*", "*DELETE FROM*;*",
+					// Process control
+					"kill -9*", "killall*", "pkill*",
+				},
+				Action:  ActionRequireApproval,
+				Message: "This command may cause data loss. Please confirm.",
 			},
 			RiskBlocked: {
-				Patterns: []string{"mkfs*", "dd if=*", "shutdown*", "reboot*", "halt*", "init 0", "init 6", "> /dev/sd*", "mv /dev/*"},
-				Action:   ActionDeny,
-				Message:  "This command is blocked for safety reasons",
+				Patterns: []string{
+					"mkfs*", "dd if=*", "dd of=/dev/*",
+					"shutdown*", "reboot*", "halt*", "init 0", "init 6",
+					"> /dev/sd*", "mv /dev/*",
+					"format *:",
+					":(){ :|:& };:", // Fork bomb
+					"chmod -R 777 /",
+					"rm -rf /",
+				},
+				Action:  ActionDeny,
+				Message: "This command is blocked for safety reasons",
 			},
 		},
 		SafeBins: []string{
@@ -395,13 +434,20 @@ func DefaultExecAnalysisConfig() ExecAnalysisConfig {
 			User:  RiskSafe,
 		},
 		SuspiciousPatterns: []string{
-			`\$\([^)]*\)`,       // Command substitution $(...)
-			"`[^`]*`",           // Backtick execution
-			`\|\s*(sh|bash)`,    // Pipe to shell
-			`&&\s*(rm|sudo)`,    // Chained dangerous commands
-			`;\s*(rm|sudo)`,     // Semicolon dangerous commands
-			`>\s*/etc/`,         // Writing to /etc
-			`>\s*/dev/`,         // Writing to /dev
+			`\$\([^)]*\)`,          // Command substitution $(...)
+			"`[^`]*`",              // Backtick execution
+			`\|\s*(sh|bash|zsh)`,   // Pipe to shell
+			`&&\s*(rm|sudo|dd)`,    // Chained dangerous commands
+			`;\s*(rm|sudo|dd)`,     // Semicolon dangerous commands
+			`>\s*/etc/`,            // Writing to /etc
+			`>\s*/dev/`,            // Writing to /dev
+			`curl[^|]*\|\s*sh`,     // Pipe curl to shell
+			`wget[^|]*\|\s*sh`,     // Pipe wget to shell
+			`eval\s+`,              // eval execution
+			`\bexec\s+\d+[<>]`,     // fd redirection exec
+			`--no-verify`,          // Git hook bypass
+			`--force`,              // Force flag on any command
+			`2>/dev/null`,          // Error suppression (suspicious in context)
 		},
 		DefaultAction: ActionAllowLog,
 	}

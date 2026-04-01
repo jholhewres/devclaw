@@ -258,9 +258,10 @@ type ToolHandlerFunc func(ctx context.Context, args map[string]any) (any, error)
 
 // registeredTool bundles a tool definition with its handler.
 type registeredTool struct {
-	Definition ToolDefinition
-	Handler    ToolHandlerFunc
-	Hidden     bool // If true, the tool is callable but not sent to the LLM schema.
+	Definition     ToolDefinition
+	Handler        ToolHandlerFunc
+	Hidden         bool // If true, the tool is callable but not sent to the LLM schema.
+	ConcurrentSafe bool // If true, this tool can run in parallel with other concurrent-safe tools.
 }
 
 // ToolResult holds the output of a single tool execution.
@@ -467,9 +468,34 @@ func RunAsync(ctx context.Context, config AsyncToolConfig, fn func(ctx context.C
 }
 
 // sequentialTools are tools that must not run in parallel (shared state).
+// Deprecated: Use ConcurrentSafe field on registeredTool instead.
+// Kept for backward compatibility — tools NOT in defaultConcurrentSafeTools
+// and NOT explicitly marked are treated as serial.
 var sequentialTools = map[string]bool{
 	"bash": true, "write_file": true, "edit_file": true,
 	"ssh": true, "scp": true, "exec": true, "set_env": true,
+	"apply_patch": true, "send_message": true, "message": true,
+}
+
+// defaultConcurrentSafeTools lists tools that are safe to run in parallel.
+// These are read-only tools that don't modify filesystem, processes, or external state.
+var defaultConcurrentSafeTools = map[string]bool{
+	// File reading
+	"read_file": true, "grep": true, "find": true, "ls": true,
+	"glob": true, "list_files": true,
+	// Git read-only
+	"git_log": true, "git_status": true, "git_diff": true, "git_show": true,
+	"git_blame": true, "git_branch": true,
+	// Docker read-only
+	"docker_ps": true, "docker_images": true, "docker_logs": true,
+	// Web/search (read-only, no side effects)
+	"web_search": true, "web_fetch": true,
+	// Memory read
+	"memory_search": true, "memory_read": true, "memory_list": true,
+	// Session read
+	"session_list": true, "session_read": true,
+	// Capabilities / info
+	"capabilities": true,
 }
 
 // ToolHook is a callback that runs before or after tool execution.
@@ -656,6 +682,43 @@ func (e *ToolExecutor) SetConfirmationRequester(fn func(sessionID, callerJID, to
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.confirmationRequester = fn
+}
+
+// MarkConcurrentSafe marks the named tools as safe for concurrent execution.
+// Tools not explicitly marked and not in the defaultConcurrentSafeTools set
+// are treated as serial (must execute one at a time).
+func (e *ToolExecutor) MarkConcurrentSafe(names ...string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, name := range names {
+		if t, ok := e.tools[name]; ok {
+			t.ConcurrentSafe = true
+		}
+	}
+}
+
+// IsConcurrentSafe returns true if the named tool can run in parallel with others.
+// Checks the per-tool annotation first, then falls back to the default set.
+func (e *ToolExecutor) IsConcurrentSafe(name string) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if t, ok := e.tools[name]; ok {
+		return t.ConcurrentSafe
+	}
+	return false
+}
+
+// ApplyDefaultConcurrency marks all registered tools that appear in the
+// defaultConcurrentSafeTools set as ConcurrentSafe. Called once after all
+// tools are registered.
+func (e *ToolExecutor) ApplyDefaultConcurrency() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for name, t := range e.tools {
+		if defaultConcurrentSafeTools[name] {
+			t.ConcurrentSafe = true
+		}
+	}
 }
 
 // Configure applies ToolExecutorConfig (parallel, max_parallel, timeouts).
@@ -994,15 +1057,19 @@ func (e *ToolExecutor) Execute(ctx context.Context, calls []ToolCall) []ToolResu
 	maxParallel := e.maxParallel
 	e.mu.RUnlock()
 
-	if !parallel || len(calls) <= 1 || e.hasSequentialTool(calls) {
+	if !parallel || len(calls) <= 1 {
 		return e.executeSequential(ctx, calls)
 	}
-	return e.executeParallel(ctx, calls, maxParallel)
+	return e.executeStreaming(ctx, calls, maxParallel)
 }
 
+// hasSequentialTool returns true if any call targets a serial (non-concurrent-safe) tool.
 func (e *ToolExecutor) hasSequentialTool(calls []ToolCall) bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	for _, c := range calls {
-		if sequentialTools[c.Function.Name] {
+		t, ok := e.tools[c.Function.Name]
+		if !ok || !t.ConcurrentSafe {
 			return true
 		}
 	}
@@ -1012,28 +1079,165 @@ func (e *ToolExecutor) hasSequentialTool(calls []ToolCall) bool {
 func (e *ToolExecutor) executeSequential(ctx context.Context, calls []ToolCall) []ToolResult {
 	results := make([]ToolResult, len(calls))
 	for i, call := range calls {
+		// Check for abort/cancellation between sequential calls.
+		select {
+		case <-ctx.Done():
+			results[i] = ToolResult{
+				ToolCallID: call.ID,
+				Name:       call.Function.Name,
+				Content:    formatToolError(call.Function.Name, ctx.Err()),
+				Error:      ctx.Err(),
+			}
+			continue
+		default:
+		}
 		results[i] = e.executeSingle(ctx, call)
 	}
 	return results
 }
 
-func (e *ToolExecutor) executeParallel(ctx context.Context, calls []ToolCall, maxParallel int) []ToolResult {
+// executeStreaming handles mixed batches of concurrent-safe and serial tools.
+// Concurrent-safe tools run in parallel. When a serial tool is encountered,
+// all pending concurrent tools must finish before the serial tool executes.
+// If any tool fails with a non-recoverable error, siblings are cancelled (abort cascade).
+// Results are always returned in the original call order.
+func (e *ToolExecutor) executeStreaming(ctx context.Context, calls []ToolCall, maxParallel int) []ToolResult {
 	results := make([]ToolResult, len(calls))
+
+	// Classify calls into groups: consecutive concurrent-safe tools form a group,
+	// serial tools form single-item groups.
+	type callGroup struct {
+		indices    []int
+		calls      []ToolCall
+		concurrent bool
+	}
+
+	e.mu.RLock()
+	var groups []callGroup
+	var currentGroup *callGroup
+	for i, call := range calls {
+		t, ok := e.tools[call.Function.Name]
+		isConcurrent := ok && t.ConcurrentSafe
+		if currentGroup == nil || currentGroup.concurrent != isConcurrent {
+			groups = append(groups, callGroup{concurrent: isConcurrent})
+			currentGroup = &groups[len(groups)-1]
+		}
+		currentGroup.indices = append(currentGroup.indices, i)
+		currentGroup.calls = append(currentGroup.calls, call)
+	}
+	e.mu.RUnlock()
+
+	// Log execution plan for observability.
+	if len(groups) > 1 || (len(groups) == 1 && groups[0].concurrent && len(groups[0].calls) > 1) {
+		for gi, g := range groups {
+			names := make([]string, len(g.calls))
+			for ci, c := range g.calls {
+				names[ci] = c.Function.Name
+			}
+			mode := "serial"
+			if g.concurrent {
+				mode = "concurrent"
+			}
+			e.logger.Debug("tool execution group",
+				"group", gi,
+				"mode", mode,
+				"tools", names,
+			)
+		}
+	}
+
+	// Execute each group.
+	for _, g := range groups {
+		// Check for abort/cancellation between groups.
+		select {
+		case <-ctx.Done():
+			for _, idx := range g.indices {
+				results[idx] = ToolResult{
+					ToolCallID: calls[idx].ID,
+					Name:       calls[idx].Function.Name,
+					Content:    formatToolError(calls[idx].Function.Name, ctx.Err()),
+					Error:      ctx.Err(),
+				}
+			}
+			continue
+		default:
+		}
+
+		if !g.concurrent || len(g.calls) == 1 {
+			// Serial group or single tool: execute sequentially.
+			for j, call := range g.calls {
+				results[g.indices[j]] = e.executeSingle(ctx, call)
+			}
+		} else {
+			// Concurrent group: execute in parallel with abort cascade.
+			e.executeConcurrentGroup(ctx, g.calls, g.indices, results, maxParallel)
+		}
+	}
+
+	return results
+}
+
+// executeConcurrentGroup runs a batch of concurrent-safe tools in parallel.
+// If any tool returns a non-recoverable error, remaining siblings are cancelled.
+// Results are written to the pre-allocated results slice at the given indices.
+func (e *ToolExecutor) executeConcurrentGroup(ctx context.Context, calls []ToolCall, indices []int, results []ToolResult, maxParallel int) {
+	// Create a cancellable context for abort cascade.
+	groupCtx, groupCancel := context.WithCancel(ctx)
+	defer groupCancel()
+
 	sem := make(chan struct{}, maxParallel)
 	var wg sync.WaitGroup
 
-	for i, call := range calls {
+	for j, call := range calls {
 		wg.Add(1)
-		go func(idx int, tc ToolCall) {
+		go func(localIdx int, globalIdx int, tc ToolCall) {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			results[idx] = e.executeSingle(ctx, tc)
-		}(i, call)
+
+			// Acquire semaphore slot.
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-groupCtx.Done():
+				results[globalIdx] = ToolResult{
+					ToolCallID: tc.ID,
+					Name:       tc.Function.Name,
+					Content:    "[Cancelled: sibling tool failed]",
+					Error:      groupCtx.Err(),
+				}
+				return
+			}
+
+			// Check cancellation before executing.
+			select {
+			case <-groupCtx.Done():
+				results[globalIdx] = ToolResult{
+					ToolCallID: tc.ID,
+					Name:       tc.Function.Name,
+					Content:    "[Cancelled: sibling tool failed]",
+					Error:      groupCtx.Err(),
+				}
+				return
+			default:
+			}
+
+			result := e.executeSingle(groupCtx, tc)
+			results[globalIdx] = result
+
+			// Abort cascade: if a tool fails with a non-recoverable error,
+			// cancel all siblings in this group.
+			// Skip if the group context is already cancelled (sibling already triggered cascade)
+			// to avoid redundant cancellations and log noise.
+			if result.Error != nil && groupCtx.Err() == nil && !IsRecoverableToolError(result.Content) {
+				e.logger.Warn("abort cascade triggered",
+					"failed_tool", tc.Function.Name,
+					"error", result.Error,
+				)
+				groupCancel()
+			}
+		}(j, indices[j], call)
 	}
 
 	wg.Wait()
-	return results
 }
 
 // executeSingle runs a single tool call and returns the result.

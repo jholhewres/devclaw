@@ -17,6 +17,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -271,6 +273,9 @@ type AgentRun struct {
 	// plugin agent should escalate to the main agent. Set by plugin agent spawner.
 	escalationChecker func(turn int, lastResponse string) *EscalationSignal
 
+	// compactionPipeline manages multi-level proactive context compaction.
+	compactionPipeline *CompactionPipeline
+
 	// loopDetector tracks tool call history and detects repetitive patterns.
 	loopDetector *ToolLoopDetector
 
@@ -419,6 +424,7 @@ func NewAgentRunWithConfig(llm *LLMClient, executor *ToolExecutor, cfg AgentConf
 		ar.maxCompactionAttempts = cfg.MaxCompactionAttempts
 	}
 	ar.cfg = cfg
+	ar.compactionPipeline = NewCompactionPipeline(DefaultCompactThresholds())
 	return ar
 }
 
@@ -701,21 +707,66 @@ func (a *AgentRun) RunWithUsage(ctx context.Context, systemPrompt string, histor
 			}
 		}
 
-		// ── Proactive context compaction ──
-		// Instead of dropping old messages entirely (which causes amnesia), we
-		// compact the context if it grows too large. Only trigger compaction
-		// when estimated token usage exceeds 60% of context window — avoids
-		// wasting LLM summarization calls on short conversations.
-		if totalTurns > 5 && len(messages) > 15 {
+		// ── Proactive context compaction (multi-level pipeline) ──
+		// Evaluate context pressure and apply the appropriate compaction level.
+		// Cheaper levels (collapse, micro-compact) run first to avoid expensive
+		// LLM summarization calls unless truly necessary.
+		if totalTurns > 3 && len(messages) > 8 && a.compactionPipeline != nil {
 			estimatedTokens := a.estimateTokens(messages)
-			compactionThreshold := int(float64(ctxTokens) * 0.6)
-			if estimatedTokens > compactionThreshold {
-				a.logger.Debug("proactive compaction triggered",
-					"messages_len", len(messages),
-					"estimated_tokens", estimatedTokens,
-					"threshold", compactionThreshold,
+			pressure := a.compactionPipeline.Evaluate(estimatedTokens, ctxTokens)
+
+			if pressure.RecommendedLevel > CompactNone && a.compactionPipeline.ShouldCompact(pressure.RecommendedLevel) {
+				a.logger.Info("proactive compaction triggered",
+					"level", pressure.RecommendedLevel.String(),
+					"ratio", fmt.Sprintf("%.1f%%", pressure.Ratio*100),
+					"tokens", estimatedTokens,
+					"window", ctxTokens,
+					"tokens_until_blocking", pressure.TokensUntilBlocking,
 				)
-				messages = a.managedCompaction(runCtx, messages)
+
+				switch pressure.RecommendedLevel {
+				case CompactCollapse:
+					n := CollapseToolResults(messages, 4000)
+					if n > 0 {
+						a.logger.Info("collapse compaction applied", "collapsed", n)
+					}
+
+				case CompactMicro:
+					// First collapse, then micro-compact for maximum effect.
+					CollapseToolResults(messages, 4000)
+					var n int
+					messages, n = MicroCompact(messages, 10)
+					if n > 0 {
+						a.logger.Info("micro-compact applied", "cleared", n)
+					}
+
+				case CompactAuto:
+					// Apply cheap levels first, then LLM summarization.
+					CollapseToolResults(messages, 3000)
+					messages, _ = MicroCompact(messages, 10)
+					before := len(messages)
+					messages = a.managedCompaction(runCtx, messages)
+					if len(messages) < before {
+						a.compactionPipeline.RecordSuccess()
+					} else {
+						a.compactionPipeline.RecordFailure()
+					}
+
+				case CompactMemory:
+					// Extract memories before compacting.
+					CollapseToolResults(messages, 2000)
+					messages, _ = MicroCompact(messages, 6)
+					a.maybeMemoryFlush(runCtx, messages, estimatedTokens)
+					before := len(messages)
+					messages = a.aggressiveCompaction(runCtx, messages)
+					if len(messages) < before {
+						a.compactionPipeline.RecordSuccess()
+					} else {
+						a.compactionPipeline.RecordFailure()
+					}
+				}
+
+				a.compactionPipeline.SetLastLevel(pressure.RecommendedLevel)
 			}
 		}
 
@@ -2411,52 +2462,39 @@ func (a *AgentRun) maybeMemoryFlush(ctx context.Context, messages []chatMessage,
 		return
 	}
 
-	// Build flush prompt
-	flushPrompt := a.cfg.MemoryFlush.Prompt
-	if flushPrompt == "" {
-		flushPrompt = `Session nearing compaction. Review the conversation and write any important facts, decisions, or context to long-term memory using memory_save(content='...', category='summary'). Save to memory/YYYY-MM-DD.md if needed. If there's nothing worth saving, reply with NO_REPLY.`
-	}
+	a.logger.Info("executing pre-compaction memory extraction", "token_estimate", tokenEstimate)
 
-	sysPrompt := a.cfg.MemoryFlush.SystemPrompt
-	if sysPrompt == "" {
-		sysPrompt = "You are a memory preservation assistant. Your task is to save important information before context compaction. Be selective - only save truly valuable information."
-	}
+	// Use structured memory extraction: extract categorized memories
+	// (decisions, preferences, facts, learnings) from the conversation.
+	extractor := NewMemoryExtractor(a.llm, a.logger)
+	memories := extractor.Extract(ctx, messages, a.modelOverride)
 
-	// Build conversation for the silent flush turn
-	flushMessages := make([]chatMessage, 0, len(messages)+1)
-	flushMessages = append(flushMessages, chatMessage{Role: "system", Content: sysPrompt})
-
-	// Include recent conversation context (last 10 messages)
-	startIdx := len(messages) - 10
-	if startIdx < 0 {
-		startIdx = 0
-	}
-	for i := startIdx; i < len(messages); i++ {
-		flushMessages = append(flushMessages, messages[i])
-	}
-	flushMessages = append(flushMessages, chatMessage{Role: "user", Content: flushPrompt})
-
-	// Execute silent turn
-	a.logger.Info("executing pre-compaction memory flush", "token_estimate", tokenEstimate)
-
-	callCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
-
-	resp, err := a.llm.CompleteWithFallbackUsingModel(callCtx, a.modelOverride, flushMessages, nil)
-	if err != nil {
-		a.logger.Warn("memory flush failed", "error", err)
+	if len(memories) == 0 {
+		a.logger.Debug("memory flush: no memories extracted")
 		return
 	}
 
-	// Check for NO_REPLY - if so, don't process further
-	if strings.TrimSpace(strings.ToUpper(resp.Content)) == "NO_REPLY" {
-		a.logger.Debug("memory flush: no memories to save")
-		return
+	// Format and persist the extracted memories to the memory directory.
+	// The MemoryIndexer watches this directory and will index the file,
+	// making extracted memories searchable in future sessions.
+	formatted := FormatMemoriesForStorage(memories, a.sessionID)
+	if formatted != "" && a.memoryIndexer != nil && a.memoryIndexer.MemoryDir() != "" {
+		filename := fmt.Sprintf("pre-compact-%s-%s.md",
+			a.sessionID, time.Now().Format("20060102-150405"))
+		filePath := filepath.Join(a.memoryIndexer.MemoryDir(), filename)
+		if err := os.WriteFile(filePath, []byte(formatted), 0o600); err != nil {
+			a.logger.Warn("failed to write extracted memories", "path", filePath, "error", err)
+		} else {
+			a.logger.Info("pre-compaction memories saved",
+				"count", len(memories),
+				"path", filePath,
+			)
+			// Trigger async memory index so the file is indexed immediately.
+			go a.memoryIndexer.IndexNow()
+		}
 	}
 
-	// The LLM may have triggered memory saves via tool calls
-	// We don't need to do anything special here - the tools executed normally
-	a.logger.Info("memory flush completed", "response_length", len(resp.Content))
+	a.logger.Info("memory flush completed", "extracted", len(memories))
 }
 
 // estimateTokens provides a rough token estimate for a slice of messages.
