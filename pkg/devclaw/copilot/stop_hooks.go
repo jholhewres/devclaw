@@ -4,8 +4,8 @@
 // but not compiled). If incomplete work is detected, the hook can inject a
 // continuation message to prompt the agent to finish.
 //
-// Aligned with Claude Code's stop hooks pattern: verify completion before
-// allowing the agent to stop, preventing premature task completion.
+// Pattern: verify completion before allowing the agent to stop,
+// preventing premature task completion.
 package copilot
 
 import (

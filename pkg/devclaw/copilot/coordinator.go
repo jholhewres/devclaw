@@ -10,7 +10,7 @@
 // (e.g., research workers cannot write files). This ensures safe parallel
 // execution and clear separation of concerns.
 //
-// Aligned with Claude Code's coordinator protocol pattern for multi-agent tasks.
+// Implements structured multi-agent coordination for complex tasks.
 package copilot
 
 import (

@@ -3,8 +3,8 @@
 // information (decisions, preferences, facts, learnings) that would otherwise
 // be lost when messages are summarized or discarded.
 //
-// Aligned with Claude Code's sessionMemoryCompact pattern: extract first,
-// then compact safely knowing nothing important is lost.
+// Pattern: extract valuable information first, then compact safely
+// knowing nothing important is lost.
 package copilot
 
 import (
