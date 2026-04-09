@@ -48,10 +48,17 @@ type vectorCacheEntry struct {
 }
 
 // SearchResult represents a single search hit with score.
+//
+// The Wing field (added in Sprint 2 Room 2.0c) carries the originating
+// file's palace wing, if any. It is empty for legacy (wing IS NULL) files
+// and for results coming from the wing-unaware code paths. The field is
+// last in the struct to preserve JSON marshalling compatibility for any
+// caller that decoded SearchResult before Sprint 2.
 type SearchResult struct {
 	FileID string
 	Text   string
 	Score  float64
+	Wing   string
 }
 
 // NewSQLiteStore opens or creates a SQLite memory database with FTS5.
@@ -434,6 +441,173 @@ func (s *SQLiteStore) searchLikeFallback(query string, maxResults int) ([]Search
 	return results, nil
 }
 
+// searchBM25WithWing is the wing-aware variant of SearchBM25. It runs the
+// same BM25 ranking but JOINs against the files table so each result
+// carries its files.wing value (empty string for legacy NULL rows). Used
+// only by HybridSearchWithOpts when QueryWing != "" — the wing-unaware
+// path stays on SearchBM25 to guarantee byte-identical scores.
+//
+// Falls back to fileWingFallback() when FTS5 is unavailable so the wing
+// metadata is still attached even on the LIKE-based code path.
+func (s *SQLiteStore) searchBM25WithWing(query string, maxResults int) ([]SearchResult, error) {
+	if maxResults <= 0 {
+		maxResults = 10
+	}
+
+	// FTS5 not available — fall back to LIKE search and attach wings.
+	if !s.ftsAvailable {
+		results, err := s.searchLikeFallback(query, maxResults)
+		if err != nil {
+			return nil, err
+		}
+		s.attachWings(results)
+		return results, nil
+	}
+
+	// Phrase query first.
+	safeQuery := sanitizeFTS5Query(query)
+	if safeQuery == "" {
+		return nil, nil
+	}
+
+	results, err := s.ftsQueryWithWing(safeQuery, maxResults)
+	if err == nil && len(results) >= maxResults/2 {
+		return results, nil
+	}
+
+	// Expanded query: extract keywords and search with OR.
+	keywords := extractKeywords(query)
+	if len(keywords) > 0 {
+		expandedQuery := expandQueryForFTS(keywords)
+		if expandedQuery != "" && expandedQuery != safeQuery {
+			moreResults, err := s.ftsQueryWithWing(expandedQuery, maxResults)
+			if err == nil {
+				results = mergeSearchResults(results, moreResults, maxResults*2)
+			}
+		}
+	}
+
+	return results, nil
+}
+
+// ftsQueryWithWing runs a single FTS5 query that JOINs against the files
+// table to attach files.wing to each row. Mirrors ftsQuery but with the
+// extra column. Used only by the wing-aware code path.
+func (s *SQLiteStore) ftsQueryWithWing(ftsQuery string, maxResults int) ([]SearchResult, error) {
+	rows, err := s.db.Query(`
+		SELECT c.file_id, c.text, COALESCE(f.wing, ''), rank
+		FROM chunks_fts
+		JOIN chunks c ON c.id = chunks_fts.rowid
+		LEFT JOIN files f ON f.file_id = c.file_id
+		WHERE chunks_fts MATCH ?
+		ORDER BY rank
+		LIMIT ?
+	`, ftsQuery, maxResults*2)
+	if err != nil {
+		// Fall back to the LIKE path and attach wings afterwards.
+		results, err := s.searchLikeFallback(ftsQuery, maxResults)
+		if err != nil {
+			return nil, err
+		}
+		s.attachWings(results)
+		return results, nil
+	}
+	defer rows.Close()
+
+	var results []SearchResult
+	for rows.Next() {
+		var (
+			r    SearchResult
+			rank float64
+		)
+		if err := rows.Scan(&r.FileID, &r.Text, &r.Wing, &rank); err != nil {
+			continue
+		}
+		r.Score = 1.0 / (1.0 + math.Abs(rank))
+		results = append(results, r)
+	}
+
+	return results, nil
+}
+
+// searchVectorWithWing is the wing-aware variant of SearchVector. It
+// performs the same in-memory cosine search but then attaches files.wing
+// to every result via a single batched lookup. Used only by
+// HybridSearchWithOpts when QueryWing != "".
+func (s *SQLiteStore) searchVectorWithWing(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+	results, err := s.SearchVector(ctx, query, maxResults)
+	if err != nil || len(results) == 0 {
+		return results, err
+	}
+	s.attachWings(results)
+	return results, nil
+}
+
+// attachWings populates the Wing field on each result by batch-querying
+// the files table for the unique fileIDs in the slice. Files with
+// wing IS NULL get the empty string. Errors are non-fatal: a lookup
+// failure leaves Wing="" on every row, which the multiplier code then
+// treats as a legacy candidate (always neutral).
+func (s *SQLiteStore) attachWings(results []SearchResult) {
+	if len(results) == 0 {
+		return
+	}
+	uniqueIDs := make([]string, 0, len(results))
+	seen := make(map[string]struct{}, len(results))
+	for _, r := range results {
+		if _, ok := seen[r.FileID]; ok {
+			continue
+		}
+		seen[r.FileID] = struct{}{}
+		uniqueIDs = append(uniqueIDs, r.FileID)
+	}
+
+	wings := s.getWingsByFileIDs(uniqueIDs)
+	for i := range results {
+		if w, ok := wings[results[i].FileID]; ok {
+			results[i].Wing = w
+		}
+	}
+}
+
+// getWingsByFileIDs returns a map[fileID]wing for the supplied fileIDs.
+// Files with wing IS NULL map to "". Unknown fileIDs are absent from the
+// map. The query uses a parameterized IN list — fileIDs are expected to
+// be application-controlled (not user-provided).
+//
+// On any SQL error this returns an empty map; callers should treat that
+// as "no wing info available" which the wing multiplier handles safely.
+func (s *SQLiteStore) getWingsByFileIDs(fileIDs []string) map[string]string {
+	out := make(map[string]string, len(fileIDs))
+	if len(fileIDs) == 0 {
+		return out
+	}
+
+	placeholders := make([]string, len(fileIDs))
+	args := make([]any, len(fileIDs))
+	for i, id := range fileIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	q := "SELECT file_id, COALESCE(wing, '') FROM files WHERE file_id IN (" +
+		strings.Join(placeholders, ",") + ")"
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var fid, wing string
+		if err := rows.Scan(&fid, &wing); err != nil {
+			continue
+		}
+		out[fid] = wing
+	}
+	return out
+}
+
 // SearchVector performs a vector similarity search using in-memory cosine similarity.
 func (s *SQLiteStore) SearchVector(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
 	if s.embedder.Name() == "none" {
@@ -502,19 +676,130 @@ func (s *SQLiteStore) SearchVector(ctx context.Context, query string, maxResults
 	return results, nil
 }
 
-// HybridSearch performs a combined vector + BM25 search with configurable weights.
+// defaultWingBoostMatch is the score multiplier applied to candidates whose
+// wing matches the query wing when the caller leaves WingBoostMatch unset.
+// Mirrors HierarchyConfig.WingBoostMatch default.
+const defaultWingBoostMatch = 1.3
+
+// defaultWingBoostPenalty is the score multiplier applied to candidates
+// whose wing differs from the query wing when WingBoostPenalty is unset.
+// Mirrors HierarchyConfig.WingBoostPenalty default.
+const defaultWingBoostPenalty = 0.4
+
+// HybridSearchOptions configures a hybrid (vector + BM25) memory search.
+//
+// This struct replaces the six-positional-float HybridSearch signature with
+// a single options bag, which is necessary because Sprint 2 Room 2.0c adds
+// wing-aware fusion. Adding "yet another float" was already the wrong shape;
+// the options struct lets callers add new tuning knobs without breaking
+// existing call sites.
+//
+// Zero-value semantics for the numeric fields preserve the legacy defaults:
+// MaxResults=0 → 6, MinScore=0 → 0.1, VectorWeight=0 → 0.7, BM25Weight=0 → 0.3.
+// Wing fields fall back to 1.3 / 0.4 when zero (see WingBoostMatch godoc).
+type HybridSearchOptions struct {
+	// MaxResults caps the number of results returned. Defaults to 6 when 0.
+	MaxResults int
+
+	// MinScore drops candidates whose final fused score falls below this
+	// threshold. Defaults to 0.1 when 0.
+	MinScore float64
+
+	// VectorWeight is the fusion weight for the vector branch. Defaults
+	// to 0.7 when 0.
+	VectorWeight float64
+
+	// BM25Weight is the fusion weight for the keyword branch. Defaults
+	// to 0.3 when 0.
+	BM25Weight float64
+
+	// QueryWing, when non-empty, biases the fusion score: candidates whose
+	// files.wing equals QueryWing are multiplied by WingBoostMatch, candidates
+	// with a different non-empty wing are multiplied by WingBoostPenalty,
+	// and candidates with wing IS NULL remain at multiplier 1.0 (neutral).
+	//
+	// When QueryWing is empty, the boost logic is bypassed entirely and the
+	// search returns byte-identical scores and ordering to the legacy
+	// HybridSearch signature. This is the Sprint 2 retrocompat contract.
+	QueryWing string
+
+	// WingBoostMatch is the score multiplier applied when a candidate's
+	// wing matches QueryWing. Defaults to 1.3 when zero. A caller can set
+	// this to 1.0 explicitly to disable matching boost while still applying
+	// WingBoostPenalty to non-matching files.
+	WingBoostMatch float64
+
+	// WingBoostPenalty is the score multiplier applied when a candidate's
+	// wing is non-empty but differs from QueryWing. Defaults to 0.4 when
+	// zero. Files with wing IS NULL are NEVER penalized regardless of
+	// this value — that is the Sprint 1 retrocompat contract.
+	WingBoostPenalty float64
+}
+
+// HybridSearch performs a combined vector + BM25 search with configurable
+// weights. This signature is preserved verbatim for backward compatibility
+// with v1.17.0 callers; it is now a thin wrapper over HybridSearchWithOpts
+// that passes QueryWing="" to take the wing-unaware fast path.
+//
+// Calls through this entry point are byte-identical to the pre-Sprint-2
+// implementation: no JOIN against files.wing, no multiplier, no per-result
+// Wing population.
 func (s *SQLiteStore) HybridSearch(ctx context.Context, query string, maxResults int, minScore float64, vectorWeight, bm25Weight float64) ([]SearchResult, error) {
+	return s.HybridSearchWithOpts(ctx, query, HybridSearchOptions{
+		MaxResults:   maxResults,
+		MinScore:     minScore,
+		VectorWeight: vectorWeight,
+		BM25Weight:   bm25Weight,
+	})
+}
+
+// HybridSearchWithOpts is the wing-aware hybrid search implementation
+// introduced in Sprint 2 Room 2.0c. It runs vector + BM25 in parallel,
+// fuses the rankings via the existing weighted-inverse-rank formula
+// (weight * 1/(rank+1)) — NOT standard RRF k=60; that migration is
+// deferred to ADR-010 — and then applies a wing multiplier to the fused
+// score when opts.QueryWing is non-empty.
+//
+// Wing multiplier rules:
+//
+//   - candidate.Wing == opts.QueryWing → fused *= WingBoostMatch (1.3 default)
+//   - candidate.Wing != "" and != opts.QueryWing → fused *= WingBoostPenalty (0.4 default)
+//   - candidate.Wing == "" (legacy NULL) → fused *= 1.0 (NEVER penalized)
+//
+// The "wing IS NULL stays neutral" rule is a hard invariant: legacy
+// memories from v1.17.0 must rank exactly the same regardless of whether
+// the query carries a wing. Violating this would silently degrade results
+// for every user who hasn't yet started classifying their memories.
+//
+// When opts.QueryWing == "", this function is byte-identical to the
+// pre-Sprint-2 HybridSearch — no JOIN against files.wing, no multiplier
+// arithmetic, no per-result Wing field population.
+func (s *SQLiteStore) HybridSearchWithOpts(ctx context.Context, query string, opts HybridSearchOptions) ([]SearchResult, error) {
+	maxResults := opts.MaxResults
 	if maxResults <= 0 {
 		maxResults = 6
 	}
+	minScore := opts.MinScore
 	if minScore <= 0 {
 		minScore = 0.1
 	}
+	vectorWeight := opts.VectorWeight
 	if vectorWeight <= 0 {
 		vectorWeight = 0.7
 	}
+	bm25Weight := opts.BM25Weight
 	if bm25Weight <= 0 {
 		bm25Weight = 0.3
+	}
+
+	wingAware := opts.QueryWing != ""
+	matchBoost := opts.WingBoostMatch
+	if matchBoost == 0 {
+		matchBoost = defaultWingBoostMatch
+	}
+	penaltyBoost := opts.WingBoostPenalty
+	if penaltyBoost == 0 {
+		penaltyBoost = defaultWingBoostPenalty
 	}
 
 	// Run both searches in parallel.
@@ -527,19 +812,39 @@ func (s *SQLiteStore) HybridSearch(ctx context.Context, query string, maxResults
 	bm25Ch := make(chan searchResult, 1)
 
 	go func() {
-		results, err := s.SearchVector(ctx, query, maxResults*4)
+		var (
+			results []SearchResult
+			err     error
+		)
+		if wingAware {
+			results, err = s.searchVectorWithWing(ctx, query, maxResults*4)
+		} else {
+			results, err = s.SearchVector(ctx, query, maxResults*4)
+		}
 		vecCh <- searchResult{results, err}
 	}()
 
 	go func() {
-		results, err := s.SearchBM25(query, maxResults*4)
+		var (
+			results []SearchResult
+			err     error
+		)
+		if wingAware {
+			results, err = s.searchBM25WithWing(query, maxResults*4)
+		} else {
+			results, err = s.SearchBM25(query, maxResults*4)
+		}
 		bm25Ch <- searchResult{results, err}
 	}()
 
 	vecResult := <-vecCh
 	bm25Result := <-bm25Ch
 
-	// Merge results using Reciprocal Rank Fusion (RRF).
+	// Merge results using the weighted-inverse-rank fusion formula
+	// (weight * 1/(rank+1)). This is DevClaw's existing fusion — see the
+	// HybridSearchWithOpts godoc for the rationale on not migrating to
+	// standard RRF k=60.
+	//
 	// Use a hash of the full text as merge key to avoid collisions between
 	// different chunks from the same file that share a common prefix.
 	scoreMap := make(map[string]*SearchResult) // key = sha256(fileID + text)
@@ -549,11 +854,19 @@ func (s *SQLiteStore) HybridSearch(ctx context.Context, query string, maxResults
 			key := hashText(r.FileID + "|" + r.Text)
 			if existing, ok := scoreMap[key]; ok {
 				existing.Score += weight * (1.0 / float64(i+1))
+				// Wing should be stable across both branches because both
+				// the FTS and vector paths read it from the same files row,
+				// but defensively prefer a non-empty value if one branch
+				// happened to miss it (shouldn't occur with the JOIN paths).
+				if existing.Wing == "" && r.Wing != "" {
+					existing.Wing = r.Wing
+				}
 			} else {
 				scoreMap[key] = &SearchResult{
 					FileID: r.FileID,
 					Text:   r.Text,
 					Score:  weight * (1.0 / float64(i+1)),
+					Wing:   r.Wing,
 				}
 			}
 		}
@@ -564,6 +877,16 @@ func (s *SQLiteStore) HybridSearch(ctx context.Context, query string, maxResults
 	}
 	if bm25Result.err == nil {
 		mergeResults(bm25Result.results, bm25Weight)
+	}
+
+	// Apply wing multiplier to the fused score, when wing-aware mode is on.
+	// This is the only behavioral difference vs. the legacy HybridSearch
+	// path — and it is gated entirely on wingAware so QueryWing="" callers
+	// observe identical numerics.
+	if wingAware {
+		for _, r := range scoreMap {
+			r.Score *= wingMultiplier(r.Wing, opts.QueryWing, matchBoost, penaltyBoost)
+		}
 	}
 
 	// Collect and sort by combined score.
@@ -583,6 +906,29 @@ func (s *SQLiteStore) HybridSearch(ctx context.Context, query string, maxResults
 	}
 
 	return merged, nil
+}
+
+// wingMultiplier returns the score multiplier for a candidate file given
+// the candidate's wing and the query's wing. The rules are:
+//
+//   - candidateWing == "" (legacy NULL) → 1.0 (ALWAYS neutral, never penalized)
+//   - queryWing == "" → 1.0 (caller should not call this in that case anyway)
+//   - candidateWing == queryWing → matchBoost
+//   - otherwise → penaltyBoost
+//
+// The candidateWing == "" rule is the Sprint 1 retrocompat contract and
+// MUST NOT be removed. Tested by TestHybridSearchWingNullNeutral.
+func wingMultiplier(candidateWing, queryWing string, matchBoost, penaltyBoost float64) float64 {
+	if candidateWing == "" {
+		return 1.0
+	}
+	if queryWing == "" {
+		return 1.0
+	}
+	if candidateWing == queryWing {
+		return matchBoost
+	}
+	return penaltyBoost
 }
 
 // TemporalDecayConfig configures exponential score decay based on memory age.
@@ -747,9 +1093,40 @@ func jaccardSimilarity(a, b map[string]bool) float64 {
 	return float64(intersection) / float64(union)
 }
 
-// HybridSearchWithOptions performs hybrid search with optional temporal decay and MMR.
+// HybridSearchWithOptions performs hybrid search with optional temporal
+// decay and MMR. This signature is preserved verbatim for backward
+// compatibility with v1.17.0 callers; it delegates to HybridSearchWithOpts
+// with QueryWing="" to take the wing-unaware fast path.
+//
+// Sprint 2 callers that need wing-aware fusion should use
+// HybridSearchWithOptsAndPostFilters or HybridSearchWithOpts directly.
 func (s *SQLiteStore) HybridSearchWithOptions(ctx context.Context, query string, maxResults int, minScore float64, vectorWeight, bm25Weight float64, decayCfg TemporalDecayConfig, mmrCfg MMRConfig) ([]SearchResult, error) {
-	results, err := s.HybridSearch(ctx, query, maxResults*2, minScore, vectorWeight, bm25Weight)
+	return s.HybridSearchWithOptsAndPostFilters(ctx, query, HybridSearchOptions{
+		MaxResults:   maxResults,
+		MinScore:     minScore,
+		VectorWeight: vectorWeight,
+		BM25Weight:   bm25Weight,
+	}, decayCfg, mmrCfg)
+}
+
+// HybridSearchWithOptsAndPostFilters runs HybridSearchWithOpts and then
+// applies the temporal-decay and MMR post-filters. It is the wing-aware
+// equivalent of HybridSearchWithOptions and is the entry point used by
+// memory_search and prompt_layers when wing routing is active.
+//
+// The retrocompat contract is the same as HybridSearchWithOpts: passing
+// opts.QueryWing == "" produces results that are byte-identical to the
+// legacy HybridSearchWithOptions for the same numeric inputs.
+func (s *SQLiteStore) HybridSearchWithOptsAndPostFilters(ctx context.Context, query string, opts HybridSearchOptions, decayCfg TemporalDecayConfig, mmrCfg MMRConfig) ([]SearchResult, error) {
+	maxResults := opts.MaxResults
+	if maxResults <= 0 {
+		maxResults = 6
+	}
+	// Pre-fetch 2x the requested count so post-filters have headroom.
+	innerOpts := opts
+	innerOpts.MaxResults = maxResults * 2
+
+	results, err := s.HybridSearchWithOpts(ctx, query, innerOpts)
 	if err != nil {
 		return nil, err
 	}

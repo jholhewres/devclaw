@@ -79,11 +79,15 @@ func RegisterMemoryTools(executor *ToolExecutor, cfg MemoryDispatcherConfig) {
 						"type":        "integer",
 						"description": "Maximum results to return (default: 10, max: 100)",
 					},
+					"wing": map[string]any{
+						"type":        "string",
+						"description": "Optional palace wing to bias the search toward. Files in this wing rank higher; files in other wings are demoted. Files with no wing (legacy) are unaffected. If omitted, falls back to session context routing; leave empty for legacy behavior.",
+					},
 				},
 				"required": []string{"query"},
 			}),
 		func(ctx context.Context, args map[string]any) (any, error) {
-			return handleMemorySearch(ctx, store, sqliteStore, memCfg, args)
+			return handleMemorySearch(ctx, store, sqliteStore, memCfg, router, args)
 		},
 	)
 
@@ -202,7 +206,17 @@ func handleMemorySave(ctx context.Context, store *memory.FileStore, sqliteStore 
 }
 
 // handleMemorySearch searches long-term memory.
-func handleMemorySearch(ctx context.Context, store *memory.FileStore, sqliteStore *memory.SQLiteStore, cfg MemoryConfig, args map[string]any) (any, error) {
+//
+// Sprint 2 Room 2.0c: when hierarchy is enabled, the query wing is resolved
+// from args["wing"] (explicit LLM override) → ContextRouter via ctx delivery
+// target → empty (legacy). The resolved wing is passed into
+// HybridSearchWithOptsAndPostFilters as opts.QueryWing, which biases the
+// fusion score so that wing-matching files rank higher and wing-mismatched
+// files are demoted. Files with wing IS NULL stay neutral.
+//
+// When the hierarchy is disabled, QueryWing is left empty so the search
+// takes the byte-identical legacy code path.
+func handleMemorySearch(ctx context.Context, store *memory.FileStore, sqliteStore *memory.SQLiteStore, cfg MemoryConfig, router *ContextRouter, args map[string]any) (any, error) {
 	query, _ := args["query"].(string)
 	if query == "" {
 		return nil, fmt.Errorf("query is required")
@@ -228,10 +242,31 @@ func handleMemorySearch(ctx context.Context, store *memory.FileStore, sqliteStor
 			Lambda:  cfg.Search.MMR.Lambda,
 		}
 
-		results, err := sqliteStore.HybridSearchWithOptions(
-			ctx, query, limit, cfg.Search.MinScore,
-			cfg.Search.HybridWeightVector, cfg.Search.HybridWeightBM25,
-			decayCfg, mmrCfg,
+		// Resolve the query wing for fusion biasing. The priority mirrors
+		// handleMemorySave's wing assignment logic so saves and searches
+		// converge on the same wing for the same session context.
+		var queryWing string
+		if cfg.Hierarchy.Enabled {
+			wingArg, _ := args["wing"].(string)
+			queryWing = memory.NormalizeWing(wingArg)
+			if queryWing == "" && router != nil {
+				dt := DeliveryTargetFromContext(ctx)
+				res := router.Resolve(ctx, dt.Channel, dt.ChatID, query)
+				queryWing = res.Wing // already normalized by router
+			}
+		}
+
+		opts := memory.HybridSearchOptions{
+			MaxResults:       limit,
+			MinScore:         cfg.Search.MinScore,
+			VectorWeight:     cfg.Search.HybridWeightVector,
+			BM25Weight:       cfg.Search.HybridWeightBM25,
+			QueryWing:        queryWing,
+			WingBoostMatch:   cfg.Hierarchy.WingBoostMatch,
+			WingBoostPenalty: cfg.Hierarchy.WingBoostPenalty,
+		}
+		results, err := sqliteStore.HybridSearchWithOptsAndPostFilters(
+			ctx, query, opts, decayCfg, mmrCfg,
 		)
 		if err == nil && len(results) > 0 {
 			var sb strings.Builder
