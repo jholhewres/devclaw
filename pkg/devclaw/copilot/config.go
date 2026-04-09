@@ -767,6 +767,13 @@ type MemoryConfig struct {
 
 	// SessionMemory configures automatic session summarization.
 	SessionMemory SessionMemoryConfig `yaml:"session_memory"`
+
+	// Hierarchy configures the palace-aware memory subsystem (Sprint 1,
+	// v1.18.0). Defaults to Enabled=true: wing IS NULL is treated as a
+	// first-class neutral citizen, so existing v1.17.0 databases keep
+	// working byte-identically while new memories get routed through
+	// wings/rooms. See HierarchyConfig in memory_hierarchy_config.go.
+	Hierarchy HierarchyConfig `yaml:"hierarchy"`
 }
 
 // SearchConfig configures hybrid search behavior.
@@ -974,6 +981,7 @@ func DefaultConfig() *Config {
 				Enabled:  false,
 				Messages: 15,
 			},
+			Hierarchy: DefaultHierarchyConfig(),
 		},
 		Security: SecurityConfig{
 			MaxInputLength:      4096,

@@ -149,6 +149,16 @@ func (s *SQLiteStore) initSchema() error {
 		s.ftsAvailable = true
 	}
 
+	// Sprint 1 (v1.18.0) palace-aware schema additions.
+	// Additive and idempotent — safe for retrocompat (see sqlite_hierarchy.go).
+	// Failures are logged but not fatal; the core memory subsystem remains
+	// operational even if the hierarchy schema cannot be created.
+	if err := InitHierarchySchema(s.db, s.logger); err != nil {
+		slog.Warn("failed to initialize palace hierarchy schema", "error", err)
+		// Non-fatal: the core memory system continues to work with
+		// legacy (wing=NULL) behavior.
+	}
+
 	return nil
 }
 
