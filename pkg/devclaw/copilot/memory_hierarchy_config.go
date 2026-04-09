@@ -245,22 +245,22 @@ type HierarchyMetrics struct {
 	// ToolCallsByName is incremented by the palace tool handlers with the
 	// tool name as a label. Sprint 1 exposes the count via EmitSnapshot.
 	// Using a fixed set of counters avoids the need for a map in hot paths.
-	ListWingsCalls    uint64
-	ListRoomsCalls    uint64
-	GetTaxonomyCalls  uint64
-	WingPinCalls      uint64
-	WingUnpinCalls    uint64
-	WingStatusCalls   uint64
+	ListWingsCalls   uint64
+	ListRoomsCalls   uint64
+	GetTaxonomyCalls uint64
+	WingPinCalls     uint64
+	WingUnpinCalls   uint64
+	WingStatusCalls  uint64
 
 	// Phase C (Sprint 2 Room 2.5) metrics.
 	// See memory_stack.go for the stack-side counter writes and
 	// layer_essential.go / legacy_classifier.go for the cache and
 	// classifier pass writers.
-	layerTokensL0    atomic.Int64 // bytes rendered by L0 identity
-	layerTokensL1    atomic.Int64 // bytes rendered by L1 essential
-	layerTokensL2    atomic.Int64 // bytes rendered by L2 on-demand
-	l1CacheHitTotal  atomic.Int64
-	l1CacheMissTotal atomic.Int64
+	layerTokensL0       atomic.Int64 // bytes rendered by L0 identity
+	layerTokensL1       atomic.Int64 // bytes rendered by L1 essential
+	layerTokensL2       atomic.Int64 // bytes rendered by L2 on-demand
+	l1CacheHitTotal     atomic.Int64
+	l1CacheMissTotal    atomic.Int64
 	classifierPassTotal atomic.Int64 // count of dream classifier phases run
 	saveWingRoutedTotal atomic.Int64 // count of memory_save calls that routed a wing
 }
@@ -272,7 +272,7 @@ var globalMetrics = &HierarchyMetrics{}
 
 // Global returns the process-wide metrics instance. Prefer the Inc*
 // helpers for single-counter updates.
-func (HierarchyMetrics) Global() *HierarchyMetrics {
+func (m *HierarchyMetrics) Global() *HierarchyMetrics {
 	return globalMetrics
 }
 

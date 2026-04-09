@@ -12,10 +12,8 @@ package memory
 import (
 	"log/slog"
 	"os"
-	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -25,9 +23,6 @@ import (
 // budget from HierarchyConfig. Until then, 800 bytes ≈ 200 tokens is a
 // safe ceiling that fits any reasonable identity blurb.
 const defaultIdentityBudget = 800
-
-// pollInterval is how often the fallback poller checks for file changes.
-const pollInterval = 30 * time.Second
 
 // IdentityLayer loads a user-curated identity fragment from disk and
 // caches it in memory. Hot-reloads on file change via fsnotify, with a
@@ -55,6 +50,10 @@ type IdentityLayer struct {
 
 	// started guards against double-Start.
 	started bool
+
+	// pollInterval is how often the fallback poller checks for file changes.
+	// Defaults to 30s; writable by tests to speed up polling.
+	pollInterval time.Duration
 }
 
 // NewIdentityLayer constructs a new IdentityLayer. The path is the
@@ -71,10 +70,11 @@ func NewIdentityLayer(path string, logger *slog.Logger, budget int) *IdentityLay
 		budget = defaultIdentityBudget
 	}
 	return &IdentityLayer{
-		path:     path,
-		logger:   logger,
-		budget:   budget,
-		pollDone: make(chan struct{}),
+		path:         path,
+		logger:       logger,
+		budget:       budget,
+		pollDone:     make(chan struct{}),
+		pollInterval: 30 * time.Second,
 	}
 }
 
@@ -220,7 +220,7 @@ func (l *IdentityLayer) watchLoop(watcher *fsnotify.Watcher) {
 // pollLoop runs in a goroutine when fsnotify is unavailable. It checks
 // the file's ModTime every 30 seconds and reloads if it has changed.
 func (l *IdentityLayer) pollLoop() {
-	ticker := time.NewTicker(pollInterval)
+	ticker := time.NewTicker(l.pollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -246,37 +246,4 @@ func (l *IdentityLayer) pollLoop() {
 			}
 		}
 	}
-}
-
-// truncateAtBoundary truncates s to at most maxBytes, ending at a clean
-// word boundary (space or newline) when possible. If the cut point falls
-// inside a word, the truncation is moved back to the previous boundary.
-// Multi-byte UTF-8 sequences are never split.
-func truncateAtBoundary(s string, maxBytes int) string {
-	if maxBytes <= 0 || len(s) <= maxBytes {
-		return s
-	}
-
-	// Walk back from the byte limit to find a valid UTF-8 rune boundary.
-	cut := maxBytes
-	for cut > 0 && !utf8.RuneStart(s[cut]) {
-		cut--
-	}
-
-	// Walk back further to find a word boundary (space or newline).
-	boundary := cut
-	for boundary > 0 {
-		c := s[boundary-1]
-		if c == ' ' || c == '\n' || c == '\t' || c == '\r' {
-			break
-		}
-		boundary--
-	}
-
-	// If we found a word boundary, prefer it. Otherwise use the rune boundary.
-	if boundary > 0 {
-		// Include the trailing whitespace character for clean output.
-		return strings.TrimRight(s[:boundary], " \t\r\n")
-	}
-	return s[:cut]
 }
