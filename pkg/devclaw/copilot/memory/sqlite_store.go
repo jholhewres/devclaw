@@ -174,6 +174,11 @@ func (s *SQLiteStore) initSchema() error {
 		slog.Warn("failed to migrate essential_stories cache", "error", err)
 	}
 
+	// Sprint 3 Room 3.1 — KG bitemporal schema.
+	if err := MigrateKgSchema(s.db, s.logger); err != nil {
+		slog.Warn("failed to migrate kg schema", "error", err)
+	}
+
 	return nil
 }
 
