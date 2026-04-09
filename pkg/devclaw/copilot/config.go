@@ -774,6 +774,12 @@ type MemoryConfig struct {
 	// working byte-identically while new memories get routed through
 	// wings/rooms. See HierarchyConfig in memory_hierarchy_config.go.
 	Hierarchy HierarchyConfig `yaml:"hierarchy"`
+
+	// Dream configures the background memory consolidation system (v1.17.0,
+	// now wired in v1.18.0). Defaults to Enabled=true so out-of-the-box
+	// installs get idle-cycle consolidation as the release notes promised.
+	// Existing YAML without a dream: block inherits defaults (retrocompat).
+	Dream DreamConfig `yaml:"dream"`
 }
 
 // SearchConfig configures hybrid search behavior.
@@ -982,6 +988,7 @@ func DefaultConfig() *Config {
 				Messages: 15,
 			},
 			Hierarchy: DefaultHierarchyConfig(),
+			Dream:     DefaultDreamConfig(),
 		},
 		Security: SecurityConfig{
 			MaxInputLength:      4096,

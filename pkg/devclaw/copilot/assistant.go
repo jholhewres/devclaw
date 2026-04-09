@@ -194,6 +194,12 @@ type Assistant struct {
 	// memoryIndexer performs background memory indexing.
 	memoryIndexer *MemoryIndexer
 
+	// dream is the background memory consolidation system. It runs when
+	// the daemon is idle and consolidates accumulated memories. Started
+	// in Assistant.Start(), stopped in Assistant.Stop(). May be nil if
+	// config.Memory.Dream.Enabled is false.
+	dream *DreamConsolidator
+
 	// mediaSvc provides native media handling (upload, enrich, send).
 	mediaSvc *media.MediaService
 
@@ -513,6 +519,23 @@ func (a *Assistant) Start(ctx context.Context) error {
 	if a.sqliteMemory != nil {
 		a.promptComposer.SetSQLiteMemory(a.sqliteMemory)
 	}
+
+	// 0c. Initialize the dream consolidation system (background idle loop).
+	// Both memoryStore and sqliteMemory are fully initialized above, so the
+	// dream system can safely reference both. The stateDir is derived from
+	// the same data directory used by all other background components.
+	if a.memoryStore != nil && a.config.Memory.Dream.Enabled {
+		dreamStateDir := filepath.Join(filepath.Dir(a.config.Memory.Path), "dream")
+		dc := NewDreamConsolidator(a.config.Memory.Dream, a.memoryStore, dreamStateDir, a.logger).
+			WithHierarchyConfig(a.config.Memory.Hierarchy)
+		if a.sqliteMemory != nil {
+			dc = dc.WithSQLiteStore(a.sqliteMemory)
+		}
+		a.dream = dc
+		a.dream.Start(ctx)
+		a.logger.Info("dream system started", "state_dir", dreamStateDir)
+	}
+
 	a.promptComposer.SetSkillGetter(func(name string) (interface{ SystemPrompt() string }, bool) {
 		skill, ok := a.skillRegistry.Get(name)
 		if !ok {
@@ -1023,6 +1046,12 @@ func (a *Assistant) Stop() {
 	// Shut down MCP server connections.
 	if a.mcpBridge != nil {
 		a.mcpBridge.Shutdown()
+	}
+
+	// Stop dream consolidation system before closing memory stores.
+	if a.dream != nil {
+		a.dream.Stop()
+		a.logger.Info("dream system stopped")
 	}
 
 	// Close SQLite memory store.
