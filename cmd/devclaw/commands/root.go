@@ -46,6 +46,7 @@ Examples:
 		newHooksCmd(),
 		newPluginCmd(),
 		newTLSCmd(),
+		newIdentityCmd(),
 	)
 
 	// Flags globais.
