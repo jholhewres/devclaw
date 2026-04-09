@@ -206,6 +206,18 @@ type Assistant struct {
 	// uses sync.Map internally and never returns errors.
 	contextRouter *ContextRouter
 
+	// memoryStack is the Sprint 2 Room 2.4 layered memory composer
+	// (L0 IdentityLayer + L1 EssentialLayer + L2 OnDemandLayer). Built in
+	// Start() after sqliteMemory and contextRouter are ready. Nil when
+	// hierarchy is disabled or sqliteMemory is nil. The composer reads
+	// its telemetry via Stats().
+	memoryStack *MemoryStack
+
+	// identityLayer is the L0 file-backed identity layer owned by the
+	// memory stack. Stored on the Assistant so Stop() can shut down the
+	// filesystem watcher / polling goroutine before sqliteMemory.Close().
+	identityLayer *memory.IdentityLayer
+
 	// mediaSvc provides native media handling (upload, enrich, send).
 	mediaSvc *media.MediaService
 
@@ -551,6 +563,53 @@ func (a *Assistant) Start(ctx context.Context) error {
 		a.contextRouter = NewContextRouter(a.sqliteMemory, a.logger, a.config.Memory.Hierarchy)
 		a.logger.Info("context router initialized",
 			"hierarchy_enabled", a.config.Memory.Hierarchy.Enabled,
+		)
+		a.promptComposer.SetContextRouter(a.contextRouter)
+	}
+
+	// 0e. Build the Sprint 2 Room 2.4 layered memory stack and wire it
+	// into the prompt composer. When hierarchy is disabled or sqliteMemory
+	// is nil, we skip this entirely and the prompt composer falls back to
+	// v1.18.0 byte-identical behavior (retrocompat gate verified by
+	// prompt_layers_golden_test.go).
+	if a.config.Memory.Hierarchy.Enabled && a.sqliteMemory != nil {
+		identityPath := a.config.Memory.Hierarchy.IdentityPath
+		if identityPath == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				identityPath = filepath.Join(home, ".devclaw", "identity.md")
+			}
+		}
+		identityLayer := memory.NewIdentityLayer(identityPath, a.logger, 0)
+		if startErr := identityLayer.Start(); startErr != nil {
+			// Non-fatal: a missing identity file is the common case for
+			// fresh installs. The layer still renders an empty string.
+			a.logger.Warn("identity layer start returned error", "err", startErr)
+		}
+
+		essentialCfg := memory.EssentialLayerConfig{
+			// L1Budget is expressed in tokens; convert to bytes at the
+			// standard 1 token ≈ 4 bytes approximation.
+			ByteBudget:           a.config.Memory.Hierarchy.L1Budget * 4,
+			StaleAfter:           a.config.Memory.Hierarchy.EssentialStoryStaleAfter,
+			RoomsPerWing:         a.config.Memory.Hierarchy.EssentialStoryRoomsPerWing,
+			LeadSentencesPerRoom: 3,
+		}
+		essentialLayer := memory.NewEssentialLayer(a.sqliteMemory, essentialCfg, a.logger)
+
+		entityDetector := memory.NewEntityDetector(a.sqliteMemory, memory.DefaultEntityDetectorConfig(), a.logger)
+		onDemandCfg := memory.DefaultOnDemandLayerConfig()
+		onDemandCfg.MaxResults = a.config.Memory.Hierarchy.OnDemandMaxResults
+		onDemandCfg.CrossWingEnabled = a.config.Memory.Hierarchy.OnDemandCrossWingEnabled
+		onDemandLayer := memory.NewOnDemandLayer(a.sqliteMemory, entityDetector, onDemandCfg, a.logger)
+
+		stack := NewMemoryStack(identityLayer, essentialLayer, onDemandLayer, DefaultStackConfig(), a.logger)
+		a.promptComposer.SetMemoryStack(stack)
+		a.memoryStack = stack
+		a.identityLayer = identityLayer
+		a.logger.Info("memory stack initialized",
+			"identity_path", identityPath,
+			"l1_bytes", essentialCfg.ByteBudget,
+			"l2_max_results", onDemandCfg.MaxResults,
 		)
 	}
 
@@ -1070,6 +1129,15 @@ func (a *Assistant) Stop() {
 	if a.dream != nil {
 		a.dream.Stop()
 		a.logger.Info("dream system stopped")
+	}
+
+	// Stop the L0 identity layer before closing sqliteMemory. The
+	// identity layer owns a filesystem watcher / polling goroutine; it
+	// does not touch the DB, but we stop it here for symmetry with the
+	// dream system and to keep all stack-component shutdown ordered
+	// before the store close (Sprint 2 Room 2.4).
+	if a.identityLayer != nil {
+		a.identityLayer.Stop()
 	}
 
 	// Close SQLite memory store.
