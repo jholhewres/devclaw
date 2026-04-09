@@ -73,12 +73,23 @@ type DreamResult struct {
 	Error            error         `json:"-"`
 }
 
+// dreamClassifierBatchSize is the number of legacy files the classifier
+// pass inspects per dream cycle. Bounded to prevent a single pass from
+// hogging the DB. Configurable in Sprint 3.
+const dreamClassifierBatchSize = 20
+
 // DreamConsolidator manages background memory consolidation.
 type DreamConsolidator struct {
 	config   DreamConfig
 	store    memory.Store
 	stateDir string
 	logger   *slog.Logger
+
+	// sqliteStore is optional. When set (via WithSQLiteStore), the dream
+	// cycle runs the legacy classifier phase. When nil, the phase is a no-op.
+	sqliteStore *memory.SQLiteStore
+	// hierarchyCfg gates the classifier phase. Zero value = disabled.
+	hierarchyCfg HierarchyConfig
 
 	state DreamState
 	mu    sync.Mutex
@@ -87,6 +98,21 @@ type DreamConsolidator struct {
 	stopCh chan struct{}
 	// done is closed when the background goroutine exits.
 	done chan struct{}
+}
+
+// WithSQLiteStore wires an optional *SQLiteStore into the consolidator so
+// the classifier phase can run during dream cycles. Keeps the memory.Store
+// interface unbroken (Option A).
+func (d *DreamConsolidator) WithSQLiteStore(s *memory.SQLiteStore) *DreamConsolidator {
+	d.sqliteStore = s
+	return d
+}
+
+// WithHierarchyConfig provides the hierarchy feature flag and keyword map
+// needed to gate and drive the legacy classifier phase.
+func (d *DreamConsolidator) WithHierarchyConfig(cfg HierarchyConfig) *DreamConsolidator {
+	d.hierarchyCfg = cfg
+	return d
 }
 
 // NewDreamConsolidator creates a new dream consolidator.
@@ -305,12 +331,44 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 
 	result.Consolidated = consolidated
 
+	// Phase 3b: Classify — opportunistically label legacy files (wing IS NULL).
+	// Error-isolated: a classifier panic or error MUST NOT abort the dream cycle.
+	d.runClassifierPhase(ctx)
+
 	// Phase 4: Apply — record results and update state.
 	d.logger.Info("dream phase: apply", "consolidated", consolidated)
 	d.recordResult("success")
 
 	result.Duration = time.Since(start)
 	return result
+}
+
+// runClassifierPhase runs the legacy classifier pass during a dream cycle.
+// It is fully error-isolated: any panic or error is logged and swallowed so
+// the rest of the dream cycle continues unaffected.
+func (d *DreamConsolidator) runClassifierPhase(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			d.logger.Warn("legacy classifier phase panicked — isolated from dream cycle", "panic", r)
+		}
+	}()
+
+	if !d.hierarchyCfg.Enabled || d.sqliteStore == nil {
+		return
+	}
+
+	passCfg := memory.LegacyClassificationConfig{
+		BatchSize: dreamClassifierBatchSize,
+		Keywords:  d.hierarchyCfg.LegacyKeywords,
+	}
+	stats, err := d.sqliteStore.RunLegacyClassificationPass(ctx, passCfg)
+	if err != nil {
+		d.logger.Warn("legacy classifier phase error — continuing dream cycle", "error", err)
+		return
+	}
+	if stats.Classified > 0 {
+		d.logger.Info("legacy classifier classified files", "count", stats.Classified)
+	}
 }
 
 // State returns the current dream state (for observability).
