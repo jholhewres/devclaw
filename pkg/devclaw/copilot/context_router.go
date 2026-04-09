@@ -337,8 +337,10 @@ func (r *ContextRouter) resolveByUserHeuristic(hint string) (string, float64, bo
 	}
 
 	// Normalize the hint: lowercase then strip common Latin accents so that
-	// user-configured keywords match accented variants in the hint.
-	hintNorm := routerStripAccents(strings.ToLower(hint))
+	// user-configured keywords match accented variants in the hint. Reuses
+	// memory.StripAccents to keep normalization rules in a single source of
+	// truth (Mn-combining-mark skip + replacement table).
+	hintNorm := memory.StripAccents(strings.ToLower(hint))
 
 	for _, h := range r.cfg.Heuristics {
 		wing := memory.NormalizeWing(h.Wing)
@@ -359,27 +361,3 @@ func (r *ContextRouter) resolveByUserHeuristic(hint string) (string, float64, bo
 	return "", 0, false
 }
 
-// routerStripAccents replaces common accented Latin characters with their
-// ASCII base equivalents. Mirrors the logic in memory.stripAccents (which is
-// unexported) so the router does not need to reach into the memory package's
-// internals.
-func routerStripAccents(s string) string {
-	var replacements = map[rune]rune{
-		'á': 'a', 'à': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a',
-		'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
-		'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
-		'ó': 'o', 'ò': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o', 'ø': 'o',
-		'ú': 'u', 'ù': 'u', 'û': 'u', 'ü': 'u',
-		'ç': 'c', 'ñ': 'n', 'ý': 'y', 'ÿ': 'y',
-	}
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		if rep, ok := replacements[r]; ok {
-			b.WriteRune(rep)
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}

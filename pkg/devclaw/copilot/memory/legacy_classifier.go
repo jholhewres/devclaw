@@ -105,7 +105,7 @@ func ClassifyLegacyContent(content string, keywords map[string][]string) Classif
 			// content so that accented and non-accented variants match
 			// each other (accent-stripped keywords match accent-stripped content).
 			kwNorm := strings.ToLower(strings.TrimSpace(kw))
-			kwNorm = stripAccents(kwNorm)
+			kwNorm = StripAccents(kwNorm)
 			if kwNorm == "" {
 				continue
 			}
@@ -183,7 +183,7 @@ func ClassifyLegacyContent(content string, keywords map[string][]string) Classif
 // Does NOT tokenize — keywords can span multiple words.
 func normalizeForMatching(s string) string {
 	s = strings.ToLower(s)
-	s = stripAccents(s)
+	s = StripAccents(s)
 
 	// Replace non-alphanumeric with spaces for word-boundary matching.
 	var b strings.Builder

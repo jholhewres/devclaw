@@ -251,34 +251,54 @@ func TestContextRouter_ConcurrentBurst(t *testing.T) {
 // heuristic tier fires when a hint matches a user-configured WingHeuristic,
 // and falls through to SourceDefault when no keywords are configured.
 func TestContextRouter_UserHeuristicMatchesConfiguredKeywords(t *testing.T) {
+	// Test fixtures intentionally use generic domain vocabulary — these
+	// strings are NOT shipped in the binary. Accented variant ("reuniao")
+	// is kept unaccented in the config to prove StripAccents normalizes
+	// accented hints ("reunião") to match it.
 	r := newTestRouterWithHeuristics(t, []WingHeuristic{
-		{Wing: "family", MatchChannelName: []string{"family", "home"}},
-		{Wing: "work", MatchGroupName: []string{"office", "team"}},
+		{Wing: "alpha", MatchChannelName: []string{"alpha-chat", "hq"}},
+		{Wing: "beta", MatchGroupName: []string{"beta-team", "reuniao"}},
 	})
 	ctx := context.Background()
 
 	cases := []struct {
+		name       string
 		channel    string
 		externalID string
 		hint       string
 		wantWing   string
 		wantSource WingResolutionSource
+		wantConf   float64
 	}{
-		{"telegram", "g1", "family group chat", "family", SourceHeuristic},
-		{"telegram", "g2", "home planning", "family", SourceHeuristic},
-		{"telegram", "g3", "office updates", "work", SourceHeuristic},
-		{"telegram", "g4", "random topic", "", SourceDefault},
-		{"telegram", "g5", "", "", SourceDefault}, // empty hint → no heuristic
+		{"channel_match", "telegram", "g1", "alpha-chat group", "alpha", SourceHeuristic, userHeuristicConfidence},
+		{"channel_secondary", "telegram", "g2", "hq planning", "alpha", SourceHeuristic, userHeuristicConfidence},
+		{"group_match", "telegram", "g3", "beta-team updates", "beta", SourceHeuristic, userHeuristicConfidence},
+		// Accented hint must match unaccented keyword via StripAccents.
+		// "reunião" (NFC) → "reuniao" after normalization → matches "reuniao".
+		{"accented_hint_nfc", "telegram", "g4", "reunião semanal", "beta", SourceHeuristic, userHeuristicConfidence},
+		// NFD-decomposed form (combining tilde) must also match — this is
+		// the Unicode Mn code path that a router-local stripper would miss.
+		{"accented_hint_nfd", "telegram", "g5", "reunia\u0303o daily", "beta", SourceHeuristic, userHeuristicConfidence},
+		{"no_match", "telegram", "g6", "random topic", "", SourceDefault, 0},
+		{"empty_hint", "telegram", "g7", "", "", SourceDefault, 0},
 	}
 
 	for _, tc := range cases {
-		res := r.Resolve(ctx, tc.channel, tc.externalID, tc.hint)
-		if res.Wing != tc.wantWing {
-			t.Errorf("hint=%q: expected wing=%q, got %q", tc.hint, tc.wantWing, res.Wing)
-		}
-		if res.Source != tc.wantSource {
-			t.Errorf("hint=%q: expected source=%v, got %v", tc.hint, tc.wantSource, res.Source)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			res := r.Resolve(ctx, tc.channel, tc.externalID, tc.hint)
+			if res.Wing != tc.wantWing {
+				t.Errorf("hint=%q: expected wing=%q, got %q", tc.hint, tc.wantWing, res.Wing)
+			}
+			if res.Source != tc.wantSource {
+				t.Errorf("hint=%q: expected source=%v, got %v", tc.hint, tc.wantSource, res.Source)
+			}
+			// Pin the heuristic-tier confidence constant so a future
+			// change to userHeuristicConfidence trips CI instead of
+			// silently shifting downstream scoring.
+			if tc.wantSource == SourceHeuristic && res.Confidence != tc.wantConf {
+				t.Errorf("hint=%q: expected confidence=%v, got %v", tc.hint, tc.wantConf, res.Confidence)
+			}
+		})
 	}
 }
 

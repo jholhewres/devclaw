@@ -109,7 +109,7 @@ func normalizeIdentifier(input string, maxLen int) string {
 	}
 
 	s = strings.ToLower(s)
-	s = stripAccents(s)
+	s = StripAccents(s)
 
 	// Reject reserved prefix BEFORE separator conversion — we need to see
 	// literal underscores to detect "__system" and friends. The check is
@@ -157,12 +157,14 @@ func normalizeIdentifier(input string, maxLen int) string {
 	return s
 }
 
-// stripAccents removes combining diacritical marks from a string while
+// StripAccents removes combining diacritical marks from a string while
 // preserving the base characters. "família" → "familia", "coração" → "coracao".
 //
 // This is a zero-dependency implementation that handles the common Latin
 // diacritics sufficient for Portuguese, Spanish, French, and English.
-func stripAccents(s string) string {
+// Exported so the copilot package can reuse the exact same normalization
+// rules for router heuristics and avoid divergence bugs.
+func StripAccents(s string) string {
 	// Table of common accented lowercase Latin characters to their ASCII base.
 	// This is not exhaustive (e.g., CJK is untouched) but covers every
 	// accent used in the target languages for wing naming.
