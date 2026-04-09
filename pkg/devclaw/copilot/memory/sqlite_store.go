@@ -860,6 +860,15 @@ func (s *SQLiteStore) HybridSearchWithOpts(ctx context.Context, query string, op
 				// happened to miss it (shouldn't occur with the JOIN paths).
 				if existing.Wing == "" && r.Wing != "" {
 					existing.Wing = r.Wing
+				} else if existing.Wing != "" && r.Wing != "" && existing.Wing != r.Wing {
+					// Disagreement between FTS and vector paths — should be
+					// impossible since both JOIN the same files row. Log so
+					// we notice if a future refactor breaks the invariant.
+					slog.Warn("hybrid search wing disagreement between fts and vector paths",
+						"file_id", r.FileID,
+						"existing_wing", existing.Wing,
+						"new_wing", r.Wing,
+					)
 				}
 			} else {
 				scoreMap[key] = &SearchResult{
@@ -973,7 +982,7 @@ func (s *SQLiteStore) ApplyTemporalDecay(results []SearchResult, cfg TemporalDec
 // or "2026-02-25.md". Returns nil for evergreen files (MEMORY.md or non-dated).
 func extractDateFromFileID(fileID string) *time.Time {
 	// Evergreen files don't decay
-	if strings.Contains(fileID, "MEMORY.md") {
+	if strings.Contains(fileID, MemoryFileName) {
 		return nil
 	}
 

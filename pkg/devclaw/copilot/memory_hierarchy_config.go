@@ -100,11 +100,11 @@ type HierarchyConfig struct {
 	// document's wing matches the query's wing. Sprint 2 reads this.
 	// Default: 1.3. See doc-02-errata.md correction 3 — the value is
 	// relative to DevClaw's weighted inverse rank fusion, NOT standard RRF k=60.
-	WingBoostMatch float64 `yaml:"wing_boost_match"`
+	WingBoostMatch float64 `yaml:"wing_boost_match,omitempty"`
 
 	// WingBoostPenalty is the multiplier applied when a document's wing
 	// differs from the query's wing. Default: 0.4 (-60% penalty).
-	WingBoostPenalty float64 `yaml:"wing_boost_penalty"`
+	WingBoostPenalty float64 `yaml:"wing_boost_penalty,omitempty"`
 
 	// AutoRoomCap is the maximum number of auto-created rooms per wing.
 	// When exceeded, the least recently used auto-only rooms are archived.

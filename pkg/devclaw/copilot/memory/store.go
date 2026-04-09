@@ -18,6 +18,13 @@ import (
 	"time"
 )
 
+// MemoryFileName is the bare filename of the curated long-term facts file
+// that FileStore.Save writes to and IndexDirectory keys indexed chunks under.
+// Cross-package callers (e.g. copilot.handleMemorySave) MUST reference this
+// constant instead of hardcoding the literal so that a future rename cannot
+// silently break wing assignment, indexing, or decay filtering.
+const MemoryFileName = "MEMORY.md"
+
 // Entry represents a single memory fact or event.
 type Entry struct {
 	Content   string    `json:"content"`
@@ -72,7 +79,7 @@ func (fs *FileStore) Save(entry Entry) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
-	memFile := filepath.Join(fs.baseDir, "MEMORY.md")
+	memFile := filepath.Join(fs.baseDir, MemoryFileName)
 
 	// Format the entry as a markdown list item.
 	line := fmt.Sprintf("- [%s] [%s] %s\n",
@@ -167,7 +174,7 @@ func (fs *FileStore) GetAll() ([]Entry, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
-	memFile := filepath.Join(fs.baseDir, "MEMORY.md")
+	memFile := filepath.Join(fs.baseDir, MemoryFileName)
 	content, err := os.ReadFile(memFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -238,7 +245,7 @@ func (fs *FileStore) ListDailyLogs() ([]string, error) {
 	var dates []string
 	for _, e := range entries {
 		name := e.Name()
-		if strings.HasSuffix(name, ".md") && name != "MEMORY.md" {
+		if strings.HasSuffix(name, ".md") && name != MemoryFileName {
 			dates = append(dates, strings.TrimSuffix(name, ".md"))
 		}
 	}

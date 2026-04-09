@@ -117,6 +117,9 @@ func (d *DreamConsolidator) WithHierarchyConfig(cfg HierarchyConfig) *DreamConso
 
 // NewDreamConsolidator creates a new dream consolidator.
 func NewDreamConsolidator(config DreamConfig, store memory.Store, stateDir string, logger *slog.Logger) *DreamConsolidator {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	d := &DreamConsolidator{
 		config:   config,
 		store:    store,

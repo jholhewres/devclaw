@@ -189,12 +189,13 @@ func handleMemorySave(ctx context.Context, store *memory.FileStore, sqliteStore 
 		}
 
 		if wing != "" {
-			// FileStore.Save always writes to MEMORY.md; IndexDirectory keys it
-			// as the bare filename "MEMORY.md". That is the stable fileID to target.
-			if err := sqliteStore.AssignWingToFile(ctx, "MEMORY.md", wing); err != nil {
+			// FileStore.Save always writes to memory.MemoryFileName; IndexDirectory
+			// keys it as the bare filename. Reference the const so a future rename
+			// of the long-term facts file cannot silently break wing assignment.
+			if err := sqliteStore.AssignWingToFile(ctx, memory.MemoryFileName, wing); err != nil {
 				// Log but do NOT fail the save — wing is advisory, file is persisted.
 				slog.Warn("failed to assign wing to file after save",
-					"file_id", "MEMORY.md",
+					"file_id", memory.MemoryFileName,
 					"wing", wing,
 					"error", err,
 				)
