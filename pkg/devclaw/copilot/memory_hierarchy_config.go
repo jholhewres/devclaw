@@ -97,6 +97,15 @@ type HierarchyConfig struct {
 	// Sprint 2 reads this. Default: 300 tokens.
 	L2Budget int `yaml:"l2_budget_tokens"`
 
+	// OnDemandMaxResults caps how many memories the L2 OnDemandLayer returns
+	// per Render call. Default: 5.
+	OnDemandMaxResults int `yaml:"on_demand_max_results,omitempty"`
+
+	// OnDemandCrossWingEnabled controls whether the L2 OnDemandLayer may
+	// return memories from a wing other than the active wing when nothing is
+	// found in the active wing. Default: true.
+	OnDemandCrossWingEnabled bool `yaml:"on_demand_cross_wing,omitempty"`
+
 	// EssentialStoryStaleAfter is the TTL before the L1 EssentialLayer
 	// regenerates a cached per-wing story. Applies to the essential_stories
 	// SQLite cache introduced in Sprint 2 Room 2.2. Default: 6 hours.
@@ -190,6 +199,8 @@ func DefaultHierarchyConfig() HierarchyConfig {
 		DefaultWing:                "",   // empty = legacy wing=NULL
 		L1Budget:                   400,
 		L2Budget:                   300,
+		OnDemandMaxResults:         5,
+		OnDemandCrossWingEnabled:   true,
 		WingBoostMatch:             1.3,
 		WingBoostPenalty:           0.4,
 		AutoRoomCap:                30,
