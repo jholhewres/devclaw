@@ -780,6 +780,26 @@ type MemoryConfig struct {
 	// installs get idle-cycle consolidation as the release notes promised.
 	// Existing YAML without a dream: block inherits defaults (retrocompat).
 	Dream DreamConfig `yaml:"dream"`
+
+	// Stack configures the Sprint 2 layered memory stack (v1.19.0+).
+	// Default: MemoryStackConfig{} (stack enabled when hierarchy is on).
+	// Set force_legacy: true to bypass the stack entirely and fall back
+	// to v1.18.0 prompt composition. See docs/memory-system.md for details.
+	Stack MemoryStackConfig `yaml:"stack"`
+}
+
+// MemoryStackConfig configures the Sprint 2 layered memory stack
+// (MemoryStack — see memory_stack.go). The only knob exposed today is
+// force_legacy, which bypasses the stack entirely and falls back to the
+// v1.18.0 prompt composer behavior. Users who want the new layered memory
+// simply leave the block empty or omit it entirely.
+type MemoryStackConfig struct {
+	// ForceLegacy disables the MemoryStack and falls back to the
+	// pre-Sprint-2 buildMemoryLayer code path. Default: false.
+	// Use this as an emergency escape hatch if the layered stack causes
+	// unexpected behavior in production — no config migration or downgrade
+	// is required. Set memory.stack.force_legacy: true in devclaw.yaml.
+	ForceLegacy bool `yaml:"force_legacy,omitempty"`
 }
 
 // SearchConfig configures hybrid search behavior.
@@ -989,6 +1009,7 @@ func DefaultConfig() *Config {
 			},
 			Hierarchy: DefaultHierarchyConfig(),
 			Dream:     DefaultDreamConfig(),
+			Stack:     MemoryStackConfig{},
 		},
 		Security: SecurityConfig{
 			MaxInputLength:      4096,

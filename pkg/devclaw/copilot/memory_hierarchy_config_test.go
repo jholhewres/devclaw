@@ -10,6 +10,8 @@
 package copilot
 
 import (
+	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -90,6 +92,91 @@ func TestHierarchyDefaultHeuristicsAndKeywordsAreEmpty(t *testing.T) {
 	}
 	if len(cfg.LegacyKeywords) != 0 {
 		t.Errorf("DefaultHierarchyConfig().LegacyKeywords: expected empty, got len=%d", len(cfg.LegacyKeywords))
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sprint 2 Room 2.5 — MemoryStackConfig + Phase C metric tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestMemoryStackConfigDefaults verifies that DefaultConfig returns
+// ForceLegacy == false (stack active by default).
+func TestMemoryStackConfigDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Memory.Stack.ForceLegacy != false {
+		t.Errorf("DefaultConfig().Memory.Stack.ForceLegacy: expected false, got %v", cfg.Memory.Stack.ForceLegacy)
+	}
+}
+
+// TestMemoryStackConfigYAMLLoad verifies that memory.stack.force_legacy: true
+// in YAML is correctly parsed.
+func TestMemoryStackConfigYAMLLoad(t *testing.T) {
+	yamlData := `
+memory:
+  stack:
+    force_legacy: true
+`
+	cfg, err := ParseConfig([]byte(yamlData))
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if !cfg.Memory.Stack.ForceLegacy {
+		t.Errorf("ForceLegacy: expected true after YAML load, got false")
+	}
+}
+
+// TestMemoryStackConfigAbsentBlockDefaults verifies that a YAML without any
+// memory.stack block yields ForceLegacy == false (stack active).
+func TestMemoryStackConfigAbsentBlockDefaults(t *testing.T) {
+	yamlData := `
+memory:
+  type: sqlite
+`
+	cfg, err := ParseConfig([]byte(yamlData))
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+	if cfg.Memory.Stack.ForceLegacy {
+		t.Errorf("ForceLegacy: expected false when stack block absent, got true")
+	}
+}
+
+// TestEmitSnapshotIncludesSprintCTwoCounters verifies that all seven Phase C
+// Sprint 2 counters appear in the EmitSnapshot output after being incremented.
+func TestEmitSnapshotIncludesSprintCTwoCounters(t *testing.T) {
+	// Use a bytes.Buffer-backed slog handler to capture log output.
+	var buf strings.Builder
+	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})
+	logger := slog.New(handler)
+
+	// Snapshot the global counters before modification and restore after.
+	// We call the Inc* helpers and then read the snapshot from a fresh
+	// HierarchyMetrics instance to keep the test isolated from process-global
+	// state that other parallel tests may have accumulated.
+	var m HierarchyMetrics
+	m.layerTokensL0.Add(100)
+	m.layerTokensL1.Add(200)
+	m.layerTokensL2.Add(300)
+	m.l1CacheHitTotal.Add(5)
+	m.l1CacheMissTotal.Add(3)
+	m.classifierPassTotal.Add(1)
+	m.saveWingRoutedTotal.Add(7)
+
+	m.EmitSnapshot(logger)
+
+	got := buf.String()
+	for _, want := range []string{
+		"layer_tokens_l0",
+		"layer_tokens_l1",
+		"layer_tokens_l2",
+		"l1_cache_hit_total",
+		"l1_cache_miss_total",
+		"classifier_pass_total",
+		"save_wing_routed_total",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("EmitSnapshot output missing metric %q\nfull output:\n%s", want, got)
+		}
 	}
 }
 

@@ -401,3 +401,138 @@ trigger: automatic
 | Prompt Layer | LayerMemory (priority 50) |
 | Token Budget | ~2000 tokens |
 | Cache TTL | 30 seconds |
+
+---
+
+## Layered Memory Stack (Sprint 2, v1.19.0+)
+
+### What it is
+
+Starting with v1.19.0, the memory prompt is assembled by a **MemoryStack** that
+composes four layers in priority order:
+
+```
+L0  Identity      — user-curated persona anchor (~/.devclaw/identity.md)
+L1  Essential     — per-wing narrative summary, cached 6h in SQLite
+L2  On-demand     — per-turn entity-driven retrieval from the active wing
+L3  Legacy        — the v1.18.0 hybrid-search block (always present)
+```
+
+L0–L2 form a prefix that is prepended to the L3 legacy output.
+When all three Sprint 2 layers render empty, the output is **byte-identical to
+v1.18.0** — the retrocompat gate enforced by the golden fixture test.
+
+### Default behavior
+
+The stack is **on by default** when `memory.hierarchy.enabled: true` (which is
+also the default since v1.18.0). No config changes are required on upgrade.
+
+### Layer priority for budget enforcement
+
+| Priority | Layer | Behavior |
+|----------|-------|----------|
+| 1 (never trimmed) | L0 Identity | Always included in full, even if it exceeds the total budget. A WARN is logged when L0 alone is over-budget. |
+| 2 (trimmed second) | L1 Essential | Truncated at a word boundary when L0 + L1 would exceed the budget. |
+| 3 (trimmed first) | L2 On-demand | Trimmed to zero before L1 is touched. Ephemeral per-turn context. |
+
+Default combined budget: 3600 bytes (~900 tokens). Controlled by the internal
+`defaultStackBudget` constant in `memory_stack.go`.
+
+### How to opt out
+
+Set the following in your `devclaw.yaml` to bypass the layered stack entirely
+and fall back to v1.18.0 prompt composition:
+
+```yaml
+memory:
+  stack:
+    force_legacy: true
+```
+
+No migration, no restart beyond a config reload. The `StackConfig.ForceLegacy`
+flag short-circuits the `Build()` call to an empty string, causing
+`buildMemoryLayer` to produce byte-identical output to v1.18.0.
+
+### Identity file
+
+Your L0 identity content lives at `~/.devclaw/identity.md`. Edit it with:
+
+```
+devclaw identity edit
+```
+
+This opens `$EDITOR` on the file, creating a default template on first run.
+The file is hot-reloaded via `fsnotify` — changes take effect on the next turn
+without restarting the daemon.
+
+**Example identity.md snippet:**
+
+```markdown
+# Identity
+
+I am a software engineer who prefers concise answers and working code over
+long explanations. I value correctness over speed.
+```
+
+### How L1 caches essential stories
+
+The L1 EssentialLayer renders a deterministic Markdown summary of the most
+recently touched rooms and the lead sentences of their top files within the
+active wing. The result is cached in the `essential_stories` SQLite table.
+
+- **Cache key:** wing name (normalized to lowercase, accents stripped)
+- **TTL:** 6 hours (configurable via `memory.hierarchy.essential_story_stale_after`)
+- **Invalidation:** automatic on the next Render call after TTL expires; can be
+  forced manually via the `EssentialLayer.Invalidate` API or by the dream cycle
+- **Zero LLM calls** — template-only, fully deterministic
+
+### How L2 detects entities
+
+The L2 OnDemandLayer runs a per-turn regex tokenization over the user's message
+to extract candidate entities (names, room keywords, topics). These are then
+matched against the `rooms` and `wings` tables in a direct SQL lookup — no LLM
+call, no embedding inference.
+
+- **Latency contract:** p95 < 10ms warm
+- **Result cap:** configurable via `memory.hierarchy.on_demand_max_results` (default: 5)
+- **Wing-scoped by default:** queries are biased toward the active wing
+
+### Cross-wing fallback
+
+When a search against the active wing returns no results, the OnDemandLayer
+includes **one cross-wing result** as a fallback. This preserves relevance for
+queries that naturally span wings (e.g. a question about a shared contact).
+The fallback is controlled by `memory.hierarchy.on_demand_cross_wing` (default: `true`).
+
+### Example YAML (all defaults shown)
+
+```yaml
+memory:
+  hierarchy:
+    enabled: true                     # ON by default since v1.18.0
+    l1_budget_tokens: 400
+    l2_budget_tokens: 300
+    on_demand_max_results: 5
+    on_demand_cross_wing: true
+    essential_story_stale_after: 6h
+    essential_story_rooms_per_wing: 4
+    wing_boost_match: 1.3
+    wing_boost_penalty: 0.4
+
+  # Escape hatch — uncomment to revert to v1.18.0 behavior:
+  # stack:
+  #   force_legacy: true
+```
+
+### Retrocompat guarantee
+
+When all three Sprint 2 layers (L0, L1, L2) render empty strings — which
+happens when `hierarchy.enabled: false`, or when the identity file is absent
+and no wing is active and no entities are detected — the `MemoryStack.Build()`
+method returns `""`. In that case `buildMemoryLayer` produces output that is
+**byte-identical to v1.18.0**. This invariant is enforced by the golden fixture
+test in `prompt_layers_golden_test.go`.
+
+Existing v1.18.0 databases require no migration. The `essential_stories` table
+is created with `CREATE TABLE IF NOT EXISTS` on first use. Users with
+`memory.hierarchy.enabled: false` see zero behavior change.

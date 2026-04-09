@@ -46,6 +46,14 @@ import (
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
 )
 
+func init() {
+	// Wire L1 cache hit/miss callbacks into the memory package at program
+	// start. The memory package cannot import copilot (import cycle), so it
+	// exposes function-variable setters. This init runs once per process.
+	memory.SetL1CacheHitFn(IncL1CacheHit)
+	memory.SetL1CacheMissFn(IncL1CacheMiss)
+}
+
 // defaultStackBudget is the default cap on L0+L1+L2 combined bytes.
 // 3600 bytes ≈ 900 tokens (1 token ≈ 4 bytes). Sized so the stack can
 // hold a generous identity blurb (200 tokens) plus a full essential
@@ -364,6 +372,13 @@ func (s *MemoryStack) Build(ctx context.Context, activeWing, turn string) string
 		s.trimmedTotal.Add(1)
 	}
 	s.buildTotal.Add(1)
+
+	// Emit global layer-token counters (ADR-008 Phase C metrics).
+	// Only called when at least one layer rendered content — the early-exit
+	// above (all-empty) already returns before reaching here.
+	IncLayerTokensL0(bytesL0)
+	IncLayerTokensL1(bytesL1)
+	IncLayerTokensL2(bytesL2)
 
 	// Concatenate non-empty layers in strict order with the separator.
 	parts := make([]string, 0, 3)

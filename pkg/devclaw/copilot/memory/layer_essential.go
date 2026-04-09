@@ -28,6 +28,23 @@ import (
 	"unicode/utf8"
 )
 
+// l1CacheHitFn and l1CacheMissFn are injected by the copilot package at
+// startup to wire L1 cache metrics without creating an import cycle.
+// The memory package must NOT import the copilot package (architectural
+// constraint). These vars are nil until SetL1CacheHitFn/SetL1CacheMissFn
+// are called. Callers guard with a nil check before invoking.
+var l1CacheHitFn func()
+var l1CacheMissFn func()
+
+// SetL1CacheHitFn sets the callback invoked on each L1 essential-story cache
+// hit. Called once at startup by the copilot package.
+func SetL1CacheHitFn(fn func()) { l1CacheHitFn = fn }
+
+// SetL1CacheMissFn sets the callback invoked on each L1 essential-story cache
+// miss (i.e., the generation path is taken). Called once at startup by the
+// copilot package.
+func SetL1CacheMissFn(fn func()) { l1CacheMissFn = fn }
+
 // Layer-local defaults. The layer accepts a config so callers can override
 // these; a zero-value EssentialLayerConfig falls through to the constants.
 const (
@@ -162,6 +179,9 @@ func (l *EssentialLayer) Render(ctx context.Context, wing string) string {
 
 	// Fast path: cache hit and fresh.
 	if story, fresh, ok := l.readCache(ctx, wingKey); ok && fresh {
+		if l1CacheHitFn != nil {
+			l1CacheHitFn()
+		}
 		return story
 	}
 
@@ -173,9 +193,16 @@ func (l *EssentialLayer) Render(ctx context.Context, wing string) string {
 	// This is what keeps concurrent callers to a single generation per
 	// wing when 10 goroutines hit Render() simultaneously.
 	if story, fresh, ok := l.readCache(ctx, wingKey); ok && fresh {
+		if l1CacheHitFn != nil {
+			l1CacheHitFn()
+		}
 		return story
 	}
 
+	// Cache miss — generation path.
+	if l1CacheMissFn != nil {
+		l1CacheMissFn()
+	}
 	story, err := l.generateLocked(ctx, wingKey)
 	if err != nil {
 		l.logger.Warn("essential layer: generate failed",

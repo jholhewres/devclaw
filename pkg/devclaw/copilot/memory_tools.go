@@ -199,6 +199,8 @@ func handleMemorySave(ctx context.Context, store *memory.FileStore, sqliteStore 
 					"wing", wing,
 					"error", err,
 				)
+			} else {
+				IncSaveWingRouted()
 			}
 		}
 	}

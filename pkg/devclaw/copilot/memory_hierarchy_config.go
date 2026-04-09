@@ -251,6 +251,18 @@ type HierarchyMetrics struct {
 	WingPinCalls      uint64
 	WingUnpinCalls    uint64
 	WingStatusCalls   uint64
+
+	// Phase C (Sprint 2 Room 2.5) metrics.
+	// See memory_stack.go for the stack-side counter writes and
+	// layer_essential.go / legacy_classifier.go for the cache and
+	// classifier pass writers.
+	layerTokensL0    atomic.Int64 // bytes rendered by L0 identity
+	layerTokensL1    atomic.Int64 // bytes rendered by L1 essential
+	layerTokensL2    atomic.Int64 // bytes rendered by L2 on-demand
+	l1CacheHitTotal  atomic.Int64
+	l1CacheMissTotal atomic.Int64
+	classifierPassTotal atomic.Int64 // count of dream classifier phases run
+	saveWingRoutedTotal atomic.Int64 // count of memory_save calls that routed a wing
 }
 
 // globalMetrics is the process-wide HierarchyMetrics instance. Callers
@@ -281,6 +293,28 @@ func IncSearchWithWingFilter() { atomic.AddUint64(&globalMetrics.SearchWithWingF
 
 // IncSearchWithoutWingFilter atomically increments the unfiltered search counter.
 func IncSearchWithoutWingFilter() { atomic.AddUint64(&globalMetrics.SearchWithoutWingFilter, 1) }
+
+// IncLayerTokensL0 adds n to the L0 layer byte counter.
+func IncLayerTokensL0(n int) { globalMetrics.layerTokensL0.Add(int64(n)) }
+
+// IncLayerTokensL1 adds n to the L1 layer byte counter.
+func IncLayerTokensL1(n int) { globalMetrics.layerTokensL1.Add(int64(n)) }
+
+// IncLayerTokensL2 adds n to the L2 layer byte counter.
+func IncLayerTokensL2(n int) { globalMetrics.layerTokensL2.Add(int64(n)) }
+
+// IncL1CacheHit increments the L1 essential story cache-hit counter.
+func IncL1CacheHit() { globalMetrics.l1CacheHitTotal.Add(1) }
+
+// IncL1CacheMiss increments the L1 essential story cache-miss counter.
+func IncL1CacheMiss() { globalMetrics.l1CacheMissTotal.Add(1) }
+
+// IncClassifierPass increments the legacy classifier phase run counter.
+func IncClassifierPass() { globalMetrics.classifierPassTotal.Add(1) }
+
+// IncSaveWingRouted increments the count of memory_save calls that
+// successfully routed a wing via context or explicit argument.
+func IncSaveWingRouted() { globalMetrics.saveWingRoutedTotal.Add(1) }
 
 // IncToolCall atomically increments the counter for a given palace tool name.
 // Unknown names are ignored (no-op) rather than creating new counters at
@@ -339,6 +373,22 @@ func (m *HierarchyMetrics) EmitSnapshot(logger *slog.Logger) {
 	emit("memory.tools.wing_pin_total", atomic.LoadUint64(&m.WingPinCalls))
 	emit("memory.tools.wing_unpin_total", atomic.LoadUint64(&m.WingUnpinCalls))
 	emit("memory.tools.wing_status_total", atomic.LoadUint64(&m.WingStatusCalls))
+
+	// Phase C Sprint 2 counters.
+	emitI64 := func(name string, value int64) {
+		logger.Info("palace metric",
+			"metric", name,
+			"value", value,
+			"component", "palace",
+		)
+	}
+	emitI64("layer_tokens_l0", m.layerTokensL0.Load())
+	emitI64("layer_tokens_l1", m.layerTokensL1.Load())
+	emitI64("layer_tokens_l2", m.layerTokensL2.Load())
+	emitI64("l1_cache_hit_total", m.l1CacheHitTotal.Load())
+	emitI64("l1_cache_miss_total", m.l1CacheMissTotal.Load())
+	emitI64("classifier_pass_total", m.classifierPassTotal.Load())
+	emitI64("save_wing_routed_total", m.saveWingRoutedTotal.Load())
 }
 
 // EmitHierarchyEnabled logs the feature flag state as a gauge. Called once

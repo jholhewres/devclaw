@@ -337,6 +337,7 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 	// Phase 3b: Classify — opportunistically label legacy files (wing IS NULL).
 	// Error-isolated: a classifier panic or error MUST NOT abort the dream cycle.
 	d.runClassifierPhase(ctx)
+	IncClassifierPass()
 
 	// Phase 4: Apply — record results and update state.
 	d.logger.Info("dream phase: apply", "consolidated", consolidated)

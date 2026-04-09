@@ -602,7 +602,9 @@ func (a *Assistant) Start(ctx context.Context) error {
 		onDemandCfg.CrossWingEnabled = a.config.Memory.Hierarchy.OnDemandCrossWingEnabled
 		onDemandLayer := memory.NewOnDemandLayer(a.sqliteMemory, entityDetector, onDemandCfg, a.logger)
 
-		stack := NewMemoryStack(identityLayer, essentialLayer, onDemandLayer, DefaultStackConfig(), a.logger)
+		stackCfg := DefaultStackConfig()
+		stackCfg.ForceLegacy = a.config.Memory.Stack.ForceLegacy
+		stack := NewMemoryStack(identityLayer, essentialLayer, onDemandLayer, stackCfg, a.logger)
 		a.promptComposer.SetMemoryStack(stack)
 		a.memoryStack = stack
 		a.identityLayer = identityLayer
