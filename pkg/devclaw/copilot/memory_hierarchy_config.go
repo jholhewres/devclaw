@@ -25,6 +25,7 @@ package copilot
 import (
 	"log/slog"
 	"sync/atomic"
+	"time"
 )
 
 // WingHeuristic matches channel or group name patterns to a wing.
@@ -88,13 +89,23 @@ type HierarchyConfig struct {
 	DefaultWing string `yaml:"default_wing"`
 
 	// L1Budget is the token budget for Layer 1 (essential story).
-	// Sprint 2 reads this. Sprint 1 stores it but does not consume it.
-	// Default: 400 tokens.
-	L1Budget int `yaml:"l1_budget_tokens"`
+	// Sprint 2 Room 2.2 consumes this as a byte-budget approximation
+	// (1 token ≈ 4 bytes → 400 tokens ≈ 1600 bytes). Default: 400 tokens.
+	L1Budget int `yaml:"l1_budget_tokens,omitempty"`
 
 	// L2Budget is the token budget for Layer 2 (on-demand retrieval).
 	// Sprint 2 reads this. Default: 300 tokens.
 	L2Budget int `yaml:"l2_budget_tokens"`
+
+	// EssentialStoryStaleAfter is the TTL before the L1 EssentialLayer
+	// regenerates a cached per-wing story. Applies to the essential_stories
+	// SQLite cache introduced in Sprint 2 Room 2.2. Default: 6 hours.
+	EssentialStoryStaleAfter time.Duration `yaml:"essential_story_stale_after,omitempty"`
+
+	// EssentialStoryRoomsPerWing caps how many rooms the L1 template walks
+	// when rendering a wing's essential story. Higher values include more
+	// context at the cost of hitting the byte budget sooner. Default: 4.
+	EssentialStoryRoomsPerWing int `yaml:"essential_story_rooms_per_wing,omitempty"`
 
 	// WingBoostMatch is the multiplier applied to search scores when a
 	// document's wing matches the query's wing. Sprint 2 reads this.
@@ -175,15 +186,17 @@ type HierarchyConfig struct {
 // setting memory.hierarchy.enabled: false in their YAML.
 func DefaultHierarchyConfig() HierarchyConfig {
 	return HierarchyConfig{
-		Enabled:                true, // ON by default — see doc comment above
-		DefaultWing:            "",   // empty = legacy wing=NULL
-		L1Budget:               400,
-		L2Budget:               300,
-		WingBoostMatch:         1.3,
-		WingBoostPenalty:       0.4,
-		AutoRoomCap:            30,
-		AutoRoomDedupeDistance: 2,
-		IdentityPath:           "", // empty = use ~/.devclaw/identity.md
+		Enabled:                    true, // ON by default — see doc comment above
+		DefaultWing:                "",   // empty = legacy wing=NULL
+		L1Budget:                   400,
+		L2Budget:                   300,
+		WingBoostMatch:             1.3,
+		WingBoostPenalty:           0.4,
+		AutoRoomCap:                30,
+		AutoRoomDedupeDistance:     2,
+		IdentityPath:               "", // empty = use ~/.devclaw/identity.md
+		EssentialStoryStaleAfter:   6 * time.Hour,
+		EssentialStoryRoomsPerWing: 4,
 	}
 }
 

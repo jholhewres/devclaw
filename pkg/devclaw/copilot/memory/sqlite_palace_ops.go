@@ -469,3 +469,229 @@ func (s *SQLiteStore) TotalLegacyFiles() (int, error) {
 	}
 	return count, nil
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// L1 essential-story helpers (Sprint 2 Room 2.2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ListRoomsByRecency returns rooms in a wing ordered by last_activity DESC
+// with a stable tie-breaker on name ASC. Pass an empty wing to return rooms
+// whose wing IS NULL (the legacy cidadão set). The limit caps the number
+// of rows returned; pass <= 0 for no cap.
+//
+// This helper exists for the L1 EssentialLayer which wants the most
+// recently touched rooms per wing, whereas the default ListRooms orders by
+// memory_count DESC to surface heavy-use rooms.
+//
+// Rooms with NULL last_activity sort LAST (i.e. behind any room that has
+// seen activity) so freshly-created idle rooms do not displace active ones.
+func (s *SQLiteStore) ListRoomsByRecency(ctx context.Context, wing string, limit int) ([]RoomInfo, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+
+	// last_activity IS NULL sorts to the end so that active rooms always win.
+	// The explicit ASC name tie-breaker keeps output deterministic under
+	// equal timestamps — important for cache byte-identity checks.
+	//
+	// Note: the `rooms` table declares wing NOT NULL, so the empty-wing
+	// branch below matches only wing='' sentinel rows (unlikely). The
+	// L1 EssentialLayer routes "legacy wing" stories through the files
+	// table directly (wing IS NULL), not through rooms. This branch is
+	// kept for symmetry with ListRooms but is effectively a no-op on
+	// schema-conformant databases.
+	if wing == "" {
+		if limit > 0 {
+			rows, err = s.db.QueryContext(ctx, `
+				SELECT wing, name, COALESCE(hall, ''), source, confidence,
+					reuse_count, memory_count,
+					COALESCE(display_name, ''), COALESCE(description, ''),
+					last_activity, created_at
+				FROM rooms
+				WHERE wing = ''
+				ORDER BY (last_activity IS NULL) ASC, last_activity DESC, name ASC
+				LIMIT ?
+			`, limit)
+		} else {
+			rows, err = s.db.QueryContext(ctx, `
+				SELECT wing, name, COALESCE(hall, ''), source, confidence,
+					reuse_count, memory_count,
+					COALESCE(display_name, ''), COALESCE(description, ''),
+					last_activity, created_at
+				FROM rooms
+				WHERE wing = ''
+				ORDER BY (last_activity IS NULL) ASC, last_activity DESC, name ASC
+			`)
+		}
+	} else {
+		norm := NormalizeWing(wing)
+		if norm == "" {
+			return nil, fmt.Errorf("invalid wing name: %q", wing)
+		}
+		if limit > 0 {
+			rows, err = s.db.QueryContext(ctx, `
+				SELECT wing, name, COALESCE(hall, ''), source, confidence,
+					reuse_count, memory_count,
+					COALESCE(display_name, ''), COALESCE(description, ''),
+					last_activity, created_at
+				FROM rooms
+				WHERE wing = ?
+				ORDER BY (last_activity IS NULL) ASC, last_activity DESC, name ASC
+				LIMIT ?
+			`, norm, limit)
+		} else {
+			rows, err = s.db.QueryContext(ctx, `
+				SELECT wing, name, COALESCE(hall, ''), source, confidence,
+					reuse_count, memory_count,
+					COALESCE(display_name, ''), COALESCE(description, ''),
+					last_activity, created_at
+				FROM rooms
+				WHERE wing = ?
+				ORDER BY (last_activity IS NULL) ASC, last_activity DESC, name ASC
+			`, norm)
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list rooms by recency: %w", err)
+	}
+	defer rows.Close()
+
+	var out []RoomInfo
+	for rows.Next() {
+		var ri RoomInfo
+		var lastActivity sql.NullTime
+		var wingVal sql.NullString
+		if err := rows.Scan(
+			&wingVal, &ri.Name, &ri.Hall,
+			&ri.Source, &ri.Confidence,
+			&ri.ReuseCount, &ri.MemoryCount,
+			&ri.DisplayName, &ri.Description,
+			&lastActivity, &ri.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if wingVal.Valid {
+			ri.Wing = wingVal.String
+		}
+		if lastActivity.Valid {
+			ri.LastActivity = lastActivity.Time
+		}
+		out = append(out, ri)
+	}
+	return out, rows.Err()
+}
+
+// RoomFileSummary is a lightweight projection of a memory file used by the
+// L1 EssentialLayer. It carries just enough to render a lead sentence
+// bullet without pulling the entire chunk payload into memory.
+type RoomFileSummary struct {
+	FileID      string
+	Text        string // concatenated chunk text (first chunk only)
+	AccessCount int
+	IndexedAt   time.Time
+}
+
+// TopFilesInRoom returns up to `limit` files belonging to (wing, room)
+// ordered by access_count DESC then indexed_at DESC, with a stable
+// file_id ASC tie-breaker. For each file the first chunk's text is
+// returned as Text — the L1 renderer extracts a lead sentence from it.
+//
+// Pass wing="" to match the legacy wing IS NULL set. Pass room="" to
+// match files whose room IS NULL as well. The limit must be > 0; callers
+// asking for 0 get an empty slice without hitting the database.
+//
+// All string parameters are normalized before use to defend the SQL
+// layer even if callers forget to normalize upstream.
+func (s *SQLiteStore) TopFilesInRoom(ctx context.Context, wing, room string, limit int) ([]RoomFileSummary, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	wNorm := NormalizeWing(wing)
+	rNorm := NormalizeRoom(room)
+
+	// The join grabs the first chunk (chunk_idx=0) which holds the lead
+	// text for most memories. LEFT JOIN keeps files visible even if their
+	// chunks row is missing (shouldn't happen in practice, but defensive).
+	//
+	// Tie-breakers: access_count DESC → indexed_at DESC → file_id ASC.
+	// The final file_id ASC keeps output byte-deterministic so cached
+	// stories stay stable between calls.
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	switch {
+	case wNorm == "" && rNorm == "":
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT f.file_id,
+				COALESCE(c.text, ''),
+				COALESCE(f.access_count, 0),
+				f.indexed_at
+			FROM files f
+			LEFT JOIN chunks c ON c.file_id = f.file_id AND c.chunk_idx = 0
+			WHERE f.wing IS NULL AND f.room IS NULL
+			  AND (f.deleted_at IS NULL)
+			ORDER BY f.access_count DESC, f.indexed_at DESC, f.file_id ASC
+			LIMIT ?
+		`, limit)
+	case wNorm == "" && rNorm != "":
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT f.file_id,
+				COALESCE(c.text, ''),
+				COALESCE(f.access_count, 0),
+				f.indexed_at
+			FROM files f
+			LEFT JOIN chunks c ON c.file_id = f.file_id AND c.chunk_idx = 0
+			WHERE f.wing IS NULL AND f.room = ?
+			  AND (f.deleted_at IS NULL)
+			ORDER BY f.access_count DESC, f.indexed_at DESC, f.file_id ASC
+			LIMIT ?
+		`, rNorm, limit)
+	case wNorm != "" && rNorm == "":
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT f.file_id,
+				COALESCE(c.text, ''),
+				COALESCE(f.access_count, 0),
+				f.indexed_at
+			FROM files f
+			LEFT JOIN chunks c ON c.file_id = f.file_id AND c.chunk_idx = 0
+			WHERE f.wing = ? AND f.room IS NULL
+			  AND (f.deleted_at IS NULL)
+			ORDER BY f.access_count DESC, f.indexed_at DESC, f.file_id ASC
+			LIMIT ?
+		`, wNorm, limit)
+	default:
+		rows, err = s.db.QueryContext(ctx, `
+			SELECT f.file_id,
+				COALESCE(c.text, ''),
+				COALESCE(f.access_count, 0),
+				f.indexed_at
+			FROM files f
+			LEFT JOIN chunks c ON c.file_id = f.file_id AND c.chunk_idx = 0
+			WHERE f.wing = ? AND f.room = ?
+			  AND (f.deleted_at IS NULL)
+			ORDER BY f.access_count DESC, f.indexed_at DESC, f.file_id ASC
+			LIMIT ?
+		`, wNorm, rNorm, limit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("top files in room: %w", err)
+	}
+	defer rows.Close()
+
+	var out []RoomFileSummary
+	for rows.Next() {
+		var rf RoomFileSummary
+		var indexedAt sql.NullTime
+		if err := rows.Scan(&rf.FileID, &rf.Text, &rf.AccessCount, &indexedAt); err != nil {
+			return nil, err
+		}
+		if indexedAt.Valid {
+			rf.IndexedAt = indexedAt.Time
+		}
+		out = append(out, rf)
+	}
+	return out, rows.Err()
+}

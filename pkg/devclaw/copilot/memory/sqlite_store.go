@@ -166,6 +166,14 @@ func (s *SQLiteStore) initSchema() error {
 		// legacy (wing=NULL) behavior.
 	}
 
+	// Sprint 2 Room 2.2 — L1 essential_stories cache table.
+	// Same non-fatal policy as InitHierarchySchema: a failed migration
+	// downgrades L1 to "render uncached on every call" but never blocks
+	// the rest of the memory subsystem.
+	if err := MigrateEssentialStories(s.db, s.logger); err != nil {
+		slog.Warn("failed to migrate essential_stories cache", "error", err)
+	}
+
 	return nil
 }
 
