@@ -27,6 +27,29 @@ import (
 	"sync/atomic"
 )
 
+// WingHeuristic matches channel or group name patterns to a wing.
+// The binary ships zero defaults — all heuristics are user-provided via
+// YAML config. This is intentional: hardcoded locale or domain-specific
+// keywords would be biased for open-source deployments.
+//
+// Example YAML snippet under memory.hierarchy.heuristics:
+//
+//	heuristics:
+//	  - wing: work
+//	    match_channel_name: [work, job, office]
+//	  - wing: family
+//	    match_channel_name: [family, home, kids]
+type WingHeuristic struct {
+	// Wing is the canonical wing identifier to assign on match.
+	Wing string `yaml:"wing"`
+	// MatchChannelName contains lowercase substrings; if the hint (channel
+	// name, group name, display name) contains any of them, this wing wins.
+	MatchChannelName []string `yaml:"match_channel_name,omitempty"`
+	// MatchGroupName is an alias for MatchChannelName for readability
+	// when the hint comes from a messaging group name.
+	MatchGroupName []string `yaml:"match_group_name,omitempty"`
+}
+
 // HierarchyConfig configures the palace-aware memory subsystem introduced
 // in Sprint 1. It lives under MemoryConfig.Hierarchy and is opt-in:
 // Enabled=false by default preserves v1.17.0 behavior byte-for-byte.
@@ -98,6 +121,27 @@ type HierarchyConfig struct {
 	// Sprint 2 reads this. Empty string uses the default:
 	// ~/.devclaw/identity.md. Sprint 1 stores it but does not consume it.
 	IdentityPath string `yaml:"identity_path"`
+
+	// Heuristics is the user-provided list of channel/group name patterns
+	// used by the context router's heuristic tier. The binary ships zero
+	// defaults — a fresh install classifies nothing (all memories land with
+	// wing=NULL) until the user opts in via YAML. This is intentional:
+	// hardcoded domain or locale keywords would be biased for an open-source
+	// project with diverse deployments.
+	//
+	// The router iterates this slice in order; first match wins (confidence 0.7).
+	// If nil or empty, the heuristic tier is a no-op and every unmapped
+	// message falls through to DefaultWing or wing=NULL.
+	Heuristics []WingHeuristic `yaml:"heuristics,omitempty"`
+
+	// LegacyKeywords is the keyword-to-wing mapping used by the legacy
+	// content classifier (RunLegacyClassificationPass). The binary ships
+	// zero defaults — the classifier is a no-op unless the user provides
+	// keywords here. This preserves locale and domain neutrality.
+	//
+	// Map key: wing identifier (e.g. "work", "family").
+	// Map value: list of lowercase substrings that signal that wing.
+	LegacyKeywords map[string][]string `yaml:"legacy_keywords,omitempty"`
 }
 
 // DefaultHierarchyConfig returns the defaults for HierarchyConfig.

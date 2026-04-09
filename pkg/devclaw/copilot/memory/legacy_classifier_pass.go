@@ -72,6 +72,12 @@ type LegacyClassificationConfig struct {
 	// DryRun reports what WOULD be classified without writing anything
 	// to the database. Useful for CLI preview and tests.
 	DryRun bool
+
+	// Keywords is the wing → keyword slice map used by the classifier.
+	// Sourced from HierarchyConfig.LegacyKeywords. If nil or empty, the
+	// pass is a no-op: it logs once at INFO and returns 0 classified.
+	// The binary ships zero defaults to stay locale and domain neutral.
+	Keywords map[string][]string
 }
 
 // DefaultLegacyClassificationBatchSize is the number of files processed
@@ -101,6 +107,14 @@ const MinAllowedClassifierConfidence = 0.5
 func (s *SQLiteStore) RunLegacyClassificationPass(ctx context.Context, cfg LegacyClassificationConfig) (*LegacyClassificationStats, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("sqlite store is not initialized")
+	}
+
+	// If no keywords are configured, the pass is a no-op. Log once at INFO
+	// so operators can see why nothing is being classified without having to
+	// dig through debug logs.
+	if len(cfg.Keywords) == 0 {
+		s.logger.Info("legacy classifier: no keywords configured — pass is a no-op; set memory.hierarchy.legacy_keywords in config to enable")
+		return &LegacyClassificationStats{PerWing: make(map[string]int)}, nil
 	}
 
 	batchSize := cfg.BatchSize
@@ -166,7 +180,7 @@ func (s *SQLiteStore) RunLegacyClassificationPass(ctx context.Context, cfg Legac
 			continue
 		}
 
-		result := ClassifyLegacyContent(content)
+		result := ClassifyLegacyContent(content, cfg.Keywords)
 		if result.Wing == "" || result.Confidence < minConf {
 			stats.Skipped++
 			continue

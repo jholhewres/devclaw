@@ -79,6 +79,20 @@ logging:
 	}
 }
 
+// TestHierarchyDefaultHeuristicsAndKeywordsAreEmpty verifies that
+// DefaultHierarchyConfig ships zero heuristics and zero legacy keywords.
+// This is the i18n + domain-neutrality guarantee: a fresh install classifies
+// nothing via heuristics or legacy classifier until the user opts in via YAML.
+func TestHierarchyDefaultHeuristicsAndKeywordsAreEmpty(t *testing.T) {
+	cfg := DefaultHierarchyConfig()
+	if len(cfg.Heuristics) != 0 {
+		t.Errorf("DefaultHierarchyConfig().Heuristics: expected empty, got len=%d", len(cfg.Heuristics))
+	}
+	if len(cfg.LegacyKeywords) != 0 {
+		t.Errorf("DefaultHierarchyConfig().LegacyKeywords: expected empty, got len=%d", len(cfg.LegacyKeywords))
+	}
+}
+
 // TestHierarchyOverrideWithPartialYAMLPreservesUntouchedDefaults verifies
 // that when a user sets ONLY some hierarchy fields, the untouched ones
 // remain at defaults. This is the classic go-yaml footgun pattern — if

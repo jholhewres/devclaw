@@ -12,16 +12,28 @@ import (
 	"time"
 )
 
-// newTestRouter returns a ContextRouter backed by a fresh test store.
+// newTestRouter returns a ContextRouter backed by a fresh test store
+// with an empty (no-heuristics) config.
 func newTestRouter(t *testing.T) *ContextRouter {
 	t.Helper()
 	store := newTestStoreCopilot(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewContextRouter(store, logger)
+	return NewContextRouter(store, logger, DefaultHierarchyConfig())
+}
+
+// newTestRouterWithHeuristics returns a ContextRouter seeded with the
+// provided heuristic rules. Keywords are test-local — not shipped.
+func newTestRouterWithHeuristics(t *testing.T, heuristics []WingHeuristic) *ContextRouter {
+	t.Helper()
+	store := newTestStoreCopilot(t)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cfg := DefaultHierarchyConfig()
+	cfg.Heuristics = heuristics
+	return NewContextRouter(store, logger, cfg)
 }
 
 func TestContextRouter_NilStoreReturnsDisabled(t *testing.T) {
-	r := NewContextRouter(nil, nil)
+	r := NewContextRouter(nil, nil, DefaultHierarchyConfig())
 	res := r.Resolve(context.Background(), "telegram", "123", "")
 	if res.Source != SourceDisabled {
 		t.Errorf("expected SourceDisabled with nil store, got %v", res.Source)
@@ -52,11 +64,15 @@ func TestContextRouter_TierMappedHit(t *testing.T) {
 }
 
 func TestContextRouter_TierHeuristicPersistsAndRepeats(t *testing.T) {
-	r := newTestRouter(t)
+	// Seed user heuristics so the hint "work-team" matches wing "work".
+	// These are test-local keywords — not shipped in the binary.
+	r := newTestRouterWithHeuristics(t, []WingHeuristic{
+		{Wing: "work", MatchChannelName: []string{"work-team", "office"}},
+	})
 	ctx := context.Background()
 
-	// CLI channel always maps to work heuristically.
-	res1 := r.Resolve(ctx, "cli", "local-session", "")
+	// Hint containing "work-team" should match the heuristic.
+	res1 := r.Resolve(ctx, "telegram", "group-123", "work-team chat")
 	if res1.Source != SourceHeuristic {
 		t.Errorf("first call expected SourceHeuristic, got %v", res1.Source)
 	}
@@ -68,7 +84,7 @@ func TestContextRouter_TierHeuristicPersistsAndRepeats(t *testing.T) {
 	// same result — the source may or may not change depending on whether
 	// we read from the cache (SourceHeuristic) or from the store
 	// (SourceMapped because persist happened). What matters is the wing.
-	res2 := r.Resolve(ctx, "cli", "local-session", "")
+	res2 := r.Resolve(ctx, "telegram", "group-123", "work-team chat")
 	if res2.Wing != "work" {
 		t.Errorf("second call expected wing=work, got %q", res2.Wing)
 	}
@@ -179,7 +195,11 @@ func TestContextRouter_PinUpdatesCache(t *testing.T) {
 //
 // This is a correctness test, not a latency benchmark.
 func TestContextRouter_ConcurrentBurst(t *testing.T) {
-	r := newTestRouter(t)
+	// Seed heuristics so the hint "burst-group" matches wing "work".
+	// Using test-local vocabulary — not shipped in the binary.
+	r := newTestRouterWithHeuristics(t, []WingHeuristic{
+		{Wing: "work", MatchChannelName: []string{"burst-group"}},
+	})
 	ctx := context.Background()
 
 	const burstSize = 50
@@ -190,7 +210,7 @@ func TestContextRouter_ConcurrentBurst(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			results[idx] = r.Resolve(ctx, "cli", "burst-session", "")
+			results[idx] = r.Resolve(ctx, "telegram", "burst-session", "burst-group chat")
 		}(i)
 	}
 	wg.Wait()
@@ -198,7 +218,7 @@ func TestContextRouter_ConcurrentBurst(t *testing.T) {
 	// All goroutines should see the same wing (no race corruption).
 	expected := results[0].Wing
 	if expected != "work" {
-		t.Fatalf("expected all results to be wing=work (cli heuristic), got first=%q", expected)
+		t.Fatalf("expected all results to be wing=work (user heuristic), got first=%q", expected)
 	}
 	for i, res := range results {
 		if res.Wing != expected {
@@ -213,7 +233,7 @@ func TestContextRouter_ConcurrentBurst(t *testing.T) {
 	}
 	count := 0
 	for _, m := range mappings {
-		if m.Channel == "cli" && m.ExternalID == "burst-session" {
+		if m.Channel == "telegram" && m.ExternalID == "burst-session" {
 			count++
 		}
 	}
@@ -222,8 +242,63 @@ func TestContextRouter_ConcurrentBurst(t *testing.T) {
 	}
 
 	// Cache should be populated.
-	if _, ok := r.cache.Load(routerCacheKey("cli", "burst-session")); !ok {
+	if _, ok := r.cache.Load(routerCacheKey("telegram", "burst-session")); !ok {
 		t.Error("expected cache to be populated after burst")
+	}
+}
+
+// TestContextRouter_UserHeuristicMatchesConfiguredKeywords verifies the
+// heuristic tier fires when a hint matches a user-configured WingHeuristic,
+// and falls through to SourceDefault when no keywords are configured.
+func TestContextRouter_UserHeuristicMatchesConfiguredKeywords(t *testing.T) {
+	r := newTestRouterWithHeuristics(t, []WingHeuristic{
+		{Wing: "family", MatchChannelName: []string{"family", "home"}},
+		{Wing: "work", MatchGroupName: []string{"office", "team"}},
+	})
+	ctx := context.Background()
+
+	cases := []struct {
+		channel    string
+		externalID string
+		hint       string
+		wantWing   string
+		wantSource WingResolutionSource
+	}{
+		{"telegram", "g1", "family group chat", "family", SourceHeuristic},
+		{"telegram", "g2", "home planning", "family", SourceHeuristic},
+		{"telegram", "g3", "office updates", "work", SourceHeuristic},
+		{"telegram", "g4", "random topic", "", SourceDefault},
+		{"telegram", "g5", "", "", SourceDefault}, // empty hint → no heuristic
+	}
+
+	for _, tc := range cases {
+		res := r.Resolve(ctx, tc.channel, tc.externalID, tc.hint)
+		if res.Wing != tc.wantWing {
+			t.Errorf("hint=%q: expected wing=%q, got %q", tc.hint, tc.wantWing, res.Wing)
+		}
+		if res.Source != tc.wantSource {
+			t.Errorf("hint=%q: expected source=%v, got %v", tc.hint, tc.wantSource, res.Source)
+		}
+	}
+}
+
+// TestContextRouter_NoHeuristicsNoMatch verifies that an out-of-the-box
+// install (no Heuristics configured) classifies nothing via the heuristic
+// tier — all unmapped messages fall through to SourceDefault.
+func TestContextRouter_NoHeuristicsNoMatch(t *testing.T) {
+	r := newTestRouter(t) // DefaultHierarchyConfig has empty Heuristics
+	ctx := context.Background()
+
+	hints := []string{"family chat", "work team", "office", "finances", ""}
+	channels := []string{"telegram", "whatsapp", "cli", "mcp"}
+	for _, ch := range channels {
+		for _, hint := range hints {
+			res := r.Resolve(ctx, ch, "ext-"+ch+hint, hint)
+			// Without heuristics, must fall to default (wing=NULL).
+			if res.Source == SourceHeuristic {
+				t.Errorf("channel=%q hint=%q: got SourceHeuristic without any config", ch, hint)
+			}
+		}
 	}
 }
 

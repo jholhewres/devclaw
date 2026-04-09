@@ -13,10 +13,10 @@
 //     manual entries, 0.5-0.8 for heuristic ones).
 //
 //  2. HEURISTIC: no explicit mapping exists. The router guesses a wing
-//     based on channel-specific patterns (e.g., "telegram group names
-//     containing 'family'" → wing=family). Confidence is 0.5-0.8. The
-//     guess is then persisted so subsequent messages skip straight to
-//     tier 1.
+//     based on user-configured patterns (HierarchyConfig.Heuristics).
+//     The binary ships zero defaults — all heuristics are opt-in via YAML.
+//     Confidence is 0.7 (constant). The guess is then persisted so
+//     subsequent messages skip straight to tier 1.
 //
 //  3. DEFAULT: neither explicit nor heuristic. Returns an empty wing,
 //     which propagates to wing=NULL in storage. This is a first-class
@@ -98,10 +98,7 @@ type routerCacheEntry struct {
 type ContextRouter struct {
 	store  *memory.SQLiteStore
 	logger *slog.Logger
-
-	// defaultHeuristicConfidence is the confidence applied to heuristic
-	// matches. Can be tuned later if telemetry shows the default is off.
-	defaultHeuristicConfidence float64
+	cfg    HierarchyConfig
 
 	// cache maps a (channel, externalID) key to a routerCacheEntry with
 	// TTL-based eviction. sync.Map is used because the access pattern is
@@ -122,14 +119,17 @@ type ContextRouter struct {
 // The store may be nil — in that case, the router is a no-op that always
 // returns a SourceDisabled resolution. This supports startup paths where
 // the memory system failed to initialize but the channels are still running.
-func NewContextRouter(store *memory.SQLiteStore, logger *slog.Logger) *ContextRouter {
+//
+// cfg is the HierarchyConfig for this router instance. Heuristics are
+// read from cfg.Heuristics — zero heuristics means tier 2 is a no-op.
+func NewContextRouter(store *memory.SQLiteStore, logger *slog.Logger, cfg HierarchyConfig) *ContextRouter {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &ContextRouter{
-		store:                      store,
-		logger:                     logger,
-		defaultHeuristicConfidence: 0.6,
+		store:  store,
+		logger: logger,
+		cfg:    cfg,
 	}
 }
 
@@ -244,11 +244,11 @@ func (r *ContextRouter) resolveUncached(ctx context.Context, channel, externalID
 		)
 	}
 
-	// Tier 2: heuristic guess based on channel patterns.
-	if wing := r.heuristic(channel, externalID, hint); wing != "" {
+	// Tier 2: user-configured heuristic guess based on channel patterns.
+	if wing, conf, ok := r.resolveByUserHeuristic(hint); ok {
 		// Persist the guess so subsequent lookups skip straight to Tier 1.
 		// Failures here are non-fatal — we still return the guess to the caller.
-		if err := r.store.SetChannelWing(channel, externalID, wing, "heuristic", r.defaultHeuristicConfidence); err != nil {
+		if err := r.store.SetChannelWing(channel, externalID, wing, "heuristic", conf); err != nil {
 			r.logger.Debug("context router: failed to persist heuristic mapping",
 				"channel", channel,
 				"external_id", externalID,
@@ -259,7 +259,7 @@ func (r *ContextRouter) resolveUncached(ctx context.Context, channel, externalID
 		IncContextRouterHeuristic()
 		return WingResolution{
 			Wing:       wing,
-			Confidence: r.defaultHeuristicConfidence,
+			Confidence: conf,
 			Source:     SourceHeuristic,
 		}
 	}
@@ -314,64 +314,72 @@ func (e *routerError) Error() string { return e.msg }
 // Heuristics
 // ─────────────────────────────────────────────────────────────────────────────
 
-// heuristic applies pattern-matching rules to guess a wing. Returns an
-// empty string if no rule matches, leaving the caller to fall back to
-// SourceDefault.
-//
-// The rules are intentionally CONSERVATIVE: we only guess when we are
-// fairly confident, to avoid polluting the palace with bad defaults. A
-// missed guess is cheap (falls back to legacy wing=NULL, v1.17.0 behavior);
-// a wrong guess is annoying (wrong memories surface later) and requires
-// the user to fix via `/wing merge` or `devclaw wing map --force`.
-//
-// Current rule set (Sprint 1 — minimal, to be expanded with telemetry):
-//
-//   - CLI invocations (channel="cli") default to "work" — dev context.
-//   - MCP clients (channel="mcp") default to "work" — IDE integration.
-//   - Telegram/WhatsApp groups with family-keyword names → "family".
-//   - Telegram/WhatsApp groups with finance-keyword names → "finance".
-//   - Everything else: no heuristic match.
-//
-// The hint parameter can contain a message preview, group name, or display
-// name from the channel — whatever helps the heuristic decide. If empty,
-// only channel+externalID patterns are consulted.
-func (r *ContextRouter) heuristic(channel, externalID, hint string) string {
-	channel = strings.ToLower(strings.TrimSpace(channel))
+// userHeuristicConfidence is the fixed confidence score assigned to a wing
+// resolved via a user-configured heuristic rule. It is deliberately constant
+// (not tunable per rule) to keep the config surface minimal — telemetry can
+// inform a future per-rule confidence field if needed.
+const userHeuristicConfidence = 0.7
 
-	switch channel {
-	case "cli":
-		// CLI sessions are almost always developer work.
-		return "work"
-	case "mcp":
-		// MCP integrations come from IDEs (Cursor, VSCode, etc.) — dev work.
-		return "work"
+// resolveByUserHeuristic iterates cfg.Heuristics and checks whether the hint
+// (channel name, group name, or display name from the channel) matches any
+// user-configured pattern. First match wins.
+//
+// Returns ("", 0, false) when:
+//   - cfg.Heuristics is nil or empty (no user config → no-op)
+//   - hint is empty (nothing to match against)
+//   - no pattern matches
+//
+// The hint is normalized to lowercase + accent-stripped before matching,
+// consistent with how NormalizeWing treats wing names.
+func (r *ContextRouter) resolveByUserHeuristic(hint string) (string, float64, bool) {
+	if len(r.cfg.Heuristics) == 0 || hint == "" {
+		return "", 0, false
 	}
 
-	// For messaging channels, inspect the hint (group name, contact name).
-	hintLower := strings.ToLower(hint)
-	if hintLower != "" {
-		if containsAny(hintLower, "family", "familia", "família", "mae", "mãe", "pai", "filho", "filha", "casa") {
-			return "family"
+	// Normalize the hint: lowercase then strip common Latin accents so that
+	// user-configured keywords match accented variants in the hint.
+	hintNorm := routerStripAccents(strings.ToLower(hint))
+
+	for _, h := range r.cfg.Heuristics {
+		wing := memory.NormalizeWing(h.Wing)
+		if wing == "" {
+			continue
 		}
-		if containsAny(hintLower, "finance", "finança", "financeiro", "bank", "banco", "conta", "fatura", "boleto") {
-			return "finance"
+		for _, kw := range h.MatchChannelName {
+			if kw != "" && strings.Contains(hintNorm, strings.ToLower(kw)) {
+				return wing, userHeuristicConfidence, true
+			}
 		}
-		if containsAny(hintLower, "work", "trabalho", "job", "emprego", "escritorio", "escritório", "office") {
-			return "work"
+		for _, kw := range h.MatchGroupName {
+			if kw != "" && strings.Contains(hintNorm, strings.ToLower(kw)) {
+				return wing, userHeuristicConfidence, true
+			}
 		}
 	}
-
-	// No match — return empty to fall through to default.
-	return ""
+	return "", 0, false
 }
 
-// containsAny reports whether s contains any of the listed substrings.
-// Substrings should be lowercase; s is expected to be lowercased by the caller.
-func containsAny(s string, needles ...string) bool {
-	for _, n := range needles {
-		if strings.Contains(s, n) {
-			return true
+// routerStripAccents replaces common accented Latin characters with their
+// ASCII base equivalents. Mirrors the logic in memory.stripAccents (which is
+// unexported) so the router does not need to reach into the memory package's
+// internals.
+func routerStripAccents(s string) string {
+	var replacements = map[rune]rune{
+		'á': 'a', 'à': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a',
+		'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
+		'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
+		'ó': 'o', 'ò': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o', 'ø': 'o',
+		'ú': 'u', 'ù': 'u', 'û': 'u', 'ü': 'u',
+		'ç': 'c', 'ñ': 'n', 'ý': 'y', 'ÿ': 'y',
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if rep, ok := replacements[r]; ok {
+			b.WriteRune(rep)
+		} else {
+			b.WriteRune(r)
 		}
 	}
-	return false
+	return b.String()
 }
