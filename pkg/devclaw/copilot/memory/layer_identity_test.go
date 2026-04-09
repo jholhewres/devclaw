@@ -2,6 +2,7 @@ package memory
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -220,6 +221,40 @@ func TestIdentityLayer_StopIsIdempotent(t *testing.T) {
 // part of the polling path.
 func TestIdentityLayer_PollingFallback(t *testing.T) {
 	t.Skip("polling goroutine uses 30s interval; fallback logic is covered by TestIdentityLayer_ReloadForcesReread and code review")
+}
+
+func TestIdentityLayer_PollingPicksUpLateFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping polling integration test in short mode")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "identity.md")
+
+	layer := NewIdentityLayer(path, nil, 1000)
+	layer.pollInterval = 100 * time.Millisecond
+
+	layer.Start()
+	defer layer.Stop()
+
+	out := layer.Render()
+	if out != "" {
+		t.Fatalf("expected empty output before file exists, got %q", out)
+	}
+
+	content := "Hello, I am DevClaw assistant."
+	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		out = layer.Render()
+		if out == content {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("poll did not pick up file within 5s; last output=%q", out)
 }
 
 // TestTruncateAtBoundary_UnicodeSafe verifies that truncation never splits a

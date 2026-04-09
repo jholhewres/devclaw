@@ -212,7 +212,7 @@ func TestMemoryStack_WingAndTurnForwardedToL2(t *testing.T) {
 func TestMemoryStack_BudgetGuardTrimsL2First(t *testing.T) {
 	logger, _ := newQuietLogger()
 	l0 := strings.Repeat("a", 20)
-	l1 := strings.Repeat("b ", 25) // 50 bytes with spaces
+	l1 := strings.Repeat("b ", 25)  // 50 bytes with spaces
 	l2 := strings.Repeat("c ", 100) // 200 bytes with spaces
 
 	cfg := DefaultStackConfig()
@@ -281,6 +281,42 @@ func TestMemoryStack_BudgetGuardTrimsL1SecondIfL2ExhaustedStillOver(t *testing.T
 	l1Got := parts[1]
 	if len(l1Got) > 20 {
 		t.Errorf("expected trimmed L1 length ≤ 20, got %d: %q", len(l1Got), l1Got)
+	}
+
+	st := s.Stats()
+	if st.TrimmedTotal != 1 {
+		t.Errorf("expected TrimmedTotal=1, got %d", st.TrimmedTotal)
+	}
+}
+
+// TestMemoryStack_BudgetGuardExactFitTrimsL2 verifies that when L0+L1
+// bytes exactly equal the budget, L2 is fully trimmed to empty (no
+// partial L2 leak).
+func TestMemoryStack_BudgetGuardExactFitTrimsL2(t *testing.T) {
+	logger, _ := newQuietLogger()
+	l0 := strings.Repeat("a", 20)
+	l1 := strings.Repeat("b ", 25) // 50 bytes with spaces
+	l2 := strings.Repeat("c ", 25) // 50 bytes with spaces
+
+	cfg := DefaultStackConfig()
+	cfg.TotalBudget = 70 // exactly L0 (20) + L1 (50)
+	s := newStackFromLayers(
+		&mockLayer{out: l0},
+		&mockLayer{out: l1},
+		&mockLayer{out: l2},
+		cfg,
+		logger,
+	)
+
+	out := s.Build(context.Background(), "", "turn")
+	if !strings.Contains(out, l0) {
+		t.Error("expected L0 intact in output")
+	}
+	if !strings.Contains(out, strings.TrimSpace(l1)) {
+		t.Errorf("expected L1 intact in output, got %q", out)
+	}
+	if strings.Contains(out, "c") {
+		t.Errorf("expected no L2 content (no 'c') in output, got %q", out)
 	}
 
 	st := s.Stats()
