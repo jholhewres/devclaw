@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Layer-local defaults. The layer accepts a config so callers can override
@@ -398,10 +399,17 @@ func extractLeadSentence(text string) string {
 	}
 
 	// Hard cap the search window so pathological inputs don't make us
-	// walk a megabyte of text.
+	// walk a megabyte of text. Walk the cut point back to a UTF-8 rune
+	// start so we never slice in the middle of a multi-byte sequence —
+	// otherwise the downstream strings.Index / TrimSpace / ReplaceAll
+	// operations could emit a malformed prefix.
 	windowLen := defaultL1LeadSentenceMaxBytes
-	if len(s) < windowLen {
+	if len(s) <= windowLen {
 		windowLen = len(s)
+	} else {
+		for windowLen > 0 && !utf8.RuneStart(s[windowLen]) {
+			windowLen--
+		}
 	}
 	window := s[:windowLen]
 

@@ -179,8 +179,15 @@ func (l *OnDemandLayer) Render(ctx context.Context, activeWing string, turn stri
 
 	// Step 4 — cross-wing fallback: if we got nothing from the active wing
 	// and cross-wing is enabled, run ONE more search without a wing filter.
+	// Open a FRESH context bounded by the same SearchTimeoutMs budget — the
+	// active-wing search may have exhausted most of searchCtx already,
+	// leaving the fallback with near-zero remaining budget which would
+	// silently time out. Bounded by outerCtx so the total render budget
+	// still holds.
 	if len(merged) == 0 && l.cfg.CrossWingEnabled {
-		merged = l.searchEntities(searchCtx, entities[:1], "")
+		fallbackCtx, fallbackCancel := context.WithTimeout(outerCtx, time.Duration(l.cfg.SearchTimeoutMs)*time.Millisecond)
+		merged = l.searchEntities(fallbackCtx, entities[:1], "")
+		fallbackCancel()
 		if len(merged) > 1 {
 			merged = merged[:1]
 		}

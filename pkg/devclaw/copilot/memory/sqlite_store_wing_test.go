@@ -381,8 +381,15 @@ func TestHybridSearchEmptyQueryWingByteIdentical(t *testing.T) {
 // TestHybridSearchZeroBoostUsesDefaults verifies that leaving WingBoostMatch
 // and WingBoostPenalty at zero in the options struct produces the same
 // results as setting them explicitly to 1.3 and 0.4.
+//
+// Uses newStableStore (sha256-backed non-parallel vectors) because the
+// generic deterministicEmbedder from sqlite_store_test.go returns scaled-
+// parallel vectors that collapse cosine similarity to 1.0 and produce
+// non-deterministic tie-breaking in fusion across back-to-back calls.
+// Same lesson as TestHybridSearchWingNullNeutral — this test was missed
+// during the Room 2.0c flake fix.
 func TestHybridSearchZeroBoostUsesDefaults(t *testing.T) {
-	store := newTestStore(t)
+	store := newStableStore(t)
 	ctx := context.Background()
 
 	text := "default boost token sample"
