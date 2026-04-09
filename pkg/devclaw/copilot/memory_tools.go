@@ -16,9 +16,10 @@ import (
 
 // MemoryDispatcherConfig holds configuration for memory tools.
 type MemoryDispatcherConfig struct {
-	Store       *memory.FileStore
-	SQLiteStore *memory.SQLiteStore
-	Config      MemoryConfig
+	Store         *memory.FileStore
+	SQLiteStore   *memory.SQLiteStore
+	Config        MemoryConfig
+	ContextRouter *ContextRouter // optional; nil disables wing routing
 }
 
 // RegisterMemoryTools registers individual memory tools.
@@ -28,6 +29,7 @@ func RegisterMemoryTools(executor *ToolExecutor, cfg MemoryDispatcherConfig) {
 	store := cfg.Store
 	sqliteStore := cfg.SQLiteStore
 	memCfg := cfg.Config
+	router := cfg.ContextRouter
 
 	// ── memory_save ──
 	executor.RegisterHidden(
@@ -46,11 +48,15 @@ func RegisterMemoryTools(executor *ToolExecutor, cfg MemoryDispatcherConfig) {
 						"description": "Category: fact, preference, event, or summary",
 						"enum":        []string{"fact", "preference", "event", "summary"},
 					},
+					"wing": map[string]any{
+						"type":        "string",
+						"description": "Optional palace wing to file this memory under. If omitted, falls back to session context routing. Leave empty for legacy behavior.",
+					},
 				},
 				"required": []string{"content"},
 			}),
 		func(ctx context.Context, args map[string]any) (any, error) {
-			return handleMemorySave(ctx, store, sqliteStore, memCfg, args)
+			return handleMemorySave(ctx, store, sqliteStore, memCfg, router, args)
 		},
 	)
 
@@ -114,7 +120,10 @@ func RegisterMemoryTools(executor *ToolExecutor, cfg MemoryDispatcherConfig) {
 }
 
 // handleMemorySave saves content to long-term memory.
-func handleMemorySave(_ context.Context, store *memory.FileStore, sqliteStore *memory.SQLiteStore, cfg MemoryConfig, args map[string]any) (any, error) {
+// After indexing, it resolves the palace wing from args["wing"] (explicit LLM
+// override) or via the ContextRouter using the session's delivery target from
+// ctx. If no wing can be determined, files.wing stays NULL (legacy behavior).
+func handleMemorySave(ctx context.Context, store *memory.FileStore, sqliteStore *memory.SQLiteStore, cfg MemoryConfig, router *ContextRouter, args map[string]any) (any, error) {
 	content, _ := args["content"].(string)
 	if content == "" {
 		return nil, fmt.Errorf("content is required")
@@ -150,6 +159,42 @@ func handleMemorySave(_ context.Context, store *memory.FileStore, sqliteStore *m
 		defer indexCancel()
 		if err := sqliteStore.IndexMemoryDir(indexCtx, memDir, chunkCfg); err != nil {
 			slog.Warn("memory index update after save failed", "error", err)
+		}
+	}
+
+	// ── Wing assignment (Sprint 2 Room 2.0b) ──
+	//
+	// Priority:
+	//  1. Explicit wing from LLM args (user or agent override).
+	//  2. Session-context routing via ContextRouter using the DeliveryTarget
+	//     that the agent runtime injects into ctx for every real session.
+	//  3. Leave files.wing as NULL (legacy first-class citizen per ADR-006).
+	//
+	// NormalizeWing validates, strips accents, rejects reserved prefixes, and
+	// returns "" for any input that can't form a valid wing name — so an empty
+	// result always means "no wing", and the early-return preserves NULL.
+	if sqliteStore != nil && cfg.Hierarchy.Enabled {
+		wingArg, _ := args["wing"].(string)
+		wing := memory.NormalizeWing(wingArg)
+
+		if wing == "" && router != nil {
+			// No explicit wing from LLM — ask the router based on session context.
+			dt := DeliveryTargetFromContext(ctx)
+			res := router.Resolve(ctx, dt.Channel, dt.ChatID, content)
+			wing = res.Wing // already normalized by router
+		}
+
+		if wing != "" {
+			// FileStore.Save always writes to MEMORY.md; IndexDirectory keys it
+			// as the bare filename "MEMORY.md". That is the stable fileID to target.
+			if err := sqliteStore.AssignWingToFile(ctx, "MEMORY.md", wing); err != nil {
+				// Log but do NOT fail the save — wing is advisory, file is persisted.
+				slog.Warn("failed to assign wing to file after save",
+					"file_id", "MEMORY.md",
+					"wing", wing,
+					"error", err,
+				)
+			}
 		}
 	}
 

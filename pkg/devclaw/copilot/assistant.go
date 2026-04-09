@@ -200,6 +200,12 @@ type Assistant struct {
 	// config.Memory.Dream.Enabled is false.
 	dream *DreamConsolidator
 
+	// contextRouter resolves (channel, chatID) pairs to palace wings for
+	// memory routing. Initialized in Start() after sqliteMemory is ready.
+	// Nil when sqliteMemory is nil. Safe to access concurrently — the router
+	// uses sync.Map internally and never returns errors.
+	contextRouter *ContextRouter
+
 	// mediaSvc provides native media handling (upload, enrich, send).
 	mediaSvc *media.MediaService
 
@@ -534,6 +540,18 @@ func (a *Assistant) Start(ctx context.Context) error {
 		a.dream = dc
 		a.dream.Start(ctx)
 		a.logger.Info("dream system started", "state_dir", dreamStateDir)
+	}
+
+	// 0d. Initialize the context router for palace wing resolution.
+	// Constructed unconditionally when sqliteMemory is available — the router
+	// is safe to instantiate regardless of Hierarchy.Enabled state (it returns
+	// SourceDisabled when the flag is off). Used by memory_save to route new
+	// memories to the right wing (Sprint 2 Room 2.0b).
+	if a.sqliteMemory != nil {
+		a.contextRouter = NewContextRouter(a.sqliteMemory, a.logger, a.config.Memory.Hierarchy)
+		a.logger.Info("context router initialized",
+			"hierarchy_enabled", a.config.Memory.Hierarchy.Enabled,
+		)
 	}
 
 	a.promptComposer.SetSkillGetter(func(name string) (interface{ SystemPrompt() string }, bool) {
@@ -3334,7 +3352,7 @@ func (a *Assistant) registerSystemTools() {
 	}
 
 	a.ssrfGuard = security.NewSSRFGuard(a.config.Security.SSRF, a.logger)
-	RegisterSystemTools(a.toolExecutor, sandboxRunner, a.memoryStore, a.sqliteMemory, a.config.Memory, a.scheduler, dataDir, a.ssrfGuard, a.vault, a.config.WebSearch, a.skillDB, a.config.Gateway, a.config.Security.ToolGuard)
+	RegisterSystemTools(a.toolExecutor, sandboxRunner, a.memoryStore, a.sqliteMemory, a.config.Memory, a.contextRouter, a.scheduler, dataDir, a.ssrfGuard, a.vault, a.config.WebSearch, a.skillDB, a.config.Gateway, a.config.Security.ToolGuard)
 
 	// Register skill database tools if available.
 	if a.skillDB != nil {

@@ -62,7 +62,9 @@ func sanitizeOutput(output string) string {
 // RegisterSystemTools registers all built-in system tools in the executor.
 // These are core tools available regardless of which skills are loaded.
 // If ssrfGuard is non-nil, web_fetch will validate URLs against SSRF rules.
-func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, memStore *memory.FileStore, sqliteStore *memory.SQLiteStore, memCfg MemoryConfig, sched *scheduler.Scheduler, dataDir string, ssrfGuard *security.SSRFGuard, vault *Vault, webSearchCfg WebSearchConfig, skillDB *SkillDB, gatewayCfg GatewayConfig, toolGuardCfg ToolGuardConfig) {
+// contextRouter may be nil; when non-nil it is forwarded to the memory tools
+// so that memory_save can route new memories to palace wings (Sprint 2 Room 2.0b).
+func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, memStore *memory.FileStore, sqliteStore *memory.SQLiteStore, memCfg MemoryConfig, contextRouter *ContextRouter, sched *scheduler.Scheduler, dataDir string, ssrfGuard *security.SSRFGuard, vault *Vault, webSearchCfg WebSearchConfig, skillDB *SkillDB, gatewayCfg GatewayConfig, toolGuardCfg ToolGuardConfig) {
 	registerWebSearchTool(executor, webSearchCfg)
 	registerWebFetchTool(executor, ssrfGuard)
 	registerFileTools(executor, dataDir)
@@ -76,9 +78,10 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 
 	if memStore != nil {
 		RegisterMemoryTools(executor, MemoryDispatcherConfig{
-			Store:       memStore,
-			SQLiteStore: sqliteStore,
-			Config:      memCfg,
+			Store:         memStore,
+			SQLiteStore:   sqliteStore,
+			Config:        memCfg,
+			ContextRouter: contextRouter,
 		})
 	}
 

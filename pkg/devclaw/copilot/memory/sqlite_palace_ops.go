@@ -6,11 +6,12 @@
 // unconditionally (though may be empty). Callers should gate invocation
 // at a higher level.
 //
-// None of these functions touch the `files` table or the `chunks` table.
-// They deal exclusively with the new registry tables.
+// Sprint 2 Room 2.0b adds AssignWingToFile which touches the `files` table.
+// All other functions deal exclusively with the registry tables.
 package memory
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -429,6 +430,32 @@ func (s *SQLiteStore) GetTaxonomy() ([]TaxonomyEntry, error) {
 		out = append(out, TaxonomyEntry{Wing: w, Rooms: rooms})
 	}
 	return out, nil
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// File wing assignment (Sprint 2 Room 2.0b)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// AssignWingToFile sets the wing column on a file row, but ONLY when the
+// current wing is NULL. This conditional UPDATE is the race barrier that
+// makes concurrent saves and dream classifier passes safe:
+//
+//   - If memory_save runs first → sets wing=X; classifier's UPDATE becomes a
+//     no-op (WHERE wing IS NULL no longer matches).
+//   - If classifier runs first → sets wing=Y; memory_save's UPDATE becomes a
+//     no-op. Both end states are valid; no cross-contamination.
+//
+// The fileID is the key used by IndexDirectory/IndexChunks — for files
+// written by FileStore.Save this is always "MEMORY.md".
+//
+// An empty wing is rejected at the caller level (NormalizeWing returns "").
+// The query uses a parameterized placeholder to prevent injection.
+func (s *SQLiteStore) AssignWingToFile(ctx context.Context, fileID string, wing string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE files SET wing = ? WHERE file_id = ? AND wing IS NULL`,
+		wing, fileID,
+	)
+	return err
 }
 
 // TotalLegacyFiles returns the count of files with wing IS NULL — memories
