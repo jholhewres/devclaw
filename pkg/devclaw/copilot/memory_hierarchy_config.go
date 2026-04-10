@@ -28,6 +28,29 @@ import (
 	"time"
 )
 
+// KGConfig configures the knowledge graph extraction subsystem.
+// It lives under HierarchyConfig.KG and controls LLM-based triple
+// extraction during dream cycles. Off by default — the operator must
+// explicitly opt in via AutoExtract and acknowledge consent.
+type KGConfig struct {
+	// AutoExtract controls which extraction modes are active.
+	// Values: "off" (default), "pattern", "llm", "both".
+	// When "off", no automatic extraction runs during dream cycles.
+	AutoExtract string `yaml:"auto_extract" json:"auto_extract"`
+
+	// LLMBudgetPerCycle caps how many memories the LLM extractor processes
+	// per dream cycle. Default: 20. The budget is enforced by the dream
+	// cycle caller, not the extractor itself.
+	LLMBudgetPerCycle int `yaml:"llm_budget_per_cycle" json:"llm_budget_per_cycle"`
+
+	// LLMConsentACK must be true when AutoExtract contains "llm".
+	// This is a safety gate — the operator must explicitly acknowledge
+	// that memory contents will be sent to an external LLM API for
+	// triple extraction. When false and mode is "llm" or "both",
+	// NewLLMExtractor returns an error.
+	LLMConsentACK bool `yaml:"llm_consent_acknowledged" json:"llm_consent_acknowledged"`
+}
+
 // WingHeuristic matches channel or group name patterns to a wing.
 // The binary ships zero defaults — all heuristics are user-provided via
 // YAML config. This is intentional: hardcoded locale or domain-specific
@@ -162,6 +185,10 @@ type HierarchyConfig struct {
 	// Map key: wing identifier (e.g. "work", "family").
 	// Map value: list of lowercase substrings that signal that wing.
 	LegacyKeywords map[string][]string `yaml:"legacy_keywords,omitempty"`
+
+	// KG configures knowledge graph extraction (Sprint 3 Room 3.4).
+	// Default: AutoExtract="off", LLMBudgetPerCycle=20, LLMConsentACK=false.
+	KG KGConfig `yaml:"kg,omitempty"`
 }
 
 // DefaultHierarchyConfig returns the defaults for HierarchyConfig.
@@ -208,6 +235,11 @@ func DefaultHierarchyConfig() HierarchyConfig {
 		IdentityPath:               "", // empty = use ~/.devclaw/identity.md
 		EssentialStoryStaleAfter:   6 * time.Hour,
 		EssentialStoryRoomsPerWing: 4,
+		KG: KGConfig{
+			AutoExtract:       "off",
+			LLMBudgetPerCycle: 20,
+			LLMConsentACK:     false,
+		},
 	}
 }
 
