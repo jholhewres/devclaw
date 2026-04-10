@@ -218,3 +218,8 @@ func extractKGQueryTokens(query string) []string {
 func (s *SQLiteStore) SetKG(k *kg.KG) {
 	s.kg = k
 }
+
+// KG returns the Knowledge Graph instance, or nil if KG is not configured.
+func (s *SQLiteStore) KG() *kg.KG {
+	return s.kg
+}

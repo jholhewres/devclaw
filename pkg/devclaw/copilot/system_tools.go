@@ -85,6 +85,10 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 		})
 	}
 
+	if sqliteStore != nil {
+		RegisterKGTools(executor, sqliteStore)
+	}
+
 	if sched != nil {
 		RegisterSchedulerDispatcher(executor, sched, skillDB)
 	}
@@ -112,7 +116,7 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 // scriptRunners maps script command prefixes to their file extensions.
 var scriptRunners = map[string]string{
 	"python ": ".py", "python3 ": ".py",
-	"node ":   ".js", "npx ":    ".js",
+	"node ": ".js", "npx ": ".js",
 }
 
 // checkScriptPreflight detects when a bash command runs a Python/JS script
@@ -1622,7 +1626,7 @@ func registerCapabilitiesTool(executor *ToolExecutor) {
 				},
 			},
 		),
-			func(_ context.Context, args map[string]any) (any, error) {
+		func(_ context.Context, args map[string]any) (any, error) {
 			filter, _ := args["filter"].(string)
 			if filter == "" {
 				filter = "all"

@@ -1280,6 +1280,10 @@ func (s *SQLiteStore) Close() error {
 	return s.db.Close()
 }
 
+func (s *SQLiteStore) DB() *sql.DB {
+	return s.db
+}
+
 // ChunkCount returns the total number of indexed chunks.
 func (s *SQLiteStore) ChunkCount() int {
 	var count int

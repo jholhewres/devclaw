@@ -23,6 +23,11 @@ func NewKG(db *sql.DB, logger *slog.Logger) (*KG, error) {
 	return &KG{db: db, logger: logger}, nil
 }
 
+// DB returns the underlying database connection for direct queries.
+func (k *KG) DB() *sql.DB {
+	return k.db
+}
+
 func (k *KG) EnsureEntity(ctx context.Context, name string) (int64, error) {
 	var entityID int64
 	err := k.db.QueryRowContext(ctx,

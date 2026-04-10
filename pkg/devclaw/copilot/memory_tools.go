@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/kg"
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
 )
 
@@ -352,4 +353,447 @@ func handleMemoryIndex(ctx context.Context, sqliteStore *memory.SQLiteStore, cfg
 
 	return fmt.Sprintf("Memory index updated: %d files, %d chunks.",
 		sqliteStore.FileCount(), sqliteStore.ChunkCount()), nil
+}
+
+// ── Knowledge Graph Tools (Sprint 3 Room 3.6) ──
+
+// RegisterKGTools registers the 6 knowledge-graph tools.
+func RegisterKGTools(executor *ToolExecutor, sqliteStore *memory.SQLiteStore) {
+	k := sqliteStore.KG()
+	if k == nil {
+		return
+	}
+
+	executor.RegisterHidden(
+		MakeToolDefinition("kg_query",
+			"Query the knowledge graph for facts about an entity. Returns triples where the entity is subject, object, or both.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"entity": map[string]any{
+						"type":        "string",
+						"description": "Entity name to query",
+					},
+					"direction": map[string]any{
+						"type":        "string",
+						"description": "Direction: out (subject→), in (→object), or both. Default: out",
+						"enum":        []string{"out", "in", "both"},
+					},
+					"wing": map[string]any{
+						"type":        "string",
+						"description": "Optional wing filter to narrow results",
+					},
+				},
+				"required": []string{"entity"},
+			}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			return handleKGQuery(ctx, k, args)
+		},
+	)
+
+	executor.RegisterHidden(
+		MakeToolDefinition("kg_add",
+			"Add a triple (subject, predicate, object) to the knowledge graph.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"subject": map[string]any{
+						"type":        "string",
+						"description": "Subject entity name",
+					},
+					"predicate": map[string]any{
+						"type":        "string",
+						"description": "Predicate name (e.g. works_at, likes, located_in)",
+					},
+					"object": map[string]any{
+						"type":        "string",
+						"description": "Object text or entity name",
+					},
+					"wing": map[string]any{
+						"type":        "string",
+						"description": "Optional palace wing for this triple",
+					},
+					"confidence": map[string]any{
+						"type":        "number",
+						"description": "Confidence score 0-1 (default: 0.5)",
+					},
+				},
+				"required": []string{"subject", "predicate", "object"},
+			}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			return handleKGAdd(ctx, k, args)
+		},
+	)
+
+	executor.RegisterHidden(
+		MakeToolDefinition("kg_invalidate",
+			"Invalidate (soft-delete) a triple by ID. Requires confirm=true to proceed.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"triple_id": map[string]any{
+						"type":        "integer",
+						"description": "ID of the triple to invalidate",
+					},
+					"confirm": map[string]any{
+						"type":        "boolean",
+						"description": "Set to true to confirm invalidation (default: false)",
+					},
+				},
+				"required": []string{"triple_id"},
+			}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			return handleKGInvalidate(ctx, k, args)
+		},
+	)
+
+	executor.RegisterHidden(
+		MakeToolDefinition("kg_timeline",
+			"Query the knowledge graph timeline for an entity within a date range.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"entity": map[string]any{
+						"type":        "string",
+						"description": "Entity name",
+					},
+					"from": map[string]any{
+						"type":        "string",
+						"description": "Start date (RFC3339, optional)",
+					},
+					"until": map[string]any{
+						"type":        "string",
+						"description": "End date (RFC3339, optional)",
+					},
+					"direction": map[string]any{
+						"type":        "string",
+						"description": "Direction: out, in, or both (default: out)",
+						"enum":        []string{"out", "in", "both"},
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Max results (default: 100, max: 100)",
+					},
+				},
+				"required": []string{"entity"},
+			}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			return handleKGTimeline(ctx, k, args)
+		},
+	)
+
+	executor.RegisterHidden(
+		MakeToolDefinition("kg_stats",
+			"Return counts of entities, predicates, active triples, and total triples in the knowledge graph.",
+			map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			return handleKGStats(ctx, k)
+		},
+	)
+
+	executor.RegisterHidden(
+		MakeToolDefinition("kg_merge_entities",
+			"Merge source entity into target entity. All triples are reassigned and source becomes an alias. Requires confirm=true.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"source_entity": map[string]any{
+						"type":        "string",
+						"description": "Entity to merge (will be deleted)",
+					},
+					"target_entity": map[string]any{
+						"type":        "string",
+						"description": "Entity to merge into (kept)",
+					},
+					"confirm": map[string]any{
+						"type":        "boolean",
+						"description": "Set to true to confirm merge (default: false)",
+					},
+				},
+				"required": []string{"source_entity", "target_entity"},
+			}),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			return handleKGMergeEntities(ctx, k, args)
+		},
+	)
+}
+
+func parseDirection(dir string) kg.Direction {
+	switch strings.ToLower(dir) {
+	case "in":
+		return kg.In
+	case "both":
+		return kg.Both
+	default:
+		return kg.Out
+	}
+}
+
+func handleKGQuery(ctx context.Context, k *kg.KG, args map[string]any) (any, error) {
+	entity, _ := args["entity"].(string)
+	if entity == "" {
+		return nil, fmt.Errorf("entity is required")
+	}
+
+	dirStr, _ := args["direction"].(string)
+	dir := parseDirection(dirStr)
+
+	wing := memory.NormalizeWing("")
+	if w, ok := args["wing"].(string); ok {
+		wing = memory.NormalizeWing(w)
+	}
+
+	triples, err := k.QueryEntity(ctx, entity, dir)
+	if err != nil {
+		return nil, fmt.Errorf("kg query: %w", err)
+	}
+
+	if len(triples) == 0 {
+		return fmt.Sprintf("No triples found for entity %q.", entity), nil
+	}
+
+	filtered := triples
+	if wing != "" {
+		var kept []kg.Triple
+		for _, tr := range triples {
+			if tr.Wing == wing {
+				kept = append(kept, tr)
+			}
+		}
+		filtered = kept
+	}
+
+	var sb strings.Builder
+	for _, tr := range filtered {
+		obj := tr.ObjectText
+		if tr.ObjectName != "" {
+			obj = tr.ObjectName
+		}
+		sb.WriteString(fmt.Sprintf("%s (%s) %s [confidence=%.1f", tr.SubjectName, tr.PredicateName, obj, tr.Confidence))
+		if tr.Wing != "" {
+			sb.WriteString(fmt.Sprintf(", wing=%s", tr.Wing))
+		}
+		sb.WriteString("]\n")
+	}
+	return sb.String(), nil
+}
+
+func handleKGAdd(ctx context.Context, k *kg.KG, args map[string]any) (any, error) {
+	subject, _ := args["subject"].(string)
+	if subject == "" {
+		return nil, fmt.Errorf("subject is required")
+	}
+	predicate, _ := args["predicate"].(string)
+	if predicate == "" {
+		return nil, fmt.Errorf("predicate is required")
+	}
+	object, _ := args["object"].(string)
+	if object == "" {
+		return nil, fmt.Errorf("object is required")
+	}
+
+	confidence := 0.5
+	if c, ok := args["confidence"].(float64); ok && c > 0 {
+		confidence = c
+	}
+
+	wing := ""
+	if w, ok := args["wing"].(string); ok {
+		wing = memory.NormalizeWing(w)
+	}
+
+	tid, err := k.AddTriple(ctx, subject, predicate, object, kg.TripleOpts{
+		Confidence: confidence,
+		Wing:       wing,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("kg add: %w", err)
+	}
+
+	return fmt.Sprintf("Added triple #%d: %s (%s) %s [confidence=%.1f]", tid, subject, predicate, object, confidence), nil
+}
+
+func handleKGInvalidate(ctx context.Context, k *kg.KG, args map[string]any) (any, error) {
+	tidFloat, ok := args["triple_id"].(float64)
+	if !ok {
+		return nil, fmt.Errorf("triple_id is required and must be an integer")
+	}
+	tid := int64(tidFloat)
+
+	confirm, _ := args["confirm"].(bool)
+	if !confirm {
+		return fmt.Sprintf("This will invalidate triple #%d. Set confirm=true to proceed.", tid), nil
+	}
+
+	if err := k.InvalidateTriple(ctx, tid); err != nil {
+		return nil, fmt.Errorf("kg invalidate: %w", err)
+	}
+
+	return fmt.Sprintf("Triple #%d invalidated.", tid), nil
+}
+
+func handleKGTimeline(ctx context.Context, k *kg.KG, args map[string]any) (any, error) {
+	entity, _ := args["entity"].(string)
+	if entity == "" {
+		return nil, fmt.Errorf("entity is required")
+	}
+
+	dirStr, _ := args["direction"].(string)
+	dir := parseDirection(dirStr)
+
+	from, _ := args["from"].(string)
+	if from == "" {
+		from = "0001-01-01T00:00:00Z"
+	}
+	until, _ := args["until"].(string)
+	if until == "" {
+		until = "9999-12-31T23:59:59Z"
+	}
+
+	maxCap := 100
+	limit := 100
+	if l, ok := args["limit"].(float64); ok && l > 0 {
+		limit = int(l)
+	}
+	requestedLimit := limit
+	if limit > maxCap {
+		limit = maxCap
+	}
+
+	triples, err := k.Timeline(ctx, kg.TimelineOpts{
+		Subject:   entity,
+		From:      from,
+		Until:     until,
+		Direction: dir,
+		Limit:     limit + 1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("kg timeline: %w", err)
+	}
+
+	hasMore := false
+	if len(triples) > limit {
+		hasMore = true
+		triples = triples[:limit]
+	}
+
+	var sb strings.Builder
+	for _, tr := range triples {
+		obj := tr.ObjectText
+		if tr.ObjectName != "" {
+			obj = tr.ObjectName
+		}
+		sb.WriteString(fmt.Sprintf("[%s] %s (%s) %s [confidence=%.1f",
+			tr.ValidFrom, tr.SubjectName, tr.PredicateName, obj, tr.Confidence))
+		if tr.Wing != "" {
+			sb.WriteString(fmt.Sprintf(", wing=%s", tr.Wing))
+		}
+		if tr.ValidUntil != "" {
+			sb.WriteString(fmt.Sprintf(", until=%s", tr.ValidUntil))
+		}
+		sb.WriteString("]\n")
+	}
+
+	if hasMore {
+		sb.WriteString(fmt.Sprintf("has_more: true (showing %d of %d requested)\n", limit, requestedLimit))
+	}
+
+	return sb.String(), nil
+}
+
+func handleKGStats(ctx context.Context, k *kg.KG) (any, error) {
+	db := k.DB()
+
+	var entities, predicates, activeTriples, totalTriples int
+
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM kg_entities").Scan(&entities); err != nil {
+		return nil, fmt.Errorf("kg stats entities: %w", err)
+	}
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM kg_predicates").Scan(&predicates); err != nil {
+		return nil, fmt.Errorf("kg stats predicates: %w", err)
+	}
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM kg_triples WHERE valid_until IS NULL AND txn_until IS NULL").Scan(&activeTriples); err != nil {
+		return nil, fmt.Errorf("kg stats active triples: %w", err)
+	}
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM kg_triples").Scan(&totalTriples); err != nil {
+		return nil, fmt.Errorf("kg stats total triples: %w", err)
+	}
+
+	return fmt.Sprintf("KG Stats: entities=%d, predicates=%d, active_triples=%d, total_triples=%d",
+		entities, predicates, activeTriples, totalTriples), nil
+}
+
+func handleKGMergeEntities(ctx context.Context, k *kg.KG, args map[string]any) (any, error) {
+	source, _ := args["source_entity"].(string)
+	if source == "" {
+		return nil, fmt.Errorf("source_entity is required")
+	}
+	target, _ := args["target_entity"].(string)
+	if target == "" {
+		return nil, fmt.Errorf("target_entity is required")
+	}
+
+	confirm, _ := args["confirm"].(bool)
+	if !confirm {
+		return fmt.Sprintf("This will merge %q into %q. All triples will be reassigned. Set confirm=true to proceed.", source, target), nil
+	}
+
+	sourceID, err := k.EnsureEntity(ctx, source)
+	if err != nil {
+		return nil, fmt.Errorf("resolve source entity: %w", err)
+	}
+	targetID, err := k.EnsureEntity(ctx, target)
+	if err != nil {
+		return nil, fmt.Errorf("resolve target entity: %w", err)
+	}
+	if sourceID == targetID {
+		return fmt.Sprintf("Source and target are the same entity (id=%d). Nothing to merge.", sourceID), nil
+	}
+
+	db := k.DB()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("merge begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE kg_triples SET subject_entity_id = ? WHERE subject_entity_id = ?",
+		targetID, sourceID,
+	); err != nil {
+		return nil, fmt.Errorf("merge reassign subject: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE kg_triples SET object_entity_id = ? WHERE object_entity_id = ?",
+		targetID, sourceID,
+	); err != nil {
+		return nil, fmt.Errorf("merge reassign object: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		"DELETE FROM kg_entity_aliases WHERE entity_id = ?",
+		sourceID,
+	); err != nil {
+		return nil, fmt.Errorf("merge delete source aliases: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		"INSERT OR IGNORE INTO kg_entity_aliases (entity_id, alias_name) VALUES (?, ?)",
+		targetID, strings.TrimSpace(strings.ToLower(source)),
+	); err != nil {
+		return nil, fmt.Errorf("merge register alias: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		"DELETE FROM kg_entities WHERE entity_id = ?",
+		sourceID,
+	); err != nil {
+		return nil, fmt.Errorf("merge delete source entity: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("merge commit: %w", err)
+	}
+
+	return fmt.Sprintf("Merged %q into %q. Source entity deleted and registered as alias.", source, target), nil
 }
