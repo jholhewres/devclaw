@@ -27,6 +27,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/kg"
 )
 
 // Layer-local defaults.
@@ -103,10 +105,12 @@ func (c OnDemandLayerConfig) withDefaults() OnDemandLayerConfig {
 // Until Room 2.4 wires this into the prompt stack, the layer is dead code
 // at runtime but fully functional for tests.
 type OnDemandLayer struct {
-	store    *SQLiteStore
-	detector *EntityDetector
-	cfg      OnDemandLayerConfig
-	logger   *slog.Logger
+	store            *SQLiteStore
+	detector         *EntityDetector
+	cfg              OnDemandLayerConfig
+	logger           *slog.Logger
+	kg               *kg.KG
+	kgFactsPerRender int
 }
 
 // NewOnDemandLayer constructs a layer. detector may be nil — in that case the
@@ -128,6 +132,14 @@ func NewOnDemandLayer(store *SQLiteStore, detector *EntityDetector, cfg OnDemand
 		detector: detector,
 		cfg:      cfg,
 		logger:   logger,
+	}
+}
+
+func (l *OnDemandLayer) SetKG(k *kg.KG, factsPerRender int) {
+	l.kg = k
+	l.kgFactsPerRender = factsPerRender
+	if l.kgFactsPerRender <= 0 {
+		l.kgFactsPerRender = 3
 	}
 }
 
@@ -205,6 +217,13 @@ func (l *OnDemandLayer) Render(ctx context.Context, activeWing string, turn stri
 
 	// Step 5 — render as Markdown.
 	output := l.renderMarkdown(merged, entities)
+
+	// Step 5b — prepend KG facts if available.
+	if l.kg != nil {
+		if kgSection := l.renderKGFacts(outerCtx, entities); kgSection != "" {
+			output = kgSection + output
+		}
+	}
 
 	// Step 6 — truncate to byte budget.
 	output = truncateAtBoundary(output, l.cfg.ByteBudget)
@@ -362,5 +381,42 @@ func (l *OnDemandLayer) renderMarkdown(results []onDemandResult, entities []Enti
 		b.WriteString(fmt.Sprintf("- **%s**: %s\n", display, lead))
 	}
 
+	return b.String()
+}
+
+func (l *OnDemandLayer) renderKGFacts(ctx context.Context, entities []EntityMatch) string {
+	if l.kg == nil || len(entities) == 0 {
+		return ""
+	}
+
+	entityName := entities[0].Candidate.Text
+	if entityName == "" {
+		entityName = entities[0].Wing
+	}
+	if entityName == "" {
+		entityName = entities[0].Room
+	}
+	if entityName == "" {
+		return ""
+	}
+
+	facts, err := l.kg.CurrentFacts(ctx, entityName)
+	if err != nil || len(facts) == 0 {
+		return ""
+	}
+
+	limit := l.kgFactsPerRender
+	if limit <= 0 {
+		limit = 3
+	}
+	if len(facts) > limit {
+		facts = facts[:limit]
+	}
+
+	var b strings.Builder
+	b.WriteString("## Knowledge\n")
+	for _, f := range facts {
+		b.WriteString(fmt.Sprintf("- %s %s %s\n", f.SubjectName, f.PredicateName, f.ObjectText))
+	}
 	return b.String()
 }

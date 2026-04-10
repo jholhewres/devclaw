@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/kg"
 	_ "github.com/mattn/go-sqlite3" // SQLite driver with FTS5 support.
 )
 
@@ -37,6 +38,10 @@ type SQLiteStore struct {
 	vectorCacheMu     sync.RWMutex
 	vectorCacheByID   map[int64]vectorCacheEntry // chunkID → entry
 	vectorCacheByFile map[string][]int64         // fileID → []chunkID
+
+	// kg is the lazy-initialized Knowledge Graph reference, nil when KG is
+	// disabled. Inert until someone calls HybridSearchEnriched.
+	kg *kg.KG
 }
 
 // vectorCacheEntry holds a chunk embedding for in-memory vector search.
@@ -177,6 +182,10 @@ func (s *SQLiteStore) initSchema() error {
 	// Sprint 3 Room 3.1 — KG bitemporal schema.
 	if err := MigrateKgSchema(s.db, s.logger); err != nil {
 		slog.Warn("failed to migrate kg schema", "error", err)
+	} else {
+		if k, err := kg.NewKG(s.db, s.logger); err == nil {
+			s.kg = k
+		}
 	}
 
 	return nil
@@ -747,6 +756,11 @@ type HybridSearchOptions struct {
 	// zero. Files with wing IS NULL are NEVER penalized regardless of
 	// this value — that is the Sprint 1 retrocompat contract.
 	WingBoostPenalty float64
+
+	// KGFactsPerEntity caps the number of KG facts returned per detected
+	// entity in HybridSearchEnriched. Defaults to 3 when zero.
+	// Set to -1 for unlimited.
+	KGFactsPerEntity int
 }
 
 // HybridSearch performs a combined vector + BM25 search with configurable
