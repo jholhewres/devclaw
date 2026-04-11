@@ -65,15 +65,24 @@ type EmbeddingConfig struct {
 
 	// FallbackModel is the model for the fallback provider.
 	FallbackModel string `yaml:"fallback_model"`
+
+	// Quantize enables uint8 quantization of embeddings for ~4x memory reduction.
+	// Default: true. Set to false as escape hatch if quantization degrades search.
+	Quantize bool `yaml:"quantize"`
+
+	// QuantizeBits is the quantization bit-width (default: 8). Reserved for future 4-bit support.
+	QuantizeBits int `yaml:"quantize_bits"`
 }
 
 // DefaultEmbeddingConfig returns sensible defaults.
 func DefaultEmbeddingConfig() EmbeddingConfig {
 	return EmbeddingConfig{
-		Provider:   "none",
-		Model:      "text-embedding-3-small",
-		Dimensions: 1536,
-		Cache:      true,
+		Provider:     "none",
+		Model:        "text-embedding-3-small",
+		Dimensions:   1536,
+		Cache:        true,
+		Quantize:     true,
+		QuantizeBits: 8,
 	}
 }
 

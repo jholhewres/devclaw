@@ -42,6 +42,9 @@ type SQLiteStore struct {
 	// kg is the lazy-initialized Knowledge Graph reference, nil when KG is
 	// disabled. Inert until someone calls HybridSearchEnriched.
 	kg *kg.KG
+
+	// quantizeEnabled enables uint8 quantization of embeddings (~4x memory reduction).
+	quantizeEnabled bool
 }
 
 // vectorCacheEntry holds a chunk embedding for in-memory vector search.
@@ -49,7 +52,8 @@ type vectorCacheEntry struct {
 	chunkID   int64
 	fileID    string
 	text      string
-	embedding []float32
+	embedding []float32           // float32 path (used when quantize=false)
+	quantized *QuantizedEmbedding // uint8 path (used when quantize=true, ~4x less memory)
 }
 
 // SearchResult represents a single search hit with score.
@@ -92,6 +96,12 @@ func NewSQLiteStore(dbPath string, embedder EmbeddingProvider, logger *slog.Logg
 	}
 
 	return store, nil
+}
+
+// SetQuantizeEnabled enables or disables uint8 embedding quantization.
+// Call before loadVectorCache (typically right after construction).
+func (s *SQLiteStore) SetQuantizeEnabled(enabled bool) {
+	s.quantizeEnabled = enabled
 }
 
 // initSchema creates the required tables and indices.
@@ -327,12 +337,18 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 
 		if embVec != nil {
 			chunkID, _ := result.LastInsertId()
-			newCacheEntries = append(newCacheEntries, vectorCacheEntry{
+			entry := vectorCacheEntry{
 				chunkID:   chunkID,
 				fileID:    fileID,
 				text:      chunk.Text,
 				embedding: embVec,
-			})
+			}
+			if s.quantizeEnabled {
+				q := QuantizeFloat32(embVec)
+				entry.quantized = &q
+				entry.embedding = nil // free float32 in cache
+			}
+			newCacheEntries = append(newCacheEntries, entry)
 		}
 	}
 
@@ -664,11 +680,18 @@ func (s *SQLiteStore) SearchVector(ctx context.Context, query string, maxResults
 	}
 	var candidates []scored
 
+	// Precompute query norm once for all quantized comparisons.
+	queryNorm := VectorNorm(queryVec)
+
 	for _, entry := range cache {
-		if len(entry.embedding) == 0 {
+		var sim float64
+		if entry.quantized != nil {
+			sim = entry.quantized.CosineSimilarity(queryVec, queryNorm)
+		} else if len(entry.embedding) > 0 {
+			sim = cosineSimilarity(queryVec, entry.embedding)
+		} else {
 			continue
 		}
-		sim := cosineSimilarity(queryVec, entry.embedding)
 		if sim > 0 {
 			candidates = append(candidates, scored{entry: entry, score: sim})
 		}
@@ -1233,6 +1256,11 @@ func (s *SQLiteStore) loadVectorCache() error {
 		}
 		if err := json.Unmarshal([]byte(embJSON), &e.embedding); err != nil {
 			continue
+		}
+		if s.quantizeEnabled && len(e.embedding) > 0 {
+			q := QuantizeFloat32(e.embedding)
+			e.quantized = &q
+			e.embedding = nil // free float32 memory (~4x savings)
 		}
 		byID[e.chunkID] = e
 		byFile[e.fileID] = append(byFile[e.fileID], e.chunkID)
