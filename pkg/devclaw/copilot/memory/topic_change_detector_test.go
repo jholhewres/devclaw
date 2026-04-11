@@ -85,6 +85,58 @@ func TestTopicChange_UpdateTopic_Synchronous(t *testing.T) {
 	d.mu.RUnlock()
 }
 
+func TestMergeOnDemandResults(t *testing.T) {
+	t.Run("deduplication by fileID keeps higher score", func(t *testing.T) {
+		a := []onDemandResult{{fileID: "f1", text: "a", score: 0.9, wing: "w"}}
+		b := []onDemandResult{{fileID: "f1", text: "b", score: 0.5, wing: "w"}}
+		got := mergeOnDemandResults(a, b, 10)
+		if len(got) != 1 {
+			t.Fatalf("expected 1 result after dedup, got %d", len(got))
+		}
+		if got[0].score != 0.9 {
+			t.Errorf("expected higher score 0.9, got %f", got[0].score)
+		}
+	})
+
+	t.Run("sorted by score descending", func(t *testing.T) {
+		a := []onDemandResult{
+			{fileID: "f1", text: "a", score: 0.3, wing: "w"},
+			{fileID: "f2", text: "b", score: 0.8, wing: "w"},
+		}
+		b := []onDemandResult{
+			{fileID: "f3", text: "c", score: 0.6, wing: "w"},
+		}
+		got := mergeOnDemandResults(a, b, 10)
+		if len(got) != 3 {
+			t.Fatalf("expected 3 results, got %d", len(got))
+		}
+		for i := 1; i < len(got); i++ {
+			if got[i].score > got[i-1].score {
+				t.Errorf("results not sorted: got[%d].score=%f > got[%d].score=%f", i, got[i].score, i-1, got[i-1].score)
+			}
+		}
+	})
+
+	t.Run("maxResults cap is respected", func(t *testing.T) {
+		a := []onDemandResult{
+			{fileID: "f1", text: "a", score: 0.9, wing: "w"},
+			{fileID: "f2", text: "b", score: 0.8, wing: "w"},
+			{fileID: "f3", text: "c", score: 0.7, wing: "w"},
+		}
+		b := []onDemandResult{
+			{fileID: "f4", text: "d", score: 0.6, wing: "w"},
+		}
+		got := mergeOnDemandResults(a, b, 2)
+		if len(got) != 2 {
+			t.Fatalf("expected 2 results (capped), got %d", len(got))
+		}
+		// Should keep the top 2 by score.
+		if got[0].score != 0.9 || got[1].score != 0.8 {
+			t.Errorf("expected scores 0.9 and 0.8, got %f and %f", got[0].score, got[1].score)
+		}
+	})
+}
+
 func TestEntityOverlap(t *testing.T) {
 	tests := []struct {
 		name string

@@ -153,6 +153,10 @@ func (q *QuantizedEmbedding) UnmarshalBinary(data []byte) error {
 	}
 
 	q.Dims = int(binary.LittleEndian.Uint32(data[0:4]))
+	const maxEmbeddingDims = 65536
+	if q.Dims > maxEmbeddingDims {
+		return fmt.Errorf("quantized embedding: dims %d exceeds maximum %d", q.Dims, maxEmbeddingDims)
+	}
 	q.Scale = math.Float32frombits(binary.LittleEndian.Uint32(data[4:8]))
 	q.MinVal = math.Float32frombits(binary.LittleEndian.Uint32(data[8:12]))
 
