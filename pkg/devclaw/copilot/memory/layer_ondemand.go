@@ -25,6 +25,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -232,18 +233,14 @@ func (l *OnDemandLayer) Render(ctx context.Context, activeWing string, turn stri
 			extraCancel()
 			merged = mergeOnDemandResults(merged, extraResults, l.cfg.MaxResults)
 
-			// Inject KG facts for the new topic if available.
-			if l.topicDetector.kg != nil {
-				kgFacts := l.topicDetector.LookupKGFacts(outerCtx, entities)
-				if len(kgFacts) > 0 {
-					for _, f := range kgFacts {
-						merged = append(merged, onDemandResult{
-							fileID: "kg-fact",
-							text:   f.SubjectName + " " + f.PredicateName + " " + f.ObjectText,
-							score:  f.Confidence,
-						})
-					}
-				}
+			// Inject KG facts for the new topic (LookupKGFacts handles nil KG).
+			kgFacts := l.topicDetector.LookupKGFacts(outerCtx, entities)
+			for _, f := range kgFacts {
+				merged = append(merged, onDemandResult{
+					fileID: "kg-fact",
+					text:   f.SubjectName + " " + f.PredicateName + " " + f.ObjectText,
+					score:  f.Confidence,
+				})
 			}
 		}
 		// Update topic state (synchronous struct copy, no API call).
@@ -368,8 +365,8 @@ type onDemandResult struct {
 	entity EntityMatch
 }
 
-// mergeOnDemandResults merges two result sets, deduplicates by fileID, and
-// caps at maxResults. Used when topic change triggers a cross-wing search.
+// mergeOnDemandResults merges two result sets, deduplicates by fileID, sorts
+// by score descending, and caps at maxResults.
 func mergeOnDemandResults(a, b []onDemandResult, maxResults int) []onDemandResult {
 	seen := make(map[string]bool, len(a))
 	for _, r := range a {
@@ -383,6 +380,10 @@ func mergeOnDemandResults(a, b []onDemandResult, maxResults int) []onDemandResul
 			seen[r.fileID] = true
 		}
 	}
+	// Sort by score descending so truncation drops lowest-scored results.
+	sort.Slice(merged, func(i, j int) bool {
+		return merged[i].score > merged[j].score
+	})
 	if maxResults > 0 && len(merged) > maxResults {
 		merged = merged[:maxResults]
 	}

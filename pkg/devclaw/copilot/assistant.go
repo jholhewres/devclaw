@@ -507,6 +507,8 @@ func (a *Assistant) Start(ctx context.Context) error {
 				"error", err)
 		} else {
 			a.sqliteMemory = sqlStore
+			// Wire uint8 embedding quantization (4x memory reduction).
+			sqlStore.SetQuantizeEnabled(a.config.Memory.Embedding.Quantize)
 			a.logger.Info("SQLite memory store initialized",
 				"embedding_provider", embedder.Name(),
 				"db", dbPath,
@@ -602,23 +604,24 @@ func (a *Assistant) Start(ctx context.Context) error {
 		onDemandCfg.CrossWingEnabled = a.config.Memory.Hierarchy.OnDemandCrossWingEnabled
 		onDemandLayer := memory.NewOnDemandLayer(a.sqliteMemory, entityDetector, onDemandCfg, a.logger)
 
-		// Wire KG into OnDemandLayer for enriched search results.
-		if kgStore := a.sqliteMemory.KG(); kgStore != nil {
-			factsPerRender := a.config.Memory.Hierarchy.KG.FactsPerInjection
-			if factsPerRender <= 0 {
-				factsPerRender = 5
-			}
-			onDemandLayer.SetKG(kgStore, factsPerRender)
-
-			// Wire TopicChangeDetector for context-switch handling.
-			topicDetector := memory.NewTopicChangeDetector(
-				float32(a.config.Memory.Hierarchy.TopicChangeThreshold),
-				float32(a.config.Memory.Hierarchy.TopicChangeEntityOverlap),
-				kgStore,
-				factsPerRender,
-			)
-			onDemandLayer.SetTopicDetector(topicDetector)
+		// Wire KG into OnDemandLayer for enriched search results (nil-safe).
+		kgStore := a.sqliteMemory.KG() // may be nil
+		factsPerRender := a.config.Memory.Hierarchy.KG.FactsPerInjection
+		if factsPerRender <= 0 {
+			factsPerRender = 5
 		}
+		if kgStore != nil {
+			onDemandLayer.SetKG(kgStore, factsPerRender)
+		}
+
+		// Wire TopicChangeDetector — works with or without KG.
+		topicDetector := memory.NewTopicChangeDetector(
+			float32(a.config.Memory.Hierarchy.TopicChangeThreshold),
+			float32(a.config.Memory.Hierarchy.TopicChangeEntityOverlap),
+			kgStore, // may be nil — detector degrades gracefully
+			factsPerRender,
+		)
+		onDemandLayer.SetTopicDetector(topicDetector)
 
 		stackCfg := DefaultStackConfig()
 		stackCfg.ForceLegacy = a.config.Memory.Stack.ForceLegacy

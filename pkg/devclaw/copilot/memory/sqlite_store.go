@@ -109,12 +109,18 @@ func (s *SQLiteStore) SetQuantizeEnabled(enabled bool) {
 	s.quantizeEnabled = enabled
 }
 
-// LastQueryEmbedding returns the most recent query embedding from SearchVector.
-// Used by TopicChangeDetector to avoid extra embedding API calls. Thread-safe.
+// LastQueryEmbedding returns a copy of the most recent query embedding from
+// SearchVector. Returns a defensive copy to prevent data races if the embedding
+// provider reuses buffers. Thread-safe.
 func (s *SQLiteStore) LastQueryEmbedding() []float32 {
 	s.lastQueryEmbMu.RLock()
 	defer s.lastQueryEmbMu.RUnlock()
-	return s.lastQueryEmb
+	if s.lastQueryEmb == nil {
+		return nil
+	}
+	cp := make([]float32, len(s.lastQueryEmb))
+	copy(cp, s.lastQueryEmb)
+	return cp
 }
 
 // initSchema creates the required tables and indices.

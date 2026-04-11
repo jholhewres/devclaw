@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/kg/patterns"
 )
@@ -13,14 +14,21 @@ import (
 //go:embed patterns/pt-br.yaml
 var defaultPatternsYAML []byte
 
+var (
+	defaultPatternSetsOnce sync.Once
+	defaultPatternSetsVal  []*patterns.PatternSet
+)
+
 // DefaultPatternSets returns the built-in pattern sets (pt-br).
-// Returns nil on parse error (should never happen with embedded YAML).
+// Parsed once and cached via sync.Once. Returns nil on parse error.
 func DefaultPatternSets() []*patterns.PatternSet {
-	ps, err := patterns.Load(defaultPatternsYAML)
-	if err != nil {
-		return nil
-	}
-	return []*patterns.PatternSet{ps}
+	defaultPatternSetsOnce.Do(func() {
+		ps, err := patterns.Load(defaultPatternsYAML)
+		if err == nil {
+			defaultPatternSetsVal = []*patterns.PatternSet{ps}
+		}
+	})
+	return defaultPatternSetsVal
 }
 
 // Extractor scans free text for SPO triples using configurable regex patterns.
