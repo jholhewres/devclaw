@@ -27,10 +27,26 @@ const MemoryFileName = "MEMORY.md"
 
 // Entry represents a single memory fact or event.
 type Entry struct {
-	Content   string    `json:"content"`
-	Source    string    `json:"source"`    // "user", "agent", "system"
-	Category string    `json:"category"`  // "fact", "preference", "event", "summary"
-	Timestamp time.Time `json:"timestamp"`
+	Content   string     `json:"content"`
+	Source    string     `json:"source"`              // "user", "agent", "system"
+	Category  string     `json:"category"`            // "fact", "preference", "event", "summary"
+	Timestamp time.Time  `json:"timestamp"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"` // nil = never expires
+}
+
+// categoryTTL defines default time-to-live per category.
+// Zero means the category never expires.
+var categoryTTL = map[string]time.Duration{
+	"event":      7 * 24 * time.Hour,  // 7 days
+	"summary":    30 * 24 * time.Hour, // 30 days
+	"fact":       0,                   // never expires
+	"preference": 0,                   // never expires
+}
+
+// DefaultTTLForCategory returns the default TTL for a category.
+// Returns 0 (never expires) for unknown categories.
+func DefaultTTLForCategory(category string) time.Duration {
+	return categoryTTL[category]
 }
 
 // Store defines the interface for memory persistence.
@@ -79,14 +95,33 @@ func (fs *FileStore) Save(entry Entry) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
+	// Set TTL-based expiration if not already set.
+	if entry.ExpiresAt == nil {
+		if ttl := DefaultTTLForCategory(entry.Category); ttl > 0 {
+			exp := entry.Timestamp.Add(ttl)
+			entry.ExpiresAt = &exp
+		}
+	}
+
 	memFile := filepath.Join(fs.baseDir, MemoryFileName)
 
 	// Format the entry as a markdown list item.
-	line := fmt.Sprintf("- [%s] [%s] %s\n",
-		entry.Timestamp.Format("2006-01-02 15:04"),
-		entry.Category,
-		entry.Content,
-	)
+	// Include expires_at tag if set, for parsing on read.
+	var line string
+	if entry.ExpiresAt != nil {
+		line = fmt.Sprintf("- [%s] [%s] [expires:%s] %s\n",
+			entry.Timestamp.Format("2006-01-02 15:04"),
+			entry.Category,
+			entry.ExpiresAt.Format("2006-01-02"),
+			entry.Content,
+		)
+	} else {
+		line = fmt.Sprintf("- [%s] [%s] %s\n",
+			entry.Timestamp.Format("2006-01-02 15:04"),
+			entry.Category,
+			entry.Content,
+		)
+	}
 
 	f, err := os.OpenFile(memFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -102,6 +137,73 @@ func (fs *FileStore) Save(entry Entry) error {
 
 	_, err = f.WriteString(line)
 	return err
+}
+
+// SaveIfNotDuplicate atomically checks for duplicates and saves under a single lock.
+// Returns (saved bool, existingContent string, error).
+// If saved is false, existingContent contains the matching entry's content.
+func (fs *FileStore) SaveIfNotDuplicate(entry Entry, contentHash string, isDuplicate func(existing Entry) bool) (bool, string, error) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	// Read existing entries under the write lock (atomic check+write).
+	memFile := filepath.Join(fs.baseDir, MemoryFileName)
+	content, err := os.ReadFile(memFile)
+	if err != nil && !os.IsNotExist(err) {
+		return false, "", fmt.Errorf("reading memory file: %w", err)
+	}
+	existing := parseMemoryFile(string(content), "memory")
+
+	for _, e := range existing {
+		if isDuplicate(e) {
+			return false, e.Content, nil
+		}
+	}
+
+	// Set TTL-based expiration if not already set.
+	if entry.ExpiresAt == nil {
+		if ttl := DefaultTTLForCategory(entry.Category); ttl > 0 {
+			exp := entry.Timestamp.Add(ttl)
+			entry.ExpiresAt = &exp
+		}
+	}
+
+	// Sanitize content to prevent [expires:] injection.
+	entry.Content = strings.ReplaceAll(entry.Content, "[expires:", "[expires\\:")
+
+	// Format and write.
+	var line string
+	if entry.ExpiresAt != nil {
+		line = fmt.Sprintf("- [%s] [%s] [expires:%s] %s\n",
+			entry.Timestamp.Format("2006-01-02 15:04"),
+			entry.Category,
+			entry.ExpiresAt.Format("2006-01-02"),
+			entry.Content,
+		)
+	} else {
+		line = fmt.Sprintf("- [%s] [%s] %s\n",
+			entry.Timestamp.Format("2006-01-02 15:04"),
+			entry.Category,
+			entry.Content,
+		)
+	}
+
+	f, err := os.OpenFile(memFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return false, "", fmt.Errorf("opening memory file: %w", err)
+	}
+	defer f.Close()
+
+	info, _ := f.Stat()
+	if info != nil && info.Size() == 0 {
+		f.WriteString("# DevClaw Memory\n\nLong-term facts and preferences.\n\n")
+	}
+
+	_, err = f.WriteString(line)
+	if err != nil {
+		return false, "", err
+	}
+	return true, "", nil
 }
 
 // Search returns entries whose content matches the query (case-insensitive).
@@ -166,7 +268,17 @@ func (fs *FileStore) GetByDate(date time.Time) ([]Entry, error) {
 		return nil, err
 	}
 
-	return parseMemoryFile(string(content), "daily"), nil
+	entries := parseMemoryFile(string(content), "daily")
+
+	// Filter out expired entries (same contract as GetAll).
+	now := time.Now()
+	valid := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		if e.ExpiresAt == nil || e.ExpiresAt.After(now) {
+			valid = append(valid, e)
+		}
+	}
+	return valid, nil
 }
 
 // GetAll reads and parses all entries from MEMORY.md.
@@ -183,7 +295,17 @@ func (fs *FileStore) GetAll() ([]Entry, error) {
 		return nil, err
 	}
 
-	return parseMemoryFile(string(content), "memory"), nil
+	entries := parseMemoryFile(string(content), "memory")
+
+	// Filter out expired entries.
+	now := time.Now()
+	valid := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		if e.ExpiresAt == nil || e.ExpiresAt.After(now) {
+			valid = append(valid, e)
+		}
+	}
+	return valid, nil
 }
 
 // SaveDailyLog appends a conversation summary to the daily log file.
@@ -288,6 +410,18 @@ func parseMemoryFile(content, source string) []Entry {
 			closeBracket := strings.Index(line, "]")
 			if closeBracket > 0 {
 				entry.Category = line[1:closeBracket]
+				line = strings.TrimSpace(line[closeBracket+1:])
+			}
+		}
+
+		// Try to parse optional expiration: [expires:YYYY-MM-DD]
+		if strings.HasPrefix(line, "[expires:") {
+			closeBracket := strings.Index(line, "]")
+			if closeBracket > 0 {
+				dateStr := line[len("[expires:"):closeBracket]
+				if exp, err := time.Parse("2006-01-02", dateStr); err == nil {
+					entry.ExpiresAt = &exp
+				}
 				line = strings.TrimSpace(line[closeBracket+1:])
 			}
 		}

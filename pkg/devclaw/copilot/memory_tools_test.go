@@ -470,3 +470,117 @@ func TestLooksLikeCredential(t *testing.T) {
 		}
 	}
 }
+
+// ---------- Deduplication Tests ----------
+
+func TestMemorySave_ExactDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	store, err := memory.NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := MemoryConfig{}
+	content := "user prefers dark mode"
+
+	// First save succeeds.
+	res1, err := handleMemorySave(context.Background(), store, nil, cfg, nil, map[string]any{
+		"content": content,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res1.(string), "Saved to memory") {
+		t.Errorf("first save should succeed, got: %v", res1)
+	}
+
+	// Second save of identical content should be skipped.
+	res2, err := handleMemorySave(context.Background(), store, nil, cfg, nil, map[string]any{
+		"content": content,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res2.(string), "duplicate skipped") {
+		t.Errorf("duplicate save should be skipped, got: %v", res2)
+	}
+}
+
+func TestMemorySave_FuzzyDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	store, err := memory.NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := MemoryConfig{}
+
+	// Save original.
+	_, err = handleMemorySave(context.Background(), store, nil, cfg, nil, map[string]any{
+		"content": "treino A-D às 6h da manhã segunda quarta sexta",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Near-duplicate (very similar tokens).
+	res, err := handleMemorySave(context.Background(), store, nil, cfg, nil, map[string]any{
+		"content": "treino A-D às 6h manhã segunda quarta sexta",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.(string), "Similar memory already exists") {
+		t.Errorf("near-duplicate should be detected, got: %v", res)
+	}
+}
+
+func TestMemorySave_DifferentContentSaves(t *testing.T) {
+	dir := t.TempDir()
+	store, err := memory.NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := MemoryConfig{}
+
+	_, err = handleMemorySave(context.Background(), store, nil, cfg, nil, map[string]any{
+		"content": "user prefers dark mode",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Different content should save fine.
+	res, err := handleMemorySave(context.Background(), store, nil, cfg, nil, map[string]any{
+		"content": "user lives in Maceió",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.(string), "Saved to memory") {
+		t.Errorf("different content should save, got: %v", res)
+	}
+}
+
+func TestJaccardSimilarity(t *testing.T) {
+	cases := []struct {
+		a, b string
+		min  float64
+		max  float64
+	}{
+		{"hello world", "hello world", 1.0, 1.0},
+		{"hello world", "goodbye moon", 0.0, 0.01},
+		{"treino A-D 6h manhã", "treino A-D às 6h da manhã", 0.5, 0.9},
+		{"", "", 1.0, 1.0},
+		{"hello", "", 0.0, 0.0},
+	}
+	for _, tc := range cases {
+		a := tokenize(tc.a)
+		b := tokenize(tc.b)
+		sim := jaccardSimilarity(a, b)
+		if sim < tc.min || sim > tc.max {
+			t.Errorf("jaccard(%q, %q) = %.3f, want [%.2f, %.2f]", tc.a, tc.b, sim, tc.min, tc.max)
+		}
+	}
+}

@@ -5,6 +5,8 @@ package copilot
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -149,14 +151,35 @@ func handleMemorySave(ctx context.Context, store *memory.FileStore, sqliteStore 
 		return nil, fmt.Errorf("invalid category: %s (valid: fact, preference, event, summary)", category)
 	}
 
-	err := store.Save(memory.Entry{
-		Content:   content,
-		Source:    "agent",
-		Category:  category,
-		Timestamp: time.Now(),
-	})
+	// Atomic dedup check + save under a single lock (prevents TOCTOU race).
+	contentHash := sha256Hex(content)
+	contentTokens := tokenize(content)
+	saved, existingContent, err := store.SaveIfNotDuplicate(
+		memory.Entry{
+			Content:   content,
+			Source:    "agent",
+			Category:  category,
+			Timestamp: time.Now(),
+		},
+		contentHash,
+		func(e memory.Entry) bool {
+			if sha256Hex(e.Content) == contentHash {
+				return true
+			}
+			if len(contentTokens) > 0 && jaccardSimilarity(contentTokens, tokenize(e.Content)) > 0.85 {
+				return true
+			}
+			return false
+		},
+	)
 	if err != nil {
 		return nil, err
+	}
+	if !saved {
+		if sha256Hex(existingContent) == contentHash {
+			return "Memory already exists (duplicate skipped).", nil
+		}
+		return fmt.Sprintf("Similar memory already exists: %q. Duplicate skipped.", truncateForDedup(existingContent, 80)), nil
 	}
 
 	// Re-index the MEMORY.md file if SQLite memory is available.
@@ -874,4 +897,53 @@ func redactCredentials(content string) string {
 // RedactCredentials is the exported version for use by the security package.
 func RedactCredentials(content string) string {
 	return redactCredentials(content)
+}
+
+// ---------- Deduplication Helpers ----------
+
+// sha256Hex returns the hex-encoded SHA-256 hash of s.
+func sha256Hex(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
+}
+
+// tokenize splits a string into lowercase word tokens for Jaccard comparison.
+func tokenize(s string) map[string]struct{} {
+	words := strings.Fields(strings.ToLower(s))
+	set := make(map[string]struct{}, len(words))
+	for _, w := range words {
+		set[w] = struct{}{}
+	}
+	return set
+}
+
+// jaccardSimilarity computes |A∩B| / |A∪B| for two token sets.
+func jaccardSimilarity(a, b map[string]struct{}) float64 {
+	if len(a) == 0 && len(b) == 0 {
+		return 1.0
+	}
+	if len(a) == 0 || len(b) == 0 {
+		return 0.0
+	}
+	intersection := 0
+	for k := range a {
+		if _, ok := b[k]; ok {
+			intersection++
+		}
+	}
+	union := len(a) + len(b) - intersection
+	if union == 0 {
+		return 0.0
+	}
+	return float64(intersection) / float64(union)
+}
+
+// truncateForDedup truncates a string to maxLen runes with "..." suffix.
+// Uses rune-aware slicing to avoid splitting multi-byte UTF-8 characters.
+func truncateForDedup(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen]) + "..."
 }
