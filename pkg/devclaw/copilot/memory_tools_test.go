@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
@@ -392,6 +393,80 @@ func TestNormalizeWingContract(t *testing.T) {
 		got := memory.NormalizeWing(tc.input)
 		if got != tc.expected {
 			t.Errorf("NormalizeWing(%q) = %q, want %q", tc.input, got, tc.expected)
+		}
+	}
+}
+
+// ---------- Credential Redaction Tests ----------
+
+func TestRedactCredentials_Password(t *testing.T) {
+	cases := []struct {
+		input    string
+		contains string
+		absent   string
+	}{
+		{"senha: example123!", "[REDACTED — use vault]", "example123!"},
+		{"password: hunter2", "[REDACTED — use vault]", "hunter2"},
+		{"Password: SuperSecret123", "[REDACTED — use vault]", "SuperSecret123"},
+		{"no credential here", "no credential here", "REDACTED"},
+	}
+	for _, tc := range cases {
+		got := RedactCredentials(tc.input)
+		if !strings.Contains(got, tc.contains) {
+			t.Errorf("RedactCredentials(%q) = %q, want to contain %q", tc.input, got, tc.contains)
+		}
+		if tc.absent != "" && strings.Contains(got, tc.absent) {
+			t.Errorf("RedactCredentials(%q) = %q, should NOT contain %q", tc.input, got, tc.absent)
+		}
+	}
+}
+
+func TestRedactCredentials_APIKey(t *testing.T) {
+	cases := []struct {
+		input    string
+		contains string
+		absent   string
+	}{
+		{"api_key: sk-abc123def456", "[REDACTED — use vault]", "sk-abc123def456"},
+		{"secret_key: mysecret", "[REDACTED — use vault]", "mysecret"},
+		{"access_token: tok_123456", "[REDACTED — use vault]", "tok_123456"},
+		{"ghp_ABCDEFghijklmnopqrstuvwxyz1234567890", "[REDACTED — use vault]", "ghp_ABCDEF"},
+		{"sk-abcdefghijklmnopqrstuvwxyz12345678", "[REDACTED — use vault]", "sk-abcdef"},
+	}
+	for _, tc := range cases {
+		got := RedactCredentials(tc.input)
+		if !strings.Contains(got, tc.contains) {
+			t.Errorf("RedactCredentials(%q) = %q, want to contain %q", tc.input, got, tc.contains)
+		}
+		if tc.absent != "" && strings.Contains(got, tc.absent) {
+			t.Errorf("RedactCredentials(%q) = %q, should NOT contain %q", tc.input, got, tc.absent)
+		}
+	}
+}
+
+func TestLooksLikeCredential(t *testing.T) {
+	positives := []string{
+		"senha: minhasenha123",
+		"password: hunter2",
+		"api_key: abc123",
+		"ghp_ABCDEFghijklmnopqrstuvwxyz1234567890",
+		"sk-abcdefghijklmnopqrstuvwxyz1234567",
+		"bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+	}
+	for _, p := range positives {
+		if !LooksLikeCredential(p) {
+			t.Errorf("LooksLikeCredential(%q) = false, want true", p)
+		}
+	}
+
+	negatives := []string{
+		"gostei do treino de hoje",
+		"a reunião é às 15h",
+		"prefere café sem açúcar",
+	}
+	for _, n := range negatives {
+		if LooksLikeCredential(n) {
+			t.Errorf("LooksLikeCredential(%q) = true, want false", n)
 		}
 	}
 }

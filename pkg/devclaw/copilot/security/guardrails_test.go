@@ -274,3 +274,45 @@ func TestCheckURLGrounding(t *testing.T) {
 		}
 	})
 }
+
+// ---------- Credential Leak Detection ----------
+
+func TestOutputGuardrail_DetectsCredential(t *testing.T) {
+	t.Parallel()
+	g := NewOutputGuardrail(nil)
+	// Wire a credential checker that detects "password:" pattern.
+	g.CredentialChecker = func(s string) bool {
+		return strings.Contains(strings.ToLower(s), "password:") ||
+			strings.Contains(strings.ToLower(s), "senha:")
+	}
+
+	t.Run("detects_password", func(t *testing.T) {
+		err := g.Validate("Your password: hunter2 has been saved")
+		if err != ErrCredentialLeak {
+			t.Errorf("expected ErrCredentialLeak, got %v", err)
+		}
+	})
+
+	t.Run("detects_senha", func(t *testing.T) {
+		err := g.Validate("A senha: example123 está no arquivo")
+		if err != ErrCredentialLeak {
+			t.Errorf("expected ErrCredentialLeak, got %v", err)
+		}
+	})
+
+	t.Run("clean_output_passes", func(t *testing.T) {
+		err := g.Validate("The weather today is sunny and warm.")
+		if err != nil {
+			t.Errorf("expected nil, got %v", err)
+		}
+	})
+
+	t.Run("no_checker_passes", func(t *testing.T) {
+		g2 := NewOutputGuardrail(nil)
+		// No CredentialChecker set — backward compatible.
+		err := g2.Validate("password: secret123")
+		if err != nil {
+			t.Errorf("expected nil (no checker), got %v", err)
+		}
+	})
+}

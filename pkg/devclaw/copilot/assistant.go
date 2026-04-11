@@ -289,7 +289,7 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 		sessionStore:     NewSessionStore(logger.With("component", "sessions")),
 		promptComposer:   NewPromptComposer(cfg),
 		inputGuard:       security.NewInputGuardrail(cfg.Security.MaxInputLength, cfg.Security.RateLimit),
-		outputGuard:      security.NewOutputGuardrail(logger.With("component", "output-guard")),
+		outputGuard:      newOutputGuardWithCredentialCheck(logger),
 		subagentMgr:      NewSubagentManager(cfg.Subagents, logger),
 		hookMgr:          NewHookManager(logger),
 		projectMgr:       projectMgr,
@@ -945,6 +945,14 @@ func (a *Assistant) Start(ctx context.Context) error {
 			return nil
 		})
 		go a.memoryIndexer.Start(a.ctx)
+	}
+
+	// 5c-health. Verify memory pipeline is functional after init.
+	if a.memoryStore != nil {
+		memDir := filepath.Join(filepath.Dir(a.config.Memory.Path), "memory")
+		if _, err := os.Stat(memDir); os.IsNotExist(err) {
+			a.logger.Error("CRITICAL: memory directory missing after init — memory_save/search will fail", "dir", memDir)
+		}
 	}
 
 	// 5d. Initialize native media service if enabled.
@@ -2287,8 +2295,14 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 
 	// ── Step 9: Validate output ──
 	if err := a.outputGuard.ValidateWithContext(response, toolCallsToResultContexts(toolCalls)); err != nil {
-		logger.Warn("output rejected, applying fallback", "error", err)
-		response = "Sorry, I encountered an issue generating the response. Could you rephrase?"
+		if errors.Is(err, security.ErrCredentialLeak) {
+			// Redact credentials but keep the rest of the response useful.
+			logger.Warn("credential detected in output, redacting", "error", err)
+			response = RedactCredentials(response)
+		} else {
+			logger.Warn("output rejected, applying fallback", "error", err)
+			response = "Sorry, I encountered an issue generating the response. Could you rephrase?"
+		}
 	}
 
 	// ── Step 10: Update session ──
@@ -3786,6 +3800,13 @@ func (a *Assistant) autoCaptureFacts(userMessage, assistantResponse, sessionID s
 		if fact == "" || len(fact) < 5 {
 			continue
 		}
+		// Block credentials from being persisted via auto-capture.
+		if looksLikeCredential(fact) {
+			a.logger.Warn("auto-capture: credential pattern in extracted fact, skipping",
+				"session", sessionID,
+			)
+			continue
+		}
 		_ = a.memoryStore.Save(memory.Entry{
 			Content:   fact,
 			Source:    origin,
@@ -4247,6 +4268,14 @@ func generateSlug(text string, maxWords int) string {
 	return strings.TrimRight(result, "-")
 }
 
+// newOutputGuardWithCredentialCheck creates an OutputGuardrail with the
+// credential checker wired in, avoiding circular imports between copilot and security.
+func newOutputGuardWithCredentialCheck(logger *slog.Logger) *security.OutputGuardrail {
+	g := security.NewOutputGuardrail(logger.With("component", "output-guard"))
+	g.CredentialChecker = LooksLikeCredential
+	return g
+}
+
 // sendReply sends a response to the original message's channel.
 // Long messages are split into chunks respecting the channel limit (default 4000 chars).
 // buildTTSProvider creates the appropriate TTS provider based on config.
@@ -4604,6 +4633,13 @@ func (a *Assistant) resumeInterruptedRuns() {
 
 			// Flush any remaining streamed text.
 			blockStreamer.Finish()
+
+			// Validate and redact credentials in resumed response.
+			if err := a.outputGuard.ValidateWithContext(response, nil); err != nil {
+				if errors.Is(err, security.ErrCredentialLeak) {
+					response = RedactCredentials(response)
+				}
+			}
 
 			// Send final response if there's leftover and streamer didn't send it.
 			if response != "" && !blockStreamer.HasSentBlocks() {

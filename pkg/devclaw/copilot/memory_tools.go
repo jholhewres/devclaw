@@ -287,7 +287,7 @@ func handleMemorySearch(ctx context.Context, store *memory.FileStore, sqliteStor
 				if len(text) > 500 {
 					text = text[:500] + "..."
 				}
-				sb.WriteString(fmt.Sprintf("- [%s] (score: %.2f) %s\n", r.FileID, r.Score, text))
+				sb.WriteString(fmt.Sprintf("- [%s] (score: %.2f) %s\n", r.FileID, r.Score, redactCredentials(text)))
 			}
 			return sb.String(), nil
 		}
@@ -306,7 +306,7 @@ func handleMemorySearch(ctx context.Context, store *memory.FileStore, sqliteStor
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Found %d memories:\n\n", len(entries)))
 	for _, e := range entries {
-		sb.WriteString(fmt.Sprintf("- [%s] %s\n", e.Category, e.Content))
+		sb.WriteString(fmt.Sprintf("- [%s] %s\n", e.Category, redactCredentials(e.Content)))
 	}
 	return sb.String(), nil
 }
@@ -337,7 +337,7 @@ func handleMemoryList(_ context.Context, store *memory.FileStore, args map[strin
 		sb.WriteString(fmt.Sprintf("- [%s] [%s] %s\n",
 			e.Timestamp.Format("2006-01-02"),
 			e.Category,
-			e.Content))
+			redactCredentials(e.Content)))
 	}
 	return sb.String(), nil
 }
@@ -575,9 +575,9 @@ func handleKGQuery(ctx context.Context, k *kg.KG, args map[string]any) (any, err
 
 	var sb strings.Builder
 	for _, tr := range filtered {
-		obj := tr.ObjectText
+		obj := redactCredentials(tr.ObjectText)
 		if tr.ObjectName != "" {
-			obj = tr.ObjectName
+			obj = redactCredentials(tr.ObjectName)
 		}
 		sb.WriteString(fmt.Sprintf("%s (%s) %s [confidence=%.1f", tr.SubjectName, tr.PredicateName, obj, tr.Confidence))
 		if tr.Wing != "" {
@@ -600,6 +600,11 @@ func handleKGAdd(ctx context.Context, k *kg.KG, args map[string]any) (any, error
 	object, _ := args["object"].(string)
 	if object == "" {
 		return nil, fmt.Errorf("object is required")
+	}
+
+	// Block credentials from being stored in the knowledge graph.
+	if looksLikeCredential(object) {
+		return nil, fmt.Errorf("object looks like a credential — use the vault tool instead of kg_add to store secrets securely")
 	}
 
 	confidence := 0.5
@@ -689,9 +694,9 @@ func handleKGTimeline(ctx context.Context, k *kg.KG, args map[string]any) (any, 
 
 	var sb strings.Builder
 	for _, tr := range triples {
-		obj := tr.ObjectText
+		obj := redactCredentials(tr.ObjectText)
 		if tr.ObjectName != "" {
-			obj = tr.ObjectName
+			obj = redactCredentials(tr.ObjectName)
 		}
 		sb.WriteString(fmt.Sprintf("[%s] %s (%s) %s [confidence=%.1f",
 			tr.ValidFrom, tr.SubjectName, tr.PredicateName, obj, tr.Confidence))
@@ -845,4 +850,28 @@ func looksLikeCredential(content string) bool {
 		}
 	}
 	return false
+}
+
+// LooksLikeCredential is the exported version for use by the security package.
+func LooksLikeCredential(content string) bool {
+	return looksLikeCredential(content)
+}
+
+// redactCredentials replaces detected credential patterns with a redaction marker.
+// Keeps the label (e.g. "senha") but replaces the value with [REDACTED — use vault].
+func redactCredentials(content string) string {
+	for _, re := range compiledCredentialPatterns {
+		content = re.ReplaceAllStringFunc(content, func(match string) string {
+			if idx := strings.IndexByte(match, ':'); idx >= 0 {
+				return match[:idx] + ": [REDACTED — use vault]"
+			}
+			return "[REDACTED — use vault]"
+		})
+	}
+	return content
+}
+
+// RedactCredentials is the exported version for use by the security package.
+func RedactCredentials(content string) string {
+	return redactCredentials(content)
 }
