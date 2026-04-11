@@ -602,6 +602,24 @@ func (a *Assistant) Start(ctx context.Context) error {
 		onDemandCfg.CrossWingEnabled = a.config.Memory.Hierarchy.OnDemandCrossWingEnabled
 		onDemandLayer := memory.NewOnDemandLayer(a.sqliteMemory, entityDetector, onDemandCfg, a.logger)
 
+		// Wire KG into OnDemandLayer for enriched search results.
+		if kgStore := a.sqliteMemory.KG(); kgStore != nil {
+			factsPerRender := a.config.Memory.Hierarchy.KG.FactsPerInjection
+			if factsPerRender <= 0 {
+				factsPerRender = 5
+			}
+			onDemandLayer.SetKG(kgStore, factsPerRender)
+
+			// Wire TopicChangeDetector for context-switch handling.
+			topicDetector := memory.NewTopicChangeDetector(
+				float32(a.config.Memory.Hierarchy.TopicChangeThreshold),
+				float32(a.config.Memory.Hierarchy.TopicChangeEntityOverlap),
+				kgStore,
+				factsPerRender,
+			)
+			onDemandLayer.SetTopicDetector(topicDetector)
+		}
+
 		stackCfg := DefaultStackConfig()
 		stackCfg.ForceLegacy = a.config.Memory.Stack.ForceLegacy
 		stack := NewMemoryStack(identityLayer, essentialLayer, onDemandLayer, stackCfg, a.logger)

@@ -133,6 +133,14 @@ type HierarchyConfig struct {
 	// found in the active wing. Default: true.
 	OnDemandCrossWingEnabled bool `yaml:"on_demand_cross_wing,omitempty"`
 
+	// TopicChangeThreshold is the cosine similarity below which a topic
+	// change is detected. Lower = more sensitive. Default: 0.65.
+	TopicChangeThreshold float64 `yaml:"topic_change_threshold,omitempty"`
+
+	// TopicChangeEntityOverlap is the entity overlap ratio below which
+	// the cosine stage is triggered. Default: 0.3.
+	TopicChangeEntityOverlap float64 `yaml:"topic_change_entity_overlap,omitempty"`
+
 	// EssentialStoryStaleAfter is the TTL before the L1 EssentialLayer
 	// regenerates a cached per-wing story. Applies to the essential_stories
 	// SQLite cache introduced in Sprint 2 Room 2.2. Default: 6 hours.
@@ -232,6 +240,8 @@ func DefaultHierarchyConfig() HierarchyConfig {
 		L2Budget:                   300,
 		OnDemandMaxResults:         5,
 		OnDemandCrossWingEnabled:   true,
+		TopicChangeThreshold:       0.65,
+		TopicChangeEntityOverlap:   0.3,
 		WingBoostMatch:             1.3,
 		WingBoostPenalty:           0.4,
 		AutoRoomCap:                30,
