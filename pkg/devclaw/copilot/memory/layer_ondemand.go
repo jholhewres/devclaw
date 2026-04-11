@@ -111,6 +111,7 @@ type OnDemandLayer struct {
 	logger           *slog.Logger
 	kg               *kg.KG
 	kgFactsPerRender int
+	topicDetector    *TopicChangeDetector
 }
 
 // NewOnDemandLayer constructs a layer. detector may be nil — in that case the
@@ -133,6 +134,11 @@ func NewOnDemandLayer(store *SQLiteStore, detector *EntityDetector, cfg OnDemand
 		cfg:      cfg,
 		logger:   logger,
 	}
+}
+
+// SetTopicDetector sets the optional topic change detector.
+func (l *OnDemandLayer) SetTopicDetector(d *TopicChangeDetector) {
+	l.topicDetector = d
 }
 
 func (l *OnDemandLayer) SetKG(k *kg.KG, factsPerRender int) {
@@ -209,6 +215,39 @@ func (l *OnDemandLayer) Render(ctx context.Context, activeWing string, turn stri
 		l.logger.Debug("on-demand layer: search timeout exceeded",
 			"elapsed", time.Since(start))
 		// Return whatever we have so far, or empty.
+	}
+
+	// Step 4b — topic change detection (zero extra API calls).
+	// Uses entities already computed in Step 1 and query embedding from the store.
+	if l.topicDetector != nil {
+		queryEmb := l.store.LastQueryEmbedding()
+		tcResult := l.topicDetector.Detect(entities, queryEmb)
+		if tcResult.Changed {
+			l.logger.Debug("on-demand layer: topic change detected",
+				"confidence", tcResult.Confidence)
+			// Cross-wing search for the new topic.
+			extraCtx, extraCancel := context.WithTimeout(outerCtx,
+				time.Duration(l.cfg.SearchTimeoutMs)*time.Millisecond)
+			extraResults := l.searchEntities(extraCtx, entities, "")
+			extraCancel()
+			merged = mergeOnDemandResults(merged, extraResults, l.cfg.MaxResults)
+
+			// Inject KG facts for the new topic if available.
+			if l.topicDetector.kg != nil {
+				kgFacts := l.topicDetector.LookupKGFacts(outerCtx, entities)
+				if len(kgFacts) > 0 {
+					for _, f := range kgFacts {
+						merged = append(merged, onDemandResult{
+							fileID: "kg-fact",
+							text:   f.SubjectName + " " + f.PredicateName + " " + f.ObjectText,
+							score:  f.Confidence,
+						})
+					}
+				}
+			}
+		}
+		// Update topic state (synchronous struct copy, no API call).
+		l.topicDetector.UpdateTopic(entities, queryEmb)
 	}
 
 	if len(merged) == 0 {
@@ -327,6 +366,27 @@ type onDemandResult struct {
 	score  float64
 	wing   string
 	entity EntityMatch
+}
+
+// mergeOnDemandResults merges two result sets, deduplicates by fileID, and
+// caps at maxResults. Used when topic change triggers a cross-wing search.
+func mergeOnDemandResults(a, b []onDemandResult, maxResults int) []onDemandResult {
+	seen := make(map[string]bool, len(a))
+	for _, r := range a {
+		seen[r.fileID] = true
+	}
+	merged := make([]onDemandResult, len(a))
+	copy(merged, a)
+	for _, r := range b {
+		if !seen[r.fileID] {
+			merged = append(merged, r)
+			seen[r.fileID] = true
+		}
+	}
+	if maxResults > 0 && len(merged) > maxResults {
+		merged = merged[:maxResults]
+	}
+	return merged
 }
 
 // renderMarkdown assembles a Markdown snippet from the merged results.

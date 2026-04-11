@@ -45,6 +45,11 @@ type SQLiteStore struct {
 
 	// quantizeEnabled enables uint8 quantization of embeddings (~4x memory reduction).
 	quantizeEnabled bool
+
+	// lastQueryEmbedding stores the most recent query embedding from SearchVector.
+	// Reused by TopicChangeDetector to avoid extra embedding API calls.
+	lastQueryEmbMu  sync.RWMutex
+	lastQueryEmb    []float32
 }
 
 // vectorCacheEntry holds a chunk embedding for in-memory vector search.
@@ -102,6 +107,14 @@ func NewSQLiteStore(dbPath string, embedder EmbeddingProvider, logger *slog.Logg
 // Call before loadVectorCache (typically right after construction).
 func (s *SQLiteStore) SetQuantizeEnabled(enabled bool) {
 	s.quantizeEnabled = enabled
+}
+
+// LastQueryEmbedding returns the most recent query embedding from SearchVector.
+// Used by TopicChangeDetector to avoid extra embedding API calls. Thread-safe.
+func (s *SQLiteStore) LastQueryEmbedding() []float32 {
+	s.lastQueryEmbMu.RLock()
+	defer s.lastQueryEmbMu.RUnlock()
+	return s.lastQueryEmb
 }
 
 // initSchema creates the required tables and indices.
@@ -661,6 +674,11 @@ func (s *SQLiteStore) SearchVector(ctx context.Context, query string, maxResults
 		return nil, nil
 	}
 	queryVec := embeddings[0]
+
+	// Save query embedding for reuse by TopicChangeDetector.
+	s.lastQueryEmbMu.Lock()
+	s.lastQueryEmb = queryVec
+	s.lastQueryEmbMu.Unlock()
 
 	// Snapshot in-memory cache for lock-free iteration.
 	s.vectorCacheMu.RLock()
