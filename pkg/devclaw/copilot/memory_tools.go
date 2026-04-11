@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -132,6 +133,12 @@ func handleMemorySave(ctx context.Context, store *memory.FileStore, sqliteStore 
 	content, _ := args["content"].(string)
 	if content == "" {
 		return nil, fmt.Errorf("content is required")
+	}
+
+	// Block credentials/secrets from being saved in semantic memory.
+	// These should be stored in the vault instead.
+	if looksLikeCredential(content) {
+		return nil, fmt.Errorf("this looks like a credential or password — use the vault tool instead of memory_save to store secrets securely")
 	}
 
 	validCategories := map[string]bool{"fact": true, "preference": true, "event": true, "summary": true}
@@ -796,4 +803,46 @@ func handleKGMergeEntities(ctx context.Context, k *kg.KG, args map[string]any) (
 	}
 
 	return fmt.Sprintf("Merged %q into %q. Source entity deleted and registered as alias.", source, target), nil
+}
+
+// ---------- Credential Detection ----------
+
+// credentialPatterns detects content that looks like passwords, API keys,
+// tokens, or other secrets that should be stored in the vault instead of
+// semantic memory.
+var credentialPatterns = []string{
+	`(?i)senha[:\s]+\S+`,
+	`(?i)password[:\s]+\S+`,
+	`(?i)api[_-]?key[:\s]+\S+`,
+	`(?i)secret[_-]?key[:\s]+\S+`,
+	`(?i)access[_-]?token[:\s]+\S+`,
+	`(?i)bearer\s+[a-zA-Z0-9\-_.]+`,
+	`(?i)token[:\s]+[a-zA-Z0-9\-_.]{20,}`,
+	`(?i)(ssh|pgp|gpg)[_-]?(key|private)[:\s]`,
+	`(?i)private[_-]?key[:\s]`,
+	`-----BEGIN\s+(RSA|EC|OPENSSH|PGP)\s+PRIVATE\s+KEY-----`,
+	`(?i)(aws|gcp|azure)[_-]?(secret|key|token)[:\s]+\S+`,
+	`ghp_[a-zA-Z0-9]{36}`,          // GitHub PAT
+	`sk-[a-zA-Z0-9]{32,}`,          // OpenAI API key
+	`AIza[a-zA-Z0-9\-_]{35}`,       // Google API key
+	`xox[bpas]-[a-zA-Z0-9\-]{10,}`, // Slack token
+}
+
+var compiledCredentialPatterns []*regexp.Regexp
+
+func init() {
+	for _, p := range credentialPatterns {
+		compiledCredentialPatterns = append(compiledCredentialPatterns, regexp.MustCompile(p))
+	}
+}
+
+// looksLikeCredential checks whether content contains patterns that
+// indicate passwords, API keys, tokens, or other secrets.
+func looksLikeCredential(content string) bool {
+	for _, re := range compiledCredentialPatterns {
+		if re.MatchString(content) {
+			return true
+		}
+	}
+	return false
 }
