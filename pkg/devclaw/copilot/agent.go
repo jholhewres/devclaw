@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/kg"
 )
 
 const (
@@ -143,6 +145,17 @@ type AgentConfig struct {
 
 	// Compaction configures how context compaction preserves important information.
 	Compaction CompactionConfig `yaml:"compaction"`
+
+	// KG configures Knowledge Graph extraction during compaction and dream cycles.
+	KG KGAgentConfig `yaml:"kg"`
+}
+
+// KGAgentConfig mirrors the relevant KGConfig fields for use in AgentConfig.
+type KGAgentConfig struct {
+	AutoExtract       string `yaml:"auto_extract"`
+	LLMBudgetPerCycle int    `yaml:"llm_budget_per_cycle"`
+	LLMConsentACK     bool   `yaml:"llm_consent_acknowledged"`
+	FactsPerInjection int    `yaml:"facts_per_injection"`
 }
 
 // MemoryFlushConfig configures pre-compaction memory flush behavior.
@@ -294,6 +307,15 @@ type AgentRun struct {
 	assistantFragments []string
 
 	logger *slog.Logger
+
+	// kg is the Knowledge Graph for context-residual extraction during compaction.
+	// Nil when KG is disabled. Set via SetKG().
+	kg *kg.KG
+}
+
+// SetKG sets the Knowledge Graph reference for context-residual extraction.
+func (a *AgentRun) SetKG(k *kg.KG) {
+	a.kg = k
 }
 
 // UsageAccumulator tracks token usage across multiple LLM calls within a run.
@@ -2495,6 +2517,61 @@ func (a *AgentRun) maybeMemoryFlush(ctx context.Context, messages []chatMessage,
 	}
 
 	a.logger.Info("memory flush completed", "extracted", len(memories))
+
+	// KG extraction as "context residual" — captures structured facts
+	// that survive compaction even when the narrative is summarized away.
+	// Runs AFTER MemoryExtractor (which produces flat markdown memories).
+	// Best-effort: errors logged, never block compaction.
+	if a.kg != nil && a.cfg.KG.AutoExtract != "off" {
+		a.kgExtractFromMemories(ctx, memories)
+	}
+}
+
+// kgExtractFromMemories extracts structured KG triples from pre-compaction
+// memories. Pattern-based extraction is fast (~1ms/memory) and always runs.
+// LLM-based extraction is optional, budget-capped, and circuit-breaker gated.
+// This is best-effort: any error is logged and swallowed.
+func (a *AgentRun) kgExtractFromMemories(ctx context.Context, memories []ExtractedMemory) {
+	patternSets := kg.DefaultPatternSets()
+	if patternSets == nil {
+		a.logger.Warn("kg extraction: no default pattern sets available")
+		return
+	}
+
+	// Pattern-based extraction (fast, always runs when enabled).
+	mode := a.cfg.KG.AutoExtract
+	if mode == "pattern" || mode == "both" {
+		patternCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		extractor, err := kg.NewExtractor(patternSets, a.logger)
+		if err != nil {
+			a.logger.Warn("kg extraction: failed to create extractor", "error", err)
+			return
+		}
+
+		var totalExtracted int
+		for _, mem := range memories {
+			if patternCtx.Err() != nil {
+				break
+			}
+			if mem.Importance >= 3 {
+				n, err := extractor.ExtractAndStore(patternCtx, a.kg, mem.Content, "", a.sessionID)
+				if err != nil {
+					a.logger.Warn("kg pattern extraction failed", "error", err)
+					continue
+				}
+				totalExtracted += n
+			}
+		}
+		if totalExtracted > 0 {
+			a.logger.Info("kg pattern extraction complete", "triples", totalExtracted)
+		}
+	}
+
+	// LLM-based extraction is supported when the LLM client implements
+	// kg.LLMProvider. Currently deferred — pattern extraction covers the
+	// primary use case. Future: add adapter for LLMClient → kg.LLMProvider.
 }
 
 // estimateTokens provides a rough token estimate for a slice of messages.

@@ -2,12 +2,26 @@ package kg
 
 import (
 	"context"
+	_ "embed"
 	"log/slog"
 	"regexp"
 	"strings"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/kg/patterns"
 )
+
+//go:embed patterns/pt-br.yaml
+var defaultPatternsYAML []byte
+
+// DefaultPatternSets returns the built-in pattern sets (pt-br).
+// Returns nil on parse error (should never happen with embedded YAML).
+func DefaultPatternSets() []*patterns.PatternSet {
+	ps, err := patterns.Load(defaultPatternsYAML)
+	if err != nil {
+		return nil
+	}
+	return []*patterns.PatternSet{ps}
+}
 
 // Extractor scans free text for SPO triples using configurable regex patterns.
 type Extractor struct {

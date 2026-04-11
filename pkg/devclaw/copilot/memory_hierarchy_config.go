@@ -49,6 +49,10 @@ type KGConfig struct {
 	// triple extraction. When false and mode is "llm" or "both",
 	// NewLLMExtractor returns an error.
 	LLMConsentACK bool `yaml:"llm_consent_acknowledged" json:"llm_consent_acknowledged"`
+
+	// FactsPerInjection caps how many KG facts are injected into the prompt
+	// after compaction. Default: 5. Facts are ranked by confidence × recency.
+	FactsPerInjection int `yaml:"facts_per_injection" json:"facts_per_injection"`
 }
 
 // WingHeuristic matches channel or group name patterns to a wing.

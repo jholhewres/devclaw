@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/kg"
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
 )
 
@@ -339,6 +340,11 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 	d.runClassifierPhase(ctx)
 	IncClassifierPass()
 
+	// Phase 3c: KG extraction — extract structured facts from memories.
+	// Pattern-based only (no LLM budget consumed during idle consolidation).
+	// Error-isolated: same as classifier phase.
+	d.runKGExtractionPhase(ctx)
+
 	// Phase 4: Apply — record results and update state.
 	d.logger.Info("dream phase: apply", "consolidated", consolidated)
 	d.recordResult("success")
@@ -372,6 +378,64 @@ func (d *DreamConsolidator) runClassifierPhase(ctx context.Context) {
 	}
 	if stats.Classified > 0 {
 		d.logger.Info("legacy classifier classified files", "count", stats.Classified)
+	}
+}
+
+// runKGExtractionPhase extracts KG triples from indexed memories during
+// the dream cycle. Pattern-based only (no LLM budget consumed during idle
+// consolidation). Capped at 100 extractions per cycle to bound runtime.
+// Fully error-isolated: any panic or error is logged and swallowed.
+func (d *DreamConsolidator) runKGExtractionPhase(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			d.logger.Warn("kg extraction phase panicked — isolated from dream cycle", "panic", r)
+		}
+	}()
+
+	if d.sqliteStore == nil {
+		return
+	}
+	kgStore := d.sqliteStore.KG()
+	if kgStore == nil {
+		return
+	}
+	if d.hierarchyCfg.KG.AutoExtract == "off" || d.hierarchyCfg.KG.AutoExtract == "" {
+		return
+	}
+
+	patternSets := kg.DefaultPatternSets()
+	if patternSets == nil {
+		return
+	}
+	extractor, err := kg.NewExtractor(patternSets, d.logger)
+	if err != nil {
+		d.logger.Warn("kg extraction phase: failed to create extractor", "error", err)
+		return
+	}
+
+	// Read indexed memories from the store for extraction.
+	entries, err := d.store.GetAll()
+	if err != nil {
+		d.logger.Warn("kg extraction phase: failed to get memories", "error", err)
+		return
+	}
+
+	extracted := 0
+	const maxPerCycle = 100
+	for _, entry := range entries {
+		if ctx.Err() != nil || extracted >= maxPerCycle {
+			break
+		}
+		n, err := extractor.ExtractAndStore(ctx, kgStore, entry.Content, "", "dream-cycle")
+		if err != nil {
+			d.logger.Warn("kg extraction phase: extraction error", "error", err)
+			continue
+		}
+		extracted += n
+	}
+
+	if extracted > 0 {
+		d.logger.Info("dream kg extraction complete", "triples", extracted)
 	}
 }
 
