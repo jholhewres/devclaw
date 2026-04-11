@@ -384,13 +384,20 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 // Falls back to LIKE-based search when FTS5 is not available.
 // Applies query expansion to handle conversational queries.
 func (s *SQLiteStore) SearchBM25(query string, maxResults int) ([]SearchResult, error) {
+	searchStart := time.Now()
 	if maxResults <= 0 {
 		maxResults = 10
 	}
 
 	// If FTS5 is not available, use LIKE fallback with expanded keywords.
 	if !s.ftsAvailable {
-		return s.searchLikeFallback(query, maxResults)
+		results, err := s.searchLikeFallback(query, maxResults)
+		s.logger.Info("search_bm25 completed",
+			"elapsed_ms", time.Since(searchStart).Milliseconds(),
+			"results", len(results),
+			"fts5", false,
+		)
+		return results, err
 	}
 
 	// Try phrase search first.
@@ -416,6 +423,11 @@ func (s *SQLiteStore) SearchBM25(query string, maxResults int) ([]SearchResult, 
 		}
 	}
 
+	s.logger.Info("search_bm25 completed",
+		"elapsed_ms", time.Since(searchStart).Milliseconds(),
+		"results", len(results),
+		"fts5", true,
+	)
 	return results, nil
 }
 
@@ -667,6 +679,7 @@ func (s *SQLiteStore) getWingsByFileIDs(fileIDs []string) map[string]string {
 
 // SearchVector performs a vector similarity search using in-memory cosine similarity.
 func (s *SQLiteStore) SearchVector(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+	searchStart := time.Now()
 	if s.embedder.Name() == "none" {
 		return nil, nil
 	}
@@ -742,6 +755,12 @@ func (s *SQLiteStore) SearchVector(ctx context.Context, query string, maxResults
 		})
 	}
 
+	s.logger.Info("search_vector completed",
+		"elapsed_ms", time.Since(searchStart).Milliseconds(),
+		"chunks_scanned", len(cache),
+		"results", len(results),
+		"quantized", s.quantizeEnabled,
+	)
 	return results, nil
 }
 
@@ -849,6 +868,7 @@ func (s *SQLiteStore) HybridSearch(ctx context.Context, query string, maxResults
 // pre-Sprint-2 HybridSearch — no JOIN against files.wing, no multiplier
 // arithmetic, no per-result Wing field population.
 func (s *SQLiteStore) HybridSearchWithOpts(ctx context.Context, query string, opts HybridSearchOptions) ([]SearchResult, error) {
+	searchStart := time.Now()
 	maxResults := opts.MaxResults
 	if maxResults <= 0 {
 		maxResults = 6
@@ -988,6 +1008,13 @@ func (s *SQLiteStore) HybridSearchWithOpts(ctx context.Context, query string, op
 		merged = merged[:maxResults]
 	}
 
+	s.logger.Info("hybrid_search completed",
+		"elapsed_ms", time.Since(searchStart).Milliseconds(),
+		"vector_results", len(vecResult.results),
+		"bm25_results", len(bm25Result.results),
+		"fused_results", len(merged),
+		"wing", opts.QueryWing,
+	)
 	return merged, nil
 }
 

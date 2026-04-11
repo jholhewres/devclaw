@@ -195,10 +195,11 @@ type Assistant struct {
 	memoryIndexer *MemoryIndexer
 
 	// dream is the background memory consolidation system. It runs when
-	// the daemon is idle and consolidates accumulated memories. Started
-	// in Assistant.Start(), stopped in Assistant.Stop(). May be nil if
-	// config.Memory.Dream.Enabled is false.
-	dream *DreamConsolidator
+	// the daemon is idle and consolidates accumulated memories. Lazy-initialized
+	// on first ensureDream() call. May be nil if config.Memory.Dream.Enabled is false.
+	dream        *DreamConsolidator
+	dreamOnce    sync.Once
+	dreamInitCtx context.Context
 
 	// contextRouter resolves (channel, chatID) pairs to palace wings for
 	// memory routing. Initialized in Start() after sqliteMemory is ready.
@@ -540,21 +541,10 @@ func (a *Assistant) Start(ctx context.Context) error {
 		a.promptComposer.SetSQLiteMemory(a.sqliteMemory)
 	}
 
-	// 0c. Initialize the dream consolidation system (background idle loop).
-	// Both memoryStore and sqliteMemory are fully initialized above, so the
-	// dream system can safely reference both. The stateDir is derived from
-	// the same data directory used by all other background components.
-	if a.memoryStore != nil && a.config.Memory.Dream.Enabled {
-		dreamStateDir := filepath.Join(filepath.Dir(a.config.Memory.Path), "dream")
-		dc := NewDreamConsolidator(a.config.Memory.Dream, a.memoryStore, dreamStateDir, a.logger).
-			WithHierarchyConfig(a.config.Memory.Hierarchy)
-		if a.sqliteMemory != nil {
-			dc = dc.WithSQLiteStore(a.sqliteMemory)
-		}
-		a.dream = dc
-		a.dream.Start(ctx)
-		a.logger.Info("dream system started", "state_dir", dreamStateDir)
-	}
+	// 0c. Dream system: deferred to first trigger (lazy-init).
+	// Saves startup time + goroutine when dream never fires (common: 0 cycles
+	// observed in 48h of production logs). Initialized on first ensureDream() call.
+	a.dreamInitCtx = ctx
 
 	// 0d. Initialize the context router for palace wing resolution.
 	// Constructed unconditionally when sqliteMemory is available — the router
@@ -1120,6 +1110,28 @@ func (a *Assistant) GetMediaService() *media.MediaService {
 	return a.mediaSvc
 }
 
+// ensureDream lazy-initializes the DreamConsolidator on first call.
+// Returns nil if dream is disabled or memoryStore is unavailable.
+func (a *Assistant) ensureDream() *DreamConsolidator {
+	if !a.config.Memory.Dream.Enabled || a.memoryStore == nil {
+		return nil
+	}
+	a.dreamOnce.Do(func() {
+		dreamStateDir := filepath.Join(filepath.Dir(a.config.Memory.Path), "dream")
+		dc := NewDreamConsolidator(a.config.Memory.Dream, a.memoryStore, dreamStateDir, a.logger).
+			WithHierarchyConfig(a.config.Memory.Hierarchy)
+		if a.sqliteMemory != nil {
+			dc = dc.WithSQLiteStore(a.sqliteMemory)
+		}
+		a.dream = dc
+		if a.dreamInitCtx != nil {
+			a.dream.Start(a.dreamInitCtx)
+		}
+		a.logger.Info("dream system started (lazy-init)", "state_dir", dreamStateDir)
+	})
+	return a.dream
+}
+
 // Stop gracefully shuts down all subsystems.
 func (a *Assistant) Stop() {
 	a.logger.Info("stopping DevClaw Copilot...")
@@ -1149,6 +1161,7 @@ func (a *Assistant) Stop() {
 	}
 
 	// Stop dream consolidation system before closing memory stores.
+	// Dream may have been lazy-initialized or never started.
 	if a.dream != nil {
 		a.dream.Stop()
 		a.logger.Info("dream system stopped")

@@ -2267,12 +2267,18 @@ func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []ch
 			}
 		}
 
-		// Step 2: Memory flush before first compaction (if enabled)
-		// This gives the agent a chance to save important memories before compaction
+		// Step 2: Memory flush before first compaction (if enabled).
+		// Runs async to avoid blocking the compaction retry path.
+		// Uses a copy of messages to prevent races with the caller.
 		if attempt == 0 && a.cfg.MemoryFlush.Enabled {
-			// Estimate tokens based on message content
 			tokenEstimate := a.estimateTokens(messages)
-			a.maybeMemoryFlush(ctx, messages, tokenEstimate)
+			msgCopy := make([]chatMessage, len(messages))
+			copy(msgCopy, messages)
+			go func() {
+				flushCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				a.maybeMemoryFlush(flushCtx, msgCopy, tokenEstimate)
+			}()
 		}
 
 		// Step 3+4: Compact messages using LLM summarization.
