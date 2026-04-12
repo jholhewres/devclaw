@@ -488,8 +488,12 @@ func (a *Assistant) Start(ctx context.Context) error {
 		a.memoryStore = memStore
 	}
 
-	// 0a. Initialize SQLite memory with FTS5 + vector search (if configured).
-	if a.config.Memory.Type == "sqlite" {
+	// 0a. Initialize SQLite memory with FTS5 + vector search.
+	// Always attempt SQLite init regardless of config type — FTS5 keyword
+	// search works without embeddings, and the indexer/dream/dedup pipeline
+	// depends on it. Users should not need to change config to get functional
+	// memory search. Only skip if explicitly set to "none" or "disabled".
+	if a.config.Memory.Type != "none" && a.config.Memory.Type != "disabled" {
 		embedCfg := a.config.Memory.Embedding
 		// Use main API key if embedding key not set.
 		if embedCfg.APIKey == "" {
