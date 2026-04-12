@@ -25,15 +25,17 @@ func init() {
 		{`(?i)\b(overview|balanço|relatório|recap)\b`, "summary"},
 
 		// EVENT patterns — time-bound activities that expire (TTL 7d).
-		{`(?i)\b(reunião|meeting|agenda|call|standup|sprint|daily)\b`, "event"},
+		// Patterns require specific context to avoid false positives on common words
+		// like "call" ("dog is called"), "daily" ("daily routine"), "sprint" ("works in sprints").
+		{`(?i)\b(reunião|meeting|standup)\b`, "event"},
 		{`(?i)\b(lembrete|reminder|alerta|alert|aviso)\b`, "event"},
 		{`(?i)\b\d{1,2}[/:h]\d{2}\b`, "event"},                                                               // time: 15:00, 6h30
 		{`(?i)\b(hoje|amanhã|ontem|tomorrow|yesterday|today)\b`, "event"},                                      // relative dates
 		{`(?i)\b(segunda|terça|quarta|quinta|sexta|sábado|domingo)\b`, "event"},                                 // PT weekdays
 		{`(?i)\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b`, "event"},                         // EN weekdays
-		{`(?i)\b(deploy|release|rollback|hotfix|incident|outage)\b`, "event"},                                   // ops events
-		{`(?i)\b(comprou|pagou|transferiu|bought|paid|transferred|depositou|sacou)\b`, "event"},                 // financial events
-		{`(?i)\b(saldo|fatura|conta|balance|invoice|bill)\b.*\b(R\$|BRL|\d+[.,]\d{2})\b`, "event"},             // financial with amount
+		{`(?i)\b(deploy|rollback|hotfix|incident|outage)\b`, "event"},                                           // ops events (removed "release" — too broad)
+		{`(?i)\b(comprou|pagou|transferiu|depositou|sacou)\b`, "event"},                                         // PT financial verbs (removed EN "bought/paid" — too broad)
+		{`(?i)\b(saldo|fatura|invoice|bill)\b.*\b(R\$|BRL|\d+[.,]\d{2})\b`, "event"},                           // financial with amount
 
 		// (remaining summary patterns already declared above)
 
@@ -55,8 +57,9 @@ func init() {
 // categorizeMemory classifies memory content into a category based on
 // keyword patterns. Returns "fact" as the safe default (never expires).
 //
-// Priority: event > summary > preference > fact.
-// First match wins within each priority group.
+// Priority: summary > event > preference > fact.
+// Summary is checked first to avoid false event matches on words like "daily".
+// First match wins.
 func categorizeMemory(content string) string {
 	// Priority order: check event first, then summary, then preference.
 	for _, cp := range compiledCategoryPatterns {

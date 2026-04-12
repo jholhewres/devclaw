@@ -236,10 +236,7 @@ func (d *DreamConsolidator) shouldDream() bool {
 	if minSessions <= 0 {
 		minSessions = 2
 	}
-	activityCount := d.state.SessionsSince
-	if d.state.CompactionsSince > activityCount {
-		activityCount = d.state.CompactionsSince
-	}
+	activityCount := d.state.SessionsSince + d.state.CompactionsSince
 	if activityCount < minSessions {
 		return false
 	}

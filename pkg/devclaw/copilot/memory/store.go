@@ -410,8 +410,10 @@ func (fs *FileStore) Compact() (int, error) {
 		if e.ExpiresAt != nil && e.ExpiresAt.Before(now) {
 			continue
 		}
-		// Dedup by content hash (keep newest = first seen in reverse scan).
-		h := sha256.Sum256([]byte(e.Content))
+		// Dedup by category+content hash (keep newest = first seen in reverse scan).
+		// Including category prevents a "fact" from being silently replaced by a
+		// "summary" with a 30-day TTL.
+		h := sha256.Sum256([]byte(e.Category + "\x00" + e.Content))
 		hash := hex.EncodeToString(h[:])
 		if _, exists := seen[hash]; exists {
 			continue

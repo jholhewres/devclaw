@@ -11,7 +11,7 @@ func TestCategorize_Event(t *testing.T) {
 		"deploy da versão 2.1 hoje",
 		"amanhã tem standup",
 		"pagou fatura do Inter R$ 3.483,68",
-		"segunda-feira tem daily",
+		"segunda-feira tem reunião",
 	}
 	for _, c := range cases {
 		if got := categorizeMemory(c); got != "event" {
@@ -82,5 +82,25 @@ func TestCategorize_Fact(t *testing.T) {
 func TestCategorize_Default(t *testing.T) {
 	if got := categorizeMemory("random text with no patterns"); got != "fact" {
 		t.Errorf("default should be 'fact', got %q", got)
+	}
+}
+
+func TestCategorize_FalsePositives(t *testing.T) {
+	// These should NOT be events — common words in fact/preference contexts.
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{"user's dog is called Max", "fact"},
+		{"user's daily routine involves coffee", "fact"},
+		{"user works in 2-week sprints", "fact"},
+		{"user prefers latest release of Go", "preference"},
+		{"user has a paid GitHub subscription", "fact"},
+		{"user's research agenda focuses on ML", "fact"},
+	}
+	for _, tc := range cases {
+		if got := categorizeMemory(tc.input); got != tc.expected {
+			t.Errorf("categorizeMemory(%q) = %q, want %q (false positive)", tc.input, got, tc.expected)
+		}
 	}
 }
