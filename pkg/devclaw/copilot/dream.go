@@ -58,10 +58,11 @@ func DefaultDreamConfig() DreamConfig {
 
 // DreamState persists the dream system's state between restarts.
 type DreamState struct {
-	LastDreamAt    time.Time `json:"last_dream_at"`
-	SessionsSince  int       `json:"sessions_since"`
-	TotalDreams    int       `json:"total_dreams"`
-	LastResult     string    `json:"last_result"` // "success", "error", "no_changes"
+	LastDreamAt      time.Time `json:"last_dream_at"`
+	SessionsSince    int       `json:"sessions_since"`
+	CompactionsSince int       `json:"compactions_since"` // proxy for sessions in persistent channels (WhatsApp)
+	TotalDreams      int       `json:"total_dreams"`
+	LastResult       string    `json:"last_result"` // "success", "error", "no_changes"
 }
 
 // DreamResult holds the outcome of a dream consolidation run.
@@ -204,6 +205,16 @@ func (d *DreamConsolidator) RecordSession() {
 	d.saveState()
 }
 
+// RecordCompaction increments the compaction counter.
+// For persistent sessions (WhatsApp), compactions serve as the activity
+// signal since sessions never formally end.
+func (d *DreamConsolidator) RecordCompaction() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.state.CompactionsSince++
+	d.saveState()
+}
+
 // shouldDream checks all three gates.
 func (d *DreamConsolidator) shouldDream() bool {
 	d.mu.Lock()
@@ -218,12 +229,18 @@ func (d *DreamConsolidator) shouldDream() bool {
 		return false
 	}
 
-	// Gate 2: Sessions since last dream.
+	// Gate 2: Activity since last dream (sessions OR compactions).
+	// For persistent sessions (WhatsApp), compactions serve as the activity
+	// signal since sessions never formally end.
 	minSessions := d.config.MinSessionsBetween
 	if minSessions <= 0 {
 		minSessions = 2
 	}
-	if d.state.SessionsSince < minSessions {
+	activityCount := d.state.SessionsSince
+	if d.state.CompactionsSince > activityCount {
+		activityCount = d.state.CompactionsSince
+	}
+	if activityCount < minSessions {
 		return false
 	}
 
@@ -305,22 +322,24 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 
 	consolidated := 0
 
-	// Save consolidated entries (merge duplicates into single entries).
-	for _, dup := range duplicates {
-		merged := memory.Entry{
-			Content:   fmt.Sprintf("[Consolidated] %s (merged from %d similar entries)", dup.canonical, dup.count),
-			Source:    "dream",
-			Category: "summary",
-			Timestamp: time.Now(),
+	// Compact the memory file: remove expired entries and exact duplicates.
+	// This replaces the old approach of appending [Consolidated] entries,
+	// which grew MEMORY.md unboundedly without actually removing dead data.
+	if fileStore, ok := d.store.(*memory.FileStore); ok {
+		removed, err := fileStore.Compact()
+		if err != nil {
+			d.logger.Warn("dream: compact failed", "error", err)
+		} else if removed > 0 {
+			d.logger.Info("dream: compacted memory file",
+				"removed", removed,
+				"duplicates_detected", len(duplicates),
+				"contradictions_detected", len(contradictions),
+			)
+			consolidated = removed
 		}
-		if err := d.store.Save(merged); err != nil {
-			d.logger.Warn("dream: failed to save consolidated memory", "error", err)
-			continue
-		}
-		consolidated++
 	}
 
-	// Save contradiction reports.
+	// Save contradiction reports (append-only — these are new information).
 	for _, c := range contradictions {
 		report := memory.Entry{
 			Content:   fmt.Sprintf("[Contradiction] %s vs %s", c.entryA, c.entryB),
@@ -639,6 +658,7 @@ func (d *DreamConsolidator) recordResult(result string) {
 	defer d.mu.Unlock()
 	d.state.LastDreamAt = time.Now()
 	d.state.SessionsSince = 0
+	d.state.CompactionsSince = 0
 	d.state.TotalDreams++
 	d.state.LastResult = result
 	d.saveState()

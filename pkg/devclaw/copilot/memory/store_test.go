@@ -196,3 +196,88 @@ func TestDefaultTTLForCategory(t *testing.T) {
 		t.Error("unknown TTL should be 0 (never)")
 	}
 }
+
+func TestFileStore_Compact_RemovesExpired(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Save an expired event (8 days old).
+	past := time.Now().Add(-8 * 24 * time.Hour)
+	_ = fs.Save(Entry{Content: "old meeting", Source: "agent", Category: "event", Timestamp: past})
+
+	// Save a fresh fact.
+	_ = fs.Save(Entry{Content: "user likes Go", Source: "agent", Category: "fact", Timestamp: time.Now()})
+
+	removed, err := fs.Compact()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Errorf("expected 1 removed, got %d", removed)
+	}
+
+	entries, _ := fs.GetAll()
+	for _, e := range entries {
+		if e.Content == "old meeting" {
+			t.Error("expired entry should have been removed by Compact")
+		}
+	}
+}
+
+func TestFileStore_Compact_RemovesDuplicates(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Save the same content 3 times with different timestamps.
+	for i := 0; i < 3; i++ {
+		_ = fs.Save(Entry{
+			Content:   "user works at HostGator",
+			Source:    "agent",
+			Category:  "fact",
+			Timestamp: time.Now().Add(time.Duration(i) * time.Hour),
+		})
+	}
+
+	removed, err := fs.Compact()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 2 {
+		t.Errorf("expected 2 duplicates removed, got %d", removed)
+	}
+
+	entries, _ := fs.GetAll()
+	count := 0
+	for _, e := range entries {
+		if e.Content == "user works at HostGator" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected 1 entry after dedup, got %d", count)
+	}
+}
+
+func TestFileStore_Compact_NoChanges(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = fs.Save(Entry{Content: "unique fact", Source: "agent", Category: "fact", Timestamp: time.Now()})
+
+	removed, err := fs.Compact()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 0 {
+		t.Errorf("expected 0 removed, got %d", removed)
+	}
+}

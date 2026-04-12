@@ -9,6 +9,8 @@
 package memory
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -374,6 +376,94 @@ func (fs *FileStore) ListDailyLogs() ([]string, error) {
 
 	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
 	return dates, nil
+}
+
+// Compact rewrites MEMORY.md, removing expired and duplicate entries.
+// Uses atomic write (temp file + rename) to prevent corruption.
+// Returns the number of entries removed.
+func (fs *FileStore) Compact() (int, error) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	memFile := filepath.Join(fs.baseDir, MemoryFileName)
+	content, err := os.ReadFile(memFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("reading memory file: %w", err)
+	}
+
+	entries := parseMemoryFile(string(content), "memory")
+	if len(entries) == 0 {
+		return 0, nil
+	}
+
+	now := time.Now()
+	seen := make(map[string]int) // content hash → index of newest entry
+	keep := make([]bool, len(entries))
+
+	// First pass: mark non-expired, non-duplicate entries to keep.
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		// Filter expired.
+		if e.ExpiresAt != nil && e.ExpiresAt.Before(now) {
+			continue
+		}
+		// Dedup by content hash (keep newest = first seen in reverse scan).
+		h := sha256.Sum256([]byte(e.Content))
+		hash := hex.EncodeToString(h[:])
+		if _, exists := seen[hash]; exists {
+			continue
+		}
+		seen[hash] = i
+		keep[i] = true
+	}
+
+	// Count removals.
+	removed := 0
+	for _, k := range keep {
+		if !k {
+			removed++
+		}
+	}
+	if removed == 0 {
+		return 0, nil
+	}
+
+	// Write surviving entries to temp file, then atomic rename.
+	tmpFile := memFile + ".compact.tmp"
+	var buf strings.Builder
+	buf.WriteString("# DevClaw Memory\n\nLong-term facts and preferences.\n\n")
+	for i, e := range entries {
+		if !keep[i] {
+			continue
+		}
+		if e.ExpiresAt != nil {
+			buf.WriteString(fmt.Sprintf("- [%s] [%s] [expires:%s] %s\n",
+				e.Timestamp.Format("2006-01-02 15:04"),
+				e.Category,
+				e.ExpiresAt.Format("2006-01-02"),
+				e.Content,
+			))
+		} else {
+			buf.WriteString(fmt.Sprintf("- [%s] [%s] %s\n",
+				e.Timestamp.Format("2006-01-02 15:04"),
+				e.Category,
+				e.Content,
+			))
+		}
+	}
+
+	if err := os.WriteFile(tmpFile, []byte(buf.String()), 0o644); err != nil {
+		return 0, fmt.Errorf("writing temp compact file: %w", err)
+	}
+	if err := os.Rename(tmpFile, memFile); err != nil {
+		os.Remove(tmpFile)
+		return 0, fmt.Errorf("atomic rename: %w", err)
+	}
+
+	return removed, nil
 }
 
 // ---------- Parsing ----------

@@ -3696,6 +3696,12 @@ func (a *Assistant) doCompactSession(session *Session) {
 	default: // "summarize"
 		a.compactSummarize(session, threshold)
 	}
+
+	// Record compaction as Dream activity signal.
+	// For persistent sessions (WhatsApp), this is the only way Dream triggers.
+	if d := a.ensureDream(); d != nil {
+		d.RecordCompaction()
+	}
 }
 
 // compactSummarize uses the LLM to generate a summary of older conversation
@@ -3811,10 +3817,11 @@ func (a *Assistant) autoCaptureFacts(userMessage, assistantResponse, sessionID s
 			)
 			continue
 		}
+		category := categorizeMemory(fact)
 		_ = a.memoryStore.Save(memory.Entry{
 			Content:   fact,
 			Source:    origin,
-			Category:  "fact",
+			Category:  category,
 			Timestamp: time.Now(),
 		})
 		a.logger.Debug("auto-captured memory fact",
