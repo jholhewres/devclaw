@@ -495,8 +495,12 @@ func (a *Assistant) Start(ctx context.Context) error {
 	// memory search. Only skip if explicitly set to "none" or "disabled".
 	if a.config.Memory.Type != "none" && a.config.Memory.Type != "disabled" {
 		embedCfg := a.config.Memory.Embedding
-		// Use main API key if embedding key not set.
-		if embedCfg.APIKey == "" {
+		// Only inject the main LLM API key when the user explicitly chose an
+		// API-based embedding provider. For "auto"/"none"/"" the auto-detection
+		// should try local ONNX first (zero cost, offline) before falling back
+		// to API keys from env vars.
+		p := strings.ToLower(embedCfg.Provider)
+		if embedCfg.APIKey == "" && p != "auto" && p != "none" && p != "" {
 			embedCfg.APIKey = a.config.API.APIKey
 		}
 		embedder := memory.NewEmbeddingProvider(embedCfg)
