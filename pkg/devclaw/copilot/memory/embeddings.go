@@ -337,6 +337,8 @@ func newAutoEmbedder(cfg EmbeddingConfig) EmbeddingProvider {
 	if emb, err := NewONNXEmbedder(cfg); err == nil {
 		slog.Info("using local ONNX embeddings (no API key needed)", "model", emb.Model())
 		return emb
+	} else {
+		slog.Info("ONNX local not available, trying API keys", "reason", err.Error())
 	}
 
 	// ONNX unavailable — fall back to API keys from env vars.
