@@ -307,11 +307,11 @@ var autoProviderOrder = []struct {
 	{"mistral", "MISTRAL_API_KEY"},
 }
 
-// newAutoEmbedder creates an embedding provider by auto-detecting available API keys.
-// Tries providers in order: OpenAI > Gemini > Voyage > Mistral.
-// If the config has an explicit APIKey, tries to match it to a provider via BaseURL.
+// newAutoEmbedder creates an embedding provider by auto-detecting available resources.
+// Priority: local ONNX first (zero cost, zero latency), then API keys as fallback.
+// If the config has an explicit APIKey, uses that directly.
 func newAutoEmbedder(cfg EmbeddingConfig) EmbeddingProvider {
-	// If explicit API key is provided, try to detect provider from base URL.
+	// If explicit API key is provided, use it (user explicitly configured an API).
 	if cfg.APIKey != "" {
 		if cfg.BaseURL != "" {
 			lower := strings.ToLower(cfg.BaseURL)
@@ -325,33 +325,32 @@ func newAutoEmbedder(cfg EmbeddingConfig) EmbeddingProvider {
 			case strings.Contains(lower, "mistral"):
 				cfg.Provider = "mistral"
 			default:
-				// Unknown URL but has key — try OpenAI-compatible format.
 				cfg.Provider = "openai"
 			}
 			return newEmbeddingProviderByName(cfg.Provider, cfg)
 		}
-		// Key but no URL — default to OpenAI.
 		cfg.Provider = "openai"
 		return newEmbeddingProviderByName("openai", cfg)
 	}
 
-	// No explicit key — check env vars in priority order.
-	for _, p := range autoProviderOrder {
-		if key := os.Getenv(p.envVar); key != "" {
-			autoCfg := cfg
-			autoCfg.APIKey = key
-			autoCfg.Provider = p.name
-			return newEmbeddingProviderByName(p.name, autoCfg)
-		}
-	}
-
-	// No API keys available — try local ONNX embedder before giving up.
+	// No explicit key — prefer local ONNX (zero cost, fully offline).
 	if emb, err := NewONNXEmbedder(cfg); err == nil {
 		slog.Info("using local ONNX embeddings (no API key needed)", "model", emb.Model())
 		return emb
 	}
 
-	// No keys, no local runtime — degrade to null (FTS-only).
+	// ONNX unavailable — fall back to API keys from env vars.
+	for _, p := range autoProviderOrder {
+		if key := os.Getenv(p.envVar); key != "" {
+			autoCfg := cfg
+			autoCfg.APIKey = key
+			autoCfg.Provider = p.name
+			slog.Info("using API embeddings (ONNX unavailable)", "provider", p.name)
+			return newEmbeddingProviderByName(p.name, autoCfg)
+		}
+	}
+
+	// No local runtime, no API keys — degrade to FTS-only.
 	return &NullEmbedder{}
 }
 
