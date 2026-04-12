@@ -289,7 +289,7 @@ func newEmbeddingProviderByName(name string, cfg EmbeddingConfig) EmbeddingProvi
 			return &NullEmbedder{}
 		}
 		return emb
-	case "auto":
+	case "auto", "none", "":
 		return newAutoEmbedder(cfg)
 	default:
 		return &NullEmbedder{}
