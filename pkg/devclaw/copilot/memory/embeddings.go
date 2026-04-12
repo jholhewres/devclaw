@@ -77,7 +77,7 @@ type EmbeddingConfig struct {
 // DefaultEmbeddingConfig returns sensible defaults.
 func DefaultEmbeddingConfig() EmbeddingConfig {
 	return EmbeddingConfig{
-		Provider:     "none",
+		Provider:     "auto",
 		Model:        "text-embedding-3-small",
 		Dimensions:   1536,
 		Cache:        true,
@@ -282,6 +282,13 @@ func newEmbeddingProviderByName(name string, cfg EmbeddingConfig) EmbeddingProvi
 		return NewVoyageEmbedder(cfg)
 	case "mistral":
 		return NewMistralEmbedder(cfg)
+	case "onnx", "local":
+		emb, err := NewONNXEmbedder(cfg)
+		if err != nil {
+			slog.Warn("ONNX embedder not available, falling back to null", "error", err)
+			return &NullEmbedder{}
+		}
+		return emb
 	case "auto":
 		return newAutoEmbedder(cfg)
 	default:
@@ -338,7 +345,13 @@ func newAutoEmbedder(cfg EmbeddingConfig) EmbeddingProvider {
 		}
 	}
 
-	// No keys available — degrade to null (FTS-only).
+	// No API keys available — try local ONNX embedder before giving up.
+	if emb, err := NewONNXEmbedder(cfg); err == nil {
+		slog.Info("using local ONNX embeddings (no API key needed)", "model", emb.Model())
+		return emb
+	}
+
+	// No keys, no local runtime — degrade to null (FTS-only).
 	return &NullEmbedder{}
 }
 

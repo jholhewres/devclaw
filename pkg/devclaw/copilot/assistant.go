@@ -959,6 +959,20 @@ func (a *Assistant) Start(ctx context.Context) error {
 		}
 	}
 
+	// 5c-status. Log full memory pipeline status.
+	{
+		embName := a.config.Memory.Embedding.Provider
+		a.logger.Info("memory pipeline status",
+			"file_store", a.memoryStore != nil,
+			"sqlite_store", a.sqliteMemory != nil,
+			"embedding_provider", embName,
+			"indexer_enabled", a.memoryIndexer != nil,
+			"dream_enabled", a.config.Memory.Dream.Enabled,
+			"hierarchy_enabled", a.config.Memory.Hierarchy.Enabled,
+			"quantize_enabled", a.config.Memory.Embedding.Quantize,
+		)
+	}
+
 	// 5d. Initialize native media service if enabled.
 	if a.config.NativeMedia.Enabled {
 		// Create media store
