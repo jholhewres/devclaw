@@ -27,7 +27,7 @@ const (
 	onnxModelName      = "all-MiniLM-L6-v2"
 	onnxModelDims      = 384
 	onnxMaxSeqLen      = 128
-	onnxRuntimeVersion = "1.27.0"
+	onnxRuntimeVersion = "1.24.1"
 
 	// Download URLs.
 	onnxRuntimeURLTemplate = "https://github.com/microsoft/onnxruntime/releases/download/v%s/onnxruntime-linux-x64-%s.tgz"
