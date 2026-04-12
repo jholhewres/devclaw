@@ -256,13 +256,15 @@ func l2Normalize(vec []float32) {
 // ---------- Path resolution ----------
 
 func resolveONNXPaths() (*ONNXPaths, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("get home dir: %w", err)
+	// Use the project's data directory (./data/onnx/), consistent with
+	// paths.ResolveDataDir() and the rest of DevClaw's state layout.
+	dataDir := "data"
+	if d := os.Getenv("DEVCLAW_STATE_DIR"); d != "" {
+		dataDir = filepath.Join(d, "data")
 	}
 
-	libDir := filepath.Join(home, ".devclaw", "lib")
-	modelDir := filepath.Join(home, ".devclaw", "models", onnxModelName)
+	libDir := filepath.Join(dataDir, "onnx", "lib")
+	modelDir := filepath.Join(dataDir, "onnx", "models", onnxModelName)
 
 	libName := "libonnxruntime.so"
 	if runtime.GOOS == "darwin" {
