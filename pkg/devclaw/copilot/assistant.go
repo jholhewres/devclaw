@@ -194,6 +194,31 @@ type Assistant struct {
 	// memoryIndexer performs background memory indexing.
 	memoryIndexer *MemoryIndexer
 
+	// dream is the background memory consolidation system. It runs when
+	// the daemon is idle and consolidates accumulated memories. Lazy-initialized
+	// on first ensureDream() call. May be nil if config.Memory.Dream.Enabled is false.
+	dream        *DreamConsolidator
+	dreamOnce    sync.Once
+	dreamInitCtx context.Context
+
+	// contextRouter resolves (channel, chatID) pairs to palace wings for
+	// memory routing. Initialized in Start() after sqliteMemory is ready.
+	// Nil when sqliteMemory is nil. Safe to access concurrently — the router
+	// uses sync.Map internally and never returns errors.
+	contextRouter *ContextRouter
+
+	// memoryStack is the Sprint 2 Room 2.4 layered memory composer
+	// (L0 IdentityLayer + L1 EssentialLayer + L2 OnDemandLayer). Built in
+	// Start() after sqliteMemory and contextRouter are ready. Nil when
+	// hierarchy is disabled or sqliteMemory is nil. The composer reads
+	// its telemetry via Stats().
+	memoryStack *MemoryStack
+
+	// identityLayer is the L0 file-backed identity layer owned by the
+	// memory stack. Stored on the Assistant so Stop() can shut down the
+	// filesystem watcher / polling goroutine before sqliteMemory.Close().
+	identityLayer *memory.IdentityLayer
+
 	// mediaSvc provides native media handling (upload, enrich, send).
 	mediaSvc *media.MediaService
 
@@ -264,7 +289,7 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 		sessionStore:     NewSessionStore(logger.With("component", "sessions")),
 		promptComposer:   NewPromptComposer(cfg),
 		inputGuard:       security.NewInputGuardrail(cfg.Security.MaxInputLength, cfg.Security.RateLimit),
-		outputGuard:      security.NewOutputGuardrail(logger.With("component", "output-guard")),
+		outputGuard:      newOutputGuardWithCredentialCheck(logger),
 		subagentMgr:      NewSubagentManager(cfg.Subagents, logger),
 		hookMgr:          NewHookManager(logger),
 		projectMgr:       projectMgr,
@@ -463,11 +488,19 @@ func (a *Assistant) Start(ctx context.Context) error {
 		a.memoryStore = memStore
 	}
 
-	// 0a. Initialize SQLite memory with FTS5 + vector search (if configured).
-	if a.config.Memory.Type == "sqlite" {
+	// 0a. Initialize SQLite memory with FTS5 + vector search.
+	// Always attempt SQLite init regardless of config type — FTS5 keyword
+	// search works without embeddings, and the indexer/dream/dedup pipeline
+	// depends on it. Users should not need to change config to get functional
+	// memory search. Only skip if explicitly set to "none" or "disabled".
+	if a.config.Memory.Type != "none" && a.config.Memory.Type != "disabled" {
 		embedCfg := a.config.Memory.Embedding
-		// Use main API key if embedding key not set.
-		if embedCfg.APIKey == "" {
+		// Only inject the main LLM API key when the user explicitly chose an
+		// API-based embedding provider. For "auto"/"none"/"" the auto-detection
+		// should try local ONNX first (zero cost, offline) before falling back
+		// to API keys from env vars.
+		p := strings.ToLower(embedCfg.Provider)
+		if embedCfg.APIKey == "" && p != "auto" && p != "none" && p != "" {
 			embedCfg.APIKey = a.config.API.APIKey
 		}
 		embedder := memory.NewEmbeddingProvider(embedCfg)
@@ -483,6 +516,8 @@ func (a *Assistant) Start(ctx context.Context) error {
 				"error", err)
 		} else {
 			a.sqliteMemory = sqlStore
+			// Wire uint8 embedding quantization (4x memory reduction).
+			sqlStore.SetQuantizeEnabled(a.config.Memory.Embedding.Quantize)
 			a.logger.Info("SQLite memory store initialized",
 				"embedding_provider", embedder.Name(),
 				"db", dbPath,
@@ -513,6 +548,92 @@ func (a *Assistant) Start(ctx context.Context) error {
 	if a.sqliteMemory != nil {
 		a.promptComposer.SetSQLiteMemory(a.sqliteMemory)
 	}
+
+	// 0c. Dream system: deferred to first trigger (lazy-init).
+	// Saves startup time + goroutine when dream never fires (common: 0 cycles
+	// observed in 48h of production logs). Initialized on first ensureDream() call.
+	a.dreamInitCtx = ctx
+
+	// 0d. Initialize the context router for palace wing resolution.
+	// Constructed unconditionally when sqliteMemory is available — the router
+	// is safe to instantiate regardless of Hierarchy.Enabled state (it returns
+	// SourceDisabled when the flag is off). Used by memory_save to route new
+	// memories to the right wing (Sprint 2 Room 2.0b).
+	if a.sqliteMemory != nil {
+		a.contextRouter = NewContextRouter(a.sqliteMemory, a.logger, a.config.Memory.Hierarchy)
+		a.logger.Info("context router initialized",
+			"hierarchy_enabled", a.config.Memory.Hierarchy.Enabled,
+		)
+		a.promptComposer.SetContextRouter(a.contextRouter)
+	}
+
+	// 0e. Build the Sprint 2 Room 2.4 layered memory stack and wire it
+	// into the prompt composer. When hierarchy is disabled or sqliteMemory
+	// is nil, we skip this entirely and the prompt composer falls back to
+	// v1.18.0 byte-identical behavior (retrocompat gate verified by
+	// prompt_layers_golden_test.go).
+	if a.config.Memory.Hierarchy.Enabled && a.sqliteMemory != nil {
+		identityPath := a.config.Memory.Hierarchy.IdentityPath
+		if identityPath == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				identityPath = filepath.Join(home, ".devclaw", "identity.md")
+			}
+		}
+		identityLayer := memory.NewIdentityLayer(identityPath, a.logger, 0)
+		if startErr := identityLayer.Start(); startErr != nil {
+			// Non-fatal: a missing identity file is the common case for
+			// fresh installs. The layer still renders an empty string.
+			a.logger.Warn("identity layer start returned error", "err", startErr)
+		}
+
+		essentialCfg := memory.EssentialLayerConfig{
+			// L1Budget is expressed in tokens; convert to bytes at the
+			// standard 1 token ≈ 4 bytes approximation.
+			ByteBudget:           a.config.Memory.Hierarchy.L1Budget * 4,
+			StaleAfter:           a.config.Memory.Hierarchy.EssentialStoryStaleAfter,
+			RoomsPerWing:         a.config.Memory.Hierarchy.EssentialStoryRoomsPerWing,
+			LeadSentencesPerRoom: 3,
+		}
+		essentialLayer := memory.NewEssentialLayer(a.sqliteMemory, essentialCfg, a.logger)
+
+		entityDetector := memory.NewEntityDetector(a.sqliteMemory, memory.DefaultEntityDetectorConfig(), a.logger)
+		onDemandCfg := memory.DefaultOnDemandLayerConfig()
+		onDemandCfg.MaxResults = a.config.Memory.Hierarchy.OnDemandMaxResults
+		onDemandCfg.CrossWingEnabled = a.config.Memory.Hierarchy.OnDemandCrossWingEnabled
+		onDemandLayer := memory.NewOnDemandLayer(a.sqliteMemory, entityDetector, onDemandCfg, a.logger)
+
+		// Wire KG into OnDemandLayer for enriched search results (nil-safe).
+		kgStore := a.sqliteMemory.KG() // may be nil
+		factsPerRender := a.config.Memory.Hierarchy.KG.FactsPerInjection
+		if factsPerRender <= 0 {
+			factsPerRender = 5
+		}
+		if kgStore != nil {
+			onDemandLayer.SetKG(kgStore, factsPerRender)
+		}
+
+		// Wire TopicChangeDetector — works with or without KG.
+		topicDetector := memory.NewTopicChangeDetector(
+			float32(a.config.Memory.Hierarchy.TopicChangeThreshold),
+			float32(a.config.Memory.Hierarchy.TopicChangeEntityOverlap),
+			kgStore, // may be nil — detector degrades gracefully
+			factsPerRender,
+		)
+		onDemandLayer.SetTopicDetector(topicDetector)
+
+		stackCfg := DefaultStackConfig()
+		stackCfg.ForceLegacy = a.config.Memory.Stack.ForceLegacy
+		stack := NewMemoryStack(identityLayer, essentialLayer, onDemandLayer, stackCfg, a.logger)
+		a.promptComposer.SetMemoryStack(stack)
+		a.memoryStack = stack
+		a.identityLayer = identityLayer
+		a.logger.Info("memory stack initialized",
+			"identity_path", identityPath,
+			"l1_bytes", essentialCfg.ByteBudget,
+			"l2_max_results", onDemandCfg.MaxResults,
+		)
+	}
+
 	a.promptComposer.SetSkillGetter(func(name string) (interface{ SystemPrompt() string }, bool) {
 		skill, ok := a.skillRegistry.Get(name)
 		if !ok {
@@ -834,6 +955,28 @@ func (a *Assistant) Start(ctx context.Context) error {
 		go a.memoryIndexer.Start(a.ctx)
 	}
 
+	// 5c-health. Verify memory pipeline is functional after init.
+	if a.memoryStore != nil {
+		memDir := filepath.Join(filepath.Dir(a.config.Memory.Path), "memory")
+		if _, err := os.Stat(memDir); os.IsNotExist(err) {
+			a.logger.Error("CRITICAL: memory directory missing after init — memory_save/search will fail", "dir", memDir)
+		}
+	}
+
+	// 5c-status. Log full memory pipeline status.
+	{
+		embName := a.config.Memory.Embedding.Provider
+		a.logger.Info("memory pipeline status",
+			"file_store", a.memoryStore != nil,
+			"sqlite_store", a.sqliteMemory != nil,
+			"embedding_provider", embName,
+			"indexer_enabled", a.memoryIndexer != nil,
+			"dream_enabled", a.config.Memory.Dream.Enabled,
+			"hierarchy_enabled", a.config.Memory.Hierarchy.Enabled,
+			"quantize_enabled", a.config.Memory.Embedding.Quantize,
+		)
+	}
+
 	// 5d. Initialize native media service if enabled.
 	if a.config.NativeMedia.Enabled {
 		// Create media store
@@ -997,6 +1140,28 @@ func (a *Assistant) GetMediaService() *media.MediaService {
 	return a.mediaSvc
 }
 
+// ensureDream lazy-initializes the DreamConsolidator on first call.
+// Returns nil if dream is disabled or memoryStore is unavailable.
+func (a *Assistant) ensureDream() *DreamConsolidator {
+	if !a.config.Memory.Dream.Enabled || a.memoryStore == nil {
+		return nil
+	}
+	a.dreamOnce.Do(func() {
+		dreamStateDir := filepath.Join(filepath.Dir(a.config.Memory.Path), "dream")
+		dc := NewDreamConsolidator(a.config.Memory.Dream, a.memoryStore, dreamStateDir, a.logger).
+			WithHierarchyConfig(a.config.Memory.Hierarchy)
+		if a.sqliteMemory != nil {
+			dc = dc.WithSQLiteStore(a.sqliteMemory)
+		}
+		a.dream = dc
+		if a.dreamInitCtx != nil {
+			a.dream.Start(a.dreamInitCtx)
+		}
+		a.logger.Info("dream system started (lazy-init)", "state_dir", dreamStateDir)
+	})
+	return a.dream
+}
+
 // Stop gracefully shuts down all subsystems.
 func (a *Assistant) Stop() {
 	a.logger.Info("stopping DevClaw Copilot...")
@@ -1023,6 +1188,22 @@ func (a *Assistant) Stop() {
 	// Shut down MCP server connections.
 	if a.mcpBridge != nil {
 		a.mcpBridge.Shutdown()
+	}
+
+	// Stop dream consolidation system before closing memory stores.
+	// Dream may have been lazy-initialized or never started.
+	if a.dream != nil {
+		a.dream.Stop()
+		a.logger.Info("dream system stopped")
+	}
+
+	// Stop the L0 identity layer before closing sqliteMemory. The
+	// identity layer owns a filesystem watcher / polling goroutine; it
+	// does not touch the DB, but we stop it here for symmetry with the
+	// dream system and to keep all stack-component shutdown ordered
+	// before the store close (Sprint 2 Room 2.4).
+	if a.identityLayer != nil {
+		a.identityLayer.Stop()
 	}
 
 	// Close SQLite memory store.
@@ -2136,8 +2317,14 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 
 	// ── Step 9: Validate output ──
 	if err := a.outputGuard.ValidateWithContext(response, toolCallsToResultContexts(toolCalls)); err != nil {
-		logger.Warn("output rejected, applying fallback", "error", err)
-		response = "Sorry, I encountered an issue generating the response. Could you rephrase?"
+		if errors.Is(err, security.ErrCredentialLeak) {
+			// Redact credentials but keep the rest of the response useful.
+			logger.Warn("credential detected in output, redacting", "error", err)
+			response = RedactCredentials(response)
+		} else {
+			logger.Warn("output rejected, applying fallback", "error", err)
+			response = "Sorry, I encountered an issue generating the response. Could you rephrase?"
+		}
 	}
 
 	// ── Step 10: Update session ──
@@ -3305,7 +3492,7 @@ func (a *Assistant) registerSystemTools() {
 	}
 
 	a.ssrfGuard = security.NewSSRFGuard(a.config.Security.SSRF, a.logger)
-	RegisterSystemTools(a.toolExecutor, sandboxRunner, a.memoryStore, a.sqliteMemory, a.config.Memory, a.scheduler, dataDir, a.ssrfGuard, a.vault, a.config.WebSearch, a.skillDB, a.config.Gateway, a.config.Security.ToolGuard)
+	RegisterSystemTools(a.toolExecutor, sandboxRunner, a.memoryStore, a.sqliteMemory, a.config.Memory, a.contextRouter, a.scheduler, dataDir, a.ssrfGuard, a.vault, a.config.WebSearch, a.skillDB, a.config.Gateway, a.config.Security.ToolGuard)
 
 	// Register skill database tools if available.
 	if a.skillDB != nil {
@@ -3527,6 +3714,12 @@ func (a *Assistant) doCompactSession(session *Session) {
 	default: // "summarize"
 		a.compactSummarize(session, threshold)
 	}
+
+	// Record compaction as Dream activity signal.
+	// For persistent sessions (WhatsApp), this is the only way Dream triggers.
+	if d := a.ensureDream(); d != nil {
+		d.RecordCompaction()
+	}
 }
 
 // compactSummarize uses the LLM to generate a summary of older conversation
@@ -3635,10 +3828,18 @@ func (a *Assistant) autoCaptureFacts(userMessage, assistantResponse, sessionID s
 		if fact == "" || len(fact) < 5 {
 			continue
 		}
+		// Block credentials from being persisted via auto-capture.
+		if looksLikeCredential(fact) {
+			a.logger.Warn("auto-capture: credential pattern in extracted fact, skipping",
+				"session", sessionID,
+			)
+			continue
+		}
+		category := categorizeMemory(fact)
 		_ = a.memoryStore.Save(memory.Entry{
 			Content:   fact,
 			Source:    origin,
-			Category:  "fact",
+			Category:  category,
 			Timestamp: time.Now(),
 		})
 		a.logger.Debug("auto-captured memory fact",
@@ -3691,7 +3892,11 @@ func (a *Assistant) compactSummarize(session *Session, threshold int) {
 	// Step 2: LLM summarizes the conversation with retry and exponential backoff.
 	// Transient errors (rate-limits, timeouts) are retried up to 3 times with
 	// backoff: 2s → 4s → 8s. On permanent failure, a static fallback is used.
-	summaryPrompt := "Summarize the key points of this conversation in 2-3 sentences. Focus on decisions made, tasks completed, and important context."
+	// Use structured compaction prompt (same quality as agent-level compaction)
+	// to preserve conversation topics, decisions, and identifiers.
+	ccfg := resolvedCompactionConfig(a.config.Agent.Compaction)
+	structuredPrompt := buildStructuredCompactionPrompt(ccfg, nil, nil, nil)
+	summaryUserMsg := "Summarize this conversation history using the required section headings."
 	var summary string
 	var summaryErr error
 
@@ -3699,7 +3904,7 @@ func (a *Assistant) compactSummarize(session *Session, threshold int) {
 	const maxSummaryRetries = 3
 
 	for attempt := 1; attempt <= maxSummaryRetries; attempt++ {
-		summary, summaryErr = a.llmClient.Complete(a.ctx, "", session.RecentHistory(20), summaryPrompt)
+		summary, summaryErr = a.llmClient.Complete(a.ctx, structuredPrompt, session.RecentHistory(20), summaryUserMsg)
 		if summaryErr == nil {
 			break
 		}
@@ -4096,6 +4301,14 @@ func generateSlug(text string, maxWords int) string {
 	return strings.TrimRight(result, "-")
 }
 
+// newOutputGuardWithCredentialCheck creates an OutputGuardrail with the
+// credential checker wired in, avoiding circular imports between copilot and security.
+func newOutputGuardWithCredentialCheck(logger *slog.Logger) *security.OutputGuardrail {
+	g := security.NewOutputGuardrail(logger.With("component", "output-guard"))
+	g.CredentialChecker = LooksLikeCredential
+	return g
+}
+
 // sendReply sends a response to the original message's channel.
 // Long messages are split into chunks respecting the channel limit (default 4000 chars).
 // buildTTSProvider creates the appropriate TTS provider based on config.
@@ -4453,6 +4666,13 @@ func (a *Assistant) resumeInterruptedRuns() {
 
 			// Flush any remaining streamed text.
 			blockStreamer.Finish()
+
+			// Validate and redact credentials in resumed response.
+			if err := a.outputGuard.ValidateWithContext(response, nil); err != nil {
+				if errors.Is(err, security.ErrCredentialLeak) {
+					response = RedactCredentials(response)
+				}
+			}
 
 			// Send final response if there's leftover and streamer didn't send it.
 			if response != "" && !blockStreamer.HasSentBlocks() {

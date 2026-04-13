@@ -246,6 +246,7 @@ func EnsureStateDirs() error {
 		ResolveStateDir(),
 		ResolveDataDir(),
 		ResolveMediaDir(),
+		filepath.Join(ResolveDataDir(), "memory"),
 		filepath.Join(ResolveMediaDir(), "whatsapp"),
 		filepath.Join(ResolveMediaDir(), "telegram"),
 		ResolveSessionsDir(),

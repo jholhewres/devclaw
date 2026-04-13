@@ -133,7 +133,7 @@ func (m *MemoryIndexer) Start(ctx context.Context) error {
 
 	// Check if memory directory exists
 	if _, err := os.Stat(m.memoryDir); os.IsNotExist(err) {
-		m.logger.Debug("memory indexer disabled - memory directory does not exist", "dir", m.memoryDir)
+		m.logger.Warn("memory indexer disabled - memory directory does not exist", "dir", m.memoryDir)
 		return nil
 	}
 

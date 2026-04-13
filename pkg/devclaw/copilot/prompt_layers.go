@@ -136,6 +136,18 @@ type PromptComposer struct {
 	memorySectionBuildersMu sync.RWMutex
 	memorySectionBuilders   []MemoryPromptSectionBuilder
 
+	// memoryStack is the Sprint 2 Room 2.4 layered memory composer
+	// (L0 Identity + L1 Essential + L2 OnDemand). When non-nil, its
+	// Build output is prepended to the legacy L3 buildMemoryLayer
+	// output. When nil or when all layers return empty, buildMemoryLayer
+	// is byte-identical to v1.18.0.
+	memoryStack *MemoryStack
+
+	// contextRouter is the optional wing resolver used by the memory
+	// stack to scope L1/L2 retrieval to the session's active wing.
+	// Nil = legacy wing (empty string) for every session.
+	contextRouter *ContextRouter
+
 	// bootstrapCache caches bootstrap file contents to avoid re-reading from disk
 	// on every prompt compose. Invalidated when file content changes (hash mismatch).
 	bootstrapCacheMu sync.RWMutex
@@ -223,6 +235,21 @@ func (p *PromptComposer) SetMemoryStore(store *memory.FileStore) {
 // SetSQLiteMemory configures the SQLite memory store for hybrid search.
 func (p *PromptComposer) SetSQLiteMemory(store *memory.SQLiteStore) {
 	p.sqliteMemory = store
+}
+
+// SetMemoryStack wires a Sprint 2 Room 2.4 layered memory stack into the
+// composer. The stack renders L0+L1+L2 as a prefix that buildMemoryLayer
+// prepends to its legacy L3 output. Passing nil detaches any previously
+// configured stack and restores v1.18.0 byte-identical behavior.
+func (p *PromptComposer) SetMemoryStack(stack *MemoryStack) {
+	p.memoryStack = stack
+}
+
+// SetContextRouter wires the context router used by the memory stack to
+// resolve the active wing for a session. Nil means every session uses
+// the legacy wing ("").
+func (p *PromptComposer) SetContextRouter(router *ContextRouter) {
+	p.contextRouter = router
 }
 
 // SetContextEngines sets the pluggable context engine registry.
@@ -1283,11 +1310,40 @@ func (p *PromptComposer) buildSkillsLayerLegacy(session *Session) string {
 	return b.String()
 }
 
+// resolveActiveWingForSession returns the wing the memory stack should
+// use for the given session. Uses the context router when available,
+// falling back to an empty string (legacy wing) on any failure. Any
+// error from the router is treated as a degradation signal and does
+// not propagate — the stack MUST be able to render regardless.
+func (p *PromptComposer) resolveActiveWingForSession(session *Session, input string) string {
+	if session == nil || p.contextRouter == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	res := p.contextRouter.Resolve(ctx, session.Channel, session.ChatID, input)
+	return res.Wing
+}
+
 // buildMemoryLayer creates the memory context section.
 // Uses hybrid search (vector + BM25) when SQLite memory is available,
 // otherwise falls back to substring matching on the file store.
 func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string {
 	var parts []string
+
+	// Sprint 2 Room 2.4: stack-produced L0+L1+L2 prefix (if any).
+	// When the stack returns empty (nil stack, all layers empty, or
+	// ForceLegacy), the code below is byte-identical to v1.18.0.
+	// This is the retrocompat gate — locked by the golden fixture test
+	// in prompt_layers_golden_test.go.
+	if p.memoryStack != nil {
+		activeWing := p.resolveActiveWingForSession(session, input)
+		stackCtx, stackCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		if prefix := p.memoryStack.Build(stackCtx, activeWing, input); prefix != "" {
+			parts = append(parts, prefix)
+		}
+		stackCancel()
+	}
 
 	// Try hybrid search first (SQLite with FTS5 + vector).
 	// Use a tight timeout to avoid blocking prompt composition.

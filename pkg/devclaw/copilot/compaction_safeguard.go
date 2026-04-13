@@ -283,6 +283,7 @@ var requiredCompactionSections = []string{
 	"## Open TODOs",
 	"## Constraints/Rules",
 	"## Pending user asks",
+	"## Conversation Topics",
 	"## Exact identifiers",
 }
 
@@ -305,6 +306,9 @@ func buildStructuredCompactionPrompt(cfg CompactionConfig, toolFailures []string
 	b.WriteString("- Under '## Open TODOs': list incomplete tasks and their status.\n")
 	b.WriteString("- Under '## Constraints/Rules': list active constraints from the user or system.\n")
 	b.WriteString("- Under '## Pending user asks': describe what the user most recently asked for.\n")
+	b.WriteString("- Under '## Conversation Topics': list ALL distinct subjects discussed " +
+		"(e.g. 'LiteLLM proxy setup', 'SSH server heartbeat investigation'), " +
+		"including purely informational discussions where no action was taken.\n")
 	b.WriteString("- Under '## Exact identifiers': list ALL file paths, UUIDs, URLs, commit hashes, branch names, session IDs, and API keys (masked) verbatim.\n")
 	b.WriteString("- Focus ONLY on CONFIRMED facts from tool results. Do NOT speculate or invent outcomes.\n")
 	b.WriteString("- If a tool result was ambiguous or errored, say so explicitly.\n")
@@ -622,6 +626,7 @@ func buildMinimalFallbackSummary(messages []chatMessage) string {
 	}
 	b.WriteString("\n\n")
 
+	b.WriteString("## Conversation Topics\n(unknown — summarization failed)\n\n")
 	b.WriteString("## Exact identifiers\n")
 
 	// Collect tool names used.

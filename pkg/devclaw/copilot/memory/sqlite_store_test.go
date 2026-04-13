@@ -51,6 +51,9 @@ func newTestStore(t *testing.T) *SQLiteStore {
 }
 
 func TestIncrementalVectorCache(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow vector cache test in short mode")
+	}
 	store := newTestStore(t)
 	ctx := context.Background()
 
@@ -166,6 +169,9 @@ func TestSearchVectorOnFreshStore(t *testing.T) {
 }
 
 func TestConcurrentIndexAndSearch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping concurrent stress test in short mode")
+	}
 	store := newTestStore(t)
 	ctx := context.Background()
 

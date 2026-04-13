@@ -65,15 +65,24 @@ type EmbeddingConfig struct {
 
 	// FallbackModel is the model for the fallback provider.
 	FallbackModel string `yaml:"fallback_model"`
+
+	// Quantize enables uint8 quantization of embeddings for ~4x memory reduction.
+	// Default: true. Set to false as escape hatch if quantization degrades search.
+	Quantize bool `yaml:"quantize"`
+
+	// QuantizeBits is the quantization bit-width (default: 8). Reserved for future 4-bit support.
+	QuantizeBits int `yaml:"quantize_bits"`
 }
 
 // DefaultEmbeddingConfig returns sensible defaults.
 func DefaultEmbeddingConfig() EmbeddingConfig {
 	return EmbeddingConfig{
-		Provider:   "none",
-		Model:      "text-embedding-3-small",
-		Dimensions: 1536,
-		Cache:      true,
+		Provider:     "auto",
+		Model:        "text-embedding-3-small",
+		Dimensions:   1536,
+		Cache:        true,
+		Quantize:     true,
+		QuantizeBits: 8,
 	}
 }
 
@@ -273,7 +282,14 @@ func newEmbeddingProviderByName(name string, cfg EmbeddingConfig) EmbeddingProvi
 		return NewVoyageEmbedder(cfg)
 	case "mistral":
 		return NewMistralEmbedder(cfg)
-	case "auto":
+	case "onnx", "local":
+		emb, err := NewONNXEmbedder(cfg)
+		if err != nil {
+			slog.Warn("ONNX embedder not available, falling back to null", "error", err)
+			return &NullEmbedder{}
+		}
+		return emb
+	case "auto", "none", "":
 		return newAutoEmbedder(cfg)
 	default:
 		return &NullEmbedder{}
@@ -291,11 +307,11 @@ var autoProviderOrder = []struct {
 	{"mistral", "MISTRAL_API_KEY"},
 }
 
-// newAutoEmbedder creates an embedding provider by auto-detecting available API keys.
-// Tries providers in order: OpenAI > Gemini > Voyage > Mistral.
-// If the config has an explicit APIKey, tries to match it to a provider via BaseURL.
+// newAutoEmbedder creates an embedding provider by auto-detecting available resources.
+// Priority: local ONNX first (zero cost, zero latency), then API keys as fallback.
+// If the config has an explicit APIKey, uses that directly.
 func newAutoEmbedder(cfg EmbeddingConfig) EmbeddingProvider {
-	// If explicit API key is provided, try to detect provider from base URL.
+	// If explicit API key is provided, use it (user explicitly configured an API).
 	if cfg.APIKey != "" {
 		if cfg.BaseURL != "" {
 			lower := strings.ToLower(cfg.BaseURL)
@@ -309,27 +325,34 @@ func newAutoEmbedder(cfg EmbeddingConfig) EmbeddingProvider {
 			case strings.Contains(lower, "mistral"):
 				cfg.Provider = "mistral"
 			default:
-				// Unknown URL but has key — try OpenAI-compatible format.
 				cfg.Provider = "openai"
 			}
 			return newEmbeddingProviderByName(cfg.Provider, cfg)
 		}
-		// Key but no URL — default to OpenAI.
 		cfg.Provider = "openai"
 		return newEmbeddingProviderByName("openai", cfg)
 	}
 
-	// No explicit key — check env vars in priority order.
+	// No explicit key — prefer local ONNX (zero cost, fully offline).
+	if emb, err := NewONNXEmbedder(cfg); err == nil {
+		slog.Info("using local ONNX embeddings (no API key needed)", "model", emb.Model())
+		return emb
+	} else {
+		slog.Info("ONNX local not available, trying API keys", "reason", err.Error())
+	}
+
+	// ONNX unavailable — fall back to API keys from env vars.
 	for _, p := range autoProviderOrder {
 		if key := os.Getenv(p.envVar); key != "" {
 			autoCfg := cfg
 			autoCfg.APIKey = key
 			autoCfg.Provider = p.name
+			slog.Info("using API embeddings (ONNX unavailable)", "provider", p.name)
 			return newEmbeddingProviderByName(p.name, autoCfg)
 		}
 	}
 
-	// No keys available — degrade to null (FTS-only).
+	// No local runtime, no API keys — degrade to FTS-only.
 	return &NullEmbedder{}
 }
 

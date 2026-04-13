@@ -767,6 +767,39 @@ type MemoryConfig struct {
 
 	// SessionMemory configures automatic session summarization.
 	SessionMemory SessionMemoryConfig `yaml:"session_memory"`
+
+	// Hierarchy configures the palace-aware memory subsystem (Sprint 1,
+	// v1.18.0). Defaults to Enabled=true: wing IS NULL is treated as a
+	// first-class neutral citizen, so existing v1.17.0 databases keep
+	// working byte-identically while new memories get routed through
+	// wings/rooms. See HierarchyConfig in memory_hierarchy_config.go.
+	Hierarchy HierarchyConfig `yaml:"hierarchy"`
+
+	// Dream configures the background memory consolidation system (v1.17.0,
+	// now wired in v1.18.0). Defaults to Enabled=true so out-of-the-box
+	// installs get idle-cycle consolidation as the release notes promised.
+	// Existing YAML without a dream: block inherits defaults (retrocompat).
+	Dream DreamConfig `yaml:"dream"`
+
+	// Stack configures the Sprint 2 layered memory stack (v1.19.0+).
+	// Default: MemoryStackConfig{} (stack enabled when hierarchy is on).
+	// Set force_legacy: true to bypass the stack entirely and fall back
+	// to v1.18.0 prompt composition. See docs/memory-system.md for details.
+	Stack MemoryStackConfig `yaml:"stack"`
+}
+
+// MemoryStackConfig configures the Sprint 2 layered memory stack
+// (MemoryStack — see memory_stack.go). The only knob exposed today is
+// force_legacy, which bypasses the stack entirely and falls back to the
+// v1.18.0 prompt composer behavior. Users who want the new layered memory
+// simply leave the block empty or omit it entirely.
+type MemoryStackConfig struct {
+	// ForceLegacy disables the MemoryStack and falls back to the
+	// pre-Sprint-2 buildMemoryLayer code path. Default: false.
+	// Use this as an emergency escape hatch if the layered stack causes
+	// unexpected behavior in production — no config migration or downgrade
+	// is required. Set memory.stack.force_legacy: true in devclaw.yaml.
+	ForceLegacy bool `yaml:"force_legacy,omitempty"`
 }
 
 // SearchConfig configures hybrid search behavior.
@@ -974,6 +1007,9 @@ func DefaultConfig() *Config {
 				Enabled:  false,
 				Messages: 15,
 			},
+			Hierarchy: DefaultHierarchyConfig(),
+			Dream:     DefaultDreamConfig(),
+			Stack:     MemoryStackConfig{},
 		},
 		Security: SecurityConfig{
 			MaxInputLength:      4096,

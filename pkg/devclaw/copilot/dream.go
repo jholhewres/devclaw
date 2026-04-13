@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/kg"
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
 )
 
@@ -57,10 +58,11 @@ func DefaultDreamConfig() DreamConfig {
 
 // DreamState persists the dream system's state between restarts.
 type DreamState struct {
-	LastDreamAt    time.Time `json:"last_dream_at"`
-	SessionsSince  int       `json:"sessions_since"`
-	TotalDreams    int       `json:"total_dreams"`
-	LastResult     string    `json:"last_result"` // "success", "error", "no_changes"
+	LastDreamAt      time.Time `json:"last_dream_at"`
+	SessionsSince    int       `json:"sessions_since"`
+	CompactionsSince int       `json:"compactions_since"` // proxy for sessions in persistent channels (WhatsApp)
+	TotalDreams      int       `json:"total_dreams"`
+	LastResult       string    `json:"last_result"` // "success", "error", "no_changes"
 }
 
 // DreamResult holds the outcome of a dream consolidation run.
@@ -73,12 +75,23 @@ type DreamResult struct {
 	Error            error         `json:"-"`
 }
 
+// dreamClassifierBatchSize is the number of legacy files the classifier
+// pass inspects per dream cycle. Bounded to prevent a single pass from
+// hogging the DB. Configurable in Sprint 3.
+const dreamClassifierBatchSize = 20
+
 // DreamConsolidator manages background memory consolidation.
 type DreamConsolidator struct {
 	config   DreamConfig
 	store    memory.Store
 	stateDir string
 	logger   *slog.Logger
+
+	// sqliteStore is optional. When set (via WithSQLiteStore), the dream
+	// cycle runs the legacy classifier phase. When nil, the phase is a no-op.
+	sqliteStore *memory.SQLiteStore
+	// hierarchyCfg gates the classifier phase. Zero value = disabled.
+	hierarchyCfg HierarchyConfig
 
 	state DreamState
 	mu    sync.Mutex
@@ -89,8 +102,26 @@ type DreamConsolidator struct {
 	done chan struct{}
 }
 
+// WithSQLiteStore wires an optional *SQLiteStore into the consolidator so
+// the classifier phase can run during dream cycles. Keeps the memory.Store
+// interface unbroken (Option A).
+func (d *DreamConsolidator) WithSQLiteStore(s *memory.SQLiteStore) *DreamConsolidator {
+	d.sqliteStore = s
+	return d
+}
+
+// WithHierarchyConfig provides the hierarchy feature flag and keyword map
+// needed to gate and drive the legacy classifier phase.
+func (d *DreamConsolidator) WithHierarchyConfig(cfg HierarchyConfig) *DreamConsolidator {
+	d.hierarchyCfg = cfg
+	return d
+}
+
 // NewDreamConsolidator creates a new dream consolidator.
 func NewDreamConsolidator(config DreamConfig, store memory.Store, stateDir string, logger *slog.Logger) *DreamConsolidator {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	d := &DreamConsolidator{
 		config:   config,
 		store:    store,
@@ -174,6 +205,16 @@ func (d *DreamConsolidator) RecordSession() {
 	d.saveState()
 }
 
+// RecordCompaction increments the compaction counter.
+// For persistent sessions (WhatsApp), compactions serve as the activity
+// signal since sessions never formally end.
+func (d *DreamConsolidator) RecordCompaction() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.state.CompactionsSince++
+	d.saveState()
+}
+
 // shouldDream checks all three gates.
 func (d *DreamConsolidator) shouldDream() bool {
 	d.mu.Lock()
@@ -188,12 +229,15 @@ func (d *DreamConsolidator) shouldDream() bool {
 		return false
 	}
 
-	// Gate 2: Sessions since last dream.
+	// Gate 2: Activity since last dream (sessions OR compactions).
+	// For persistent sessions (WhatsApp), compactions serve as the activity
+	// signal since sessions never formally end.
 	minSessions := d.config.MinSessionsBetween
 	if minSessions <= 0 {
 		minSessions = 2
 	}
-	if d.state.SessionsSince < minSessions {
+	activityCount := d.state.SessionsSince + d.state.CompactionsSince
+	if activityCount < minSessions {
 		return false
 	}
 
@@ -218,6 +262,12 @@ func (d *DreamConsolidator) shouldDream() bool {
 func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 	start := time.Now()
 	result := DreamResult{}
+
+	// Ensure state directory exists before acquiring lock.
+	if err := os.MkdirAll(d.stateDir, 0o700); err != nil {
+		result.Error = fmt.Errorf("create dream state dir: %w", err)
+		return result
+	}
 
 	// Acquire lock atomically using O_CREATE|O_EXCL to prevent TOCTOU races.
 	lockPath := filepath.Join(d.stateDir, "dream.lock")
@@ -275,22 +325,24 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 
 	consolidated := 0
 
-	// Save consolidated entries (merge duplicates into single entries).
-	for _, dup := range duplicates {
-		merged := memory.Entry{
-			Content:   fmt.Sprintf("[Consolidated] %s (merged from %d similar entries)", dup.canonical, dup.count),
-			Source:    "dream",
-			Category: "summary",
-			Timestamp: time.Now(),
+	// Compact the memory file: remove expired entries and exact duplicates.
+	// This replaces the old approach of appending [Consolidated] entries,
+	// which grew MEMORY.md unboundedly without actually removing dead data.
+	if fileStore, ok := d.store.(*memory.FileStore); ok {
+		removed, err := fileStore.Compact()
+		if err != nil {
+			d.logger.Warn("dream: compact failed", "error", err)
+		} else if removed > 0 {
+			d.logger.Info("dream: compacted memory file",
+				"removed", removed,
+				"duplicates_detected", len(duplicates),
+				"contradictions_detected", len(contradictions),
+			)
+			consolidated = removed
 		}
-		if err := d.store.Save(merged); err != nil {
-			d.logger.Warn("dream: failed to save consolidated memory", "error", err)
-			continue
-		}
-		consolidated++
 	}
 
-	// Save contradiction reports.
+	// Save contradiction reports (append-only — these are new information).
 	for _, c := range contradictions {
 		report := memory.Entry{
 			Content:   fmt.Sprintf("[Contradiction] %s vs %s", c.entryA, c.entryB),
@@ -305,12 +357,108 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 
 	result.Consolidated = consolidated
 
+	// Phase 3b: Classify — opportunistically label legacy files (wing IS NULL).
+	// Error-isolated: a classifier panic or error MUST NOT abort the dream cycle.
+	d.runClassifierPhase(ctx)
+	IncClassifierPass()
+
+	// Phase 3c: KG extraction — extract structured facts from memories.
+	// Pattern-based only (no LLM budget consumed during idle consolidation).
+	// Error-isolated: same as classifier phase.
+	d.runKGExtractionPhase(ctx)
+
 	// Phase 4: Apply — record results and update state.
 	d.logger.Info("dream phase: apply", "consolidated", consolidated)
 	d.recordResult("success")
 
 	result.Duration = time.Since(start)
 	return result
+}
+
+// runClassifierPhase runs the legacy classifier pass during a dream cycle.
+// It is fully error-isolated: any panic or error is logged and swallowed so
+// the rest of the dream cycle continues unaffected.
+func (d *DreamConsolidator) runClassifierPhase(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			d.logger.Warn("legacy classifier phase panicked — isolated from dream cycle", "panic", r)
+		}
+	}()
+
+	if !d.hierarchyCfg.Enabled || d.sqliteStore == nil {
+		return
+	}
+
+	passCfg := memory.LegacyClassificationConfig{
+		BatchSize: dreamClassifierBatchSize,
+		Keywords:  d.hierarchyCfg.LegacyKeywords,
+	}
+	stats, err := d.sqliteStore.RunLegacyClassificationPass(ctx, passCfg)
+	if err != nil {
+		d.logger.Warn("legacy classifier phase error — continuing dream cycle", "error", err)
+		return
+	}
+	if stats.Classified > 0 {
+		d.logger.Info("legacy classifier classified files", "count", stats.Classified)
+	}
+}
+
+// runKGExtractionPhase extracts KG triples from indexed memories during
+// the dream cycle. Pattern-based only (no LLM budget consumed during idle
+// consolidation). Capped at 100 extractions per cycle to bound runtime.
+// Fully error-isolated: any panic or error is logged and swallowed.
+func (d *DreamConsolidator) runKGExtractionPhase(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			d.logger.Warn("kg extraction phase panicked — isolated from dream cycle", "panic", r)
+		}
+	}()
+
+	if d.sqliteStore == nil {
+		return
+	}
+	kgStore := d.sqliteStore.KG()
+	if kgStore == nil {
+		return
+	}
+	if d.hierarchyCfg.KG.AutoExtract == "off" || d.hierarchyCfg.KG.AutoExtract == "" {
+		return
+	}
+
+	patternSets := kg.DefaultPatternSets()
+	if patternSets == nil {
+		return
+	}
+	extractor, err := kg.NewExtractor(patternSets, d.logger)
+	if err != nil {
+		d.logger.Warn("kg extraction phase: failed to create extractor", "error", err)
+		return
+	}
+
+	// Read indexed memories from the store for extraction.
+	entries, err := d.store.GetAll()
+	if err != nil {
+		d.logger.Warn("kg extraction phase: failed to get memories", "error", err)
+		return
+	}
+
+	extracted := 0
+	const maxPerCycle = 100
+	for _, entry := range entries {
+		if ctx.Err() != nil || extracted >= maxPerCycle {
+			break
+		}
+		n, err := extractor.ExtractAndStore(ctx, kgStore, entry.Content, "", "dream-cycle")
+		if err != nil {
+			d.logger.Warn("kg extraction phase: extraction error", "error", err)
+			continue
+		}
+		extracted += n
+	}
+
+	if extracted > 0 {
+		d.logger.Info("dream kg extraction complete", "triples", extracted)
+	}
 }
 
 // State returns the current dream state (for observability).
@@ -503,6 +651,7 @@ func (d *DreamConsolidator) loadState() {
 }
 
 func (d *DreamConsolidator) saveState() {
+	_ = os.MkdirAll(d.stateDir, 0o700) // defensive: ensure dir exists
 	path := filepath.Join(d.stateDir, "dream_state.json")
 	data, _ := json.MarshalIndent(d.state, "", "  ")
 	_ = os.WriteFile(path, data, 0o600)
@@ -513,6 +662,7 @@ func (d *DreamConsolidator) recordResult(result string) {
 	defer d.mu.Unlock()
 	d.state.LastDreamAt = time.Now()
 	d.state.SessionsSince = 0
+	d.state.CompactionsSince = 0
 	d.state.TotalDreams++
 	d.state.LastResult = result
 	d.saveState()

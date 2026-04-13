@@ -212,16 +212,16 @@ func IndexDirectory(dir string, cfg ChunkConfig) (map[string][]Chunk, error) {
 	}
 
 	// Also index MEMORY.md from parent dir if it exists.
-	memFile := filepath.Join(dir, "..", "MEMORY.md")
+	memFile := filepath.Join(dir, "..", MemoryFileName)
 	if data, err := os.ReadFile(memFile); err == nil {
 		text := strings.TrimSpace(string(data))
 		if text != "" {
 			chunks := ChunkMarkdown(text, cfg)
 			for i := range chunks {
-				chunks[i].FileID = "MEMORY.md"
+				chunks[i].FileID = MemoryFileName
 			}
 			if len(chunks) > 0 {
-				result["MEMORY.md"] = chunks
+				result[MemoryFileName] = chunks
 			}
 		}
 	}

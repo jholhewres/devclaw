@@ -2,6 +2,66 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.19.0-rc1] — 2026-04-08
+
+### Added
+
+- **Layered memory stack** — new L0 (identity) / L1 (essential per-wing
+  story) / L2 (on-demand entity-driven retrieval) layers compose into
+  the prompt via the new `MemoryStack` type. Defaults to ON when
+  `memory.hierarchy.enabled: true`. See `docs/memory-system.md` for
+  details.
+- `devclaw identity edit` — new CLI subcommand that opens `$EDITOR`
+  on `~/.devclaw/identity.md`, creating a default template on first
+  run. The file is hot-reloaded via fsnotify.
+- **Wing-aware hybrid search** — queries tagged with a wing boost
+  matching files (default ×1.3) and penalize mismatched non-NULL
+  wings (default ×0.4). `wing IS NULL` files are always neutral
+  (multiplier 1.0) to preserve Sprint 1 retrocompat.
+- **Automatic wing routing on save** — `memory_save` now assigns
+  `files.wing` from either an explicit LLM argument or the session's
+  channel/chatID via `ContextRouter`, with zero cost for unrouted
+  CLI/MCP sessions.
+- **Legacy classifier in the dream cycle** — background dream
+  consolidation runs a bounded pattern-based classifier over
+  `wing IS NULL` files when the user has configured
+  `memory.hierarchy.legacy_keywords`. No LLM calls. User must opt in
+  with their own keyword map — the binary ships zero defaults.
+- **New telemetry counters:** `layer_tokens_l0`, `layer_tokens_l1`,
+  `layer_tokens_l2`, `l1_cache_hit_total`, `l1_cache_miss_total`,
+  `classifier_pass_total`, `save_wing_routed_total`.
+- `memory.stack.force_legacy` escape hatch — set to `true` in YAML
+  to bypass the layered stack entirely and fall back to v1.18.0
+  prompt composition.
+
+### Fixed
+
+- **`DreamConsolidator` no longer orphan** — the dream system shipped
+  in v1.17.0 was never wired into the Assistant runtime. Sprint 2
+  fixes this: dream now actually starts with the daemon. Existing
+  users get background consolidation for the first time on upgrade.
+- Accent stripping is unified between the router and memory packages
+  via exported `memory.StripAccents` — eliminates the NFD-combining-
+  mark divergence that silently broke router heuristic matching for
+  macOS/iOS inputs.
+
+### Changed
+
+- `HybridSearch`/`HybridSearchWithOptions` are now thin wrappers over
+  the new `HybridSearchWithOpts(ctx, query, opts HybridSearchOptions)`
+  — external callers see byte-identical behavior; internal code gains
+  wing-awareness. `QueryWing=""` remains byte-identical to v1.18.0
+  (proven by `TestHybridSearchEmptyQueryWingByteIdentical`).
+
+### Retrocompat
+
+- Existing v1.18.0 databases upgrade without migration. New tables
+  (`essential_stories`) are added via idempotent `CREATE TABLE IF NOT
+  EXISTS`. Existing rows are never rewritten. Users with
+  `memory.hierarchy.enabled: false` see zero behavior change.
+
+---
+
 ## [1.17.0] — 2026-03-31
 
 ### Core — Agent Intelligence

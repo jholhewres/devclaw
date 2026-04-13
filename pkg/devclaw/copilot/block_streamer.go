@@ -243,6 +243,9 @@ func (bs *BlockStreamer) flushLocked() {
 		return // Empty after stripping tags — nothing to send.
 	}
 
+	// Redact credentials before sending to prevent leaking secrets via streaming.
+	sendText = RedactCredentials(sendText)
+
 	msg := &channels.OutgoingMessage{
 		Content: strings.TrimSpace(sendText),
 		ReplyTo: bs.replyTo,

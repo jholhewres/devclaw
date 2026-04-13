@@ -84,3 +84,6 @@ pkg/devclaw/copilot/data/
 devclaw-linux-amd64
 
 workspace-*/
+
+.omc/
+.omx/

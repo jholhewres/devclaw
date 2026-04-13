@@ -39,6 +39,9 @@ func SanitizeMemoryContent(content string) string {
 	// Step 2: Strip any XML/HTML-like tags that could confuse the LLM.
 	content = stripDangerousTags(content)
 
+	// Step 3: Redact credential patterns to prevent leaking secrets via prompt injection path.
+	content = redactCredentials(content)
+
 	return content
 }
 

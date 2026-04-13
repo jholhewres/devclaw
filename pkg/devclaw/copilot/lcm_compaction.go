@@ -418,7 +418,7 @@ func formatSummariesForCondensation(sums []*LCMSummary) string {
 // deterministicFallback creates a minimal summary when LLM summarization fails.
 func deterministicFallback(msgs []*LCMMessage) string {
 	if len(msgs) == 0 {
-		return "## Decisions\n(no messages)\n## Open TODOs\n(none)\n## Constraints/Rules\n(none)\n## Pending user asks\n(none)\n## Exact identifiers\n(none)\n"
+		return "## Decisions\n(no messages)\n## Open TODOs\n(none)\n## Constraints/Rules\n(none)\n## Pending user asks\n(none)\n## Conversation Topics\n(none)\n## Exact identifiers\n(none)\n"
 	}
 
 	var b strings.Builder
@@ -436,7 +436,8 @@ func deterministicFallback(msgs []*LCMMessage) string {
 			break
 		}
 	}
-	b.WriteString("\n\n## Exact identifiers\n")
+	b.WriteString("\n\n## Conversation Topics\n(unknown — summarization failed)\n")
+	b.WriteString("\n## Exact identifiers\n")
 	fmt.Fprintf(&b, "(%d messages, seq %d→%d)\n", len(msgs), msgs[0].Seq, msgs[len(msgs)-1].Seq)
 	return b.String()
 }
@@ -470,6 +471,7 @@ Use these section headings:
 ## Open TODOs
 ## Constraints/Rules
 ## Pending user asks
+## Conversation Topics
 ## Exact identifiers`
 
 // lcmD1Prompt is for depth-1 condensed summaries: session-level focus.
@@ -484,6 +486,7 @@ Use these section headings:
 ## Goals & Status
 ## Decisions
 ## Blockers & Resolutions
+## Conversation Topics
 ## Carried Forward
 ## Key Identifiers`
 
@@ -498,6 +501,7 @@ Use these section headings:
 ## Arcs & Milestones
 ## Architecture Decisions
 ## Persistent Constraints
+## Conversation Topics
 ## Outstanding Commitments
 ## Key Identifiers`
 
@@ -512,5 +516,6 @@ Be maximally dense. Every sentence must carry lasting value.
 Use these section headings:
 ## Core Knowledge
 ## Persistent Facts
+## Conversation Topics
 ## Constraints
 ## Definitions`
