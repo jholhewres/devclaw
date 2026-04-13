@@ -125,7 +125,7 @@ func (fs *FileStore) Save(entry Entry) error {
 		)
 	}
 
-	f, err := os.OpenFile(memFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(memFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening memory file: %w", err)
 	}
@@ -190,7 +190,7 @@ func (fs *FileStore) SaveIfNotDuplicate(entry Entry, contentHash string, isDupli
 		)
 	}
 
-	f, err := os.OpenFile(memFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(memFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return false, "", fmt.Errorf("opening memory file: %w", err)
 	}
@@ -317,7 +317,7 @@ func (fs *FileStore) SaveDailyLog(date time.Time, content string) error {
 
 	dayFile := filepath.Join(fs.baseDir, date.Format("2006-01-02")+".md")
 
-	f, err := os.OpenFile(dayFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(dayFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening daily log: %w", err)
 	}
@@ -457,7 +457,7 @@ func (fs *FileStore) Compact() (int, error) {
 		}
 	}
 
-	if err := os.WriteFile(tmpFile, []byte(buf.String()), 0o644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(buf.String()), 0o600); err != nil {
 		return 0, fmt.Errorf("writing temp compact file: %w", err)
 	}
 	if err := os.Rename(tmpFile, memFile); err != nil {

@@ -9,6 +9,7 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"log/slog"
@@ -325,7 +326,13 @@ func ensureONNXModel(paths *ONNXPaths, logger *slog.Logger) error {
 	return nil
 }
 
+// downloadFile downloads a file from url to destPath via a temp file + rename.
+// If expectedSHA256 is non-empty, the downloaded content is verified against it.
 func downloadFile(url, destPath string, logger *slog.Logger) error {
+	return downloadFileWithChecksum(url, destPath, "", logger)
+}
+
+func downloadFileWithChecksum(url, destPath, expectedSHA256 string, logger *slog.Logger) error {
 	logger.Info("downloading", "url", url, "dest", destPath)
 
 	client := &http.Client{Timeout: 5 * time.Minute}
@@ -345,11 +352,24 @@ func downloadFile(url, destPath string, logger *slog.Logger) error {
 		return err
 	}
 
-	_, err = io.Copy(f, resp.Body)
+	hasher := sha256.New()
+	writer := io.MultiWriter(f, hasher)
+
+	_, err = io.Copy(writer, resp.Body)
 	f.Close()
 	if err != nil {
 		os.Remove(tmpPath)
 		return err
+	}
+
+	// Verify checksum if provided.
+	if expectedSHA256 != "" {
+		actual := fmt.Sprintf("%x", hasher.Sum(nil))
+		if actual != expectedSHA256 {
+			os.Remove(tmpPath)
+			return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", filepath.Base(destPath), expectedSHA256, actual)
+		}
+		logger.Info("checksum verified", "file", filepath.Base(destPath))
 	}
 
 	return os.Rename(tmpPath, destPath)

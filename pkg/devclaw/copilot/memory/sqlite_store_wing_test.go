@@ -137,6 +137,9 @@ func almostEqual(a, b float64) bool {
 // query equally well. Two alpha files vs one beta file: the beta file must
 // not appear before either alpha file.
 func TestHybridSearchWingBoostMatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow wing test in short mode")
+	}
 	store := newTestStore(t)
 	ctx := context.Background()
 
@@ -193,6 +196,9 @@ func TestHybridSearchWingBoostMatch(t *testing.T) {
 // TestHybridSearchWingBoostPenalty verifies that mismatched wings get
 // demoted relative to the matching wing.
 func TestHybridSearchWingBoostPenalty(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow wing test in short mode")
+	}
 	store := newTestStore(t)
 	ctx := context.Background()
 
@@ -251,6 +257,9 @@ func TestHybridSearchWingBoostPenalty(t *testing.T) {
 // and causes the legacy file to flip ranks between the wingless and
 // wing-aware calls — masking the real invariant under a flaky test.
 func TestHybridSearchWingNullNeutral(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow wing test in short mode")
+	}
 	store := newStableStore(t)
 	ctx := context.Background()
 
@@ -325,6 +334,9 @@ func TestHybridSearchWingNullNeutral(t *testing.T) {
 // ties every candidate at cosine similarity 1.0 and exposes a pre-existing
 // non-determinism in sort.Slice tie-breaking.
 func TestHybridSearchEmptyQueryWingByteIdentical(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping slow wing test in short mode")
+	}
 	store := newStableStore(t)
 	ctx := context.Background()
 
@@ -553,6 +565,9 @@ func TestHybridSearchWithOpts_HybridSearchWrapper(t *testing.T) {
 // similarity and sort.Slice tie-breaking becomes random, which masks
 // the actual fusion-formula regression signal.
 func TestHybridSearchFusionRegressionFixture(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping heavyweight fusion regression test in short mode")
+	}
 	store := newStableStore(t)
 	ctx := context.Background()
 

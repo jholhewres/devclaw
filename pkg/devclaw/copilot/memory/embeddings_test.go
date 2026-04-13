@@ -307,12 +307,17 @@ func TestFallbackEmbedder_Metadata(t *testing.T) {
 
 // ---------- Factory Tests ----------
 
-func TestNewEmbeddingProvider_NoneReturnsNull(t *testing.T) {
+func TestNewEmbeddingProvider_NoneAutoDetects(t *testing.T) {
 	t.Parallel()
 
+	// "none" is treated as "auto" — returns ONNX if runtime is available,
+	// otherwise NullEmbedder. Both are valid outcomes.
 	p := NewEmbeddingProvider(EmbeddingConfig{Provider: "none"})
-	if _, ok := p.(*NullEmbedder); !ok {
-		t.Errorf("Provider 'none' should return *NullEmbedder, got %T", p)
+	switch p.(type) {
+	case *NullEmbedder, *ONNXEmbedder:
+		// OK — depends on whether ONNX runtime is present
+	default:
+		t.Errorf("Provider 'none' should auto-detect to NullEmbedder or ONNXEmbedder, got %T", p)
 	}
 }
 
@@ -463,15 +468,19 @@ func TestAutoEmbedder_WithAPIKeyNoURL(t *testing.T) {
 	}
 }
 
-func TestAutoEmbedder_NoKeysReturnsNull(t *testing.T) {
+func TestAutoEmbedder_NoKeysReturnsLocalOrNull(t *testing.T) {
 	// t.Setenv is incompatible with t.Parallel.
 	for _, p := range autoProviderOrder {
 		t.Setenv(p.envVar, "")
 	}
 
+	// ONNX is tried first; if runtime is available, it takes priority over NullEmbedder.
 	p := newAutoEmbedder(EmbeddingConfig{})
-	if _, ok := p.(*NullEmbedder); !ok {
-		t.Errorf("auto with no keys should return *NullEmbedder, got %T", p)
+	switch p.(type) {
+	case *NullEmbedder, *ONNXEmbedder:
+		// OK
+	default:
+		t.Errorf("auto with no keys should return *NullEmbedder or *ONNXEmbedder, got %T", p)
 	}
 }
 
@@ -481,9 +490,14 @@ func TestAutoEmbedder_DetectsOpenAIEnvVar(t *testing.T) {
 	}
 	t.Setenv("OPENAI_API_KEY", "test-openai-key")
 
+	// ONNX has higher priority than API keys in auto-detection.
+	// If ONNX runtime is available, it wins. Otherwise OpenAI is used.
 	p := newAutoEmbedder(EmbeddingConfig{})
-	if _, ok := p.(*OpenAIEmbedder); !ok {
-		t.Errorf("auto with OPENAI_API_KEY should return *OpenAIEmbedder, got %T", p)
+	switch p.(type) {
+	case *OpenAIEmbedder, *ONNXEmbedder:
+		// OK
+	default:
+		t.Errorf("auto with OPENAI_API_KEY should return *OpenAIEmbedder or *ONNXEmbedder, got %T", p)
 	}
 }
 
@@ -493,9 +507,13 @@ func TestAutoEmbedder_DetectsGoogleEnvVar(t *testing.T) {
 	}
 	t.Setenv("GOOGLE_API_KEY", "test-google-key")
 
+	// ONNX has higher priority than API keys in auto-detection.
 	p := newAutoEmbedder(EmbeddingConfig{})
-	if _, ok := p.(*GeminiEmbedder); !ok {
-		t.Errorf("auto with GOOGLE_API_KEY should return *GeminiEmbedder, got %T", p)
+	switch p.(type) {
+	case *GeminiEmbedder, *ONNXEmbedder:
+		// OK
+	default:
+		t.Errorf("auto with GOOGLE_API_KEY should return *GeminiEmbedder or *ONNXEmbedder, got %T", p)
 	}
 }
 
@@ -516,8 +534,8 @@ func TestDefaultEmbeddingConfig(t *testing.T) {
 	t.Parallel()
 
 	cfg := DefaultEmbeddingConfig()
-	if cfg.Provider != "none" {
-		t.Errorf("Provider = %q, want %q", cfg.Provider, "none")
+	if cfg.Provider != "auto" {
+		t.Errorf("Provider = %q, want %q", cfg.Provider, "auto")
 	}
 	if !cfg.Cache {
 		t.Error("Cache should be true by default")
