@@ -3840,7 +3840,7 @@ func (a *Assistant) autoCaptureFacts(userMessage, assistantResponse, sessionID s
 			Content:   fact,
 			Source:    origin,
 			Category:  category,
-			Timestamp: time.Now(),
+			Timestamp: a.userNow(),
 		})
 		a.logger.Debug("auto-captured memory fact",
 			"fact_preview", truncateForCapture(fact, 60),
@@ -3853,6 +3853,17 @@ func (a *Assistant) autoCaptureFacts(userMessage, assistantResponse, sessionID s
 		"facts_saved", len(facts),
 		"session", sessionID,
 	)
+}
+
+// userNow returns the current time converted to the user's configured timezone.
+// Falls back to local time if the timezone is not set or invalid.
+func (a *Assistant) userNow() time.Time {
+	if tz := a.config.Timezone; tz != "" {
+		if loc, err := time.LoadLocation(tz); err == nil {
+			return time.Now().In(loc)
+		}
+	}
+	return time.Now()
 }
 
 // truncateForCapture limits text length for memory extraction prompts.
@@ -3945,13 +3956,19 @@ func (a *Assistant) compactSummarize(session *Session, threshold int) {
 	oldEntries := session.CompactHistory(summary, keepRecent)
 
 	// Step 4: Save the old entries to daily log.
+	// Use the oldest compacted entry's timestamp so the daily log heading
+	// reflects when the conversation happened, not when compaction ran.
 	if a.memoryStore != nil && len(oldEntries) > 0 {
 		var logContent strings.Builder
 		logContent.WriteString(fmt.Sprintf("### Compacted session: %s\n\n", session.ID))
 		logContent.WriteString(fmt.Sprintf("Summary: %s\n\n", summary))
 		logContent.WriteString(fmt.Sprintf("Entries compacted: %d\n", len(oldEntries)))
 
-		_ = a.memoryStore.SaveDailyLog(time.Now(), logContent.String())
+		entryTime := oldEntries[0].Timestamp
+		if entryTime.IsZero() {
+			entryTime = a.userNow()
+		}
+		_ = a.memoryStore.SaveDailyLog(entryTime, logContent.String())
 	}
 
 	a.logger.Info("session compacted (summarize)",

@@ -328,7 +328,7 @@ func (fs *FileStore) SaveDailyLog(date time.Time, content string) error {
 		f.WriteString(fmt.Sprintf("# Daily Log – %s\n\n", date.Format("2006-01-02")))
 	}
 
-	timestamp := time.Now().Format("15:04")
+	timestamp := date.Format("15:04")
 	_, err = f.WriteString(fmt.Sprintf("## %s\n\n%s\n\n", timestamp, content))
 	return err
 }
