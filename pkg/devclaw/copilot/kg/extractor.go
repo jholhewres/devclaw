@@ -12,20 +12,25 @@ import (
 )
 
 //go:embed patterns/pt-br.yaml
-var defaultPatternsYAML []byte
+var defaultPatternsPtBR []byte
+
+//go:embed patterns/en.yaml
+var defaultPatternsEN []byte
 
 var (
 	defaultPatternSetsOnce sync.Once
 	defaultPatternSetsVal  []*patterns.PatternSet
 )
 
-// DefaultPatternSets returns the built-in pattern sets (pt-br).
+// DefaultPatternSets returns the built-in pattern sets (pt-br + en).
 // Parsed once and cached via sync.Once. Returns nil on parse error.
 func DefaultPatternSets() []*patterns.PatternSet {
 	defaultPatternSetsOnce.Do(func() {
-		ps, err := patterns.Load(defaultPatternsYAML)
-		if err == nil {
-			defaultPatternSetsVal = []*patterns.PatternSet{ps}
+		for _, raw := range [][]byte{defaultPatternsPtBR, defaultPatternsEN} {
+			ps, err := patterns.Load(raw)
+			if err == nil {
+				defaultPatternSetsVal = append(defaultPatternSetsVal, ps)
+			}
 		}
 	})
 	return defaultPatternSetsVal
