@@ -360,7 +360,7 @@ func TestLCMCompactor_LeafPass(t *testing.T) {
 
 	// Mock summarize function.
 	mockSummarize := func(ctx context.Context, text string, aggressive bool) (string, error) {
-		return "## Decisions\nTest decision\n## Open TODOs\nNone\n## Constraints/Rules\nNone\n## Pending user asks\ntest\n## Exact identifiers\nNone", nil
+		return "## Decisions\nTest decision\n## Open TODOs\nNone\n## Constraints/Rules\nNone\n## Pending user asks\ntest\n## Conversation Topics\nNone\n## Exact identifiers\nNone", nil
 	}
 
 	summaries, err := compactor.LeafPass(context.Background(), conv.ID, mockSummarize)
@@ -396,7 +396,7 @@ func TestLCMCompactor_FullSweep(t *testing.T) {
 	}
 
 	mockSummarize := func(ctx context.Context, text string, aggressive bool) (string, error) {
-		return "## Decisions\nSweep\n## Open TODOs\n-\n## Constraints/Rules\n-\n## Pending user asks\n-\n## Exact identifiers\n-", nil
+		return "## Decisions\nSweep\n## Open TODOs\n-\n## Constraints/Rules\n-\n## Pending user asks\n-\n## Conversation Topics\n-\n## Exact identifiers\n-", nil
 	}
 
 	allNew, err := compactor.FullSweep(context.Background(), conv.ID, mockSummarize)
@@ -464,7 +464,7 @@ func TestLCMAssembler_WithSummaries(t *testing.T) {
 	// Create a summary.
 	sum := &LCMSummary{
 		ID: "sum_test_assemble", ConversationID: conv.ID, Kind: "leaf", Depth: 0,
-		Content: "## Decisions\nUsed Go\n## Open TODOs\nNone\n## Constraints/Rules\nNone\n## Pending user asks\nBuild app\n## Exact identifiers\n/main.go",
+		Content: "## Decisions\nUsed Go\n## Open TODOs\nNone\n## Constraints/Rules\nNone\n## Pending user asks\nBuild app\n## Conversation Topics\nGo development\n## Exact identifiers\n/main.go",
 		TokenCount: 50, EarliestAt: now.Add(-time.Hour), LatestAt: now.Add(-30 * time.Minute), CreatedAt: now,
 	}
 	store.InsertSummary(sum)

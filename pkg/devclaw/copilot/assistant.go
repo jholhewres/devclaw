@@ -3892,7 +3892,11 @@ func (a *Assistant) compactSummarize(session *Session, threshold int) {
 	// Step 2: LLM summarizes the conversation with retry and exponential backoff.
 	// Transient errors (rate-limits, timeouts) are retried up to 3 times with
 	// backoff: 2s → 4s → 8s. On permanent failure, a static fallback is used.
-	summaryPrompt := "Summarize the key points of this conversation in 2-3 sentences. Focus on decisions made, tasks completed, and important context."
+	// Use structured compaction prompt (same quality as agent-level compaction)
+	// to preserve conversation topics, decisions, and identifiers.
+	ccfg := resolvedCompactionConfig(a.config.Agent.Compaction)
+	structuredPrompt := buildStructuredCompactionPrompt(ccfg, nil, nil, nil)
+	summaryUserMsg := "Summarize this conversation history using the required section headings."
 	var summary string
 	var summaryErr error
 
@@ -3900,7 +3904,7 @@ func (a *Assistant) compactSummarize(session *Session, threshold int) {
 	const maxSummaryRetries = 3
 
 	for attempt := 1; attempt <= maxSummaryRetries; attempt++ {
-		summary, summaryErr = a.llmClient.Complete(a.ctx, "", session.RecentHistory(20), summaryPrompt)
+		summary, summaryErr = a.llmClient.Complete(a.ctx, structuredPrompt, session.RecentHistory(20), summaryUserMsg)
 		if summaryErr == nil {
 			break
 		}

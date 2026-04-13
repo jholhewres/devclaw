@@ -2750,6 +2750,11 @@ func (a *AgentRun) managedCompaction(ctx context.Context, messages []chatMessage
 		summary = "Compaction timed out. Earlier conversation context was discarded."
 	}
 
+	// Append topic anchors so conversation subjects survive re-compaction.
+	if anchors := extractTopicAnchors(middle); anchors != "" {
+		summary += "\n\n## Conversation Topics (pre-compaction)\n" + anchors
+	}
+
 	var compacted []chatMessage
 	compacted = append(compacted, header...)
 	compacted = append(compacted, goal)
@@ -2919,14 +2924,18 @@ func (a *AgentRun) aggressiveCompaction(ctx context.Context, messages []chatMess
 	goal := body[0]
 	// Aggressive: keep 1/3 of the adaptive value, minimum 2.
 	keepRecent := a.computeAdaptiveKeepRecent(body) / 3
-	if keepRecent < 2 {
-		keepRecent = 2
+	if keepRecent < 4 {
+		keepRecent = 4
 	}
 
 	var summary string
 	if len(body)-1 > keepRecent {
 		middle := body[1 : len(body)-keepRecent]
 		summary = a.summarizeInStages(ctx, middle)
+		// Append topic anchors so conversation subjects survive re-compaction.
+		if anchors := extractTopicAnchors(middle); anchors != "" {
+			summary += "\n\n## Conversation Topics (pre-compaction)\n" + anchors
+		}
 	} else {
 		summary = "History was aggressively truncated."
 	}
@@ -3042,9 +3051,43 @@ func (a *AgentRun) emergencyCompression(ctx context.Context, messages []chatMess
 	return compacted
 }
 
+// extractTopicAnchors scans user messages from a compacted section and extracts
+// a deduplicated bullet list of conversation topics (first 150 chars of each).
+// Zero-cost: pure string extraction, no LLM call.
+func extractTopicAnchors(messages []chatMessage) string {
+	seen := make(map[string]bool)
+	var topics []string
+	for _, m := range messages {
+		if m.Role != "user" {
+			continue
+		}
+		s, ok := m.Content.(string)
+		if !ok || len(s) < 15 {
+			continue
+		}
+		// Skip system/compaction injected messages.
+		if strings.HasPrefix(s, "[System:") || strings.HasPrefix(s, "[Old tool result") {
+			continue
+		}
+		preview := s
+		if len([]rune(preview)) > 150 {
+			preview = string([]rune(preview)[:150])
+		}
+		key := strings.ToLower(strings.TrimSpace(preview))
+		if !seen[key] {
+			seen[key] = true
+			topics = append(topics, "- "+preview)
+		}
+	}
+	if len(topics) == 0 {
+		return ""
+	}
+	return strings.Join(topics, "\n")
+}
+
 // computeAdaptiveKeepRecent calculates how many recent messages to keep during compaction
 // based on the average message size and context window capacity.
-// Small messages (<200 tokens avg) → keep up to 8; large messages (>2000 tokens avg) → keep min 3.
+// Range: min 3, max 15. Larger messages → fewer kept; smaller messages → more kept.
 func (a *AgentRun) computeAdaptiveKeepRecent(body []chatMessage) int {
 	if len(body) == 0 {
 		return 6 // default
@@ -3065,8 +3108,8 @@ func (a *AgentRun) computeAdaptiveKeepRecent(body []chatMessage) int {
 	if computed < 3 {
 		computed = 3
 	}
-	if computed > 8 {
-		computed = 8
+	if computed > 15 {
+		computed = 15
 	}
 
 	return computed
@@ -3117,7 +3160,7 @@ func (a *AgentRun) summarizeInStages(ctx context.Context, messages []chatMessage
 			Role: "system",
 			Content: "You are a summarizing assistant. Combine these partial conversation summaries " +
 				"into a single coherent summary preserving all section headings " +
-				"(## Decisions, ## Open TODOs, ## Constraints/Rules, ## Pending user asks, ## Exact identifiers). " +
+				"(## Decisions, ## Open TODOs, ## Constraints/Rules, ## Pending user asks, ## Conversation Topics, ## Exact identifiers). " +
 				"Merge entries under the same heading. Keep it concise. " +
 				"Preserve key facts, tool results, and current status. " +
 				"NEVER use text formatting like bold.",

@@ -263,6 +263,12 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 	start := time.Now()
 	result := DreamResult{}
 
+	// Ensure state directory exists before acquiring lock.
+	if err := os.MkdirAll(d.stateDir, 0o700); err != nil {
+		result.Error = fmt.Errorf("create dream state dir: %w", err)
+		return result
+	}
+
 	// Acquire lock atomically using O_CREATE|O_EXCL to prevent TOCTOU races.
 	lockPath := filepath.Join(d.stateDir, "dream.lock")
 	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -645,6 +651,7 @@ func (d *DreamConsolidator) loadState() {
 }
 
 func (d *DreamConsolidator) saveState() {
+	_ = os.MkdirAll(d.stateDir, 0o700) // defensive: ensure dir exists
 	path := filepath.Join(d.stateDir, "dream_state.json")
 	data, _ := json.MarshalIndent(d.state, "", "  ")
 	_ = os.WriteFile(path, data, 0o600)
