@@ -77,10 +77,17 @@ type SearchResult struct {
 
 // NewSQLiteStore opens or creates a SQLite memory database with FTS5.
 func NewSQLiteStore(dbPath string, embedder EmbeddingProvider, logger *slog.Logger) (*SQLiteStore, error) {
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=5000")
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_busy_timeout=30000&_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
+	// Allow multiple readers but keep pool bounded. WAL mode supports
+	// concurrent reads while serializing writes. The 30s busy_timeout
+	// lets writers queue instead of failing with "database is locked".
+	// _txlock=immediate acquires the write lock at BEGIN rather than at
+	// first write, preventing SQLITE_BUSY mid-transaction.
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(2)
 
 	store := &SQLiteStore{
 		db:                db,
@@ -985,9 +992,13 @@ func (s *SQLiteStore) HybridSearchWithOpts(ctx context.Context, query string, op
 
 	if vecResult.err == nil {
 		mergeResults(vecResult.results, vectorWeight)
+	} else {
+		s.logger.Warn("hybrid_search: vector search failed", "error", vecResult.err)
 	}
 	if bm25Result.err == nil {
 		mergeResults(bm25Result.results, bm25Weight)
+	} else {
+		s.logger.Warn("hybrid_search: bm25 search failed", "error", bm25Result.err)
 	}
 
 	// Apply wing multiplier to the fused score, when wing-aware mode is on.
