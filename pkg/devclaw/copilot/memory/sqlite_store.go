@@ -402,16 +402,20 @@ func (s *SQLiteStore) SearchBM25(query string, maxResults int) ([]SearchResult, 
 
 	// Try phrase search first.
 	safeQuery := sanitizeFTS5Query(query)
-	if safeQuery == "" {
-		return nil, nil
-	}
 
-	results, err := s.ftsQuery(safeQuery, maxResults)
-	if err == nil && len(results) >= maxResults/2 {
-		return results, nil
+	var results []SearchResult
+	var err error
+
+	if safeQuery != "" {
+		results, err = s.ftsQuery(safeQuery, maxResults)
+		if err == nil && len(results) >= maxResults/2 {
+			return results, nil
+		}
 	}
 
 	// Expand query: extract keywords and search with OR.
+	// This also serves as the fallback when safeQuery was empty
+	// (e.g. query consisted entirely of FTS5 operator characters).
 	keywords := extractKeywords(query)
 	if len(keywords) > 0 {
 		expandedQuery := expandQueryForFTS(keywords)
@@ -535,16 +539,20 @@ func (s *SQLiteStore) searchBM25WithWing(query string, maxResults int) ([]Search
 
 	// Phrase query first.
 	safeQuery := sanitizeFTS5Query(query)
-	if safeQuery == "" {
-		return nil, nil
-	}
 
-	results, err := s.ftsQueryWithWing(safeQuery, maxResults)
-	if err == nil && len(results) >= maxResults/2 {
-		return results, nil
+	var results []SearchResult
+	var err error
+
+	if safeQuery != "" {
+		results, err = s.ftsQueryWithWing(safeQuery, maxResults)
+		if err == nil && len(results) >= maxResults/2 {
+			return results, nil
+		}
 	}
 
 	// Expanded query: extract keywords and search with OR.
+	// Also serves as fallback when safeQuery was empty (query had only
+	// FTS5 operator characters).
 	keywords := extractKeywords(query)
 	if len(keywords) > 0 {
 		expandedQuery := expandQueryForFTS(keywords)

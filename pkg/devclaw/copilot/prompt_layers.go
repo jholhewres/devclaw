@@ -143,6 +143,12 @@ type PromptComposer struct {
 	// is byte-identical to v1.18.0.
 	memoryStack *MemoryStack
 
+	// lcmStore is the optional LCM store used by buildMemoryLayer to
+	// supplement long-term memory recall with recent conversation context.
+	// When non-nil, an FTS search on the session's LCM conversation is
+	// merged into the recalled memories section. Nil = no LCM recall.
+	lcmStore *LCMStore
+
 	// contextRouter is the optional wing resolver used by the memory
 	// stack to scope L1/L2 retrieval to the session's active wing.
 	// Nil = legacy wing (empty string) for every session.
@@ -250,6 +256,11 @@ func (p *PromptComposer) SetMemoryStack(stack *MemoryStack) {
 // the legacy wing ("").
 func (p *PromptComposer) SetContextRouter(router *ContextRouter) {
 	p.contextRouter = router
+}
+
+// SetLCMStore sets the LCM store for conversation-aware memory recall.
+func (p *PromptComposer) SetLCMStore(store *LCMStore) {
+	p.lcmStore = store
 }
 
 // SetContextEngines sets the pluggable context engine registry.
@@ -1331,13 +1342,15 @@ func (p *PromptComposer) resolveActiveWingForSession(session *Session, input str
 func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string {
 	var parts []string
 
+	// Resolve wing once — shared by the memory stack and hybrid search.
+	activeWing := p.resolveActiveWingForSession(session, input)
+
 	// Sprint 2 Room 2.4: stack-produced L0+L1+L2 prefix (if any).
 	// When the stack returns empty (nil stack, all layers empty, or
 	// ForceLegacy), the code below is byte-identical to v1.18.0.
 	// This is the retrocompat gate — locked by the golden fixture test
 	// in prompt_layers_golden_test.go.
 	if p.memoryStack != nil {
-		activeWing := p.resolveActiveWingForSession(session, input)
 		stackCtx, stackCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		if prefix := p.memoryStack.Build(stackCtx, activeWing, input); prefix != "" {
 			parts = append(parts, prefix)
@@ -1350,7 +1363,6 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 	// 500ms is enough for local SQLite FTS5; the old 2s was too generous.
 	if p.sqliteMemory != nil && input != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-		defer cancel()
 
 		searchCfg := p.config.Memory.Search
 		maxResults := searchCfg.MaxResults
@@ -1358,9 +1370,24 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 			maxResults = 6
 		}
 
-		results, err := p.sqliteMemory.HybridSearchWithOptions(
-			ctx, input, maxResults, searchCfg.MinScore,
-			searchCfg.HybridWeightVector, searchCfg.HybridWeightBM25,
+		// Resolve wing for fusion biasing — reuse activeWing from the
+		// memory-stack block above so recall and stack share the same wing.
+		var queryWing string
+		if p.config.Memory.Hierarchy.Enabled {
+			queryWing = activeWing
+		}
+
+		results, err := p.sqliteMemory.HybridSearchWithOptsAndPostFilters(
+			ctx, input,
+			memory.HybridSearchOptions{
+				MaxResults:       maxResults,
+				MinScore:         searchCfg.MinScore,
+				VectorWeight:     searchCfg.HybridWeightVector,
+				BM25Weight:       searchCfg.HybridWeightBM25,
+				QueryWing:        queryWing,
+				WingBoostMatch:   p.config.Memory.Hierarchy.WingBoostMatch,
+				WingBoostPenalty: p.config.Memory.Hierarchy.WingBoostPenalty,
+			},
 			memory.TemporalDecayConfig{
 				Enabled:      searchCfg.TemporalDecay.Enabled,
 				HalfLifeDays: searchCfg.TemporalDecay.HalfLifeDays,
@@ -1370,6 +1397,7 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 				Lambda:  searchCfg.MMR.Lambda,
 			},
 		)
+		cancel()
 		if err == nil && len(results) > 0 {
 			memTexts := make([]string, 0, len(results))
 			for _, r := range results {
@@ -1383,6 +1411,26 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 			// Note: the "recall before answering" instruction is now in buildCoreLayer()
 			// (never trimmed), so we only include the memories here.
 			parts = append(parts, "## Recalled Memories\n\n"+WrapMemoriesForPrompt(memTexts))
+		}
+	}
+
+	// Supplement with recent conversation context from LCM FTS.
+	// This bridges the gap between long-term memory (.md files) and the
+	// LCM store (conversation messages), ensuring the agent recalls
+	// what was discussed recently even before memory_save is called.
+	if p.lcmStore != nil && session != nil && input != "" && session.Channel != "subagent" {
+		lcmConvID := MakeSessionID(session.Channel, session.ChatID)
+		lcmResults, err := p.lcmStore.SearchFTS(lcmConvID, input, 4)
+		if err == nil && len(lcmResults) > 0 {
+			var convTexts []string
+			for _, r := range lcmResults {
+				text := r.Content
+				if len(text) > 400 {
+					text = text[:400] + "..."
+				}
+				convTexts = append(convTexts, fmt.Sprintf("[recent:%s] %s", r.EntityType, text))
+			}
+			parts = append(parts, "## Recent Conversation Context\n\n"+WrapMemoriesForPrompt(convTexts))
 		}
 	}
 

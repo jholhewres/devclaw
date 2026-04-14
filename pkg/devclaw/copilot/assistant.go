@@ -761,6 +761,7 @@ func (a *Assistant) Start(ctx context.Context) error {
 	if ccfg.lcmEnabled() && a.devclawDB != nil {
 		lcmCfg := resolvedLCMConfig(ccfg.LCM)
 		a.lcmEngine = NewLCMEngine(a.devclawDB, lcmCfg, ccfg, a.logger.With("component", "lcm"))
+		a.promptComposer.SetLCMStore(a.lcmEngine.Store())
 		a.logger.Info("LCM engine initialized",
 			"fresh_tail", lcmCfg.FreshTailCount,
 			"soft_trigger", lcmCfg.SoftTriggerRatio,

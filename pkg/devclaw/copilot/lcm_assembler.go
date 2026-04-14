@@ -60,6 +60,54 @@ func (a *LCMAssembler) AssembleContext(convID, systemPrompt, userMessage string,
 	// Calculate user message tokens.
 	userMsgTokens := EstimateTokens(userMessage)
 
+	// When no summaries exist (compaction hasn't run yet), the default
+	// FreshTailCount may be too small for the conversation, leaving older
+	// messages invisible to the LLM. Expand the tail to fill the available
+	// budget so the model sees as much raw history as possible.
+	if len(summaryItems) == 0 {
+		fixedCost := sysTotalTokens + userMsgTokens
+		remainingBudget := budget - fixedCost
+		if tailTokens < remainingBudget {
+			totalMsgs, _ := a.store.MessageCount(convID)
+			if totalMsgs > len(tail) {
+				expanded, err := a.store.GetFreshTailMessages(convID, totalMsgs)
+				if err == nil && len(expanded) > len(tail) {
+					// Greedily include messages from oldest to newest until
+					// budget is exhausted. Messages are in chronological order
+					// (oldest first). We want to keep the newest ones that fit,
+					// so we find how many from the start we must drop.
+					expandedTokens := 0
+					firstFit := 0 // index of the first message to keep
+					for i, m := range expanded {
+						expandedTokens += m.TokenCount
+						if fixedCost+expandedTokens > budget {
+							// Messages [0..i] exceed budget. Keep [i+1..end]
+							// which are the newest messages within budget.
+							firstFit = i + 1
+							break
+						}
+					}
+					if firstFit < len(expanded) {
+						tail = expanded[firstFit:]
+					} else {
+						// Even all messages exceed budget; keep just the last one
+						// so the LLM has at least the most recent context.
+						tail = expanded[len(expanded)-1:]
+					}
+					tailTokens = 0
+					for _, m := range tail {
+						tailTokens += m.TokenCount
+					}
+					a.logger.Info("lcm assemble: expanded tail (no summaries)",
+						"original_count", a.cfg.FreshTailCount,
+						"expanded_count", len(tail),
+						"tail_tokens", tailTokens,
+					)
+				}
+			}
+		}
+	}
+
 	// Total = system + summaries + tail + user message.
 	totalTokens := sysTotalTokens + tailTokens + userMsgTokens
 	for _, si := range summaryItems {
