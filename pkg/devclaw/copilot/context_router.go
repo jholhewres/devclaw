@@ -264,9 +264,31 @@ func (r *ContextRouter) resolveUncached(ctx context.Context, channel, externalID
 		}
 	}
 
-	// Tier 3: no mapping, no heuristic match. Return empty wing (legacy).
+	// Tier 3: no mapping, no heuristic match.
+	// Use the configured default wing, falling back to auto-deriving from
+	// the channel name so that wing-aware features activate automatically
+	// even when no explicit mappings or heuristics are configured.
+	defaultWing := r.cfg.DefaultWing
+	if defaultWing == "" && channel != "" && channel != "subagent" {
+		defaultWing = channel
+	}
+	if defaultWing != "" {
+		// Persist the auto-derived wing so subsequent lookups use Tier 1.
+		if err := r.store.SetChannelWing(channel, externalID, defaultWing, "auto-default", 0.5); err != nil {
+			r.logger.Debug("context router: failed to persist auto-default mapping",
+				"channel", channel,
+				"external_id", externalID,
+				"wing", defaultWing,
+				"error", err,
+			)
+		}
+	}
 	IncContextRouterDefault()
-	return WingResolution{Source: SourceDefault}
+	return WingResolution{
+		Wing:       defaultWing,
+		Confidence: 0.5,
+		Source:     SourceDefault,
+	}
 }
 
 // Pin creates or updates an explicit mapping for a (channel, externalID)

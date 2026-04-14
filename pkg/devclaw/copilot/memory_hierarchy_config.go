@@ -100,8 +100,7 @@ type HierarchyConfig struct {
 	//   - Wing boost is applied in hybrid search (Sprint 2).
 	//   - L0/L1/L2 layered memory stack activates (Sprint 2).
 	//
-	// Default: false. Flip to default-on only after telemetry per ADR-008
-	// gates are all green for 2+ weeks.
+	// Default: true (since v1.18.0 / MemPalace).
 	Enabled bool `yaml:"enabled"`
 
 	// DefaultWing is the fallback wing assigned when neither explicit

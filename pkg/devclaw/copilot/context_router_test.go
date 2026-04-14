@@ -96,8 +96,9 @@ func TestContextRouter_DefaultTier(t *testing.T) {
 	if res.Source != SourceDefault {
 		t.Errorf("expected SourceDefault, got %v", res.Source)
 	}
-	if !res.IsEmpty() {
-		t.Errorf("expected empty wing, got %q", res.Wing)
+	// Tier 3 auto-derives wing from channel name when no mappings exist.
+	if res.Wing != "unknown-channel" {
+		t.Errorf("expected auto-default wing %q, got %q", "unknown-channel", res.Wing)
 	}
 }
 
@@ -155,10 +156,10 @@ func TestContextRouter_UnpinInvalidatesCache(t *testing.T) {
 	}
 
 	// Resolve should NOT return the cached "work" value — cache was invalidated.
-	// Telegram channel has no heuristic for unknown IDs, so it falls to default.
+	// After unpin, Tier 3 auto-defaults to channel name.
 	second := r.Resolve(ctx, "telegram", "unpin-test", "")
-	if second.Wing != "" {
-		t.Errorf("expected empty wing after unpin, got %q (source=%v)", second.Wing, second.Source)
+	if second.Wing != "telegram" {
+		t.Errorf("expected auto-default wing %q after unpin, got %q (source=%v)", "telegram", second.Wing, second.Source)
 	}
 }
 
@@ -279,8 +280,8 @@ func TestContextRouter_UserHeuristicMatchesConfiguredKeywords(t *testing.T) {
 		// NFD-decomposed form (combining tilde) must also match — this is
 		// the Unicode Mn code path that a router-local stripper would miss.
 		{"accented_hint_nfd", "telegram", "g5", "reunia\u0303o daily", "beta", SourceHeuristic, userHeuristicConfidence},
-		{"no_match", "telegram", "g6", "random topic", "", SourceDefault, 0},
-		{"empty_hint", "telegram", "g7", "", "", SourceDefault, 0},
+		{"no_match", "telegram", "g6", "random topic", "telegram", SourceDefault, 0.5},
+		{"empty_hint", "telegram", "g7", "", "telegram", SourceDefault, 0.5},
 	}
 
 	for _, tc := range cases {
