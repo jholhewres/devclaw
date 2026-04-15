@@ -1,10 +1,12 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, type MessageInfo, type MediaAttachment } from '@/lib/api';
 import { createPOSTSSEConnection, type SSEEvent } from '@/lib/sse';
+import { useChatStore } from '@/stores/chat';
 
 /**
- * Strips internal LLM tags that should never be shown to the user.
- * Mirrors the server-side StripInternalTags logic.
+ * Strips internal LLM control tags and control tokens.
+ * Mirrors server-side cleanup logic.
  */
 function stripInternalTags(text: string): string {
   return (
@@ -12,227 +14,163 @@ function stripInternalTags(text: string): string {
       .replace(/\[\[reply_to[^\]]*\]\]/g, '')
       .replace(/<final>[\s\S]*?<\/final>/g, '')
       .replace(/<\/?final>/g, '')
-      // Note: <thinking> and <reasoning> tags are intentionally preserved here
-      // so that ChatMessageV2's extractThinkingContent() can extract them
-      // and display them in a collapsible ThinkingBlock.
       .replace(/\bNO_REPLY\b/g, '')
       .replace(/\bHEARTBEAT_OK\b/g, '')
       .replace(/\[Tools used:[^\]]*\]\n?/g, '')
-      .replace(/<\w+_proven\w+>[\s\S]*?<\/\w+_proven\w+>\n?/g, '')
+      .replace(/<\/?\w+_proven\w+>[\s\S]*?<\/\w+_proven\w+>?\n?/g, '')
   );
 }
 
-interface ChatState {
-  messages: MessageInfo[];
-  streamingContent: string;
-  isStreaming: boolean;
-  error: string | null;
-  isLoadingHistory: boolean;
-}
-
 /**
- * Hook para gerenciar o chat com SSE streaming.
- * Conecta ao endpoint de stream da sessão e acumula tokens.
+ * Hook to manage chat logic with SSE streaming and global state persistence.
+ * Solves the "cut-off" issue by using a global streamBuffer.
  */
 export function useChat(sessionId: string | null) {
-  const [state, setState] = useState<ChatState>({
-    messages: [],
-    streamingContent: '',
-    isStreaming: false,
-    error: null,
-    isLoadingHistory: false,
-  });
+  const { t } = useTranslation();
+  const sessionState = useChatStore((s) => (sessionId ? s.sessions[sessionId] : null));
+  const { setSessionState, addMessage, resetStreaming } = useChatStore();
+
+  const messages = sessionState?.messages || [];
+  const streamingContent = sessionState?.streamingContent || '';
+  const streamBuffer = sessionState?.streamBuffer || '';
+  const isStreaming = sessionState?.isStreaming || false;
+  const error = sessionState?.error || null;
+  const isLoadingHistory = sessionState?.isLoadingHistory || false;
+
   const cleanupRef = useRef<(() => void) | null>(null);
-  const streamContentRef = useRef('');
 
-  /* Carregar histórico ao mudar de sessão */
+  /** Synchronize history while preventing race conditions during new message sending */
   useEffect(() => {
-    // FIX: Clean up any active SSE stream from the previous session
-    // to prevent events from leaking across sessions.
-    cleanupRef.current?.();
-    cleanupRef.current = null;
-    streamContentRef.current = '';
+    if (!sessionId || messages.length > 0 || isLoadingHistory) return;
 
-    if (!sessionId) {
-      setState({
-        messages: [],
-        streamingContent: '',
-        isStreaming: false,
-        error: null,
-        isLoadingHistory: false,
-      });
-      return;
-    }
+    setSessionState(sessionId, { isLoadingHistory: true });
 
-    setState({
-      messages: [],
-      streamingContent: '',
-      isStreaming: false,
-      error: null,
-      isLoadingHistory: true,
-    });
-
-    api.chat
-      .history(sessionId)
+    api.chat.history(sessionId)
       .then((msgs) => {
-        const cleaned = (msgs || []).map((m) =>
+        const cleaned: MessageInfo[] = (msgs || []).map((m) =>
           m.role === 'assistant' ? { ...m, content: stripInternalTags(m.content).trim() } : m
         );
-        setState((s) => ({ ...s, messages: cleaned, error: null, isLoadingHistory: false }));
-      })
-      .catch(() => {
-        // Sessão nova, sem histórico - stop loading
-        setState((s) => ({ ...s, isLoadingHistory: false }));
-      });
-  }, [sessionId]);
 
-  /* Enviar mensagem */
+        // Only apply history if no new messages were added during the fetch
+        const currentState = useChatStore.getState().sessions[sessionId];
+        if (currentState && currentState.messages.length === 0) {
+          setSessionState(sessionId, { messages: cleaned, error: null, isLoadingHistory: false });
+        } else {
+          setSessionState(sessionId, { isLoadingHistory: false });
+        }
+      })
+      .catch((err) => {
+        setSessionState(sessionId, { isLoadingHistory: false, error: err.message });
+      });
+  }, [sessionId, messages.length, isLoadingHistory, setSessionState]);
+
+  /** Handle SSE events and update the global persistent buffer */
+  const handleStreamEvent = useCallback(
+    (event: SSEEvent) => {
+      if (!sessionId) return;
+      
+      const currentBuffer = useChatStore.getState().sessions[sessionId]?.streamBuffer || '';
+
+      switch (event.type) {
+        case 'delta': {
+          const data = event.data as { content: string };
+          const newBuffer = currentBuffer + data.content;
+          setSessionState(sessionId, {
+            streamBuffer: newBuffer,
+            streamingContent: stripInternalTags(newBuffer),
+          });
+          break;
+        }
+        case 'tool_use': {
+          const data = event.data as { tool: string; input: Record<string, unknown> };
+          const toolMsg: MessageInfo = {
+            role: 'tool',
+            content: data.tool,
+            timestamp: new Date().toISOString(),
+            tool_name: data.tool,
+            tool_input: JSON.stringify(data.input, null, 2),
+          };
+          addMessage(sessionId, toolMsg);
+          break;
+        }
+        case 'tool_result': {
+          const data = event.data as { tool: string; output: string; is_error?: boolean };
+          const resultMsg: MessageInfo = {
+            role: 'tool',
+            content: data.output,
+            timestamp: new Date().toISOString(),
+            tool_name: data.tool,
+            is_error: data.is_error,
+          };
+          addMessage(sessionId, resultMsg);
+          break;
+        }
+        case 'media': {
+          const data = event.data as MediaAttachment;
+          const mediaMsg: MessageInfo = {
+            role: 'assistant',
+            content: data.caption || '',
+            timestamp: new Date().toISOString(),
+            media: data,
+          };
+          addMessage(sessionId, mediaMsg);
+          break;
+        }
+        case 'done': {
+          if (currentBuffer) {
+            const finalMsg: MessageInfo = {
+              role: 'assistant',
+              content: stripInternalTags(currentBuffer).trim(),
+              timestamp: new Date().toISOString(),
+            };
+            addMessage(sessionId, finalMsg);
+          }
+          resetStreaming(sessionId);
+          cleanupRef.current = null;
+          break;
+        }
+        case 'error': {
+          const data = event.data as { message: string };
+          setSessionState(sessionId, { isStreaming: false, error: data.message });
+          cleanupRef.current = null;
+          break;
+        }
+      }
+    },
+    [sessionId, setSessionState, addMessage, resetStreaming]
+  );
+
   const sendMessage = useCallback(
     async (content: string) => {
       if (!sessionId || !content.trim()) return;
 
-      // Add user message immediately
       const userMsg: MessageInfo = {
         role: 'user',
         content: content.trim(),
         timestamp: new Date().toISOString(),
       };
-      setState((s) => ({
-        ...s,
-        messages: [...s.messages, userMsg],
-        streamingContent: '',
-        isStreaming: true,
-        error: null,
-      }));
-      streamContentRef.current = '';
+
+      addMessage(sessionId, userMsg);
+      setSessionState(sessionId, { streamingContent: '', streamBuffer: '', isStreaming: true, error: null });
 
       try {
-        // Unified endpoint: POST with body, receive SSE on the same connection.
-        // Eliminates the extra round-trip of send → GET stream.
         cleanupRef.current?.();
         cleanupRef.current = createPOSTSSEConnection({
           url: `/api/chat/${sessionId}/stream`,
           body: { content: content.trim() },
-          onEvent: (event: SSEEvent) => handleStreamEvent(event),
-          onError: (err) => {
-            setState((s) => ({
-              ...s,
-              isStreaming: false,
-              error: err.message || 'Stream error',
-            }));
-          },
+          onEvent: handleStreamEvent,
+          onError: (err) => setSessionState(sessionId, { isStreaming: false, error: err.message }),
         });
       } catch (err) {
-        setState((s) => ({
-          ...s,
+        setSessionState(sessionId, {
           isStreaming: false,
-          error: err instanceof Error ? err.message : 'Failed to send message',
-        }));
+          error: err instanceof Error ? err.message : 'Error',
+        });
       }
     },
-    [sessionId]
+    [sessionId, addMessage, setSessionState, handleStreamEvent]
   );
 
-  /* Processar eventos SSE do stream */
-  const handleStreamEvent = useCallback((event: SSEEvent) => {
-    switch (event.type) {
-      case 'run_start': {
-        // Unified endpoint sends run_id on start — no action needed,
-        // but we could store it for advanced abort flows if desired.
-        break;
-      }
-      case 'delta': {
-        const data = event.data as { content: string };
-        streamContentRef.current += data.content;
-        setState((s) => ({
-          ...s,
-          streamingContent: stripInternalTags(streamContentRef.current),
-        }));
-        break;
-      }
-      case 'tool_use': {
-        const data = event.data as { tool: string; input: Record<string, unknown> };
-        const toolMsg: MessageInfo = {
-          role: 'tool',
-          content: data.tool,
-          timestamp: new Date().toISOString(),
-          tool_name: data.tool,
-          tool_input: JSON.stringify(data.input, null, 2),
-        };
-        setState((s) => ({
-          ...s,
-          messages: [...s.messages, toolMsg],
-        }));
-        break;
-      }
-      case 'tool_result': {
-        const data = event.data as { tool: string; output: string; is_error?: boolean };
-        const resultMsg: MessageInfo = {
-          role: 'tool',
-          content: data.output,
-          timestamp: new Date().toISOString(),
-          tool_name: data.tool,
-          is_error: data.is_error,
-        };
-        setState((s) => ({
-          ...s,
-          messages: [...s.messages, resultMsg],
-        }));
-        break;
-      }
-      case 'media': {
-        const data = event.data as MediaAttachment;
-        const mediaMsg: MessageInfo = {
-          role: 'assistant',
-          content: data.caption || '',
-          timestamp: new Date().toISOString(),
-          media: data,
-        };
-        setState((s) => ({
-          ...s,
-          messages: [...s.messages, mediaMsg],
-        }));
-        break;
-      }
-      case 'done': {
-        // Flush streaming content as final message, stripping internal tags
-        if (streamContentRef.current) {
-          const cleanContent = stripInternalTags(streamContentRef.current).trim();
-          const assistantMsg: MessageInfo = {
-            role: 'assistant',
-            content: cleanContent,
-            timestamp: new Date().toISOString(),
-          };
-          setState((s) => ({
-            ...s,
-            messages: [...s.messages, assistantMsg],
-            streamingContent: '',
-            isStreaming: false,
-          }));
-        } else {
-          setState((s) => ({ ...s, isStreaming: false, streamingContent: '' }));
-        }
-        streamContentRef.current = '';
-        cleanupRef.current?.();
-        cleanupRef.current = null;
-        break;
-      }
-      case 'error': {
-        const data = event.data as { message: string };
-        setState((s) => ({
-          ...s,
-          isStreaming: false,
-          streamingContent: '',
-          error: data.message,
-        }));
-        cleanupRef.current?.();
-        cleanupRef.current = null;
-        break;
-      }
-    }
-  }, []);
-
-  /* Abortar */
   const abort = useCallback(async () => {
     if (!sessionId) return;
     cleanupRef.current?.();
@@ -240,43 +178,25 @@ export function useChat(sessionId: string | null) {
 
     try {
       await api.chat.abort(sessionId);
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
 
-    // Flush o que tiver
-    if (streamContentRef.current) {
-      const msg: MessageInfo = {
+    if (streamBuffer) {
+      const abortMsg: MessageInfo = {
         role: 'assistant',
-        content: `${streamContentRef.current}\n\n*[Aborted]*`,
+        content: `${stripInternalTags(streamBuffer)}\n\n*[${t('chatPage.aborted')}]*`,
         timestamp: new Date().toISOString(),
       };
-      setState((s) => ({
-        ...s,
-        messages: [...s.messages, msg],
-        streamingContent: '',
-        isStreaming: false,
-      }));
-    } else {
-      setState((s) => ({ ...s, isStreaming: false, streamingContent: '' }));
+      addMessage(sessionId, abortMsg);
     }
-    streamContentRef.current = '';
-  }, [sessionId]);
+    resetStreaming(sessionId);
+  }, [sessionId, t, streamBuffer, addMessage, resetStreaming]);
 
-  /* Cleanup ao desmontar */
-  useEffect(() => {
-    return () => {
-      cleanupRef.current?.();
-    };
-  }, []);
-
-  return {
-    messages: state.messages,
-    streamingContent: state.streamingContent,
-    isStreaming: state.isStreaming,
-    error: state.error,
-    isLoadingHistory: state.isLoadingHistory,
-    sendMessage,
-    abort,
-  };
+  return { 
+    messages, 
+    streamingContent, 
+    isStreaming, 
+    error, 
+    isLoadingHistory, 
+    sendMessage, 
+    abort };
 }
