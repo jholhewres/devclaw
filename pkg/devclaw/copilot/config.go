@@ -874,6 +874,13 @@ type SecurityConfig struct {
 	// EnableURLValidation enables URL validation in outputs.
 	EnableURLValidation bool `yaml:"enable_url_validation"`
 
+	// BootstrapScan controls how bootstrap files (SOUL.md, AGENTS.md,
+	// USER.md, IDENTITY.md, TOOLS.md) are scanned for prompt-injection
+	// patterns when they are loaded into the system prompt.
+	// Accepted values: "" or "warn" (log only, preserve content — default),
+	// "block" (replace matches with a redaction placeholder), "off" (skip scan).
+	BootstrapScan string `yaml:"bootstrap_scan"`
+
 	// ToolGuard configures per-tool access control, command safety,
 	// path protection, SSH allowlist, and audit logging.
 	ToolGuard ToolGuardConfig `yaml:"tool_guard"`

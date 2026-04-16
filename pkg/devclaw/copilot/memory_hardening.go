@@ -10,9 +10,75 @@
 package copilot
 
 import (
+	"log/slog"
 	"regexp"
 	"strings"
 )
+
+// BootstrapScanMode controls what happens when an injection pattern is found
+// inside a bootstrap file (SOUL.md, AGENTS.md, USER.md, IDENTITY.md, TOOLS.md).
+// Default behavior (warn) preserves content — this is safe for upgrades.
+type BootstrapScanMode string
+
+const (
+	// BootstrapScanWarn logs a Warn record and returns the content untouched.
+	// Default when config.Security.BootstrapScan is empty.
+	BootstrapScanWarn BootstrapScanMode = "warn"
+	// BootstrapScanBlock replaces each matching pattern with a redaction
+	// placeholder while keeping the rest of the file intact.
+	BootstrapScanBlock BootstrapScanMode = "block"
+	// BootstrapScanOff disables scanning entirely (useful for test fixtures
+	// that intentionally contain phrases like "ignore previous instructions").
+	BootstrapScanOff BootstrapScanMode = "off"
+)
+
+// bootstrapScanIgnoreMarker whitelists a specific bootstrap file even when
+// the global mode is warn or block. Place the marker anywhere in the file.
+const bootstrapScanIgnoreMarker = "<!-- devclaw-scan:ignore -->"
+
+// ScanBootstrapContent applies the injection pattern detector to content
+// loaded from a bootstrap file. It returns the (possibly redacted) content
+// to inject into the prompt.
+//
+// Retrocompat: the default mode is warn, which logs but never modifies the
+// returned content. Callers upgrading from a version without this scanner
+// see identical prompt output plus a single Warn record per offending file.
+func ScanBootstrapContent(path, content string, mode BootstrapScanMode, logger *slog.Logger) string {
+	if strings.Contains(content, bootstrapScanIgnoreMarker) {
+		return content
+	}
+	if mode == BootstrapScanOff {
+		return content
+	}
+	if mode == "" {
+		mode = BootstrapScanWarn
+	}
+	if !DetectInjectionPattern(content) {
+		return content
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	switch mode {
+	case BootstrapScanBlock:
+		logger.Warn("bootstrap scan: injection pattern detected (redacted)", "path", path)
+		return redactInjectionPatterns(content)
+	default:
+		logger.Warn("bootstrap scan: injection pattern detected (content preserved)", "path", path)
+		return content
+	}
+}
+
+// redactInjectionPatterns replaces each detected pattern with a short
+// placeholder. The replacement text is intentionally short so file size and
+// prompt budget stay close to the original.
+func redactInjectionPatterns(content string) string {
+	out := content
+	for _, p := range injectionPatterns {
+		out = p.ReplaceAllString(out, "[REDACTED: injection pattern]")
+	}
+	return out
+}
 
 // injectionPatterns detects common prompt injection patterns that should not
 // be auto-captured into memory (which would be replayed on every future turn).

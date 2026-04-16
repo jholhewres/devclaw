@@ -1058,6 +1058,14 @@ func (p *PromptComposer) loadBootstrapFileCached(cacheKey, filename string, sear
 		text = text[:20000] + "\n\n... [truncated at 20KB]"
 	}
 
+	// Scan bootstrap files for prompt-injection patterns. Default mode is
+	// warn, which only logs — content stays byte-identical for upgrades.
+	var scanMode BootstrapScanMode
+	if p.config != nil {
+		scanMode = BootstrapScanMode(p.config.Security.BootstrapScan)
+	}
+	text = ScanBootstrapContent(filename, text, scanMode, nil)
+
 	p.bootstrapCacheMu.Lock()
 	p.bootstrapCache[cacheKey] = &bootstrapCacheEntry{
 		content:  text,
