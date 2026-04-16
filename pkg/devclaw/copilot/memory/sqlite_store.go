@@ -229,39 +229,21 @@ func (s *SQLiteStore) initSchema() error {
 
 // IndexChunks indexes a set of chunks for a file. Uses delta sync: only
 // re-embeds chunks whose hash has changed.
+//
+// Architecture: embeddings are computed OUTSIDE the SQLite transaction to
+// minimize write lock hold time. The transaction only does fast DELETE+INSERT.
 func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []Chunk, fileHash string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	// ── Phase 1: Read existing state (no write lock) ──
 
-	// Check if file is already indexed with same hash.
 	var existingHash string
-	err = tx.QueryRow("SELECT hash FROM files WHERE file_id = ?", fileID).Scan(&existingHash)
-	if err == nil && existingHash == fileHash {
+	_ = s.db.QueryRow("SELECT hash FROM files WHERE file_id = ?", fileID).Scan(&existingHash)
+	if existingHash == fileHash {
 		return nil // File unchanged.
 	}
 
-	// Upsert file record.
-	_, err = tx.Exec(`
-		INSERT INTO files (file_id, hash, indexed_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-		ON CONFLICT(file_id) DO UPDATE SET hash = excluded.hash, indexed_at = CURRENT_TIMESTAMP
-	`, fileID, fileHash)
-	if err != nil {
-		return err
-	}
-
-	// Get existing chunk hashes to identify what changed.
 	existingChunks := make(map[string]string) // chunk_hash → embedding (JSON)
-	rows, err := tx.Query("SELECT hash, embedding FROM chunks WHERE file_id = ?", fileID)
-	if err != nil {
-		if rows != nil {
-			rows.Close()
-		}
-		// Non-fatal: treat all chunks as new.
-		s.logger.Debug("could not read existing chunks", "file", fileID, "error", err)
-	} else {
+	rows, err := s.db.Query("SELECT hash, embedding FROM chunks WHERE file_id = ?", fileID)
+	if err == nil {
 		for rows.Next() {
 			var h string
 			var emb sql.NullString
@@ -276,10 +258,8 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 		rows.Close()
 	}
 
-	// Delete old chunks for this file.
-	_, _ = tx.Exec("DELETE FROM chunks WHERE file_id = ?", fileID)
+	// ── Phase 2: Compute embeddings (no write lock, can take seconds) ──
 
-	// Find chunks that need new embeddings.
 	var textsToEmbed []string
 	var embedIndices []int
 	for i, chunk := range chunks {
@@ -289,10 +269,8 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 		}
 	}
 
-	// Generate embeddings for new/changed chunks.
 	var newEmbeddings [][]float32
 	if len(textsToEmbed) > 0 && s.embedder.Name() != "none" {
-		// Check embedding cache first.
 		newEmbeddings = make([][]float32, len(textsToEmbed))
 		var uncachedTexts []string
 		var uncachedIndices []int
@@ -307,7 +285,6 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 			}
 		}
 
-		// Embed uncached texts.
 		if len(uncachedTexts) > 0 {
 			embeddings, err := s.embedder.Embed(ctx, uncachedTexts)
 			if err != nil {
@@ -322,7 +299,31 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 		}
 	}
 
-	// Insert chunks.
+	// ── Phase 3: Fast transaction (write lock held only for DELETE+INSERT) ──
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Re-check hash inside transaction to handle concurrent modifications.
+	var txHash string
+	_ = tx.QueryRow("SELECT hash FROM files WHERE file_id = ?", fileID).Scan(&txHash)
+	if txHash == fileHash {
+		return nil // Another goroutine indexed this file while we were embedding.
+	}
+
+	_, err = tx.Exec(`
+		INSERT INTO files (file_id, hash, indexed_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(file_id) DO UPDATE SET hash = excluded.hash, indexed_at = CURRENT_TIMESTAMP
+	`, fileID, fileHash)
+	if err != nil {
+		return err
+	}
+
+	_, _ = tx.Exec("DELETE FROM chunks WHERE file_id = ?", fileID)
+
 	stmt, err := tx.Prepare(`
 		INSERT INTO chunks (file_id, chunk_idx, text, hash, embedding)
 		VALUES (?, ?, ?, ?, ?)
@@ -332,7 +333,6 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 	}
 	defer stmt.Close()
 
-	// Build a map from chunk index → embedding index for O(1) lookup.
 	chunkToEmbed := make(map[int]int, len(embedIndices))
 	for j, idx := range embedIndices {
 		chunkToEmbed[idx] = j
@@ -343,12 +343,10 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 		var embJSON sql.NullString
 		var embVec []float32
 
-		// Try to reuse existing embedding.
 		if existing, ok := existingChunks[chunk.Hash]; ok && existing != "" {
 			embJSON = sql.NullString{String: existing, Valid: true}
 			_ = json.Unmarshal([]byte(existing), &embVec)
 		} else if newEmbeddings != nil {
-			// Look up the new embedding for this chunk.
 			if j, ok := chunkToEmbed[i]; ok && j < len(newEmbeddings) && newEmbeddings[j] != nil {
 				data, _ := json.Marshal(newEmbeddings[j])
 				embJSON = sql.NullString{String: string(data), Valid: true}
@@ -372,7 +370,7 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 			if s.quantizeEnabled {
 				q := QuantizeFloat32(embVec)
 				entry.quantized = &q
-				entry.embedding = nil // free float32 in cache
+				entry.embedding = nil
 			}
 			newCacheEntries = append(newCacheEntries, entry)
 		}
@@ -382,7 +380,6 @@ func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []C
 		return err
 	}
 
-	// Update vector cache incrementally for this file only.
 	s.updateVectorCacheForFile(fileID, newCacheEntries)
 	return nil
 }

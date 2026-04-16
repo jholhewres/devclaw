@@ -182,20 +182,11 @@ func handleMemorySave(ctx context.Context, store *memory.FileStore, sqliteStore 
 		return fmt.Sprintf("Similar memory already exists: %q. Duplicate skipped.", truncateForDedup(existingContent, 80)), nil
 	}
 
-	// Re-index the MEMORY.md file if SQLite memory is available.
-	// Run synchronously so searches immediately after save find the new entry.
-	if sqliteStore != nil && cfg.Index.Auto {
-		memDir := filepath.Join(filepath.Dir(cfg.Path), "memory")
-		chunkCfg := memory.ChunkConfig{MaxTokens: cfg.Index.ChunkMaxTokens, Overlap: 100}
-		if chunkCfg.MaxTokens <= 0 {
-			chunkCfg.MaxTokens = 500
-		}
-		indexCtx, indexCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer indexCancel()
-		if err := sqliteStore.IndexMemoryDir(indexCtx, memDir, chunkCfg); err != nil {
-			slog.Warn("memory index update after save failed", "error", err)
-		}
-	}
+	// Memory indexing is handled by the background fsnotify-based indexer.
+	// Removed inline IndexMemoryDir call that re-indexed the ENTIRE directory
+	// per save (7 saves = 7N index operations), causing 30s+ SQLite contention.
+	// The fsnotify watcher detects the file change within ~500ms and coalesces
+	// multiple saves into a single re-index pass.
 
 	// ── Wing assignment (Sprint 2 Room 2.0b) ──
 	//
