@@ -49,7 +49,7 @@ type DreamConfig struct {
 func DefaultDreamConfig() DreamConfig {
 	return DreamConfig{
 		Enabled:              true,
-		MinHoursBetween:      6,
+		MinHoursBetween:      1,
 		MinSessionsBetween:   2,
 		MaxMemoriesToProcess: 100,
 		IdleMinutes:          10,
@@ -316,10 +316,21 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 
 	contradictions := d.findContradictions(entries)
 
-	// Evidence-based contradictions: detect "blocked/failed" facts that are
-	// contradicted by newer "Access: server via method" success facts.
+	// Evidence-based contradictions: detect negative facts that are contradicted
+	// by newer positive facts about the same entity.
 	evidenceContradictions := d.findEvidenceContradictions(entries)
 	contradictions = append(contradictions, evidenceContradictions...)
+
+	// Auto-expire stale negative entries that were contradicted by evidence.
+	// This lets Compact() below remove them from MEMORY.md entirely, so future
+	// memory searches don't return the outdated information.
+	if fileStore, ok := d.store.(*memory.FileStore); ok && len(evidenceContradictions) > 0 {
+		expired := d.expireStaleEntries(fileStore, evidenceContradictions)
+		d.logger.Info("dream: expired stale entries by evidence",
+			"count", expired,
+			"contradictions", len(evidenceContradictions),
+		)
+	}
 
 	result.Contradictions = len(contradictions)
 
@@ -655,6 +666,68 @@ func (d *DreamConsolidator) findEvidenceContradictions(entries []memory.Entry) [
 	}
 
 	return found
+}
+
+// expireStaleEntries scans all memory .md files and marks contradicted entries
+// with "[stale]" prefix. Stale entries are skipped by memory search filtering
+// and removed by the next Compact() pass. Returns the number of entries marked.
+func (d *DreamConsolidator) expireStaleEntries(fileStore *memory.FileStore, contradictions []contradiction) int {
+	if len(contradictions) == 0 {
+		return 0
+	}
+
+	// Build a set of stale contents to match.
+	stale := make(map[string]bool, len(contradictions))
+	for _, c := range contradictions {
+		stale[strings.TrimSpace(c.entryA)] = true
+	}
+
+	// Read all .md files in the memory directory.
+	memDir := fileStore.BaseDir()
+	entries, err := os.ReadDir(memDir)
+	if err != nil {
+		d.logger.Warn("dream: failed to read memory dir for expiration", "error", err)
+		return 0
+	}
+
+	expired := 0
+	for _, fi := range entries {
+		if fi.IsDir() || !strings.HasSuffix(fi.Name(), ".md") {
+			continue
+		}
+		path := filepath.Join(memDir, fi.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		lines := strings.Split(string(data), "\n")
+		modified := false
+		for i, line := range lines {
+			for staleContent := range stale {
+				if staleContent != "" && strings.Contains(line, staleContent) && !strings.Contains(line, "[stale]") {
+					lines[i] = strings.Replace(line, "- [", "- [stale] [", 1)
+					modified = true
+					expired++
+					break
+				}
+			}
+		}
+
+		if modified {
+			if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+				d.logger.Warn("dream: failed to write expired entries", "file", path, "error", err)
+			}
+		}
+	}
+
+	return expired
+}
+
+// ForceRun bypasses all trigger gates and runs a dream cycle immediately.
+// Used by the memory(action="dream_force") tool for on-demand consolidation.
+func (d *DreamConsolidator) ForceRun(ctx context.Context) DreamResult {
+	return d.Run(ctx)
 }
 
 // ── Helpers ──

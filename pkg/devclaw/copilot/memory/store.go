@@ -80,6 +80,11 @@ type FileStore struct {
 }
 
 // NewFileStore creates a file-based memory store at the given directory.
+// BaseDir returns the directory where memory files are stored.
+func (fs *FileStore) BaseDir() string {
+	return fs.baseDir
+}
+
 func NewFileStore(baseDir string) (*FileStore, error) {
 	if baseDir == "" {
 		baseDir = "./data/memory"
@@ -482,6 +487,13 @@ func parseMemoryFile(content, source string) []Entry {
 		}
 
 		line = strings.TrimPrefix(line, "- ")
+
+		// Skip entries marked as [stale] — they were invalidated by evidence
+		// during a dream cycle and should not be returned in searches.
+		if strings.HasPrefix(line, "[stale]") {
+			continue
+		}
+
 		entry := Entry{Source: source}
 
 		// Try to parse timestamp: [YYYY-MM-DD HH:MM]
