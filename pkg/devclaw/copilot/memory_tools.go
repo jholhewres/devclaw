@@ -911,10 +911,27 @@ func looksLikeCredential(content string) bool {
 // future sessions and repeats the same failure. Instead, the agent should
 // consult skills/vault to find the correct access method.
 //
-// Matches content that combines a blocking/denial keyword with a
-// target identifier (IP, hostname, service, protocol).
+// Allows explicit corrections and successful access patterns (e.g.
+// "SSH NÃO está bloqueado" or "Access: server via sshpass works") to pass
+// through — these are valuable operational knowledge.
 func looksLikeAccessFailureFact(content string) bool {
 	lower := strings.ToLower(content)
+
+	// Correction/success indicators override the blocking check — these are
+	// explicit statements that the access IS working, which is exactly the
+	// knowledge we want to persist.
+	correctionIndicators := []string{
+		"não está bloqueado", "not blocked", "nao esta bloqueado",
+		"funciona", "works", "working", "succeeded", "success",
+		"access:", "acesso:", "acessível via", "accessible via",
+		"correção:", "correction:", "atualização:", "update:",
+		"ignore", "supersede", "supersedes", "replaces",
+	}
+	for _, ind := range correctionIndicators {
+		if strings.Contains(lower, ind) {
+			return false // Let the correction through.
+		}
+	}
 
 	blockKeywords := []string{
 		"bloqueado", "blocked", "denied", "refused", "unreachable",
