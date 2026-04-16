@@ -156,6 +156,8 @@ const (
 	DeliveryScopeParent DeliveryScope = "parent"
 	// DeliveryScopeExternal delivers only to the external channel (no parent injection).
 	DeliveryScopeExternal DeliveryScope = "external"
+	// DeliveryScopeDefault is the fallback when no scope is specified.
+	DeliveryScopeDefault = DeliveryScopeAll
 )
 
 // SubagentRun tracks a single subagent execution.
@@ -649,7 +651,7 @@ func (m *SubagentManager) Spawn(
 
 	deliveryScope := params.DeliveryScope
 	if deliveryScope == "" {
-		deliveryScope = DeliveryScopeAll
+		deliveryScope = DeliveryScopeDefault
 	}
 
 	run := &SubagentRun{
@@ -827,7 +829,7 @@ func (m *SubagentManager) SpawnWithExecutor(
 
 	deliveryScope := params.DeliveryScope
 	if deliveryScope == "" {
-		deliveryScope = DeliveryScopeAll
+		deliveryScope = DeliveryScopeDefault
 	}
 
 	run := &SubagentRun{
@@ -1274,7 +1276,10 @@ func RegisterSubagentTools(
 			"Spawn a subagent to handle a task concurrently. The subagent runs "+
 				"independently with its own context and tools. Use this for parallelizable "+
 				"tasks like: researching multiple topics, running commands while writing code, "+
-				"or handling independent subtasks. Returns immediately with a run_id.",
+				"or handling independent subtasks. Returns immediately with a run_id. "+
+				"After spawning, if you have no other parallel work in this turn, call "+
+				"sessions_yield to release the turn — the subagent result is delivered "+
+				"automatically when it completes, triggering a new turn.",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1293,6 +1298,17 @@ func RegisterSubagentTools(
 					"timeout_seconds": map[string]any{
 						"type":        "integer",
 						"description": "Max execution time in seconds. Default: 300 (5 minutes).",
+					},
+					"delivery_scope": map[string]any{
+						"type":    "string",
+						"enum":    []string{"all", "parent", "external"},
+						"default": "all",
+						"description": "Where to deliver the completion result: " +
+							"'all' (default) = notify the parent agent AND the external channel; " +
+							"'parent' = notify only the parent agent (useful for internal tasks where " +
+							"the parent will summarize before replying); " +
+							"'external' = deliver only to the external channel (skip parent injection). " +
+							"When unset and the subagent has no external origin, falls back to 'parent'.",
 					},
 				},
 				"required": []string{"task"},
@@ -1329,11 +1345,15 @@ func RegisterSubagentTools(
 				}
 			}
 
-			// Internal subagents (spawned by tool) default to parent-only delivery
-			// to avoid duplicate announcements in external channels.
-			scope := DeliveryScopeParent
-			if originChannel != "" {
+			// Resolve delivery scope: explicit arg wins, otherwise default to
+			// 'all' when there is an external origin to route to, else 'parent'.
+			var scope DeliveryScope
+			if v, _ := args["delivery_scope"].(string); v != "" {
+				scope = DeliveryScope(v)
+			} else if originChannel != "" {
 				scope = DeliveryScopeAll
+			} else {
+				scope = DeliveryScopeParent
 			}
 
 			run, err := manager.Spawn(
