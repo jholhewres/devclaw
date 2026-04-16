@@ -24,6 +24,17 @@ func TestDaemonManager_ShutdownCancelsBaseCtx(t *testing.T) {
 	}
 }
 
+func TestDaemonManager_DoubleShutdownIsSafe(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("double Shutdown must not panic; got: %v", r)
+		}
+	}()
+	dm := NewDaemonManager(context.Background())
+	dm.Shutdown()
+	dm.Shutdown() // second call — stopCh is already closed.
+}
+
 func TestDaemonManager_ParentCancelPropagatesToBaseCtx(t *testing.T) {
 	parent, cancel := context.WithCancel(context.Background())
 	dm := NewDaemonManager(parent)

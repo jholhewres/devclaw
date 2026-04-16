@@ -47,6 +47,7 @@ type DaemonManager struct {
 	mu         sync.RWMutex
 	daemons    map[string]*Daemon
 	stopCh     chan struct{}
+	stopOnce   sync.Once          // Guards close(stopCh) so duplicate Shutdowns do not panic.
 	baseCtx    context.Context    // Lifecycle ctx — cancelled on Shutdown to tear all daemons.
 	baseCancel context.CancelFunc // Cancel handle for baseCtx.
 }
@@ -364,8 +365,9 @@ func daemonPollBackoff(pollCount int) time.Duration {
 
 // Shutdown stops all running daemons and cancels the manager's base context
 // so any daemon that escaped individual StopDaemon still terminates promptly.
+// Safe to call multiple times — stopCh is closed via sync.Once.
 func (dm *DaemonManager) Shutdown() {
-	close(dm.stopCh)
+	dm.stopOnce.Do(func() { close(dm.stopCh) })
 	dm.mu.RLock()
 	labels := make([]string, 0)
 	for label, d := range dm.daemons {

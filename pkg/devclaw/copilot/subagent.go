@@ -157,7 +157,7 @@ const (
 	// DeliveryScopeExternal delivers only to the external channel (no parent injection).
 	DeliveryScopeExternal DeliveryScope = "external"
 	// DeliveryScopeDefault is the fallback when no scope is specified.
-	DeliveryScopeDefault = DeliveryScopeAll
+	DeliveryScopeDefault DeliveryScope = DeliveryScopeAll
 )
 
 // SubagentRun tracks a single subagent execution.
@@ -583,16 +583,21 @@ func (m *SubagentManager) resolveSpawnOrigin(params SpawnParams) (channel, to st
 	}
 	if strings.HasPrefix(params.ParentSessionID, "subagent:") {
 		parentRunID := strings.TrimPrefix(params.ParentSessionID, "subagent:")
+		// Snapshot the Origin* fields while holding the lock — completeRun
+		// mutates SubagentRun under m.mu.Lock(), so reading after RUnlock
+		// would race.
+		var parentCh, parentTo string
 		m.mu.RLock()
-		parentRun, ok := m.runs[parentRunID]
+		if parentRun, ok := m.runs[parentRunID]; ok {
+			parentCh = parentRun.OriginChannel
+			parentTo = parentRun.OriginTo
+		}
 		m.mu.RUnlock()
-		if ok {
-			if channel == "" {
-				channel = parentRun.OriginChannel
-			}
-			if to == "" {
-				to = parentRun.OriginTo
-			}
+		if channel == "" {
+			channel = parentCh
+		}
+		if to == "" {
+			to = parentTo
 		}
 	} else if derivedCh, derivedTo, ok := strings.Cut(params.ParentSessionID, ":"); ok {
 		if channel == "" {
