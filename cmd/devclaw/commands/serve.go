@@ -532,8 +532,18 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	)
 
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1)
+
+	// Handle SIGUSR1 for force-dream without exiting the loop.
+	for {
+		sig := <-sigChan
+		if sig == syscall.SIGUSR1 {
+			logger.Info("SIGUSR1 received — forcing dream cycle")
+			go assistant.ForceDream(context.Background())
+			continue
+		}
+		break
+	}
 
 	logger.Info("shutdown signal received, stopping...")
 

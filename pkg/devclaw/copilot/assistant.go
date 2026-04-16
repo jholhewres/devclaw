@@ -1143,6 +1143,26 @@ func (a *Assistant) GetMediaService() *media.MediaService {
 	return a.mediaSvc
 }
 
+// ForceDream triggers a dream consolidation cycle immediately, bypassing
+// the normal trigger gates (min hours, min sessions). Useful for operator-
+// initiated consolidation (e.g. via SIGUSR1). Returns quickly if dream is
+// disabled or not yet initialized.
+func (a *Assistant) ForceDream(ctx context.Context) {
+	dc := a.ensureDream()
+	if dc == nil {
+		a.logger.Warn("force dream requested but dream system is disabled or unavailable")
+		return
+	}
+	a.logger.Info("force dream cycle requested")
+	result := dc.ForceRun(ctx)
+	a.logger.Info("force dream cycle complete",
+		"duration_ms", result.Duration.Milliseconds(),
+		"memories_analyzed", result.MemoriesAnalyzed,
+		"contradictions", result.Contradictions,
+		"consolidated", result.Consolidated,
+	)
+}
+
 // ensureDream lazy-initializes the DreamConsolidator on first call.
 // Returns nil if dream is disabled or memoryStore is unavailable.
 func (a *Assistant) ensureDream() *DreamConsolidator {
