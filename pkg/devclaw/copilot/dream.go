@@ -315,6 +315,12 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 	result.Duplicates = len(duplicates)
 
 	contradictions := d.findContradictions(entries)
+
+	// Evidence-based contradictions: detect "blocked/failed" facts that are
+	// contradicted by newer "Access: server via method" success facts.
+	evidenceContradictions := d.findEvidenceContradictions(entries)
+	contradictions = append(contradictions, evidenceContradictions...)
+
 	result.Contradictions = len(contradictions)
 
 	// Phase 3: Consolidate — merge duplicates, flag contradictions.
@@ -549,6 +555,96 @@ func (d *DreamConsolidator) findContradictions(entries []memory.Entry) []contrad
 					})
 					break
 				}
+			}
+		}
+	}
+
+	return found
+}
+
+// findEvidenceContradictions detects memory facts claiming access is "blocked",
+// "unavailable", or "failed" that are contradicted by newer success facts.
+// For example: "SSH bloqueado para 144.126.212.236" is contradicted by a later
+// "Access: 144.126.212.236 via sshpass" fact.
+func (d *DreamConsolidator) findEvidenceContradictions(entries []memory.Entry) []contradiction {
+	// Keywords indicating a negative/blocking fact.
+	blockKeywords := []string{
+		"bloqueado", "blocked", "unavailable", "indisponível",
+		"permission denied", "connection refused", "timeout",
+		"não consegue", "can't access", "cannot access",
+		"failed to connect", "não foi possível",
+	}
+
+	// Keywords indicating a successful access pattern.
+	successKeywords := []string{
+		"access:", "acesso:", "acessar via", "via sshpass",
+		"via ssh", "conectou", "connected", "succeeded",
+		"uptime", "deploy realizado", "deployed",
+	}
+
+	// Collect blocking and success entries.
+	type taggedEntry struct {
+		entry   memory.Entry
+		isBlock bool
+		host    string // extracted IP or hostname
+	}
+
+	// Simple IP/hostname extractor.
+	extractHost := func(s string) string {
+		lower := strings.ToLower(s)
+		// Look for IP addresses (simple pattern).
+		for i := 0; i < len(lower)-6; i++ {
+			if lower[i] >= '0' && lower[i] <= '9' && strings.Contains(lower[i:min(i+18, len(lower))], ".") {
+				// Extract potential IP.
+				end := i
+				for end < len(lower) && (lower[end] >= '0' && lower[end] <= '9' || lower[end] == '.') {
+					end++
+				}
+				candidate := lower[i:end]
+				dots := strings.Count(candidate, ".")
+				if dots >= 1 && len(candidate) >= 7 { // at least X.X.X.X
+					return candidate
+				}
+			}
+		}
+		return ""
+	}
+
+	var blocks, successes []taggedEntry
+
+	for _, e := range entries {
+		lower := strings.ToLower(e.Content)
+		host := extractHost(e.Content)
+		if host == "" {
+			continue // Can't correlate without a host.
+		}
+
+		for _, kw := range blockKeywords {
+			if strings.Contains(lower, kw) {
+				blocks = append(blocks, taggedEntry{entry: e, isBlock: true, host: host})
+				break
+			}
+		}
+		for _, kw := range successKeywords {
+			if strings.Contains(lower, kw) {
+				successes = append(successes, taggedEntry{entry: e, isBlock: false, host: host})
+				break
+			}
+		}
+	}
+
+	// Cross-reference: if a success fact targets the same host as a block fact,
+	// and the success is newer, the block is contradicted.
+	var found []contradiction
+	for _, block := range blocks {
+		for _, success := range successes {
+			if block.host == success.host && success.entry.Timestamp.After(block.entry.Timestamp) {
+				found = append(found, contradiction{
+					entryA: block.entry.Content,
+					entryB: fmt.Sprintf("[Evidence] %s (succeeded at %s)",
+						success.entry.Content, success.entry.Timestamp.Format("2006-01-02")),
+				})
+				break // One contradiction per block fact is enough.
 			}
 		}
 	}
