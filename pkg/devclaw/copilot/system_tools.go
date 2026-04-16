@@ -113,6 +113,9 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 
 // ---------- Script Preflight Validation ----------
 
+// maxBashOutputChars is the maximum output size for bash and ssh_exec tools.
+const maxBashOutputChars = 50000
+
 // scriptRunners maps script command prefixes to their file extensions.
 var scriptRunners = map[string]string{
 	"python ": ".py", "python3 ": ".py",
@@ -824,8 +827,8 @@ func registerBashTool(executor *ToolExecutor) {
 			output = sanitizeOutput(output)
 
 			// Truncate very long output.
-			if len(output) > 50000 {
-				output = output[:50000] + "\n... [truncated, output too long]"
+			if len(output) > maxBashOutputChars {
+				output = TruncateToolResult(output, maxBashOutputChars)
 			}
 
 			if err != nil {
@@ -915,8 +918,8 @@ func registerBashTool(executor *ToolExecutor) {
 			// Sanitize sensitive information from output.
 			output = sanitizeOutput(output)
 
-			if len(output) > 50000 {
-				output = output[:50000] + "\n... [truncated]"
+			if len(output) > maxBashOutputChars {
+				output = TruncateToolResult(output, maxBashOutputChars)
 			}
 
 			if err != nil {

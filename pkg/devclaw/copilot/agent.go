@@ -3155,7 +3155,7 @@ func (a *AgentRun) summarizeInStages(ctx context.Context, messages []chatMessage
 			Role: "system",
 			Content: "You are a summarizing assistant. Combine these partial conversation summaries " +
 				"into a single coherent summary preserving all section headings " +
-				"(## Decisions, ## Open TODOs, ## Constraints/Rules, ## Pending user asks, ## Conversation Topics, ## Exact identifiers). " +
+				"(## Decisions, ## Open TODOs, ## Constraints/Rules, ## Pending user asks, ## Conversation Topics, ## Exact identifiers, ## Operational Playbook). " +
 				"Merge entries under the same heading. Keep it concise. " +
 				"Preserve key facts, tool results, and current status. " +
 				"NEVER use text formatting like bold.",

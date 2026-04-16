@@ -285,6 +285,7 @@ var requiredCompactionSections = []string{
 	"## Pending user asks",
 	"## Conversation Topics",
 	"## Exact identifiers",
+	"## Operational Playbook",
 }
 
 // buildStructuredCompactionPrompt creates the structured compaction prompt that
@@ -310,6 +311,15 @@ func buildStructuredCompactionPrompt(cfg CompactionConfig, toolFailures []string
 		"(e.g. 'LiteLLM proxy setup', 'SSH server heartbeat investigation'), " +
 		"including purely informational discussions where no action was taken.\n")
 	b.WriteString("- Under '## Exact identifiers': list ALL file paths, UUIDs, URLs, commit hashes, branch names, session IDs, and API keys (masked) verbatim.\n")
+	b.WriteString("- Under '## Operational Playbook': list ALL working access patterns discovered during the conversation:\n")
+	b.WriteString("  - SSH access: exact user@host, auth method (key file path or sshpass), working command template\n")
+	b.WriteString("  - Database connections: exact host, port, user, database name, credential source (e.g. secret name)\n")
+	b.WriteString("  - Cloud CLI: exact syntax that succeeded (e.g. 'gcloud secrets versions access latest --secret=X')\n")
+	b.WriteString("  - API endpoints: base URL, auth method used\n")
+	b.WriteString("  - For each, note the credential resolution path (e.g. 'password from gcloud secret hg-db-supergator-prod')\n")
+	b.WriteString("  - Mask actual passwords/tokens but preserve the full command structure verbatim\n")
+	b.WriteString("  - Keep ONLY the latest working pattern per server/service (supersede failed attempts)\n")
+	b.WriteString("  - Maximum 500 tokens for this section\n")
 	b.WriteString("- Focus ONLY on CONFIRMED facts from tool results. Do NOT speculate or invent outcomes.\n")
 	b.WriteString("- If a tool result was ambiguous or errored, say so explicitly.\n")
 	b.WriteString("- Do NOT assert that something was done successfully unless the tool result confirmed it.\n")
@@ -598,7 +608,67 @@ func buildProtectedSet(messages []chatMessage, protectRecentTurns int) map[int]b
 		}
 	}
 
+	// Protect tool results containing operational access patterns (SSH, DB, cloud CLI).
+	// These are high-value "how-to" facts that get lost during compaction.
+	// Cap at maxOperationalProtected to avoid bloating context.
+	const maxOperationalProtected = 6
+	var opIndices []int
+	for i, m := range messages {
+		if protected[i] {
+			continue // already protected by other rules
+		}
+		if m.Role == "tool" {
+			content, ok := m.Content.(string)
+			if ok && len(content) >= 50 && containsOperationalPattern(content) {
+				opIndices = append(opIndices, i)
+			}
+		}
+	}
+
+	// Also protect assistant messages whose tool calls contain operational commands.
+	for i, m := range messages {
+		if protected[i] || m.Role != "assistant" || len(m.ToolCalls) == 0 {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			if containsOperationalPattern(tc.Function.Arguments) {
+				opIndices = append(opIndices, i)
+				break
+			}
+		}
+	}
+
+	// Keep only the most recent maxOperationalProtected entries.
+	if len(opIndices) > maxOperationalProtected {
+		opIndices = opIndices[len(opIndices)-maxOperationalProtected:]
+	}
+	for _, idx := range opIndices {
+		protected[idx] = true
+	}
+
 	return protected
+}
+
+// operationalPatterns detects tool results/arguments containing server access,
+// database connections, or cloud CLI patterns worth preserving through compaction.
+var operationalPatterns = []*regexp.Regexp{
+	// SSH/SCP: ssh [-i key] user@host OR sshpass -p ... ssh ...
+	regexp.MustCompile(`(?:sshpass\s+-p|(?:ssh|scp)\s+(?:-i\s+\S+\s+)?(?:-o\s+\S+\s+)*\w+@[\w.\-]+)`),
+	// PostgreSQL/MySQL connection strings
+	regexp.MustCompile(`(?:PGPASSWORD=|psql\s+-h\s+|mysql\s+-h\s+|MYSQL_PWD=)`),
+	// Cloud secret access (GCP, AWS)
+	regexp.MustCompile(`(?:gcloud\s+secrets\s+versions\s+access|aws\s+secretsmanager\s+get-secret)`),
+}
+
+// containsOperationalPattern returns true if text contains SSH, database,
+// or cloud CLI access patterns that should survive compaction.
+func containsOperationalPattern(text string) bool {
+	for _, re := range operationalPatterns {
+		if re.MatchString(text) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildMinimalFallbackSummary creates a metadata-only summary when LLM summarization fails
@@ -665,6 +735,8 @@ func buildMinimalFallbackSummary(messages []chatMessage) string {
 			b.WriteString("- " + id + "\n")
 		}
 	}
+
+	b.WriteString("\n## Operational Playbook\n(LLM summarization failed — operational patterns not preserved)\n")
 
 	return b.String()
 }

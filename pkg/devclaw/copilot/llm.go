@@ -2385,6 +2385,9 @@ func (c *LLMClient) completeOnceStreamAnthropic(ctx context.Context, model strin
 		"duration_ms", time.Since(start).Milliseconds(),
 		"finish_reason", finishReason,
 		"tool_calls", len(toolCalls),
+		"prompt_tokens", usage.PromptTokens,
+		"completion_tokens", usage.CompletionTokens,
+		"cache_read", usage.CacheReadTokens,
 	)
 
 	return &LLMResponse{

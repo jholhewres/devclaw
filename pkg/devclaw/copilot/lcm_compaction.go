@@ -328,6 +328,7 @@ func deterministicFallbackCapped(text string, maxTokens int) string {
 	}
 	b.WriteString("\n\n## Exact identifiers\n")
 	b.WriteString("(deterministic fallback, first ~512 tokens preserved)\n\n")
+	b.WriteString("## Operational Playbook\n(deterministic fallback — operational patterns not preserved)\n\n")
 
 	// Append raw truncated content for signal preservation.
 	remaining := maxChars - b.Len()
@@ -418,7 +419,7 @@ func formatSummariesForCondensation(sums []*LCMSummary) string {
 // deterministicFallback creates a minimal summary when LLM summarization fails.
 func deterministicFallback(msgs []*LCMMessage) string {
 	if len(msgs) == 0 {
-		return "## Decisions\n(no messages)\n## Open TODOs\n(none)\n## Constraints/Rules\n(none)\n## Pending user asks\n(none)\n## Conversation Topics\n(none)\n## Exact identifiers\n(none)\n"
+		return "## Decisions\n(no messages)\n## Open TODOs\n(none)\n## Constraints/Rules\n(none)\n## Pending user asks\n(none)\n## Conversation Topics\n(none)\n## Exact identifiers\n(none)\n## Operational Playbook\n(none)\n"
 	}
 
 	var b strings.Builder
@@ -439,6 +440,7 @@ func deterministicFallback(msgs []*LCMMessage) string {
 	b.WriteString("\n\n## Conversation Topics\n(unknown — summarization failed)\n")
 	b.WriteString("\n## Exact identifiers\n")
 	fmt.Fprintf(&b, "(%d messages, seq %d→%d)\n", len(msgs), msgs[0].Seq, msgs[len(msgs)-1].Seq)
+	b.WriteString("\n## Operational Playbook\n(deterministic fallback — operational patterns not preserved)\n")
 	return b.String()
 }
 
@@ -472,7 +474,9 @@ Use these section headings:
 ## Constraints/Rules
 ## Pending user asks
 ## Conversation Topics
-## Exact identifiers`
+## Exact identifiers
+## Operational Playbook
+List working access patterns: SSH (user@host + auth method), DB connections (host/port/user/db + credential source), cloud CLI exact syntax, API endpoints. Mask passwords but preserve full command structure. Keep only latest working pattern per target.`
 
 // lcmD1Prompt is for depth-1 condensed summaries: session-level focus.
 const lcmD1Prompt = `You are condensing multiple conversation summaries into a session-level summary.
@@ -488,7 +492,9 @@ Use these section headings:
 ## Blockers & Resolutions
 ## Conversation Topics
 ## Carried Forward
-## Key Identifiers`
+## Key Identifiers
+## Operational Playbook
+Carry forward operational playbook entries from child summaries. Keep only the latest working access pattern per server/service. Remove patterns that were superseded by newer ones.`
 
 // lcmD2Prompt is for depth-2 condensed summaries: arc-level scope.
 const lcmD2Prompt = `You are creating an arc-level summary spanning multiple sessions.
@@ -503,7 +509,9 @@ Use these section headings:
 ## Persistent Constraints
 ## Conversation Topics
 ## Outstanding Commitments
-## Key Identifiers`
+## Key Identifiers
+## Operational Playbook
+Preserve durable access patterns (servers, databases, cloud credentials) that remain relevant across sessions.`
 
 // lcmD3PlusPrompt is for depth-3+ condensed summaries: durable memory.
 const lcmD3PlusPrompt = `You are distilling durable memory from multiple project arcs.
@@ -518,4 +526,6 @@ Use these section headings:
 ## Persistent Facts
 ## Conversation Topics
 ## Constraints
-## Definitions`
+## Definitions
+## Operational Playbook
+Preserve long-lived server access patterns, database connection templates, and cloud CLI syntax.`

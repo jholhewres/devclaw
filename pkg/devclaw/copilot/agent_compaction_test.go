@@ -366,7 +366,11 @@ User asked to add authentication.
 
 ## Exact identifiers
 - /home/user/project/main.go
-- abc123def`
+- abc123def
+
+## Operational Playbook
+- SSH: ssh -i /home/user/.ssh/id_rsa user@10.0.0.1
+- DB: psql -h db.example.com -U admin -d mydb (password from vault secret 'db-prod')`
 
 		result := auditSummaryQuality(summary, nil, "add authentication", false)
 		if !result.Passed {
@@ -382,8 +386,8 @@ User asked to add authentication.
 		if result.Passed {
 			t.Error("expected summary without sections to fail")
 		}
-		if len(result.Failures) != 6 {
-			t.Errorf("expected 6 missing section failures, got %d: %v", len(result.Failures), result.Failures)
+		if len(result.Failures) != 7 {
+			t.Errorf("expected 7 missing section failures, got %d: %v", len(result.Failures), result.Failures)
 		}
 	})
 
@@ -400,7 +404,9 @@ None.
 ## Conversation Topics
 None.
 ## Exact identifiers
-- /some/path`
+- /some/path
+## Operational Playbook
+None.`
 
 		identifiers := []string{"/some/path", "abc-123-def"}
 		result := auditSummaryQuality(summary, identifiers, "", true)
@@ -432,6 +438,8 @@ Something completely unrelated.
 ## Conversation Topics
 None.
 ## Exact identifiers
+None.
+## Operational Playbook
 None.`
 
 		result := auditSummaryQuality(summary, nil, "please implement the authentication feature with JWT tokens", false)
