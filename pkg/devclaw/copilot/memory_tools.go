@@ -848,6 +848,7 @@ func handleKGMergeEntities(ctx context.Context, k *kg.KG, args map[string]any) (
 // like "senha do servidor" or "password for the user" (Go RE2 does not
 // support negative lookahead).
 var credentialPatterns = []string{
+	// Label-assignment forms (value is unquoted, up to the next whitespace).
 	`(?i)senha\s*[:=]\s*\S{4,}`,
 	`(?i)password\s*[:=]\s*\S{4,}`,
 	`(?i)api[_-]?key\s*[:=]\s*\S{4,}`,
@@ -855,12 +856,22 @@ var credentialPatterns = []string{
 	`(?i)access[_-]?token\s*[:=]\s*\S{4,}`,
 	`(?i)bearer\s+[a-zA-Z0-9\-_.]{20,}`,
 	`(?i)token\s*[:=]\s*[a-zA-Z0-9\-_.]{20,}`,
-	`-----BEGIN\s+(RSA|EC|OPENSSH|PGP)\s+PRIVATE\s+KEY-----`,
+	`-----BEGIN\s+(RSA|EC|OPENSSH|PGP|DSA)\s+PRIVATE\s+KEY-----`,
 	`(?i)(aws|gcp|azure)[_-]?(secret|key|token)\s*[:=]\s*\S{4,}`,
-	`ghp_[a-zA-Z0-9]{36}`,          // GitHub PAT
-	`sk-[a-zA-Z0-9]{32,}`,          // OpenAI API key
-	`AIza[a-zA-Z0-9\-_]{35}`,       // Google API key
-	`xox[bpas]-[a-zA-Z0-9\-]{10,}`, // Slack token
+	// Label-assignment forms where the value is a quoted string (may contain
+	// spaces). The post-match stopword check still guards against labels
+	// followed by articles rather than actual values.
+	`(?i)(senha|password|api[_-]?key|secret[_-]?key|access[_-]?token|token)\s*[:=]\s*"[^"\r\n]{4,}"`,
+	`(?i)(senha|password|api[_-]?key|secret[_-]?key|access[_-]?token|token)\s*[:=]\s*'[^'\r\n]{4,}'`,
+	// Well-known provider token formats (match anywhere in text).
+	`ghp_[a-zA-Z0-9]{36}`,                  // GitHub classic PAT
+	`github_pat_[a-zA-Z0-9_]{82}`,          // GitHub fine-grained PAT
+	`gho_[a-zA-Z0-9]{36}`,                  // GitHub OAuth token
+	`sk-[a-zA-Z0-9]{32,}`,                  // OpenAI API key
+	`AIza[a-zA-Z0-9\-_]{35}`,               // Google API key
+	`AKIA[0-9A-Z]{16}`,                     // AWS access key ID
+	`xox[bpasr]-[a-zA-Z0-9\-]{10,}`,        // Slack token
+	`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`, // JWT (header.payload.signature)
 }
 
 // credentialStopwordFollowups are articles/prepositions that indicate the
