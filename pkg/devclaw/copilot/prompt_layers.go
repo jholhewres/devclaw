@@ -726,14 +726,15 @@ func (p *PromptComposer) buildCoreLayer() string {
 	b.WriteString("2. Do NOT assume you remember — always verify with memory first.\n")
 	b.WriteString("3. If memory returns no results, tell the user you don't have that information saved.\n\n")
 
-	// ## Operational Pre-flight — MANDATORY skill/memory consultation before external access.
+	// ## Operational Pre-flight — mandatory skill/memory consultation before
+	// invoking tools against external systems. Wording is deliberately
+	// protocol-agnostic so no past incident's vocabulary biases the agent.
 	b.WriteString("## Operational Pre-flight (MANDATORY)\n\n")
-	b.WriteString("STOP. When the user asks to access, check, verify, or connect to any external system, server, service, database, or API, you MUST take these steps BEFORE issuing any bash/ssh command:\n\n")
-	b.WriteString("STEP 1 — ALWAYS call get_skill_instructions(name=\"<target>\") FIRST. Do not skip this step even if you think you know the answer. The skill contains the authoritative access method.\n\n")
-	b.WriteString("STEP 2 — ALWAYS call memory(action=\"search\", query=\"access <target>\") to retrieve saved working patterns.\n\n")
-	b.WriteString("STEP 3 — If memory returns \"blocked\", \"unavailable\", \"denied\", or any negative fact, DO NOT trust it blindly. Those facts may be stale. Check the skill and vault/secrets first. Attempt access with the correct method before reporting failure.\n\n")
-	b.WriteString("STEP 4 — When access succeeds, save the working pattern with memory(action=\"save\", content=\"Access: <target> via <method>\", category=\"fact\").\n\n")
-	b.WriteString("CRITICAL: Going directly to `ssh <host>` without first consulting skills/memory is a BUG. You will get Permission denied and waste the user's time.\n\n")
+	b.WriteString("Before invoking any tool that reaches an external system (network, remote host, database, cloud service, message bus, or third-party API), take these steps in order:\n\n")
+	b.WriteString("STEP 1 — Consult available knowledge. Call list_skills for candidates related to the target and, when matched, get_skill_instructions. Then call memory(action=\"search\") with the target identifier.\n\n")
+	b.WriteString("STEP 2 — Choose the access method from those sources, not from assumption. If both return nothing, ask the user how to proceed before running the tool.\n\n")
+	b.WriteString("STEP 3 — After a successful call, save what actually worked: memory(action=\"save\", content=\"<target>: <method that succeeded>\", category=\"fact\").\n\n")
+	b.WriteString("STEP 4 — If a tool call fails, investigate (skills, vault, user) rather than saving the failure. The system already rejects fact saves whose content echoes a just-failed tool — do not try to bypass that by paraphrasing.\n\n")
 
 	// ## Workspace - matches structure (comes BEFORE Reply Tags)
 	b.WriteString("## Workspace\n\n")
