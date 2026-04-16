@@ -310,7 +310,7 @@ func handleMemorySearch(ctx context.Context, store *memory.FileStore, sqliteStor
 				if len(text) > 500 {
 					text = text[:500] + "..."
 				}
-				sb.WriteString(fmt.Sprintf("- [%s] (score: %.2f) %s\n", r.FileID, r.Score, redactCredentials(text)))
+				sb.WriteString(fmt.Sprintf("- [%s] (score: %.2f) %s\n", r.FileID, r.Score, text))
 			}
 			return sb.String(), nil
 		}
@@ -329,7 +329,7 @@ func handleMemorySearch(ctx context.Context, store *memory.FileStore, sqliteStor
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Found %d memories:\n\n", len(entries)))
 	for _, e := range entries {
-		sb.WriteString(fmt.Sprintf("- [%s] %s\n", e.Category, redactCredentials(e.Content)))
+		sb.WriteString(fmt.Sprintf("- [%s] %s\n", e.Category, e.Content))
 	}
 	return sb.String(), nil
 }
@@ -360,7 +360,7 @@ func handleMemoryList(_ context.Context, store *memory.FileStore, args map[strin
 		sb.WriteString(fmt.Sprintf("- [%s] [%s] %s\n",
 			e.Timestamp.Format("2006-01-02"),
 			e.Category,
-			redactCredentials(e.Content)))
+			e.Content))
 	}
 	return sb.String(), nil
 }
@@ -598,9 +598,9 @@ func handleKGQuery(ctx context.Context, k *kg.KG, args map[string]any) (any, err
 
 	var sb strings.Builder
 	for _, tr := range filtered {
-		obj := redactCredentials(tr.ObjectText)
+		obj := tr.ObjectText
 		if tr.ObjectName != "" {
-			obj = redactCredentials(tr.ObjectName)
+			obj = tr.ObjectName
 		}
 		sb.WriteString(fmt.Sprintf("%s (%s) %s [confidence=%.1f", tr.SubjectName, tr.PredicateName, obj, tr.Confidence))
 		if tr.Wing != "" {
@@ -717,9 +717,9 @@ func handleKGTimeline(ctx context.Context, k *kg.KG, args map[string]any) (any, 
 
 	var sb strings.Builder
 	for _, tr := range triples {
-		obj := redactCredentials(tr.ObjectText)
+		obj := tr.ObjectText
 		if tr.ObjectName != "" {
-			obj = redactCredentials(tr.ObjectName)
+			obj = tr.ObjectName
 		}
 		sb.WriteString(fmt.Sprintf("[%s] %s (%s) %s [confidence=%.1f",
 			tr.ValidFrom, tr.SubjectName, tr.PredicateName, obj, tr.Confidence))

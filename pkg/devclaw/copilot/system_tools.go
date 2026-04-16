@@ -48,10 +48,6 @@ func sanitizeOutput(output string) string {
 	urlCredPattern := regexp.MustCompile(`(https?://)([^:@\s]+):([^@\s]+)@`)
 	output = urlCredPattern.ReplaceAllString(output, "$1[REDACTED]:[REDACTED]@")
 
-	// Sanitize long hex strings that look like secrets (32+ hex chars).
-	hexPattern := regexp.MustCompile(`\b[0-9a-fA-F]{32,}\b`)
-	output = hexPattern.ReplaceAllString(output, "[SANITIZED_HEX]")
-
 	// Sanitize private key patterns.
 	privateKeyPattern := regexp.MustCompile(`-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`)
 	output = privateKeyPattern.ReplaceAllString(output, "[SANITIZED_PRIVATE_KEY]")
@@ -823,9 +819,6 @@ func registerBashTool(executor *ToolExecutor) {
 
 			output = strings.TrimRight(output, "\n ")
 
-			// Sanitize sensitive information from output.
-			output = sanitizeOutput(output)
-
 			// Truncate very long output.
 			if len(output) > maxBashOutputChars {
 				output = TruncateToolResult(output, maxBashOutputChars)
@@ -915,9 +908,6 @@ func registerBashTool(executor *ToolExecutor) {
 			out, err := cmd.CombinedOutput()
 			output := strings.TrimRight(string(out), "\n ")
 
-			// Sanitize sensitive information from output.
-			output = sanitizeOutput(output)
-
 			if len(output) > maxBashOutputChars {
 				output = TruncateToolResult(output, maxBashOutputChars)
 			}
@@ -987,9 +977,6 @@ func registerBashTool(executor *ToolExecutor) {
 
 			out, err := cmd.CombinedOutput()
 			output := strings.TrimRight(string(out), "\n ")
-
-			// Sanitize sensitive information from output.
-			output = sanitizeOutput(output)
 
 			if err != nil {
 				return fmt.Sprintf("SCP error: %v\n%s", err, output), nil

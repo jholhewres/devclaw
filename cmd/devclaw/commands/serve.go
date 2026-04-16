@@ -1437,8 +1437,8 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 			prompt := assistant.ComposePrompt(session, content)
 			ctx := copilot.ContextWithDelivery(context.Background(), "webui", sessionID)
 			resp := assistant.ExecuteAgent(ctx, prompt, session, content)
-			session.AddMessage(content, resp)
-			return resp, nil
+			session.AddMessage(content, copilot.RedactCredentials(resp))
+			return copilot.RedactCredentials(resp), nil
 		},
 		StartChatStreamFn: func(_ context.Context, sessionID, content string) (*webui.RunHandle, error) {
 			store := assistant.SessionStore()
@@ -1499,7 +1499,7 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 				// Stream text tokens to the SSE channel.
 				agent.SetStreamCallback(func(chunk string) {
 					// Strip internal tags like [[reply_to_current]] before sending to UI
-					cleanChunk := copilot.StripInternalTags(chunk)
+					cleanChunk := copilot.RedactCredentials(copilot.StripInternalTags(chunk))
 					if cleanChunk == "" {
 						return // Skip empty chunks after stripping
 					}
@@ -1542,8 +1542,8 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 					return
 				}
 
-				// Persist the conversation.
-				session.AddMessage(content, resp)
+				// Persist the conversation (redact credentials before saving to disk).
+				session.AddMessage(content, copilot.RedactCredentials(resp))
 
 				if usage != nil {
 					session.AddTokenUsage(usage.PromptTokens, usage.CompletionTokens)

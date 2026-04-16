@@ -329,6 +329,8 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 			if !ok {
 				return
 			}
+			msg = sanitizeOutput(msg)
+			msg = RedactCredentials(msg)
 			_ = a.channelMgr.Send(a.ctx, channel, chatID, &channels.OutgoingMessage{Content: msg})
 		}
 		return approvalMgr.Request(sessionID, callerJID, toolName, args, sendMsg)
@@ -1129,7 +1131,7 @@ func (a *Assistant) runBootOnce() {
 		return
 	}
 
-	session.AddMessage(bootContent, result)
+	session.AddMessage(bootContent, RedactCredentials(result))
 	a.logger.Info("BOOT.md execution completed",
 		"result_preview", truncate(result, 200),
 	)
@@ -2266,7 +2268,7 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 		}
 		lastProgressAt = time.Now()
 		lastProgressMu.Unlock()
-		formatted := FormatForChannel(progressMsg, msg.Channel)
+		formatted := FormatForChannel(RedactCredentials(progressMsg), msg.Channel)
 		if formatted == "" {
 			return
 		}
@@ -2329,13 +2331,13 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	}
 
 	// ── Step 10: Update session ──
-	session.AddMessageWithToolCalls(userContent, response, toolCalls)
+	session.AddMessageWithToolCalls(userContent, RedactCredentials(response), toolCalls)
 
 	// ── Step 10b: Auto-capture memories from this conversation turn ──
 	// Asynchronously extract important facts, preferences, and decisions from
 	// the user+assistant exchange so they're available for future recall.
 	if a.memoryStore != nil {
-		go a.autoCaptureFacts(userContent, response, sessionID)
+		go a.autoCaptureFacts(userContent, RedactCredentials(response), sessionID)
 	}
 
 	// ── Step 10c: Check if session needs compaction (background) ──
@@ -3242,10 +3244,10 @@ func (a *Assistant) initScheduler() {
 			result = "Scheduled task encountered an output validation issue."
 		}
 
-		session.AddMessage(job.Command, result)
+		session.AddMessage(job.Command, RedactCredentials(result))
 
 		if job.Channel != "" && job.ChatID != "" {
-			cleanResult := StripInternalTags(result)
+			cleanResult := RedactCredentials(sanitizeOutput(StripInternalTags(result)))
 			outMsg := &channels.OutgoingMessage{Content: cleanResult}
 			if sendErr := a.channelMgr.Send(ctx, job.Channel, job.ChatID, outMsg); sendErr != nil {
 				a.logger.Error("failed to deliver scheduled message",
@@ -3272,7 +3274,7 @@ func (a *Assistant) recordScheduledResult(job *scheduler.Job, rawResult string) 
 	if job.Channel == "" || job.ChatID == "" {
 		return
 	}
-	cleanResult := StripInternalTags(rawResult)
+	cleanResult := RedactCredentials(StripInternalTags(rawResult))
 	if cleanResult == "" {
 		return
 	}
@@ -4501,6 +4503,8 @@ func (a *Assistant) makeToolResultHook(channel, chatID string, emitter MediaEmit
 }
 
 func (a *Assistant) sendReply(original *channels.IncomingMessage, content string) {
+	content = sanitizeOutput(content)
+	content = RedactCredentials(content)
 	content = FormatForChannel(content, original.Channel)
 	if content == "" {
 		return // Nothing to send (e.g. NO_REPLY, HEARTBEAT_OK, or only tags).
@@ -4694,13 +4698,14 @@ func (a *Assistant) resumeInterruptedRuns() {
 
 			// Send final response if there's leftover and streamer didn't send it.
 			if response != "" && !blockStreamer.HasSentBlocks() {
+				response = RedactCredentials(sanitizeOutput(response))
 				formatted := FormatForChannel(response, run.Channel)
 				outMsg := &channels.OutgoingMessage{Content: formatted}
 				_ = a.channelMgr.Send(a.ctx, run.Channel, run.ChatID, outMsg)
 			}
 
 			// Save to session history.
-			session.AddMessageWithToolCalls(run.UserMessage, response, toolCalls)
+			session.AddMessageWithToolCalls(run.UserMessage, RedactCredentials(response), toolCalls)
 		}(r)
 	}
 }

@@ -243,7 +243,8 @@ func (bs *BlockStreamer) flushLocked() {
 		return // Empty after stripping tags — nothing to send.
 	}
 
-	// Redact credentials before sending to prevent leaking secrets via streaming.
+	// Sanitize and redact credentials before sending to prevent leaking secrets via streaming.
+	sendText = sanitizeOutput(sendText)
 	sendText = RedactCredentials(sendText)
 
 	msg := &channels.OutgoingMessage{
