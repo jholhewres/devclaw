@@ -2951,6 +2951,11 @@ func (a *Assistant) executeAgent(ctx context.Context, workspaceID string, sessio
 	a.activeRuns[runKey] = cancel
 	a.activeRunsMu.Unlock()
 
+	// Attach a per-turn tool-outcome log so memory_save can consult tool
+	// provenance (failed/succeeded calls by subject) before persisting a
+	// fact. Replaces the previous keyword-based access-failure filter.
+	runCtx = ContextWithToolOutcomeLog(runCtx, NewToolOutcomeLog(32))
+
 	modelOverride := session.GetConfig().Model
 	historySize := a.calculateDynamicHistorySize(systemPrompt, modelOverride, session)
 	history := session.RecentHistory(historySize)

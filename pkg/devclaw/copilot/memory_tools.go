@@ -143,23 +143,25 @@ func handleMemorySave(ctx context.Context, store *memory.FileStore, sqliteStore 
 		return nil, fmt.Errorf("this looks like a credential or password — use the vault tool instead of memory_save to store secrets securely")
 	}
 
-	// Block hallucinated access failures from being persisted as facts.
-	// When the agent tries a remote command and fails (often due to missing
-	// context on the correct auth method), it tends to save "X bloqueado" or
-	// "SSH denied" as a fact. This creates a self-reinforcing hallucination
-	// loop — the next session sees the stale negative fact and repeats the
-	// failure. Reject these saves; the agent should consult skills/memory
-	// to find the correct access method instead.
-	if looksLikeAccessFailureFact(content) {
-		return nil, fmt.Errorf("refusing to save an access failure as a fact — this may be a hallucination loop. Consult skills/memory for the correct access method and retry, or save only confirmed successful access patterns")
-	}
-
 	validCategories := map[string]bool{"fact": true, "preference": true, "event": true, "summary": true}
 	category, _ := args["category"].(string)
 	if category == "" {
 		category = "fact"
 	} else if !validCategories[category] {
 		return nil, fmt.Errorf("invalid category: %s (valid: fact, preference, event, summary)", category)
+	}
+
+	// Provenance check (replaces the previous keyword-based access-failure
+	// filter). Reject fact saves whose content echoes the subject of a
+	// tool call that failed earlier in this same turn AND has not been
+	// superseded by a later successful call on the same subject. Purely
+	// structural: no locale-specific keywords, no protocol-specific rules.
+	if category == "fact" {
+		if log := ToolOutcomeLogFromContext(ctx); log != nil {
+			if reason := ProvenanceReason(content, log.Snapshot()); reason != "" {
+				return nil, fmt.Errorf("refusing to save fact: %s", reason)
+			}
+		}
 	}
 
 	// Atomic dedup check + save under a single lock (prevents TOCTOU race).
@@ -900,63 +902,6 @@ func looksLikeCredential(content string) bool {
 			if !isCredentialStopwordMatch(match) {
 				return true
 			}
-		}
-	}
-	return false
-}
-
-// looksLikeAccessFailureFact detects content that describes a failed attempt
-// to access an external system. Saving such content as a permanent "fact"
-// reinforces hallucination loops — the agent sees the stale negative fact in
-// future sessions and repeats the same failure. Instead, the agent should
-// consult skills/vault to find the correct access method.
-//
-// Allows explicit corrections and successful access patterns (e.g.
-// "SSH NÃO está bloqueado" or "Access: server via sshpass works") to pass
-// through — these are valuable operational knowledge.
-func looksLikeAccessFailureFact(content string) bool {
-	lower := strings.ToLower(content)
-
-	// Correction/success indicators override the blocking check — these are
-	// explicit statements that the access IS working, which is exactly the
-	// knowledge we want to persist.
-	correctionIndicators := []string{
-		"não está bloqueado", "not blocked", "nao esta bloqueado",
-		"funciona", "works", "working", "succeeded", "success",
-		"access:", "acesso:", "acessível via", "accessible via",
-		"correção:", "correction:", "atualização:", "update:",
-		"ignore", "supersede", "supersedes", "replaces",
-	}
-	for _, ind := range correctionIndicators {
-		if strings.Contains(lower, ind) {
-			return false // Let the correction through.
-		}
-	}
-
-	blockKeywords := []string{
-		"bloqueado", "blocked", "denied", "refused", "unreachable",
-		"sem acesso", "no access", "can't access", "cannot access",
-		"unable to access", "não consegue acessar",
-		"permission denied", "connection refused",
-	}
-	accessContext := []string{
-		"ssh", "scp", "server", "servidor", "host",
-		"database", "banco", "api", "endpoint",
-	}
-
-	hasBlock := false
-	for _, kw := range blockKeywords {
-		if strings.Contains(lower, kw) {
-			hasBlock = true
-			break
-		}
-	}
-	if !hasBlock {
-		return false
-	}
-	for _, ctx := range accessContext {
-		if strings.Contains(lower, ctx) {
-			return true
 		}
 	}
 	return false
