@@ -3299,11 +3299,18 @@ func (a *Assistant) initScheduler() {
 
 		if job.Channel != "" && job.ChatID != "" {
 			cleanResult := RedactCredentials(sanitizeOutput(StripInternalTags(result)))
-			outMsg := &channels.OutgoingMessage{Content: cleanResult}
-			if sendErr := a.channelMgr.Send(ctx, job.Channel, job.ChatID, outMsg); sendErr != nil {
-				a.logger.Error("failed to deliver scheduled message",
-					"job_id", job.ID, "error", sendErr,
-					"channel", job.Channel, "chat_id", job.ChatID)
+			if isSilentScheduledOutput(cleanResult) {
+				a.logger.Info("scheduler: job output suppressed (silent marker)",
+					"job_id", job.ID,
+					"channel", job.Channel,
+					"chat_id", job.ChatID)
+			} else {
+				outMsg := &channels.OutgoingMessage{Content: cleanResult}
+				if sendErr := a.channelMgr.Send(ctx, job.Channel, job.ChatID, outMsg); sendErr != nil {
+					a.logger.Error("failed to deliver scheduled message",
+						"job_id", job.ID, "error", sendErr,
+						"channel", job.Channel, "chat_id", job.ChatID)
+				}
 			}
 		}
 
@@ -3315,6 +3322,18 @@ func (a *Assistant) initScheduler() {
 
 	a.scheduler = scheduler.New(storage, handler, a.logger)
 	a.logger.Info("scheduler initialized")
+}
+
+// isSilentScheduledOutput reports whether a scheduled job's sanitized result
+// should suppress delivery. Whitespace-only output (common after
+// StripInternalTags removes NO_REPLY / HEARTBEAT_OK) or an output that opens
+// with the opt-in SCHEDULE_SILENT marker counts as "nothing to say".
+func isSilentScheduledOutput(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return true
+	}
+	return strings.HasPrefix(trimmed, "SCHEDULE_SILENT")
 }
 
 // recordScheduledResult records a scheduled job's output in the main
