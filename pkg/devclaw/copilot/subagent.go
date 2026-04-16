@@ -1331,19 +1331,14 @@ func RegisterSubagentTools(
 			currentDepth := SpawnDepthFromContext(ctx)
 			childDepth := currentDepth + 1
 
-			// Capture the origin channel/chat from the session context so the
+			// Capture the origin channel/chat from the delivery target so the
 			// completion announcement can be delivered directly to the requester.
+			// SessionID is an opaque hash (MakeSessionID), so channel/chatID
+			// must come from the delivery context — never by splitting the hash.
 			parentSessionID := SessionIDFromContext(ctx)
-			var originChannel, originTo string
-			if parentSessionID != "" {
-				// sessionID has the form "channel:chatID" (may include Telegram
-				// topic suffix, e.g. "telegram:12345678:topic:42").
-				// Split on the first ":" only to get channel name.
-				if idx := strings.IndexByte(parentSessionID, ':'); idx != -1 {
-					originChannel = parentSessionID[:idx]
-					originTo = parentSessionID[idx+1:]
-				}
-			}
+			delivery := DeliveryTargetFromContext(ctx)
+			originChannel := delivery.Channel
+			originTo := delivery.ChatID
 
 			// Resolve delivery scope: explicit arg wins, otherwise default to
 			// 'all' when there is an external origin to route to, else 'parent'.

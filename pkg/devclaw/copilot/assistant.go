@@ -353,16 +353,14 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 		channel := run.OriginChannel
 		chatID := run.OriginTo
 		if channel == "" || chatID == "" {
-			// Fallback: derive from ParentSessionID ("channel:chatID").
-			var ok bool
-			channel, chatID, ok = strings.Cut(run.ParentSessionID, ":")
-			if !ok {
-				a.logger.Warn("subagent announce dropped: cannot resolve sessionID",
-					"run_id", run.ID,
-					"parent_session_id", run.ParentSessionID,
-				)
-				return
-			}
+			// Should not happen: Spawn fails fast when origin is unresolvable.
+			// This remains as a safety net for DB-loaded runs from older
+			// versions that may have empty Origin* fields.
+			a.logger.Warn("subagent announce dropped: origin missing (legacy run?)",
+				"run_id", run.ID,
+				"parent_session_id", run.ParentSessionID,
+			)
+			return
 		}
 		sessionID := MakeSessionID(channel, chatID)
 		a.logger.Debug("subagent announce: routing to session",
