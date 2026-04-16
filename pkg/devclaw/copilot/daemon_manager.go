@@ -44,16 +44,27 @@ type Daemon struct {
 
 // DaemonManager manages a set of background daemons.
 type DaemonManager struct {
-	mu      sync.RWMutex
-	daemons map[string]*Daemon
-	stopCh  chan struct{}
+	mu         sync.RWMutex
+	daemons    map[string]*Daemon
+	stopCh     chan struct{}
+	baseCtx    context.Context    // Lifecycle ctx — cancelled on Shutdown to tear all daemons.
+	baseCancel context.CancelFunc // Cancel handle for baseCtx.
 }
 
-// NewDaemonManager creates a new daemon manager.
-func NewDaemonManager() *DaemonManager {
+// NewDaemonManager creates a new daemon manager. The supplied parent context
+// becomes the lifecycle root for every daemon started through StartDaemon: a
+// Shutdown() call (or a cancel on the parent) tears them all down. Passing a
+// nil parent falls back to context.Background for test ergonomics.
+func NewDaemonManager(parent context.Context) *DaemonManager {
+	if parent == nil {
+		parent = context.Background()
+	}
+	baseCtx, baseCancel := context.WithCancel(parent)
 	dm := &DaemonManager{
-		daemons: make(map[string]*Daemon),
-		stopCh:  make(chan struct{}),
+		daemons:    make(map[string]*Daemon),
+		stopCh:     make(chan struct{}),
+		baseCtx:    baseCtx,
+		baseCancel: baseCancel,
 	}
 	go dm.healthLoop()
 	return dm
@@ -70,7 +81,7 @@ func (dm *DaemonManager) StartDaemon(label, command string, port int, readyPatte
 		}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(dm.baseCtx)
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 
 	rb := newRingBuffer(defaultRingSize)
@@ -351,7 +362,8 @@ func daemonPollBackoff(pollCount int) time.Duration {
 	}
 }
 
-// Shutdown stops all running daemons.
+// Shutdown stops all running daemons and cancels the manager's base context
+// so any daemon that escaped individual StopDaemon still terminates promptly.
 func (dm *DaemonManager) Shutdown() {
 	close(dm.stopCh)
 	dm.mu.RLock()
@@ -365,6 +377,9 @@ func (dm *DaemonManager) Shutdown() {
 
 	for _, label := range labels {
 		_ = dm.StopDaemon(label, false)
+	}
+	if dm.baseCancel != nil {
+		dm.baseCancel()
 	}
 }
 

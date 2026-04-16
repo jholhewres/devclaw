@@ -3642,9 +3642,10 @@ func (a *Assistant) registerSystemTools() {
 		RegisterBrowserTools(a.toolExecutor, a.browserMgr, a.llmClient, mediaCfg, a.logger)
 	}
 
-	// Register daemon manager for background process control.
+	// Register daemon manager for background process control. Tie its
+	// lifecycle to the assistant so Stop() cascades into every daemon.
 	if a.daemonMgr == nil {
-		a.daemonMgr = NewDaemonManager()
+		a.daemonMgr = NewDaemonManager(a.ctx)
 	}
 	RegisterDaemonTools(a.toolExecutor, a.daemonMgr)
 
