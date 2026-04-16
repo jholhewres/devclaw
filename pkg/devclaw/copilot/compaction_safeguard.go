@@ -608,35 +608,15 @@ func buildProtectedSet(messages []chatMessage, protectRecentTurns int) map[int]b
 		}
 	}
 
-	// Protect the most recent successful tool results — any substantial tool
-	// result that didn't error is potentially valuable operational knowledge.
-	// This is generic: works for SSH, DB, cloud, Docker, kubectl, APIs, etc.
-	const maxRecentProtected = 8
-	var recentToolIndices []int
-	for i, m := range messages {
-		if protected[i] || m.Role != "tool" {
-			continue
-		}
-		content, ok := m.Content.(string)
-		if !ok || len(content) < 100 {
-			continue
-		}
-		// Skip error results — they're less valuable to preserve.
-		if strings.Contains(content, "Exit code: non-zero") ||
-			strings.Contains(content, "Permission denied") ||
-			strings.Contains(content, "command not found") {
-			continue
-		}
-		recentToolIndices = append(recentToolIndices, i)
-	}
-
-	// Keep only the most recent maxRecentProtected entries.
-	if len(recentToolIndices) > maxRecentProtected {
-		recentToolIndices = recentToolIndices[len(recentToolIndices)-maxRecentProtected:]
-	}
-	for _, idx := range recentToolIndices {
-		protected[idx] = true
-	}
+	// Note: an earlier iteration of this function also flagged every recent
+	// "substantial" tool result (≥100 chars, non-error) as protected. That
+	// collided with pruneByContextRatio, whose entire purpose is to trim
+	// exactly those results when context pressure grows — any tool result
+	// big enough to be worth pruning was simultaneously marked untrimmable,
+	// producing a no-op pass at high ratios. Recent conversation content is
+	// already covered by the ProtectRecentTurns sweep above; distilling
+	// older tool output is the compaction summarizer's job. Keep this
+	// function narrow.
 
 	return protected
 }
