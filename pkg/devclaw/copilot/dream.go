@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/kg"
@@ -95,6 +96,11 @@ type DreamConsolidator struct {
 
 	state DreamState
 	mu    sync.Mutex
+
+	// running guards against concurrent Run() invocations. A scheduled
+	// trigger and a ForceRun (SIGUSR1) can race; the CAS ensures only
+	// one dream cycle executes at a time.
+	running atomic.Bool
 
 	// stopCh signals the background goroutine to stop.
 	stopCh chan struct{}
@@ -262,6 +268,16 @@ func (d *DreamConsolidator) shouldDream() bool {
 func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 	start := time.Now()
 	result := DreamResult{}
+
+	// In-process reentry guard. The file lock below is the cross-process
+	// authority; this CAS is a fast-path rejection for same-process races
+	// (scheduled ticker firing while a SIGUSR1-triggered ForceRun is active).
+	if !d.running.CompareAndSwap(false, true) {
+		d.logger.Warn("dream: run skipped — already running in this process")
+		result.Error = fmt.Errorf("dream already running")
+		return result
+	}
+	defer d.running.Store(false)
 
 	// Ensure state directory exists before acquiring lock.
 	if err := os.MkdirAll(d.stateDir, 0o700); err != nil {
@@ -704,14 +720,31 @@ func (d *DreamConsolidator) expireStaleEntries(fileStore *memory.FileStore, cont
 		lines := strings.Split(string(data), "\n")
 		modified := false
 		for i, line := range lines {
-			for staleContent := range stale {
-				if staleContent != "" && strings.Contains(line, staleContent) && !strings.Contains(line, "[stale]") {
-					lines[i] = strings.Replace(line, "- [", "- [stale] [", 1)
-					modified = true
-					expired++
-					break
-				}
+			// Parse the line as a memory entry and compare by exact trimmed
+			// content. This avoids the previous bug where a short stale string
+			// could substring-match an unrelated entry, and works for any
+			// leading whitespace / prefix variation (the memory format reserves
+			// "- " as the bullet prefix).
+			bulletIdx := indexBullet(line)
+			if bulletIdx < 0 {
+				continue
 			}
+			inner := strings.TrimSpace(line[bulletIdx+2:])
+			if strings.HasPrefix(inner, "[stale]") {
+				continue // already marked
+			}
+			parsedContent := stripEntryBrackets(inner)
+			if parsedContent == "" {
+				continue
+			}
+			if !stale[parsedContent] {
+				continue
+			}
+			// Insert [stale] marker right after the "- " bullet, preserving
+			// any indentation and the original entry body verbatim.
+			lines[i] = line[:bulletIdx+2] + "[stale] " + line[bulletIdx+2:]
+			modified = true
+			expired++
 		}
 
 		if modified {
@@ -728,6 +761,54 @@ func (d *DreamConsolidator) expireStaleEntries(fileStore *memory.FileStore, cont
 // Used by the memory(action="dream_force") tool for on-demand consolidation.
 func (d *DreamConsolidator) ForceRun(ctx context.Context) DreamResult {
 	return d.Run(ctx)
+}
+
+// indexBullet returns the byte index of the "- " markdown bullet in line,
+// allowing leading whitespace. Returns -1 if not found or if the bullet is
+// not the first non-whitespace content on the line.
+func indexBullet(line string) int {
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if c == ' ' || c == '\t' {
+			continue
+		}
+		if c == '-' && i+1 < len(line) && line[i+1] == ' ' {
+			return i
+		}
+		return -1
+	}
+	return -1
+}
+
+// stripEntryBrackets removes the leading `[timestamp]`, `[category]`, and
+// optional `[expires:YYYY-MM-DD]` brackets that the memory format writes,
+// returning the trimmed entry content. Mirrors the parsing logic in
+// memory.parseMemoryFile so the stale comparison uses the same definition
+// of "content" as reads.
+func stripEntryBrackets(s string) string {
+	s = strings.TrimSpace(s)
+	// [timestamp]
+	s = skipBracket(s)
+	// [category]
+	s = skipBracket(s)
+	// [expires:...] optional
+	if strings.HasPrefix(s, "[expires:") {
+		s = skipBracket(s)
+	}
+	return strings.TrimSpace(s)
+}
+
+// skipBracket drops a leading `[...]` token and trims surrounding space.
+// Returns the input unchanged if there's no leading bracket group.
+func skipBracket(s string) string {
+	if !strings.HasPrefix(s, "[") {
+		return s
+	}
+	close := strings.Index(s, "]")
+	if close < 0 {
+		return s
+	}
+	return strings.TrimSpace(s[close+1:])
 }
 
 // ── Helpers ──
