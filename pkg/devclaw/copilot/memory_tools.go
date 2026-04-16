@@ -143,6 +143,17 @@ func handleMemorySave(ctx context.Context, store *memory.FileStore, sqliteStore 
 		return nil, fmt.Errorf("this looks like a credential or password — use the vault tool instead of memory_save to store secrets securely")
 	}
 
+	// Block hallucinated access failures from being persisted as facts.
+	// When the agent tries a remote command and fails (often due to missing
+	// context on the correct auth method), it tends to save "X bloqueado" or
+	// "SSH denied" as a fact. This creates a self-reinforcing hallucination
+	// loop — the next session sees the stale negative fact and repeats the
+	// failure. Reject these saves; the agent should consult skills/memory
+	// to find the correct access method instead.
+	if looksLikeAccessFailureFact(content) {
+		return nil, fmt.Errorf("refusing to save an access failure as a fact — this may be a hallucination loop. Consult skills/memory for the correct access method and retry, or save only confirmed successful access patterns")
+	}
+
 	validCategories := map[string]bool{"fact": true, "preference": true, "event": true, "summary": true}
 	category, _ := args["category"].(string)
 	if category == "" {
@@ -829,22 +840,48 @@ func handleKGMergeEntities(ctx context.Context, k *kg.KG, args map[string]any) (
 // credentialPatterns detects content that looks like passwords, API keys,
 // tokens, or other secrets that should be stored in the vault instead of
 // semantic memory.
+// credentialPatterns match explicit assignments of credentials. Patterns
+// require a colon/equals followed by a value. Stopword-followup checks are
+// applied post-match in matchesCredentialPattern to avoid false positives
+// like "senha do servidor" or "password for the user" (Go RE2 does not
+// support negative lookahead).
 var credentialPatterns = []string{
-	`(?i)senha[:\s]+\S+`,
-	`(?i)password[:\s]+\S+`,
-	`(?i)api[_-]?key[:\s]+\S+`,
-	`(?i)secret[_-]?key[:\s]+\S+`,
-	`(?i)access[_-]?token[:\s]+\S+`,
-	`(?i)bearer\s+[a-zA-Z0-9\-_.]+`,
-	`(?i)token[:\s]+[a-zA-Z0-9\-_.]{20,}`,
-	`(?i)(ssh|pgp|gpg)[_-]?(key|private)[:\s]`,
-	`(?i)private[_-]?key[:\s]`,
+	`(?i)senha\s*[:=]\s*\S{4,}`,
+	`(?i)password\s*[:=]\s*\S{4,}`,
+	`(?i)api[_-]?key\s*[:=]\s*\S{4,}`,
+	`(?i)secret[_-]?key\s*[:=]\s*\S{4,}`,
+	`(?i)access[_-]?token\s*[:=]\s*\S{4,}`,
+	`(?i)bearer\s+[a-zA-Z0-9\-_.]{20,}`,
+	`(?i)token\s*[:=]\s*[a-zA-Z0-9\-_.]{20,}`,
 	`-----BEGIN\s+(RSA|EC|OPENSSH|PGP)\s+PRIVATE\s+KEY-----`,
-	`(?i)(aws|gcp|azure)[_-]?(secret|key|token)[:\s]+\S+`,
+	`(?i)(aws|gcp|azure)[_-]?(secret|key|token)\s*[:=]\s*\S{4,}`,
 	`ghp_[a-zA-Z0-9]{36}`,          // GitHub PAT
 	`sk-[a-zA-Z0-9]{32,}`,          // OpenAI API key
 	`AIza[a-zA-Z0-9\-_]{35}`,       // Google API key
 	`xox[bpas]-[a-zA-Z0-9\-]{10,}`, // Slack token
+}
+
+// credentialStopwordFollowups are articles/prepositions that indicate the
+// "credential-like" label is being used informationally, not assigning a
+// value. Matches followed by one of these words are NOT real credentials.
+var credentialStopwordFollowups = map[string]bool{
+	"do": true, "da": true, "de": true, "dos": true, "das": true,
+	"para": true, "pelo": true, "pela": true, "no": true, "na": true,
+	"for": true, "to": true, "of": true, "the": true, "is": true,
+	"at": true, "in": true, "on": true, "a": true, "an": true,
+}
+
+// isCredentialStopwordMatch returns true if the regex match is a false
+// positive (label followed by a stopword, not a real credential value).
+func isCredentialStopwordMatch(match string) bool {
+	parts := strings.Fields(match)
+	if len(parts) < 2 {
+		return false
+	}
+	// The last "word" in the match is the alleged value. If it's a stopword
+	// (article/preposition), this is an informational mention, not a secret.
+	last := strings.ToLower(strings.TrimRight(parts[len(parts)-1], ".,;:!?"))
+	return credentialStopwordFollowups[last]
 }
 
 var compiledCredentialPatterns []*regexp.Regexp
@@ -859,7 +896,49 @@ func init() {
 // indicate passwords, API keys, tokens, or other secrets.
 func looksLikeCredential(content string) bool {
 	for _, re := range compiledCredentialPatterns {
-		if re.MatchString(content) {
+		for _, match := range re.FindAllString(content, -1) {
+			if !isCredentialStopwordMatch(match) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// looksLikeAccessFailureFact detects content that describes a failed attempt
+// to access an external system. Saving such content as a permanent "fact"
+// reinforces hallucination loops — the agent sees the stale negative fact in
+// future sessions and repeats the same failure. Instead, the agent should
+// consult skills/vault to find the correct access method.
+//
+// Matches content that combines a blocking/denial keyword with a
+// target identifier (IP, hostname, service, protocol).
+func looksLikeAccessFailureFact(content string) bool {
+	lower := strings.ToLower(content)
+
+	blockKeywords := []string{
+		"bloqueado", "blocked", "denied", "refused", "unreachable",
+		"sem acesso", "no access", "can't access", "cannot access",
+		"unable to access", "não consegue acessar",
+		"permission denied", "connection refused",
+	}
+	accessContext := []string{
+		"ssh", "scp", "server", "servidor", "host",
+		"database", "banco", "api", "endpoint",
+	}
+
+	hasBlock := false
+	for _, kw := range blockKeywords {
+		if strings.Contains(lower, kw) {
+			hasBlock = true
+			break
+		}
+	}
+	if !hasBlock {
+		return false
+	}
+	for _, ctx := range accessContext {
+		if strings.Contains(lower, ctx) {
 			return true
 		}
 	}
@@ -876,6 +955,10 @@ func LooksLikeCredential(content string) bool {
 func redactCredentials(content string) string {
 	for _, re := range compiledCredentialPatterns {
 		content = re.ReplaceAllStringFunc(content, func(match string) string {
+			// Skip false positives: label followed by an article/preposition.
+			if isCredentialStopwordMatch(match) {
+				return match
+			}
 			if idx := strings.IndexByte(match, ':'); idx >= 0 {
 				return match[:idx] + ": [REDACTED — use vault]"
 			}
