@@ -1340,11 +1340,17 @@ func RegisterSubagentTools(
 			originChannel := delivery.Channel
 			originTo := delivery.ChatID
 
-			// Resolve delivery scope: explicit arg wins, otherwise default to
-			// 'all' when there is an external origin to route to, else 'parent'.
+			// Resolve delivery scope: explicit arg wins (validated against the
+			// allowed enum), otherwise default to 'all' when there is an
+			// external origin to route to, else 'parent'.
 			var scope DeliveryScope
 			if v, _ := args["delivery_scope"].(string); v != "" {
-				scope = DeliveryScope(v)
+				switch DeliveryScope(v) {
+				case DeliveryScopeAll, DeliveryScopeParent, DeliveryScopeExternal:
+					scope = DeliveryScope(v)
+				default:
+					return nil, fmt.Errorf("invalid delivery_scope %q (allowed: all, parent, external)", v)
+				}
 			} else if originChannel != "" {
 				scope = DeliveryScopeAll
 			} else {

@@ -129,6 +129,32 @@ func TestSubagentAnnounce_UnresolvableOriginFailsFast(t *testing.T) {
 	}
 }
 
+func TestSubagentAnnounce_NestedSpawnInheritsOrigin(t *testing.T) {
+	// Nested spawn path: ParentSessionID="subagent:<runID>" should inherit
+	// OriginChannel/OriginTo from the parent SubagentRun stored in the
+	// manager's map.
+	mgr := newTestSubagentManager(t, new(bytes.Buffer))
+	parent := &SubagentRun{
+		ID:            "parent-1",
+		OriginChannel: "whatsapp",
+		OriginTo:      "user@c.us",
+		DeliveryScope: DeliveryScopeAll,
+		StartedAt:     time.Now(),
+		done:          make(chan struct{}),
+	}
+	registerRun(mgr, parent)
+
+	ch, to, err := mgr.resolveSpawnOrigin(SpawnParams{
+		ParentSessionID: "subagent:parent-1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ch != "whatsapp" || to != "user@c.us" {
+		t.Errorf("got (%q, %q), want (whatsapp, user@c.us)", ch, to)
+	}
+}
+
 func TestSubagentAnnounce_DeliveryScopeExternal_SkipsParent(t *testing.T) {
 	logBuf := new(bytes.Buffer)
 	mgr := newTestSubagentManager(t, logBuf)
