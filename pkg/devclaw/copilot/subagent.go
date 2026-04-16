@@ -1013,16 +1013,12 @@ func (m *SubagentManager) completeRun(run *SubagentRun, result string, err error
 	// "external" suppresses parent injection, "all" does both.
 	if cb != nil {
 		if run.DeliveryScope != DeliveryScopeExternal {
-			// Parent delivery (or both).
 			go cb(run)
 		} else {
 			m.logger.Info("subagent announce: parent inject skipped (delivery_scope=external)",
 				"run_id", run.ID,
 			)
 		}
-		// Note: external channel delivery is handled by the announce callback
-		// itself based on OriginChannel/OriginTo fields. When scope is "parent",
-		// the callback should check run.DeliveryScope and skip external delivery.
 	}
 }
 

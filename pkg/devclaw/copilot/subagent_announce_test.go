@@ -246,16 +246,4 @@ func TestSubagentAnnounce_DefaultScopeIsAll(t *testing.T) {
 	if DeliveryScopeDefault != DeliveryScopeAll {
 		t.Errorf("DeliveryScopeDefault = %q, want %q", DeliveryScopeDefault, DeliveryScopeAll)
 	}
-
-	// A run created without explicit scope should pick up the default when
-	// Spawn's zero-value branch runs. Verify the literal mapping since
-	// Spawn itself requires a full LLM/executor setup.
-	var zero DeliveryScope
-	scope := zero
-	if scope == "" {
-		scope = DeliveryScopeDefault
-	}
-	if scope != DeliveryScopeAll {
-		t.Errorf("zero-value resolution got %q, want all", scope)
-	}
 }
