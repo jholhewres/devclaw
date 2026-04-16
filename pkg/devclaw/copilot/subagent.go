@@ -949,6 +949,12 @@ func (m *SubagentManager) completeRun(run *SubagentRun, result string, err error
 	// Persist the completed state to SQLite for restart recovery.
 	m.persistRun(run)
 
+	m.logger.Debug("subagent announce decision",
+		"run_id", run.ID,
+		"delivery_scope", run.DeliveryScope,
+		"has_callback", cb != nil,
+	)
+
 	// ── Announce (push) ── Notify parent immediately
 	// instead of requiring poll via wait_subagent.
 	// Respects delivery scope: "parent" suppresses external channel delivery,
@@ -957,6 +963,10 @@ func (m *SubagentManager) completeRun(run *SubagentRun, result string, err error
 		if run.DeliveryScope != DeliveryScopeExternal {
 			// Parent delivery (or both).
 			go cb(run)
+		} else {
+			m.logger.Info("subagent announce: parent inject skipped (delivery_scope=external)",
+				"run_id", run.ID,
+			)
 		}
 		// Note: external channel delivery is handled by the announce callback
 		// itself based on OriginChannel/OriginTo fields. When scope is "parent",

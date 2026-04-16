@@ -341,7 +341,15 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 	// reformulate it (matching approach). This allows the agent to
 	// synthesize multiple subagent results and maintain conversation context.
 	a.subagentMgr.SetAnnounceCallback(func(run *SubagentRun) {
-		// Build session ID from origin coordinates.
+		a.logger.Info("subagent announce callback fired",
+			"run_id", run.ID,
+			"label", run.Label,
+			"status", run.Status,
+			"origin_channel", run.OriginChannel,
+			"origin_to", run.OriginTo,
+			"parent_session_id", run.ParentSessionID,
+			"delivery_scope", run.DeliveryScope,
+		)
 		channel := run.OriginChannel
 		chatID := run.OriginTo
 		if channel == "" || chatID == "" {
@@ -349,10 +357,18 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 			var ok bool
 			channel, chatID, ok = strings.Cut(run.ParentSessionID, ":")
 			if !ok {
+				a.logger.Warn("subagent announce dropped: cannot resolve sessionID",
+					"run_id", run.ID,
+					"parent_session_id", run.ParentSessionID,
+				)
 				return
 			}
 		}
 		sessionID := MakeSessionID(channel, chatID)
+		a.logger.Debug("subagent announce: routing to session",
+			"run_id", run.ID,
+			"session_id", sessionID,
+		)
 
 		// Build the system message for the main agent.
 		var msg string
@@ -383,6 +399,10 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 			msg = fmt.Sprintf("[System Message] A subagent task %q timed out after %s.\n\nLet the user know about this timeout briefly and offer to retry.",
 				run.Label, run.Duration.Round(time.Second))
 		default:
+			a.logger.Warn("subagent announce: unexpected status",
+				"run_id", run.ID,
+				"status", run.Status,
+			)
 			return
 		}
 
@@ -1677,13 +1697,16 @@ func (a *Assistant) enqueueFollowupMessage(sessionID, content, channel, chatID s
 	qLen := len(a.followupQueues[sessionID])
 	a.followupQueuesMu.Unlock()
 
+	isProcessing := a.messageQueue.IsProcessing(sessionID)
 	a.logger.Info("subagent result enqueued as followup",
 		"session", sessionID,
 		"queue_length", qLen,
+		"is_processing", isProcessing,
+		"will_drain_now", !isProcessing,
 	)
 
 	// If the session is not currently processing, trigger immediate processing.
-	if !a.messageQueue.IsProcessing(sessionID) {
+	if !isProcessing {
 		go a.drainFollowupQueue(sessionID)
 	}
 }
@@ -1719,6 +1742,11 @@ func (a *Assistant) drainFollowupQueue(sessionID string) {
 	msgs := a.followupQueues[sessionID]
 	delete(a.followupQueues, sessionID)
 	a.followupQueuesMu.Unlock()
+
+	a.logger.Debug("drainFollowupQueue invoked",
+		"session", sessionID,
+		"queue_len", len(msgs),
+	)
 
 	if len(msgs) == 0 {
 		return
