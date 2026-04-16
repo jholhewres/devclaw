@@ -1468,7 +1468,7 @@ func RegisterSubagentTools(
 				"required": []string{"run_id"},
 			},
 		),
-		func(_ context.Context, args map[string]any) (any, error) {
+		func(ctx context.Context, args map[string]any) (any, error) {
 			runID, _ := args["run_id"].(string)
 			if runID == "" {
 				return nil, fmt.Errorf("run_id is required")
@@ -1479,7 +1479,7 @@ func RegisterSubagentTools(
 				timeoutSec = int(v)
 			}
 
-			waitCtx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
+			waitCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 			defer cancel()
 
 			run, err := manager.Wait(waitCtx, runID)
