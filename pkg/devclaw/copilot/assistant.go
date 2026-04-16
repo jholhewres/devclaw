@@ -3274,7 +3274,7 @@ func (a *Assistant) recordScheduledResult(job *scheduler.Job, rawResult string) 
 	if job.Channel == "" || job.ChatID == "" {
 		return
 	}
-	cleanResult := RedactCredentials(StripInternalTags(rawResult))
+	cleanResult := RedactCredentials(sanitizeOutput(StripInternalTags(rawResult)))
 	if cleanResult == "" {
 		return
 	}
