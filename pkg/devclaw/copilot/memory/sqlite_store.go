@@ -21,6 +21,7 @@ import (
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/kg"
 	_ "github.com/mattn/go-sqlite3" // SQLite driver with FTS5 support.
+	"golang.org/x/sync/singleflight"
 )
 
 // SQLiteStore provides persistent memory storage with hybrid search.
@@ -50,6 +51,12 @@ type SQLiteStore struct {
 	// Reused by TopicChangeDetector to avoid extra embedding API calls.
 	lastQueryEmbMu  sync.RWMutex
 	lastQueryEmb    []float32
+
+	// indexGroup serializes concurrent IndexChunks calls for the same fileID.
+	// Without this, two writers indexing the same file could compute embeddings
+	// from overlapping-but-stale state and then race to DELETE+INSERT, leaving
+	// the last writer's possibly-stale embeddings in place.
+	indexGroup singleflight.Group
 }
 
 // vectorCacheEntry holds a chunk embedding for in-memory vector search.
@@ -230,9 +237,24 @@ func (s *SQLiteStore) initSchema() error {
 // IndexChunks indexes a set of chunks for a file. Uses delta sync: only
 // re-embeds chunks whose hash has changed.
 //
+// Concurrent calls with the same fileID are coalesced via singleflight so
+// that only one goroutine performs the embed+write; others wait and share
+// the same error/success result. This prevents races where two writers
+// read overlapping "existing chunks" state and then clobber each other
+// with stale embeddings.
+//
 // Architecture: embeddings are computed OUTSIDE the SQLite transaction to
 // minimize write lock hold time. The transaction only does fast DELETE+INSERT.
 func (s *SQLiteStore) IndexChunks(ctx context.Context, fileID string, chunks []Chunk, fileHash string) error {
+	_, err, _ := s.indexGroup.Do(fileID, func() (interface{}, error) {
+		return nil, s.indexChunksLocked(ctx, fileID, chunks, fileHash)
+	})
+	return err
+}
+
+// indexChunksLocked holds the real indexing logic; callers must go through
+// IndexChunks so singleflight can deduplicate concurrent calls per fileID.
+func (s *SQLiteStore) indexChunksLocked(ctx context.Context, fileID string, chunks []Chunk, fileHash string) error {
 	// ── Phase 1: Read existing state (no write lock) ──
 
 	var existingHash string
