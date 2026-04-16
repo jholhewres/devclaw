@@ -567,6 +567,46 @@ type SpawnParams struct {
 	EscalationChecker func(turn int, lastResponse string) *EscalationSignal
 }
 
+// resolveSpawnOrigin determines OriginChannel/OriginTo for a new subagent.
+// Resolution order: (1) explicit params values; (2) derived from
+// ParentSessionID "channel:chatID"; (3) inherited from the parent SubagentRun
+// when ParentSessionID is "subagent:<runID>" (nested spawn). Returns an error
+// when no path produces a non-empty origin — a subagent without origin cannot
+// deliver its result back to the user or parent session.
+func (m *SubagentManager) resolveSpawnOrigin(params SpawnParams) (channel, to string, err error) {
+	channel = params.OriginChannel
+	to = params.OriginTo
+	if channel != "" && to != "" {
+		return channel, to, nil
+	}
+	if strings.HasPrefix(params.ParentSessionID, "subagent:") {
+		parentRunID := strings.TrimPrefix(params.ParentSessionID, "subagent:")
+		m.mu.RLock()
+		parentRun, ok := m.runs[parentRunID]
+		m.mu.RUnlock()
+		if ok {
+			if channel == "" {
+				channel = parentRun.OriginChannel
+			}
+			if to == "" {
+				to = parentRun.OriginTo
+			}
+		}
+	} else if derivedCh, derivedTo, ok := strings.Cut(params.ParentSessionID, ":"); ok {
+		if channel == "" {
+			channel = derivedCh
+		}
+		if to == "" {
+			to = derivedTo
+		}
+	}
+	if channel == "" || to == "" {
+		return "", "", fmt.Errorf("subagent spawn: origin channel/to not resolvable (parent_session_id=%q, origin_channel=%q, origin_to=%q)",
+			params.ParentSessionID, params.OriginChannel, params.OriginTo)
+	}
+	return channel, to, nil
+}
+
 // Spawn creates and starts a new subagent. Returns the run ID immediately.
 // The subagent executes in a background goroutine.
 func (m *SubagentManager) Spawn(
@@ -593,6 +633,11 @@ func (m *SubagentManager) Spawn(
 		return nil, fmt.Errorf("max spawn depth exceeded (depth=%d, max=%d)", depth, maxDepth)
 	}
 
+	originChannel, originTo, err := m.resolveSpawnOrigin(params)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create the run.
 	runID := uuid.New().String()[:8]
 	timeout := time.Duration(m.cfg.TimeoutSeconds) * time.Second
@@ -615,8 +660,8 @@ func (m *SubagentManager) Spawn(
 		Model:           params.Model,
 		ParentSessionID: params.ParentSessionID,
 		SpawnDepth:      depth,
-		OriginChannel:   params.OriginChannel,
-		OriginTo:        params.OriginTo,
+		OriginChannel:   originChannel,
+		OriginTo:        originTo,
 		OriginThreadID:  params.OriginThreadID,
 		DeliveryScope:   deliveryScope,
 		StartedAt:       time.Now(),
@@ -767,6 +812,11 @@ func (m *SubagentManager) SpawnWithExecutor(
 		depth = 1
 	}
 
+	originChannel, originTo, err := m.resolveSpawnOrigin(params)
+	if err != nil {
+		return nil, err
+	}
+
 	runID := uuid.New().String()[:8]
 	timeout := time.Duration(m.cfg.TimeoutSeconds) * time.Second
 	if params.TimeoutSeconds > 0 {
@@ -788,8 +838,8 @@ func (m *SubagentManager) SpawnWithExecutor(
 		Model:           llmClient.model,
 		ParentSessionID: params.ParentSessionID,
 		SpawnDepth:      depth,
-		OriginChannel:   params.OriginChannel,
-		OriginTo:        params.OriginTo,
+		OriginChannel:   originChannel,
+		OriginTo:        originTo,
 		OriginThreadID:  params.OriginThreadID,
 		DeliveryScope:   deliveryScope,
 		StartedAt:       time.Now(),
@@ -1267,14 +1317,15 @@ func RegisterSubagentTools(
 
 			// Capture the origin channel/chat from the session context so the
 			// completion announcement can be delivered directly to the requester.
+			parentSessionID := SessionIDFromContext(ctx)
 			var originChannel, originTo string
-			if sessionID := SessionIDFromContext(ctx); sessionID != "" {
+			if parentSessionID != "" {
 				// sessionID has the form "channel:chatID" (may include Telegram
 				// topic suffix, e.g. "telegram:12345678:topic:42").
 				// Split on the first ":" only to get channel name.
-				if idx := strings.IndexByte(sessionID, ':'); idx != -1 {
-					originChannel = sessionID[:idx]
-					originTo = sessionID[idx+1:]
+				if idx := strings.IndexByte(parentSessionID, ':'); idx != -1 {
+					originChannel = parentSessionID[:idx]
+					originTo = parentSessionID[idx+1:]
 				}
 			}
 
@@ -1288,14 +1339,15 @@ func RegisterSubagentTools(
 			run, err := manager.Spawn(
 				context.Background(),
 				SpawnParams{
-					Task:           task,
-					Label:          label,
-					Model:          model,
-					TimeoutSeconds: timeoutSec,
-					SpawnDepth:     childDepth,
-					OriginChannel:  originChannel,
-					OriginTo:       originTo,
-					DeliveryScope:  scope,
+					Task:            task,
+					Label:           label,
+					Model:           model,
+					TimeoutSeconds:  timeoutSec,
+					SpawnDepth:      childDepth,
+					ParentSessionID: parentSessionID,
+					OriginChannel:   originChannel,
+					OriginTo:        originTo,
+					DeliveryScope:   scope,
 				},
 				llmClient,
 				executor,
