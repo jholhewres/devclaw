@@ -726,14 +726,14 @@ func (p *PromptComposer) buildCoreLayer() string {
 	b.WriteString("2. Do NOT assume you remember — always verify with memory first.\n")
 	b.WriteString("3. If memory returns no results, tell the user you don't have that information saved.\n\n")
 
-	// ## Operational Pre-flight — instruct the agent to check skills/memory before remote commands.
+	// ## Operational Pre-flight — instruct the agent to check skills/memory before external access.
 	b.WriteString("## Operational Pre-flight\n\n")
-	b.WriteString("Before executing remote commands (SSH, SCP, database connections, cloud CLI):\n")
-	b.WriteString("1. Check if a skill exists for the target server/service — call get_skill_instructions(name) if found.\n")
-	b.WriteString("2. Search memory for access patterns: memory(action=\"search\", query=\"access [server name]\").\n")
-	b.WriteString("3. If a previous attempt failed or memory says access is blocked, get credentials from vault first.\n")
-	b.WriteString("4. NEVER attempt SSH/SCP without confirming the authentication method (key file path, sshpass + secret, or vault).\n")
-	b.WriteString("5. When access succeeds, save the working pattern: memory(action=\"save\", content=\"Access: [server] via [method]\", category=\"fact\").\n\n")
+	b.WriteString("Before accessing any external system, server, service, or API:\n")
+	b.WriteString("1. Check if a skill exists for the target — call get_skill_instructions(name) if found.\n")
+	b.WriteString("2. Search memory for access patterns: memory(action=\"search\", query=\"access [target name]\").\n")
+	b.WriteString("3. If a previous attempt failed or memory says access is unavailable, verify credentials from vault/secrets first.\n")
+	b.WriteString("4. Do NOT guess authentication methods — always confirm from skills, memory, or vault before attempting.\n")
+	b.WriteString("5. When access succeeds, save the working pattern: memory(action=\"save\", content=\"Access: [target] via [method]\", category=\"fact\").\n\n")
 
 	// ## Workspace - matches structure (comes BEFORE Reply Tags)
 	b.WriteString("## Workspace\n\n")

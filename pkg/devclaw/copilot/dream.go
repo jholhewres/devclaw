@@ -562,89 +562,94 @@ func (d *DreamConsolidator) findContradictions(entries []memory.Entry) []contrad
 	return found
 }
 
-// findEvidenceContradictions detects memory facts claiming access is "blocked",
-// "unavailable", or "failed" that are contradicted by newer success facts.
-// For example: "SSH bloqueado para 144.126.212.236" is contradicted by a later
-// "Access: 144.126.212.236 via sshpass" fact.
+// findEvidenceContradictions detects negative memory facts that are contradicted
+// by newer positive facts about the same entity. Generic — works for any topic
+// (servers, APIs, services, tools), not just SSH or specific protocols.
 func (d *DreamConsolidator) findEvidenceContradictions(entries []memory.Entry) []contradiction {
-	// Keywords indicating a negative/blocking fact.
-	blockKeywords := []string{
+	// Generic negative sentiment indicators (PT + EN).
+	negativeKeywords := []string{
 		"bloqueado", "blocked", "unavailable", "indisponível",
-		"permission denied", "connection refused", "timeout",
-		"não consegue", "can't access", "cannot access",
-		"failed to connect", "não foi possível",
+		"denied", "refused", "failed", "erro", "error",
+		"não consegue", "can't", "cannot", "unable",
+		"não funciona", "doesn't work", "broken", "down",
+		"deprecated", "removido", "removed", "desativado", "disabled",
 	}
 
-	// Keywords indicating a successful access pattern.
-	successKeywords := []string{
-		"access:", "acesso:", "acessar via", "via sshpass",
-		"via ssh", "conectou", "connected", "succeeded",
-		"uptime", "deploy realizado", "deployed",
+	// Generic positive sentiment indicators (PT + EN).
+	positiveKeywords := []string{
+		"access:", "acesso:", "funciona", "works", "working",
+		"succeeded", "connected", "conectou", "accessible",
+		"acessível", "deployed", "running", "active", "ativo",
+		"fixed", "corrigido", "resolved", "resolvido",
+		"enabled", "habilitado", "available", "disponível",
 	}
 
-	// Collect blocking and success entries.
 	type taggedEntry struct {
-		entry   memory.Entry
-		isBlock bool
-		host    string // extracted IP or hostname
+		entry    memory.Entry
+		negative bool
+		topic    string // normalized topic for matching
 	}
 
-	// Simple IP/hostname extractor.
-	extractHost := func(s string) string {
+	// Extract a topic identifier from the entry: any IP, hostname, URL,
+	// or the first significant noun phrase (lowercased first 60 chars).
+	extractTopic := func(s string) string {
 		lower := strings.ToLower(s)
-		// Look for IP addresses (simple pattern).
+		// Try IP address first.
 		for i := 0; i < len(lower)-6; i++ {
-			if lower[i] >= '0' && lower[i] <= '9' && strings.Contains(lower[i:min(i+18, len(lower))], ".") {
-				// Extract potential IP.
+			if lower[i] >= '0' && lower[i] <= '9' {
 				end := i
 				for end < len(lower) && (lower[end] >= '0' && lower[end] <= '9' || lower[end] == '.') {
 					end++
 				}
 				candidate := lower[i:end]
-				dots := strings.Count(candidate, ".")
-				if dots >= 1 && len(candidate) >= 7 { // at least X.X.X.X
+				if strings.Count(candidate, ".") >= 2 && len(candidate) >= 7 {
 					return candidate
 				}
 			}
 		}
-		return ""
+		// Fallback: use first 60 chars as topic fingerprint for overlap check.
+		if len(lower) > 60 {
+			lower = lower[:60]
+		}
+		return lower
 	}
 
-	var blocks, successes []taggedEntry
+	var negatives, positives []taggedEntry
 
 	for _, e := range entries {
 		lower := strings.ToLower(e.Content)
-		host := extractHost(e.Content)
-		if host == "" {
-			continue // Can't correlate without a host.
-		}
+		topic := extractTopic(e.Content)
 
-		for _, kw := range blockKeywords {
+		for _, kw := range negativeKeywords {
 			if strings.Contains(lower, kw) {
-				blocks = append(blocks, taggedEntry{entry: e, isBlock: true, host: host})
+				negatives = append(negatives, taggedEntry{entry: e, negative: true, topic: topic})
 				break
 			}
 		}
-		for _, kw := range successKeywords {
+		for _, kw := range positiveKeywords {
 			if strings.Contains(lower, kw) {
-				successes = append(successes, taggedEntry{entry: e, isBlock: false, host: host})
+				positives = append(positives, taggedEntry{entry: e, negative: false, topic: topic})
 				break
 			}
 		}
 	}
 
-	// Cross-reference: if a success fact targets the same host as a block fact,
-	// and the success is newer, the block is contradicted.
+	// Cross-reference: if a positive fact targets the same topic as a negative,
+	// and is newer, the negative is contradicted by evidence.
 	var found []contradiction
-	for _, block := range blocks {
-		for _, success := range successes {
-			if block.host == success.host && success.entry.Timestamp.After(block.entry.Timestamp) {
+	for _, neg := range negatives {
+		for _, pos := range positives {
+			sameEntity := neg.topic == pos.topic ||
+				(len(neg.topic) > 10 && strings.Contains(pos.topic, neg.topic)) ||
+				(len(pos.topic) > 10 && strings.Contains(neg.topic, pos.topic))
+
+			if sameEntity && pos.entry.Timestamp.After(neg.entry.Timestamp) {
 				found = append(found, contradiction{
-					entryA: block.entry.Content,
-					entryB: fmt.Sprintf("[Evidence] %s (succeeded at %s)",
-						success.entry.Content, success.entry.Timestamp.Format("2006-01-02")),
+					entryA: neg.entry.Content,
+					entryB: fmt.Sprintf("[Evidence] %s (%s)",
+						pos.entry.Content, pos.entry.Timestamp.Format("2006-01-02")),
 				})
-				break // One contradiction per block fact is enough.
+				break
 			}
 		}
 	}

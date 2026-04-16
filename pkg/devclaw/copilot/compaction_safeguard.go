@@ -608,67 +608,37 @@ func buildProtectedSet(messages []chatMessage, protectRecentTurns int) map[int]b
 		}
 	}
 
-	// Protect tool results containing operational access patterns (SSH, DB, cloud CLI).
-	// These are high-value "how-to" facts that get lost during compaction.
-	// Cap at maxOperationalProtected to avoid bloating context.
-	const maxOperationalProtected = 6
-	var opIndices []int
+	// Protect the most recent successful tool results — any substantial tool
+	// result that didn't error is potentially valuable operational knowledge.
+	// This is generic: works for SSH, DB, cloud, Docker, kubectl, APIs, etc.
+	const maxRecentProtected = 8
+	var recentToolIndices []int
 	for i, m := range messages {
-		if protected[i] {
-			continue // already protected by other rules
-		}
-		if m.Role == "tool" {
-			content, ok := m.Content.(string)
-			if ok && len(content) >= 50 && containsOperationalPattern(content) {
-				opIndices = append(opIndices, i)
-			}
-		}
-	}
-
-	// Also protect assistant messages whose tool calls contain operational commands.
-	for i, m := range messages {
-		if protected[i] || m.Role != "assistant" || len(m.ToolCalls) == 0 {
+		if protected[i] || m.Role != "tool" {
 			continue
 		}
-		for _, tc := range m.ToolCalls {
-			if containsOperationalPattern(tc.Function.Arguments) {
-				opIndices = append(opIndices, i)
-				break
-			}
+		content, ok := m.Content.(string)
+		if !ok || len(content) < 100 {
+			continue
 		}
+		// Skip error results — they're less valuable to preserve.
+		if strings.Contains(content, "Exit code: non-zero") ||
+			strings.Contains(content, "Permission denied") ||
+			strings.Contains(content, "command not found") {
+			continue
+		}
+		recentToolIndices = append(recentToolIndices, i)
 	}
 
-	// Keep only the most recent maxOperationalProtected entries.
-	if len(opIndices) > maxOperationalProtected {
-		opIndices = opIndices[len(opIndices)-maxOperationalProtected:]
+	// Keep only the most recent maxRecentProtected entries.
+	if len(recentToolIndices) > maxRecentProtected {
+		recentToolIndices = recentToolIndices[len(recentToolIndices)-maxRecentProtected:]
 	}
-	for _, idx := range opIndices {
+	for _, idx := range recentToolIndices {
 		protected[idx] = true
 	}
 
 	return protected
-}
-
-// operationalPatterns detects tool results/arguments containing server access,
-// database connections, or cloud CLI patterns worth preserving through compaction.
-var operationalPatterns = []*regexp.Regexp{
-	// SSH/SCP: ssh [-i key] user@host OR sshpass -p ... ssh ...
-	regexp.MustCompile(`(?:sshpass\s+-p|(?:ssh|scp)\s+(?:-i\s+\S+\s+)?(?:-o\s+\S+\s+)*\w+@[\w.\-]+)`),
-	// PostgreSQL/MySQL connection strings
-	regexp.MustCompile(`(?:PGPASSWORD=|psql\s+-h\s+|mysql\s+-h\s+|MYSQL_PWD=)`),
-	// Cloud secret access (GCP, AWS)
-	regexp.MustCompile(`(?:gcloud\s+secrets\s+versions\s+access|aws\s+secretsmanager\s+get-secret)`),
-}
-
-// containsOperationalPattern returns true if text contains SSH, database,
-// or cloud CLI access patterns that should survive compaction.
-func containsOperationalPattern(text string) bool {
-	for _, re := range operationalPatterns {
-		if re.MatchString(text) {
-			return true
-		}
-	}
-	return false
 }
 
 // buildMinimalFallbackSummary creates a metadata-only summary when LLM summarization fails
