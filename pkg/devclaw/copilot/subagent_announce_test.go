@@ -2,6 +2,8 @@ package copilot
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync/atomic"
@@ -129,6 +131,42 @@ func TestSubagentAnnounce_UnresolvableOriginFailsFast(t *testing.T) {
 	}
 }
 
+func TestSubagentAnnounce_PartialOriginFillsFromParentID(t *testing.T) {
+	// Only one of (OriginChannel, OriginTo) set — the other must be derived
+	// from ParentSessionID without overwriting the explicit value.
+	mgr := newTestSubagentManager(t, new(bytes.Buffer))
+
+	ch, to, err := mgr.resolveSpawnOrigin(SpawnParams{
+		OriginChannel:   "whatsapp", // explicit
+		OriginTo:        "",         // must derive
+		ParentSessionID: "whatsapp:user@c.us",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ch != "whatsapp" {
+		t.Errorf("explicit OriginChannel overwritten: got %q", ch)
+	}
+	if to != "user@c.us" {
+		t.Errorf("OriginTo should derive from ParentSessionID: got %q", to)
+	}
+
+	ch2, to2, err := mgr.resolveSpawnOrigin(SpawnParams{
+		OriginChannel:   "", // must derive
+		OriginTo:        "custom-chat",
+		ParentSessionID: "webui:user123",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ch2 != "webui" {
+		t.Errorf("OriginChannel should derive: got %q", ch2)
+	}
+	if to2 != "custom-chat" {
+		t.Errorf("explicit OriginTo overwritten: got %q", to2)
+	}
+}
+
 func TestSubagentAnnounce_NestedSpawnInheritsOrigin(t *testing.T) {
 	// Nested spawn path: ParentSessionID="subagent:<runID>" should inherit
 	// OriginChannel/OriginTo from the parent SubagentRun stored in the
@@ -239,6 +277,34 @@ func TestSubagentAnnounce_CallbackLogsOnFailure(t *testing.T) {
 	}
 	if !strings.Contains(s, "has_callback=false") {
 		t.Errorf("decision log should reflect has_callback=false; got: %s", s)
+	}
+}
+
+func TestSubagentAnnounce_WaitHonorsCtxCancellation(t *testing.T) {
+	// Contract for wait_subagent: when the caller's ctx is cancelled (e.g.
+	// the agent turn ends), Wait must return promptly instead of blocking
+	// on the run's done channel until the subagent's own timeout.
+	mgr := newTestSubagentManager(t, new(bytes.Buffer))
+	run := newRun("wait-1", DeliveryScopeAll)
+	registerRun(mgr, run)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := mgr.Wait(ctx, run.ID)
+		done <- err
+	}()
+
+	// Cancel before the run ever completes.
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Wait should return context.Canceled, got %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Wait ignored ctx cancellation (would block forever)")
 	}
 }
 
