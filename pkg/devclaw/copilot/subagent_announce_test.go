@@ -193,12 +193,16 @@ func TestSubagentAnnounce_NestedSpawnInheritsOrigin(t *testing.T) {
 	}
 }
 
-func TestSubagentAnnounce_DeliveryScopeExternal_SkipsParent(t *testing.T) {
-	logBuf := new(bytes.Buffer)
-	mgr := newTestSubagentManager(t, logBuf)
-	called := make(chan struct{}, 1)
+func TestSubagentAnnounce_DeliveryScopeExternal_FiresCallback(t *testing.T) {
+	// Contract: the manager always fires the callback and passes through
+	// run.DeliveryScope. The Assistant-level callback inspects the scope
+	// and decides between direct channel send and parent inject. Skipping
+	// the callback at the manager level used to silently drop external
+	// runs because there was no other delivery path.
+	mgr := newTestSubagentManager(t, new(bytes.Buffer))
+	received := make(chan *SubagentRun, 1)
 	mgr.SetAnnounceCallback(func(run *SubagentRun) {
-		called <- struct{}{}
+		received <- run
 	})
 
 	run := newRun("ext-1", DeliveryScopeExternal)
@@ -206,14 +210,12 @@ func TestSubagentAnnounce_DeliveryScopeExternal_SkipsParent(t *testing.T) {
 	mgr.completeRun(run, "ok", nil)
 
 	select {
-	case <-called:
-		t.Fatal("callback fired for delivery_scope=external, expected skip")
-	case <-time.After(100 * time.Millisecond):
-		// expected — no call
-	}
-
-	if !strings.Contains(logBuf.String(), "parent inject skipped") {
-		t.Errorf("missing log about skipped inject; got: %s", logBuf.String())
+	case got := <-received:
+		if got.DeliveryScope != DeliveryScopeExternal {
+			t.Errorf("callback received scope=%q, want external", got.DeliveryScope)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("callback did not fire within 1s for scope=external")
 	}
 }
 

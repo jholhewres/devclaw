@@ -1012,18 +1012,13 @@ func (m *SubagentManager) completeRun(run *SubagentRun, result string, err error
 		"has_callback", cb != nil,
 	)
 
-	// ── Announce (push) ── Notify parent immediately
-	// instead of requiring poll via wait_subagent.
-	// Respects delivery scope: "parent" suppresses external channel delivery,
-	// "external" suppresses parent injection, "all" does both.
+	// ── Announce (push) ── Fire the callback regardless of DeliveryScope.
+	// The callback inspects run.DeliveryScope and routes to parent inject
+	// (parent/all) and/or direct channel send (external/all). Skipping the
+	// callback for scope=external used to silently drop the run — there is
+	// no other delivery path once the manager returns.
 	if cb != nil {
-		if run.DeliveryScope != DeliveryScopeExternal {
-			go cb(run)
-		} else {
-			m.logger.Info("subagent announce: parent inject skipped (delivery_scope=external)",
-				"run_id", run.ID,
-			)
-		}
+		go cb(run)
 	}
 }
 
