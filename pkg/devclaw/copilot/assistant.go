@@ -430,6 +430,12 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 						"channel", channel,
 						"error", err,
 					)
+				} else {
+					a.logger.Info("subagent announce: delivered to external channel",
+						"run_id", run.ID,
+						"channel", channel,
+						"chars", len(userFacing),
+					)
 				}
 			}
 		}
@@ -1874,7 +1880,16 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	var accessReason string
 	var accessLevel AccessLevel
 
-	if exists {
+	// Internal injections (subagent announce followups) carry From="system"
+	// and a deterministic ID prefix. They already route to the same channel
+	// and chatID as the original caller's session, so we grant owner-level
+	// access rather than sending them through the pairing/block gauntlet —
+	// otherwise the parent agent never sees the subagent result.
+	if msg.From == "system" && strings.HasPrefix(msg.ID, "subagent-announce-") {
+		accessAllowed = true
+		accessLevel = AccessOwner
+		accessReason = "internal subagent announce"
+	} else if exists {
 		if af, ok := ch.(channels.AccessFilter); ok {
 			// Channel has its own access filter.
 			accessAllowed, accessReason = af.CanResponse(msg)
