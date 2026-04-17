@@ -743,8 +743,12 @@ func generateConfigYAML(s *SetupRequest) string {
 
 	// -- Memory --
 	b.WriteString("# -- Memory ------------------------------------------------\n")
+	b.WriteString("# type: 'sqlite' enables FTS5 + vector search (recommended).\n")
+	b.WriteString("# 'file' is the legacy fallback with no search.\n")
+	b.WriteString("# Dream (background consolidation) and memory.stack/hierarchy\n")
+	b.WriteString("# are enabled by default — omit them here to inherit sane values.\n")
 	b.WriteString("memory:\n")
-	b.WriteString("  type: \"file\"\n")
+	b.WriteString("  type: \"sqlite\"\n")
 	b.WriteString("  path: \"./data/memory.db\"\n")
 	b.WriteString("  max_messages: 100\n")
 	b.WriteString("  compression_strategy: \"summarize\"\n\n")
