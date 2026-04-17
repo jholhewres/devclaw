@@ -117,7 +117,13 @@ var DefaultSubagentDeniedTools = []string{
 	// Skill management tools (subagents should not install/remove skills).
 	"skill_init", "skill_edit", "skill_add_script", "skill_list",
 	"skill_test", "skill_install", "skill_defaults_list", "skill_defaults_install", "skill_remove",
-	// Legacy aliases (deprecated, kept for backward compatibility).
+	// Message / media delivery tools. Subagents must return their result as
+	// text; the runtime delivers it back to the user through the announce
+	// callback (see completeRun → Assistant.SetAnnounceCallback). Letting
+	// a subagent self-deliver causes duplicated or out-of-order messages.
+	"send_message", "message", "send_media",
+	// Dispatcher aliases — deny these too so subagents can't bypass the
+	// individual denials above (e.g. memory dispatcher → memory_save).
 	"memory", "scheduler", "skill_manage",
 }
 
@@ -1240,6 +1246,14 @@ You are a **subagent** spawned by the main agent for a specific task.
 - Do NOT ask the user questions — you have all the context you need.
 - When done, provide a concise summary of what you accomplished.
 - For coding tasks: include relevant file paths, changes made, and any issues found.
+
+## Delivery
+- DO NOT try to message the user yourself. No WhatsApp/Telegram/Discord/Slack
+  API calls, no curl to internal messaging endpoints, no message/send_message
+  tool. Just return your final text as the subagent result.
+- The runtime delivers that text to the requester's channel automatically
+  when you finish, based on the configured delivery_scope. Attempting manual
+  delivery only produces duplicates or failures.
 
 ## Persistence
 - Tool errors are hints, not stop signs. Fix the input and retry.
