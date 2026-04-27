@@ -532,14 +532,11 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	)
 
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1)
+	signal.Notify(sigChan, shutdownSignals()...)
 
-	// Handle SIGUSR1 for force-dream without exiting the loop.
 	for {
 		sig := <-sigChan
-		if sig == syscall.SIGUSR1 {
-			logger.Info("SIGUSR1 received — forcing dream cycle")
-			go assistant.ForceDream(context.Background())
+		if handleForceDreamSignal(sig, assistant, logger) {
 			continue
 		}
 		break
@@ -697,13 +694,7 @@ func reloadProcess() error {
 	// Get the original arguments (skip the program name)
 	args := os.Args[1:]
 
-	// Replace current process with a new instance
-	err = syscall.Exec(executable, append([]string{executable}, args...), os.Environ())
-	if err != nil {
-		return fmt.Errorf("failed to reload process: %w", err)
-	}
-
-	return nil
+	return execReplace(executable, args, os.Environ())
 }
 
 // getServerIP returns the first non-loopback IP address of the server.
@@ -1803,9 +1794,9 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 		result := make([]webui.ChannelInstanceInfo, 0, len(chs))
 		for _, ch := range chs {
 			info := webui.ChannelInstanceInfo{
-				Type:      channelType,
-				FullName:  ch.Name(),
-				Connected: ch.IsConnected(),
+				Type:       channelType,
+				FullName:   ch.Name(),
+				Connected:  ch.IsConnected(),
 				ErrorCount: ch.Health().ErrorCount,
 				Configured: true,
 			}
@@ -2843,14 +2834,14 @@ func wireAgentAdapter(adapter *webui.AssistantAdapter, assistant *copilot.Assist
 				}
 				for _, agentName := range pi.Agents {
 					result = append(result, webui.AgentInfoAPI{
-						ID:       pi.ID + ":" + agentName,
-						Name:     agentName,
-						Source:   "plugin",
-						Active:   pi.Enabled,
-						Skills:   []string{},
-						Channels: []string{},
-						Members:  []string{},
-						Groups:   []string{},
+						ID:         pi.ID + ":" + agentName,
+						Name:       agentName,
+						Source:     "plugin",
+						Active:     pi.Enabled,
+						Skills:     []string{},
+						Channels:   []string{},
+						Members:    []string{},
+						Groups:     []string{},
 						ToolsAllow: []string{},
 						ToolsDeny:  []string{},
 					})
