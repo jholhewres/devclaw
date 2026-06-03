@@ -58,6 +58,7 @@ const (
 	LayerSafety         PromptLayer = 5  // Safety rules.
 	LayerIdentity       PromptLayer = 10 // Custom instructions.
 	LayerThinking       PromptLayer = 12 // Extended thinking level hint (from /think).
+	LayerProfile        PromptLayer = 13 // Active rotatable profile context.
 	LayerBootstrap      PromptLayer = 15 // SOUL.md, AGENTS.md, etc.
 	LayerBuiltinSkills  PromptLayer = 18 // Built-in tool guides (memory, agents, etc.)
 	LayerPluginAgents   PromptLayer = 19 // Available plugin agents for delegation.
@@ -112,17 +113,17 @@ type promptLayerCache struct {
 
 // PromptComposer assembles the final system prompt from multiple layers.
 type PromptComposer struct {
-	config        *Config
-	agentProfile  *AgentProfileConfig // Active agent profile (nil = default).
-	memoryStore   *memory.FileStore
-	sqliteMemory  *memory.SQLiteStore
-	skillGetter   func(name string) (interface{ SystemPrompt() string }, bool)
-	skillLister   func() []SkillInfo // Returns all available skills with name, description, tools
-	builtinSkills *BuiltinSkills
-	toolExecutor     *ToolExecutor // For dynamic tool list generation
+	config            *Config
+	agentProfile      *AgentProfileConfig // Active agent profile (nil = default).
+	memoryStore       *memory.FileStore
+	sqliteMemory      *memory.SQLiteStore
+	skillGetter       func(name string) (interface{ SystemPrompt() string }, bool)
+	skillLister       func() []SkillInfo // Returns all available skills with name, description, tools
+	builtinSkills     *BuiltinSkills
+	toolExecutor      *ToolExecutor            // For dynamic tool list generation
 	pluginAgentLister func() []pluginAgentInfo // Lists available plugin agents.
-	isSubagent    bool // When true, only AGENTS.md + TOOLS.md are loaded.
-	contextEngines *ContextEngineRegistry // Pluggable context engines.
+	isSubagent        bool                     // When true, only AGENTS.md + TOOLS.md are loaded.
+	contextEngines    *ContextEngineRegistry   // Pluggable context engines.
 
 	// workspaceID identifies the active workspace for cache key namespacing.
 	// Empty = main agent (global bootstrap dirs).
@@ -175,8 +176,8 @@ type PromptComposer struct {
 type SkillInfo struct {
 	Name          string
 	Description   string
-	Location      string   // Absolute path to SKILL.md ("" for built-in skills)
-	HasReferences bool     // True if the skill has a references/ directory
+	Location      string // Absolute path to SKILL.md ("" for built-in skills)
+	HasReferences bool   // True if the skill has a references/ directory
 	Tools         []string
 }
 
@@ -322,6 +323,9 @@ func (p *PromptComposer) Compose(session *Session, input string) string {
 	}
 	if thinkingPrompt := p.buildThinkingLayer(session); thinkingPrompt != "" {
 		layers = append(layers, layerEntry{layer: LayerThinking, content: thinkingPrompt})
+	}
+	if profileLayer := p.buildProfileLayer(); profileLayer != "" {
+		layers = append(layers, layerEntry{layer: LayerProfile, content: profileLayer})
 	}
 	cfg := session.GetConfig()
 	if cfg.BusinessContext != "" {
@@ -657,6 +661,33 @@ func (p *PromptComposer) buildProjectContextLayer() string {
 
 // ---------- Layer Builders ----------
 
+func (p *PromptComposer) buildProfileLayer() string {
+	if p.agentProfile == nil {
+		return ""
+	}
+	prof := p.agentProfile
+	var b strings.Builder
+	b.WriteString("## Active Profile: ")
+	if prof.Label != "" {
+		b.WriteString(prof.Label)
+	} else {
+		b.WriteString(prof.ID)
+	}
+	b.WriteString("\n\n")
+	if prof.Description != "" {
+		b.WriteString(prof.Description)
+		b.WriteString("\n\n")
+	}
+	if prof.Instructions != "" {
+		b.WriteString(prof.Instructions)
+		b.WriteString("\n\n")
+	}
+	if prof.MemoryScope != "" {
+		b.WriteString("Memory scope: " + prof.MemoryScope + "\n")
+	}
+	return b.String()
+}
+
 // buildCoreLayer creates the base identity and tooling guidance.
 // Matches structure exactly: identity → tooling → tool call style → safety → workspace → reply tags → messaging.
 // Behavioral guidance lives in AGENTS.md/SOUL.md, not here.
@@ -789,30 +820,30 @@ func (p *PromptComposer) buildCoreLayer() string {
 // Only tools present in the executor's visible set AND in this map are included.
 // This avoids hardcoding the list — if a tool is hidden or removed, it disappears.
 var coreToolSummaries = map[string]string{
-	"read_file":      "Read file contents",
-	"write_file":     "Write/create a file",
-	"edit_file":      "Apply targeted edits to a file",
-	"list_files":     "List directory contents",
-	"search_files":   "Search file contents with regex",
-	"glob_files":     "Find files by glob pattern",
-	"bash":           "Run shell commands",
-	"web_search":     "Search the web",
-	"web_fetch":      "Fetch a URL and extract content",
-	"memory":         "Long-term memory (action: save/search/list/index)",
-	"scheduler":      "Scheduled tasks and reminders (action: add/list/remove/search)",
-	"vault":          "Encrypted secret storage (action: status/save/get/list/delete)",
-	"message":        "Send messages, channel actions (polls, reactions, etc.)",
-	"sessions":       "Manage chat sessions (list/get/send/rename)",
-	"spawn_subagent": "Delegate complex subtasks to a child agent",
-	"list_subagents": "List running child agents",
-	"describe_image": "Describe image contents via Vision",
-	"browser":        "Control web browser (navigate/screenshot/click/fill/act)",
-	"daemon":         "Manage background daemons",
-	"apply_patch":    "Apply a unified diff patch to files",
-	"skill_init":     "Create a new skill",
-	"skill_list":     "List available skills",
-	"skill_install":  "Install a skill from URL",
-	"skill_db_query": "Query a skill's SQLite database",
+	"read_file":            "Read file contents",
+	"write_file":           "Write/create a file",
+	"edit_file":            "Apply targeted edits to a file",
+	"list_files":           "List directory contents",
+	"search_files":         "Search file contents with regex",
+	"glob_files":           "Find files by glob pattern",
+	"bash":                 "Run shell commands",
+	"web_search":           "Search the web",
+	"web_fetch":            "Fetch a URL and extract content",
+	"memory":               "Long-term memory (action: save/search/list/index)",
+	"scheduler":            "Scheduled tasks and reminders (action: add/list/remove/search)",
+	"vault":                "Encrypted secret storage (action: status/save/get/list/delete)",
+	"message":              "Send messages, channel actions (polls, reactions, etc.)",
+	"sessions":             "Manage chat sessions (list/get/send/rename)",
+	"spawn_subagent":       "Delegate complex subtasks to a child agent",
+	"list_subagents":       "List running child agents",
+	"describe_image":       "Describe image contents via Vision",
+	"browser":              "Control web browser (navigate/screenshot/click/fill/act)",
+	"daemon":               "Manage background daemons",
+	"apply_patch":          "Apply a unified diff patch to files",
+	"skill_init":           "Create a new skill",
+	"skill_list":           "List available skills",
+	"skill_install":        "Install a skill from URL",
+	"skill_db_query":       "Query a skill's SQLite database",
 	"skill_db_list_tables": "List tables in a skill's database",
 }
 
@@ -1337,6 +1368,9 @@ func (p *PromptComposer) buildSkillsLayerLegacy(session *Session) string {
 // error from the router is treated as a degradation signal and does
 // not propagate — the stack MUST be able to render regardless.
 func (p *PromptComposer) resolveActiveWingForSession(session *Session, input string) string {
+	if p.agentProfile != nil && p.agentProfile.MemoryScope != "" {
+		return p.agentProfile.MemoryScope
+	}
 	if session == nil || p.contextRouter == nil {
 		return ""
 	}

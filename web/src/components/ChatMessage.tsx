@@ -121,14 +121,14 @@ export const ChatMessage = memo(function ChatMessage({
     return (
       <div className="flex items-start justify-end gap-3 animate-fade-in">
         <div className="max-w-[80%]">
-          <div className="rounded-2xl rounded-tr-md bg-brand-secondary px-4 py-3">
-            <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-primary">
+          <div className="rounded-2xl bg-brand-primary/50 border border-brand/10 px-4 py-2.5">
+            <p className="whitespace-pre-wrap text-[16px] leading-relaxed text-primary">
               {content}
             </p>
           </div>
         </div>
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-solid">
-          <User className="h-4 w-4 text-white" />
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-solid/20">
+          <User className="h-3.5 w-3.5 text-brand-solid" />
         </div>
       </div>
     )
@@ -151,13 +151,13 @@ export const ChatMessage = memo(function ChatMessage({
     >
       <div
         className={cn(
-          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-300',
+          'flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-all duration-300',
           isStreaming
-            ? 'bg-brand-solid ring-2 ring-brand/30 ring-offset-2 ring-offset-primary'
-            : 'bg-tertiary',
+            ? 'bg-brand-solid/20 ring-1 ring-brand/30'
+            : 'bg-tertiary/50',
         )}
       >
-        <Bot className={cn('h-4 w-4 transition-colors', isStreaming ? 'text-white' : 'text-tertiary')} />
+        <Bot className={cn('h-3.5 w-3.5 transition-colors', isStreaming ? 'text-brand-solid' : 'text-tertiary')} />
       </div>
       <div className="relative min-w-0 flex-1">
         {isStreaming && isEmpty ? (
@@ -179,7 +179,7 @@ export const ChatMessage = memo(function ChatMessage({
                   {cleanContent}
                 </ReactMarkdown>
                 {isStreaming && (
-                  <span className="ml-0.5 inline-block h-[18px] w-[2px] rounded-full bg-brand-solid align-text-bottom animate-pulse" />
+                  <span className="ml-0.5 inline-block h-[18px] w-[2px] rounded-full bg-brand-solid align-text-bottom animate-stream-cursor" />
                 )}
               </div>
             )}
@@ -361,24 +361,29 @@ function ToolMessage({ toolName, toolInput, content, isError }: { toolName?: str
   const hasContent = hasInput || hasOutput
 
   return (
-    <div className="ml-11 animate-fade-in py-1">
-      <div className="rounded-xl border border-secondary bg-secondary overflow-hidden">
+    <div className="ml-10 animate-fade-in py-0.5">
+      <div className={cn(
+        'rounded-lg border overflow-hidden',
+        isError ? 'border-error/30 bg-error-primary/50' : 'border-secondary bg-secondary/50',
+      )}>
         {/* Header */}
-        <button
+          <button
           onClick={() => setExpanded(!expanded)}
           className={cn(
-            'flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-left text-xs transition-colors',
-            'hover:bg-primary_hover'
+            'flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-xs transition-colors',
+            'hover:bg-primary_hover/50',
           )}
         >
-          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-brand-secondary">
-            <Icon className="h-3.5 w-3.5 text-brand-tertiary" />
+          <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-brand-secondary">
+            <Icon className="h-3 w-3 text-brand-tertiary" />
           </div>
-          <span className="min-w-0 flex-1 truncate font-medium text-primary">
+          <span className="min-w-0 flex-1 truncate font-medium text-secondary">
             {summary}
           </span>
-          {/* Status indicator */}
-          <span className={cn('flex h-1.5 w-1.5 shrink-0 rounded-full', isError ? 'bg-error' : 'bg-success-solid')} />
+          <span className={cn(
+            'h-1.5 w-1.5 shrink-0 rounded-full',
+            isError ? 'bg-error' : 'bg-success',
+          )} />
           {hasContent && (
             expanded
               ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-tertiary" />
@@ -443,7 +448,7 @@ function CodeBlock({ className, children, ...props }: React.HTMLAttributes<HTMLE
   if (isInline) {
     return (
       <code
-        className="rounded-md bg-secondary px-1.5 py-0.5 text-[13px] text-primary"
+        className="rounded-md bg-secondary px-1.5 py-0.5 text-[13px] text-brand-tertiary font-medium"
         {...props}
       >
         {children}

@@ -58,12 +58,11 @@ export function ChatInput({
   return (
     <div
       className={cn(
-        'rounded-2xl border bg-primary shadow-sm transition-all',
-        'focus-within:border-primary focus-within:shadow-md',
-        'border-secondary'
+        'rounded-xl border bg-secondary/50 shadow-sm transition-all',
+        'focus-within:border-brand/40 focus-within:shadow-md',
+        'border-secondary',
       )}
     >
-      {/* Textarea */}
       <textarea
         ref={textareaRef}
         value={value}
@@ -74,44 +73,41 @@ export function ChatInput({
         rows={rows}
         autoFocus={autoFocus}
         className={cn(
-          'w-full resize-none border-none bg-transparent px-4 pt-3.5 pb-2 text-[15px] text-primary',
-          'placeholder:text-quaternary outline-none focus:ring-0',
-          'disabled:opacity-50'
+          'w-full resize-none border-none bg-transparent px-4 pt-3.5 pb-1 text-[16px] text-primary',
+          'placeholder:text-quaternary outline-hidden focus:ring-0',
+          'disabled:opacity-50',
         )}
         style={{ boxShadow: 'none' }}
       />
 
-      {/* Action bar */}
-      <div className="flex items-center justify-between px-3 pb-3">
-        {/* Left side - hint */}
-        <span className="text-xs text-tertiary">
+      <div className="flex items-center justify-between px-3 pb-2.5">
+        <span className="text-[11px] text-quaternary">
           {t('chatPage.enterToSend')}
         </span>
 
-        {/* Right side - send/stop */}
         <div className="flex items-center gap-2">
           {isStreaming ? (
             <button
               onClick={() => onAbort?.()}
               className={cn(
-                'flex h-8 w-8 cursor-pointer items-center justify-center rounded-full',
-                'bg-error text-white transition-all hover:bg-red-600',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-error/50'
+                'flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg',
+                'bg-error/10 text-error border border-error/20 transition-all hover:bg-error/20',
+                'focus-visible:outline-hidden',
               )}
               aria-label="Stop generation"
             >
-              <Square className="h-3.5 w-3.5" fill="currentColor" />
+              <Square className="h-3 w-3" fill="currentColor" />
             </button>
           ) : (
             <button
               onClick={handleSend}
               disabled={!canSend}
               className={cn(
-                'flex h-8 w-8 cursor-pointer items-center justify-center rounded-full transition-all',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/50',
+                'flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg transition-all',
+                'focus-visible:outline-hidden',
                 canSend
-                  ? 'bg-brand-solid text-white hover:bg-brand-hover'
-                  : 'bg-secondary text-tertiary cursor-not-allowed'
+                  ? 'bg-brand-solid text-white hover:bg-brand-solid_hover'
+                  : 'bg-secondary text-quaternary',
               )}
               aria-label="Send message"
             >
