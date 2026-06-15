@@ -3950,6 +3950,17 @@ func (a *Assistant) compactSummarize(session *Session, threshold int) {
 		} else {
 			a.logger.Info("memory flush completed before compaction")
 		}
+
+		// Step 1b: Persist an operational working-context snapshot so the agent
+		// keeps its current goal/recent activity after compaction instead of
+		// re-deriving work it already did.
+		if snap, ok := buildPreCompactSnapshot(session.RecentHistory(20), a.userNow()); ok {
+			if err := a.memoryStore.Save(snap); err != nil {
+				a.logger.Warn("precompact snapshot save failed", "error", err)
+			} else {
+				a.logger.Info("precompact snapshot saved", "origin", snap.Origin, "memory_type", snap.MemoryType)
+			}
+		}
 	}
 
 	// Step 2: LLM summarizes the conversation with retry and exponential backoff.
