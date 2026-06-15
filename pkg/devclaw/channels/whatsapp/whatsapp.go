@@ -1801,6 +1801,18 @@ func (w *WhatsApp) seedGroupPoliciesFromConfig() {
 	}
 }
 
+// stripChannelPrefix removes a leading "whatsapp:" routing prefix that delivery
+// targets and scheduled jobs may prepend to a chat id (e.g.
+// "whatsapp:5511999999999@s.whatsapp.net"). It only strips the known channel
+// prefix, never a device-part colon inside a real JID.
+func stripChannelPrefix(s string) string {
+	const prefix = "whatsapp:"
+	if len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix) {
+		return strings.TrimSpace(s[len(prefix):])
+	}
+	return s
+}
+
 // normalizeJID normalizes a JID for consistent lookups.
 // Strips companion device suffix (:XX) so that messages from linked devices
 // are treated as coming from the same user.

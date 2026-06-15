@@ -160,6 +160,14 @@ func handleSchedulerAdd(ctx context.Context, sched *scheduler.Scheduler, skillDB
 		}
 	}
 
+	// Strip a leading channel routing prefix (e.g. "whatsapp:") that may be
+	// duplicated into chat_id, so the stored recipient is a clean JID. Sending a
+	// prefixed JID fails downstream ("recipient must be a user JID with no
+	// device part").
+	if channel != "" {
+		chatID = strings.TrimPrefix(chatID, channel+":")
+	}
+
 	isolateSession, _ := args["isolate_session"].(bool)
 	asSubagent, _ := args["as_subagent"].(bool)
 
