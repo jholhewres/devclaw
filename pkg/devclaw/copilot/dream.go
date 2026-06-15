@@ -68,12 +68,13 @@ type DreamState struct {
 
 // DreamResult holds the outcome of a dream consolidation run.
 type DreamResult struct {
-	MemoriesAnalyzed int           `json:"memories_analyzed"`
-	Duplicates       int           `json:"duplicates_merged"`
-	Contradictions   int           `json:"contradictions_found"`
-	Consolidated     int           `json:"consolidated"`
-	Duration         time.Duration `json:"duration"`
-	Error            error         `json:"-"`
+	MemoriesAnalyzed       int           `json:"memories_analyzed"`
+	Duplicates             int           `json:"duplicates_merged"`
+	Contradictions         int           `json:"contradictions_found"`
+	ContradictionsResolved int           `json:"contradictions_resolved"`
+	Consolidated           int           `json:"consolidated"`
+	Duration               time.Duration `json:"duration"`
+	Error                  error         `json:"-"`
 }
 
 // dreamClassifierBatchSize is the number of legacy files the classifier
@@ -337,58 +338,61 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 	evidenceContradictions := d.findEvidenceContradictions(entries)
 	contradictions = append(contradictions, evidenceContradictions...)
 
-	// Auto-expire stale negative entries that were contradicted by evidence.
-	// This lets Compact() below remove them from MEMORY.md entirely, so future
-	// memory searches don't return the outdated information.
-	if fileStore, ok := d.store.(*memory.FileStore); ok && len(evidenceContradictions) > 0 {
-		expired := d.expireStaleEntries(fileStore, evidenceContradictions)
-		d.logger.Info("dream: expired stale entries by evidence",
-			"count", expired,
-			"contradictions", len(evidenceContradictions),
-		)
-	}
-
 	result.Contradictions = len(contradictions)
 
-	// Phase 3: Consolidate — merge duplicates, flag contradictions.
+	// Phase 3: Consolidate — RESOLVE contradictions by superseding the older
+	// side, and merge duplicates. The previous implementation only appended
+	// "[Contradiction] A vs B" report entries, which grew MEMORY.md unboundedly
+	// and left the stale fact retrievable — the root cause of hundreds of
+	// unresolved contradictions accumulating in production while the agent kept
+	// recalling outdated information.
 	d.logger.Info("dream phase: consolidate",
 		"duplicates", len(duplicates),
 		"contradictions", len(contradictions),
 	)
 
-	consolidated := 0
+	// Pinned memories are never superseded automatically.
+	pinned := make(map[string]bool)
+	for _, e := range entries {
+		if e.IsPinned() {
+			pinned[strings.TrimSpace(e.Content)] = true
+		}
+	}
+	resolvable := make([]contradiction, 0, len(contradictions))
+	for _, c := range contradictions {
+		if pinned[strings.TrimSpace(c.entryA)] {
+			continue // never supersede a pinned memory
+		}
+		resolvable = append(resolvable, c)
+	}
 
-	// Compact the memory file: remove expired entries and exact duplicates.
-	// This replaces the old approach of appending [Consolidated] entries,
-	// which grew MEMORY.md unboundedly without actually removing dead data.
+	consolidated := 0
+	resolved := 0
 	if fileStore, ok := d.store.(*memory.FileStore); ok {
+		// Supersede the older side of each contradiction with a soft [stale]
+		// marker. parseMemoryFile skips stale entries (so searches stop
+		// returning them) and Compact then drops them from disk. Soft and
+		// reversible — the raw content stays in the file's history until compact.
+		if len(resolvable) > 0 {
+			resolved = d.expireStaleEntries(fileStore, resolvable)
+		}
+		// Compact: remove stale/expired entries and exact duplicates.
 		removed, err := fileStore.Compact()
 		if err != nil {
 			d.logger.Warn("dream: compact failed", "error", err)
 		} else if removed > 0 {
-			d.logger.Info("dream: compacted memory file",
-				"removed", removed,
-				"duplicates_detected", len(duplicates),
-				"contradictions_detected", len(contradictions),
-			)
 			consolidated = removed
 		}
-	}
-
-	// Save contradiction reports (append-only — these are new information).
-	for _, c := range contradictions {
-		report := memory.Entry{
-			Content:   fmt.Sprintf("[Contradiction] %s vs %s", c.entryA, c.entryB),
-			Source:    "dream",
-			Category: "summary",
-			Timestamp: time.Now(),
-		}
-		if err := d.store.Save(report); err != nil {
-			d.logger.Warn("dream: failed to save contradiction report", "error", err)
-		}
+		d.logger.Info("dream: compacted memory file",
+			"removed", consolidated,
+			"duplicates_detected", len(duplicates),
+			"contradictions_detected", len(contradictions),
+			"contradictions_resolved", resolved,
+		)
 	}
 
 	result.Consolidated = consolidated
+	result.ContradictionsResolved = resolved
 
 	// Phase 3b: Classify — opportunistically label legacy files (wing IS NULL).
 	// Error-isolated: a classifier panic or error MUST NOT abort the dream cycle.
@@ -576,9 +580,14 @@ func (d *DreamConsolidator) findContradictions(entries []memory.Entry) []contrad
 				aHasNeg := strings.Contains(a, neg)
 				bHasNeg := strings.Contains(b, neg)
 				if aHasNeg != bHasNeg {
+					// entryA = older entry (the one to supersede); entryB = newer.
+					older, newer := entries[i], entries[j]
+					if newer.Timestamp.Before(older.Timestamp) {
+						older, newer = newer, older
+					}
 					found = append(found, contradiction{
-						entryA: entries[i].Content,
-						entryB: entries[j].Content,
+						entryA: older.Content,
+						entryB: newer.Content,
 					})
 					break
 				}
