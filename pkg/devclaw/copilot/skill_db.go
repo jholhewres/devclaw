@@ -207,12 +207,18 @@ func (s *SkillDB) reconcileFromPhysical(skillName, tableName string) bool {
 	).Scan(&name); err != nil {
 		return false // genuinely missing (or probe failed)
 	}
+	// Recover the real schema and row count so DescribeTable/ListTables return
+	// accurate metadata for the reconciled table instead of zero values.
+	schemaJSON := s.introspectSchemaJSON(full)
+	var rowCount int
+	_ = s.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s", full)).Scan(&rowCount)
+
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := s.db.Exec(
 		`INSERT OR IGNORE INTO _skill_tables_registry
 		 (skill_name, table_name, display_name, description, schema_json, row_count, created_at, updated_at)
-		 VALUES (?, ?, '', '', '{}', 0, ?, ?)`,
-		skillName, tableName, now, now,
+		 VALUES (?, ?, '', 'reconciled from existing table', ?, ?, ?, ?)`,
+		skillName, tableName, schemaJSON, rowCount, now, now,
 	); err != nil {
 		slog.Warn("skill_db: failed to reconcile orphaned table into registry",
 			"skill", skillName, "table", tableName, "error", err)
@@ -221,6 +227,46 @@ func (s *SkillDB) reconcileFromPhysical(skillName, tableName string) bool {
 	slog.Warn("skill_db: reconciled orphaned table into registry (created out-of-band)",
 		"skill", skillName, "table", tableName)
 	return true
+}
+
+// introspectSchemaJSON reads a physical table's user-defined columns via
+// PRAGMA table_info and returns them as registry schema JSON (the same shape
+// CreateTable stores). Auto-managed columns (id, created_at, updated_at) are
+// omitted. Returns "{}" on any error. fullName is composed from already
+// validated skill/table names, so interpolation here is safe.
+func (s *SkillDB) introspectSchemaJSON(fullName string) string {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", fullName))
+	if err != nil {
+		return "{}"
+	}
+	defer rows.Close()
+
+	cols := map[string]string{}
+	for rows.Next() {
+		var (
+			cid         int
+			name, ctype string
+			notnull, pk int
+			dflt        sql.NullString
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return "{}"
+		}
+		switch name {
+		case "id", "created_at", "updated_at":
+			continue
+		}
+		def := ctype
+		if notnull == 1 {
+			def += " NOT NULL"
+		}
+		cols[name] = def
+	}
+	b, err := json.Marshal(cols)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
 }
 
 // validateName checks if a name is valid for tables/columns.

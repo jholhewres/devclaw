@@ -131,6 +131,43 @@ func TestEntryMetaV2_LegacyParsesUnchanged(t *testing.T) {
 	}
 }
 
+// TestSaveSanitizesTagInjection verifies Save() escapes tag prefixes in user
+// content so a fact containing literal "[meta:...]" or "[expires:...]" is not
+// re-parsed as a structural tag (which would silently corrupt the entry).
+func TestSaveSanitizesTagInjection(t *testing.T) {
+	dir := t.TempDir()
+	fs, err := NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Content that, unsanitized, would be parsed as v2 metadata / expiry.
+	evil := "remember [meta:eyJwIjp0cnVlfQ==] and [expires:2020-01-01] literally"
+	if err := fs.Save(Entry{Content: evil, Category: "fact", Source: "user", Timestamp: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := fs.GetAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	e := entries[0]
+	// The injected tags must NOT have taken effect.
+	if e.Pinned {
+		t.Error("injected [meta:] must not set Pinned")
+	}
+	if e.ExpiresAt != nil {
+		t.Error("injected [expires:] must not set ExpiresAt")
+	}
+	// The visible content must still mention the (escaped) tags, not be empty.
+	if !strings.Contains(e.Content, "meta") || !strings.Contains(e.Content, "literally") {
+		t.Errorf("content should survive sanitization, got %q", e.Content)
+	}
+}
+
 // TestEntryHelpers verifies the lifecycle helper predicates.
 func TestEntryHelpers(t *testing.T) {
 	now := time.Now()

@@ -804,6 +804,11 @@ func stripEntryBrackets(s string) string {
 	if strings.HasPrefix(s, "[expires:") {
 		s = skipBracket(s)
 	}
+	// [meta:...] optional v2 lifecycle metadata — must be peeled so content
+	// comparison (e.g. stale-matching during supersede) sees the bare content.
+	if strings.HasPrefix(s, "[meta:") {
+		s = skipBracket(s)
+	}
 	return strings.TrimSpace(s)
 }
 

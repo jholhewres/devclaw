@@ -570,6 +570,20 @@ func TestReconcileOrphanedTable(t *testing.T) {
 	if len(tables) != 1 || tables[0].TableName != "study_progress" {
 		t.Fatalf("expected reconciled study_progress in registry, got %+v", tables)
 	}
+
+	// Reconcile must recover the real schema (not a zero value) so DescribeTable
+	// reports the user-defined columns. Auto columns (id/created_at/updated_at)
+	// are omitted.
+	info, err := db.DescribeTable("ingles-daily-study", "study_progress")
+	if err != nil {
+		t.Fatalf("DescribeTable after reconcile: %v", err)
+	}
+	if _, ok := info.Schema["lesson_number"]; !ok {
+		t.Errorf("reconciled schema should include user column lesson_number, got %+v", info.Schema)
+	}
+	if _, ok := info.Schema["id"]; ok {
+		t.Errorf("reconciled schema should omit the auto id column, got %+v", info.Schema)
+	}
 }
 
 // TestIsolatedSkills tests that skills are isolated from each other.

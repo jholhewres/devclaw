@@ -132,6 +132,16 @@ func applyEntryMeta(e *Entry, payload string) {
 	e.Superseded = m.Superseded
 }
 
+// sanitizeEntryContent escapes structural tag prefixes in user content so they
+// are not re-parsed as [expires:]/[meta:] tags on the next read (which would
+// silently corrupt the entry). Must be applied once at save time — never inside
+// formatEntryLine, which Compact re-runs over already-stored content.
+func sanitizeEntryContent(s string) string {
+	s = strings.ReplaceAll(s, "[expires:", "[expires\\:")
+	s = strings.ReplaceAll(s, "[meta:", "[meta\\:")
+	return s
+}
+
 // formatEntryLine renders an entry as a single MEMORY.md markdown line:
 //
 //   - [YYYY-MM-DD HH:MM] [category] [expires:YYYY-MM-DD] [meta:...] content
@@ -238,6 +248,9 @@ func (fs *FileStore) Save(entry Entry) error {
 
 	memFile := filepath.Join(fs.baseDir, MemoryFileName)
 
+	// Sanitize content to prevent [expires:]/[meta:] tag injection on reparse.
+	entry.Content = sanitizeEntryContent(entry.Content)
+
 	// Format the entry as a markdown list item.
 	// Include expires_at tag if set, for parsing on read.
 	line := formatEntryLine(entry)
@@ -288,8 +301,7 @@ func (fs *FileStore) SaveIfNotDuplicate(entry Entry, contentHash string, isDupli
 	}
 
 	// Sanitize content to prevent [expires:]/[meta:] tag injection on reparse.
-	entry.Content = strings.ReplaceAll(entry.Content, "[expires:", "[expires\\:")
-	entry.Content = strings.ReplaceAll(entry.Content, "[meta:", "[meta\\:")
+	entry.Content = sanitizeEntryContent(entry.Content)
 
 	// Format and write.
 	line := formatEntryLine(entry)
