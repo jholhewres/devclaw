@@ -312,11 +312,11 @@ func TestTableNameSanitization(t *testing.T) {
 	defer db.Close()
 
 	invalidNames := []string{
-		"",               // empty
-		"123abc",         // starts with number
-		"my table",       // space
-		"sqlite_test",    // sqlite_ prefix (now blocked)
-		"_test",          // starts with underscore
+		"",                      // empty
+		"123abc",                // starts with number
+		"my table",              // space
+		"sqlite_test",           // sqlite_ prefix (now blocked)
+		"_test",                 // starts with underscore
 		strings.Repeat("a", 65), // too long
 	}
 
@@ -527,6 +527,48 @@ func TestTableNotFound(t *testing.T) {
 	_, err := db.Insert("crm", "contacts", map[string]any{"name": "Test"})
 	if err == nil {
 		t.Error("Expected error when inserting into non-existent table")
+	}
+}
+
+// TestReconcileOrphanedTable verifies a table created out-of-band (bypassing
+// CreateTable, so missing from _skill_tables_registry) is self-healed and
+// queryable instead of failing with "skill has no tables". Guards the prod bug
+// where the english-study skill's study_progress table existed physically but
+// every skill_db_query failed. Also checks hyphen/underscore name equivalence.
+func TestReconcileOrphanedTable(t *testing.T) {
+	db := newTestDB(t)
+	defer db.Close()
+
+	// Create the physical table directly, like a raw `sqlite3 ... CREATE TABLE`
+	// from the bash tool — no registry row is written.
+	full := fullTableName(normalizeSkillName("ingles-daily-study"), "study_progress")
+	if _, err := db.db.Exec(fmt.Sprintf(
+		"CREATE TABLE %s (id TEXT PRIMARY KEY, lesson_number INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+		full)); err != nil {
+		t.Fatalf("create out-of-band table: %v", err)
+	}
+
+	// Query via the hyphenated skill name (as the agent does): must reconcile.
+	rows, err := db.QueryWithOptions("ingles-daily-study", "study_progress", QueryOptions{})
+	if err != nil {
+		t.Fatalf("QueryWithOptions after out-of-band create should self-heal, got: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected 0 rows from empty table, got %d", len(rows))
+	}
+
+	// Underscore form resolves the same physical table.
+	if _, err := db.QueryWithOptions("ingles_daily_study", "study_progress", QueryOptions{}); err != nil {
+		t.Fatalf("underscore skill name should resolve same table: %v", err)
+	}
+
+	// Registry now contains the reconciled row.
+	tables, err := db.ListTables("ingles-daily-study")
+	if err != nil {
+		t.Fatalf("ListTables: %v", err)
+	}
+	if len(tables) != 1 || tables[0].TableName != "study_progress" {
+		t.Fatalf("expected reconciled study_progress in registry, got %+v", tables)
 	}
 }
 
