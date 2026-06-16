@@ -4,11 +4,22 @@ All notable changes to DevClaw are documented in this file.
 
 ## [v1.19.0] — 2026-06-15
 
-Memory/context reliability release. Diagnosed from production logs where the
-agent kept recalling stale/contradictory facts after compaction and failed on
-two execution bugs. Builds on the v1.19.0-rc1 layered memory stack.
+Memory/context reliability + web UI redesign. Diagnosed from production logs
+where the agent kept recalling stale/contradictory facts after compaction and
+failed on two execution bugs; also reskins the web UI and adds a Workflows
+surface. Builds on the v1.19.0-rc1 layered memory stack.
 
 ### Added
+
+- **Web UI — "Parchment + Sienna" visual direction.** Reskinned at the Tailwind
+  token layer: warm parchment paper (ink #1a1714), burnt-sienna accent
+  (#b85a26), Geist / Geist Mono typography, and a three-slash claw-mark logo.
+  Dark mode tokens unchanged.
+- **Workflows page.** New UI to chain agents into multi-step automations (status
+  badges, search, create panel with per-step agent selection), replacing the
+  Plugins nav entry (`/plugins` redirects to `/workflows`). Renders mock data —
+  a functional UI preview ahead of backend persistence/execution. Translated in
+  en/es/pt.
 
 - **Memory lifecycle metadata v2** — `memory.Entry` gains optional, backward-
   compatible fields (`Supersedes`, `Consolidates`, `Importance`, `Pinned`,
