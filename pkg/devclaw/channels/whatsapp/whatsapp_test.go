@@ -503,6 +503,10 @@ func TestParseJIDNormalizesRecipient(t *testing.T) {
 		{"channel prefix only", "whatsapp:5511999999999@s.whatsapp.net", "5511999999999", "s.whatsapp.net"},
 		{"device part only", "5511999999999:48@s.whatsapp.net", "5511999999999", "s.whatsapp.net"},
 		{"clean user jid", "5511999999999@s.whatsapp.net", "5511999999999", "s.whatsapp.net"},
+		// Regression: a genuine 12-digit BR recipient must be sent verbatim — the
+		// send path must NOT insert the mobile 9th digit (that misdelivered replies).
+		{"12-digit BR recipient unchanged", "558287015132@s.whatsapp.net", "558287015132", "s.whatsapp.net"},
+		{"12-digit BR with prefix + device", "whatsapp:558287015132:48@s.whatsapp.net", "558287015132", "s.whatsapp.net"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

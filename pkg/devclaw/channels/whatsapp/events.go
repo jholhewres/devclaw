@@ -783,9 +783,12 @@ func parseJID(s string) (types.JID, error) {
 
 	// Already a full JID with server.
 	if strings.Contains(s, "@") {
-		// Normalize away any companion device suffix (":NN") so the recipient is a
-		// bare user JID. normalizeJID leaves group JIDs (@g.us) untouched.
-		return types.ParseJID(normalizeJID(s))
+		// Strip a companion device suffix (":NN") so the recipient is a bare user
+		// JID. Do NOT apply phone-number normalization here: the recipient must be
+		// sent verbatim — normalizeBRPhone would mutate a genuine 12-digit BR number
+		// (e.g. 558287015132 -> 5582987015132) and silently misdeliver. Groups
+		// (@g.us) are left untouched.
+		return types.ParseJID(stripDevicePart(s))
 	}
 
 	// Bare phone number — add @s.whatsapp.net.

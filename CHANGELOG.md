@@ -2,6 +2,19 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.19.1] — 2026-06-15
+
+### Fixed
+
+- **WhatsApp replies misdelivered (regression from v1.19.0).** The JID fix in
+  v1.19.0 routed the outgoing recipient through `normalizeJID`, which applies
+  `normalizeBRPhone` and inserts the mobile 9th digit into genuine 12-digit
+  Brazilian numbers (e.g. `558287015132` → `5582987015132`). Replies were then
+  sent to a non-existent number — WhatsApp accepted the send with no error, so
+  the agent processed messages but the user never received responses. The send
+  path now strips only the channel prefix and companion device part
+  (`stripDevicePart`), never mutating the phone digits. Lookups are unaffected.
+
 ## [v1.19.0] — 2026-06-15
 
 Memory/context reliability + web UI redesign. Diagnosed from production logs
