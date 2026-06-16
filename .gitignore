@@ -54,6 +54,7 @@ configs/bootstrap/USER.md
 
 # Agent working directory (projects, temp files, generated content)
 /workspace/
+.sisyphus/
 
 # Config with secrets
 config.yaml

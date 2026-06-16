@@ -10,9 +10,17 @@ import (
 )
 
 // AgentProfileConfig defines a specialized agent configuration.
+// When used as a "rotatable profile", the same agent identity (SOUL.md) is
+// preserved while switching domain context, model, skills, and tool access.
 type AgentProfileConfig struct {
 	// ID is the unique identifier for this agent profile.
 	ID string `yaml:"id"`
+
+	// Label is a human-readable name shown to the user (e.g. "DevClaw Dev").
+	Label string `yaml:"label"`
+
+	// Description is a short summary of what this profile focuses on.
+	Description string `yaml:"description"`
 
 	// Model is the LLM model to use (e.g., "gpt-4o", "claude-sonnet-4").
 	Model string `yaml:"model"`
@@ -22,6 +30,21 @@ type AgentProfileConfig struct {
 
 	// Skills are the skill names to enable for this agent.
 	Skills []string `yaml:"skills"`
+
+	// ToolProfile selects which tool group preset to use ("minimal", "coding", "full").
+	ToolProfile string `yaml:"tool_profile"`
+
+	// MemoryScope scopes memory search results to this tag.
+	// Empty = search all memories (no scoping).
+	MemoryScope string `yaml:"memory_scope"`
+
+	// BootstrapDir is an additional directory to load bootstrap files (AGENTS.md, TOOLS.md)
+	// from when this profile is active. Useful for project-specific conventions.
+	BootstrapDir string `yaml:"bootstrap_dir"`
+
+	// WorkspacePatterns auto-activates this profile when the resolved workspace
+	// directory matches any of these glob patterns (e.g. "/home/user/project-x/**").
+	WorkspacePatterns []string `yaml:"workspace_patterns"`
 
 	// Channels route messages from these channels to this agent.
 	Channels []string `yaml:"channels"`
@@ -59,12 +82,12 @@ type AgentsConfig struct {
 
 // AgentRouter routes messages to the appropriate agent profile.
 type AgentRouter struct {
-	profiles   map[string]*AgentProfileConfig
-	byChannel  map[string]string // channel -> profile ID
-	byUser     map[string]string // user JID -> profile ID
-	byGroup    map[string]string // group JID -> profile ID
-	defaultID  string
-	logger     *slog.Logger
+	profiles  map[string]*AgentProfileConfig
+	byChannel map[string]string // channel -> profile ID
+	byUser    map[string]string // user JID -> profile ID
+	byGroup   map[string]string // group JID -> profile ID
+	defaultID string
+	logger    *slog.Logger
 }
 
 // NewAgentRouter creates a new agent router from configuration.

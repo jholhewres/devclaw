@@ -1674,6 +1674,144 @@ type SecurityAuditToolConfig struct {
 	EmbeddingCfg  memory.EmbeddingConfig
 }
 
+// ProfileSwitcherConfig holds dependencies for the switch_profile tool.
+type ProfileSwitcherConfig struct {
+	Router       *AgentRouter
+	SessionStore *SessionStore
+}
+
+// RegisterProfileTools registers profile switching tools.
+func RegisterProfileTools(executor *ToolExecutor, cfg ProfileSwitcherConfig) {
+	if cfg.Router == nil {
+		return
+	}
+
+	executor.Register(
+		MakeToolDefinition("switch_profile",
+			"Switch the active profile to change domain context, model, skills, and tool access. "+
+				"Use this when the user wants to work on a different project or context. "+
+				"Available profiles can be listed with action='list'.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"profile_id": map[string]any{
+						"type":        "string",
+						"description": "Profile ID to activate (use action='list' to see available IDs). Leave empty with action='switch' to return to the base config.",
+					},
+					"action": map[string]any{
+						"type":        "string",
+						"enum":        []string{"switch", "list", "current"},
+						"description": "'switch' to change profile, 'list' to see all profiles, 'current' to show active profile",
+					},
+				},
+			},
+		),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			action, _ := args["action"].(string)
+			if action == "" {
+				action = "switch"
+			}
+
+			switch action {
+			case "list":
+				var sb strings.Builder
+				sb.WriteString("# Available Profiles\n\n")
+				for _, id := range cfg.Router.ListProfiles() {
+					p := cfg.Router.GetProfile(id)
+					if p == nil {
+						continue
+					}
+					label := p.Label
+					if label == "" {
+						label = p.ID
+					}
+					sb.WriteString(fmt.Sprintf("- **%s** (`%s`)", label, p.ID))
+					if p.Description != "" {
+						sb.WriteString(": " + p.Description)
+					}
+					if p.Model != "" {
+						sb.WriteString(" [model: " + p.Model + "]")
+					}
+					sb.WriteString("\n")
+				}
+				return sb.String(), nil
+
+			case "current":
+				sessionID := SessionIDFromContext(ctx)
+				if sessionID == "" {
+					return "No active session.", nil
+				}
+				profileID := "none (base config)"
+				if cfg.SessionStore != nil {
+					if sess := cfg.SessionStore.GetByID(sessionID); sess != nil {
+						if active := sess.GetConfig().ActiveProfileID; active != "" {
+							p := cfg.Router.GetProfile(active)
+							if p != nil {
+								label := p.Label
+								if label == "" {
+									label = p.ID
+								}
+								profileID = fmt.Sprintf("%s (%s)", label, active)
+							} else {
+								profileID = active + " (not found)"
+							}
+						}
+					}
+				}
+				return fmt.Sprintf("Active profile: %s", profileID), nil
+
+			case "switch":
+				profileID, _ := args["profile_id"].(string)
+				if profileID == "" {
+					sessionID := SessionIDFromContext(ctx)
+					if sessionID == "" {
+						return "No active session.", nil
+					}
+					if cfg.SessionStore != nil {
+						if sess := cfg.SessionStore.GetByID(sessionID); sess != nil {
+							sessConfig := sess.GetConfig()
+							sessConfig.ActiveProfileID = ""
+							sess.SetConfig(sessConfig)
+						}
+					}
+					return "Switched to base configuration.", nil
+				}
+				profile := cfg.Router.GetProfile(profileID)
+				if profile == nil {
+					available := strings.Join(cfg.Router.ListProfiles(), ", ")
+					return fmt.Sprintf("Profile '%s' not found. Available: %s", profileID, available), nil
+				}
+
+				sessionID := SessionIDFromContext(ctx)
+				if sessionID != "" && cfg.SessionStore != nil {
+					if sess := cfg.SessionStore.GetByID(sessionID); sess != nil {
+						sessConfig := sess.GetConfig()
+						sessConfig.ActiveProfileID = profileID
+						sess.SetConfig(sessConfig)
+					}
+				}
+
+				label := profile.Label
+				if label == "" {
+					label = profile.ID
+				}
+				var sb strings.Builder
+				sb.WriteString(fmt.Sprintf("Switched to profile **%s**.", label))
+				if profile.Description != "" {
+					sb.WriteString(" " + profile.Description)
+				}
+				if profile.Model != "" {
+					sb.WriteString(fmt.Sprintf(" Model: %s.", profile.Model))
+				}
+				return sb.String(), nil
+
+			default:
+				return "Unknown action. Use 'switch', 'list', or 'current'.", nil
+			}
+		},
+	)
+}
+
 func registerSecurityAuditTool(executor *ToolExecutor, cfg SecurityAuditToolConfig) {
 	executor.RegisterHidden(
 		MakeToolDefinition("security_audit", "Run a security audit checking for misconfigurations, exposed secrets, and security gaps.", map[string]any{

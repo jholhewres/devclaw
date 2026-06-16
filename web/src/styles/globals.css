@@ -26,6 +26,7 @@
 /* ── Root defaults ── */
 :root {
   font-size: 16px;
+  color-scheme: light dark;
 }
 
 html {
@@ -47,6 +48,38 @@ body {
   color: var(--color-text-primary);
   background: var(--color-bg-nav);
   line-height: 1.5;
+}
+
+/* ── System preference: auto dark mode ── */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    color-scheme: dark;
+  }
+}
+
+/* ── Glass surface tokens (for overlays, panels, modals) ── */
+.glass {
+  background: rgba(18, 18, 24, 0.7);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.light .glass {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.glass-subtle {
+  background: rgba(18, 18, 24, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.light .glass-subtle {
+  background: rgba(255, 255, 255, 0.4);
 }
 
 /* ── Interactive elements — always show pointer ── */
@@ -181,6 +214,31 @@ input:focus-visible {
 .animate-slide-in-left { animation: slide-in-left 0.25s ease-out; }
 .animate-toast-in { animation: toast-in 0.3s ease-out forwards; }
 .animate-toast-out { animation: toast-out 0.2s ease-in forwards; }
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes dialog-out {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to { opacity: 0; transform: scale(0.96) translateY(8px); }
+}
+
+@keyframes stream-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(100%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-dialog-in { animation: dialog-in 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+.animate-dialog-out { animation: dialog-out 0.15s ease-in forwards; }
+.animate-stream-cursor { animation: stream-cursor 1s step-end infinite; }
+.animate-slide-up { animation: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
 
 /* ── Stream shimmer ── */
 .stream-shimmer {

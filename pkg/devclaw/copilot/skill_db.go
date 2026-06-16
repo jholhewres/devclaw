@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -52,11 +53,11 @@ type QueryOptions struct {
 
 // Constants for validation.
 const (
-	maxNameLength      = 64  // Max length for skill/table/column names
-	maxFullNameLength  = 128 // Max length for combined skill_table name
-	maxQueryLimit      = 1000
-	defaultQueryLimit  = 100
-	maxRowIDLength     = 64
+	maxNameLength     = 64  // Max length for skill/table/column names
+	maxFullNameLength = 128 // Max length for combined skill_table name
+	maxQueryLimit     = 1000
+	defaultQueryLimit = 100
+	maxRowIDLength    = 64
 )
 
 // validNameRegex validates table and column names (lowercase letters, numbers, underscores).
@@ -67,17 +68,17 @@ var validRowIDRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 
 // allowedColumnTypes is a whitelist of valid SQL column types.
 var allowedColumnTypes = map[string]bool{
-	"TEXT":               true,
-	"TEXT NOT NULL":      true,
-	"INTEGER":            true,
-	"INTEGER NOT NULL":   true,
-	"REAL":               true,
-	"REAL NOT NULL":      true,
-	"BLOB":               true,
-	"NUMERIC":            true,
-	"BOOLEAN":            true,
-	"DATE":               true,
-	"DATETIME":           true,
+	"TEXT":             true,
+	"TEXT NOT NULL":    true,
+	"INTEGER":          true,
+	"INTEGER NOT NULL": true,
+	"REAL":             true,
+	"REAL NOT NULL":    true,
+	"BLOB":             true,
+	"NUMERIC":          true,
+	"BOOLEAN":          true,
+	"DATE":             true,
+	"DATETIME":         true,
 }
 
 // allowedColumnTypesWithDefaults are type patterns that include DEFAULT values.
@@ -187,6 +188,85 @@ func (s *SkillDB) tableNotFoundError(skillName, tableName string) error {
 	}
 	return fmt.Errorf("table %q not found for skill %q; available tables: [%s]",
 		tableName, skillName, strings.Join(tables, ", "))
+}
+
+// reconcileFromPhysical self-heals the registry when a skill table exists
+// physically (in sqlite_master) but has no _skill_tables_registry row. This
+// happens when a table is created out-of-band (e.g. raw SQL via the bash tool)
+// instead of through CreateTable, which previously made every query fail with
+// "skill has no tables" even though the data was right there.
+//
+// Returns true when the table is (now) registered and usable. Uses s.db
+// directly so it is safe to call whether the caller holds a read or write lock;
+// database/sql is goroutine-safe and the reconcile INSERT is rare and idempotent.
+func (s *SkillDB) reconcileFromPhysical(skillName, tableName string) bool {
+	full := fullTableName(skillName, tableName)
+	var name string
+	if err := s.db.QueryRow(
+		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", full,
+	).Scan(&name); err != nil {
+		return false // genuinely missing (or probe failed)
+	}
+	// Recover the real schema and row count so DescribeTable/ListTables return
+	// accurate metadata for the reconciled table instead of zero values.
+	schemaJSON := s.introspectSchemaJSON(full)
+	var rowCount int
+	_ = s.db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s", full)).Scan(&rowCount)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.Exec(
+		`INSERT OR IGNORE INTO _skill_tables_registry
+		 (skill_name, table_name, display_name, description, schema_json, row_count, created_at, updated_at)
+		 VALUES (?, ?, '', 'reconciled from existing table', ?, ?, ?, ?)`,
+		skillName, tableName, schemaJSON, rowCount, now, now,
+	); err != nil {
+		slog.Warn("skill_db: failed to reconcile orphaned table into registry",
+			"skill", skillName, "table", tableName, "error", err)
+		return false
+	}
+	slog.Warn("skill_db: reconciled orphaned table into registry (created out-of-band)",
+		"skill", skillName, "table", tableName)
+	return true
+}
+
+// introspectSchemaJSON reads a physical table's user-defined columns via
+// PRAGMA table_info and returns them as registry schema JSON (the same shape
+// CreateTable stores). Auto-managed columns (id, created_at, updated_at) are
+// omitted. Returns "{}" on any error. fullName is composed from already
+// validated skill/table names, so interpolation here is safe.
+func (s *SkillDB) introspectSchemaJSON(fullName string) string {
+	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", fullName))
+	if err != nil {
+		return "{}"
+	}
+	defer rows.Close()
+
+	cols := map[string]string{}
+	for rows.Next() {
+		var (
+			cid         int
+			name, ctype string
+			notnull, pk int
+			dflt        sql.NullString
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return "{}"
+		}
+		switch name {
+		case "id", "created_at", "updated_at":
+			continue
+		}
+		def := ctype
+		if notnull == 1 {
+			def += " NOT NULL"
+		}
+		cols[name] = def
+	}
+	b, err := json.Marshal(cols)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
 }
 
 // validateName checks if a name is valid for tables/columns.
@@ -374,7 +454,10 @@ func (s *SkillDB) Insert(skillName, tableName string, data map[string]any) (stri
 		skillName, tableName,
 	).Scan(&schemaJSON)
 	if err == sql.ErrNoRows {
-		return "", s.tableNotFoundError(skillName, tableName)
+		if !s.reconcileFromPhysical(skillName, tableName) {
+			return "", s.tableNotFoundError(skillName, tableName)
+		}
+		err = nil // reconciled: table is now registered, fall through
 	}
 	if err != nil {
 		return "", fmt.Errorf("check table: %w", err)
@@ -468,7 +551,10 @@ func (s *SkillDB) QueryWithOptions(skillName, tableName string, opts QueryOption
 		skillName, tableName,
 	).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return nil, s.tableNotFoundError(skillName, tableName)
+		if !s.reconcileFromPhysical(skillName, tableName) {
+			return nil, s.tableNotFoundError(skillName, tableName)
+		}
+		err = nil // reconciled: table is now registered, fall through
 	}
 	if err != nil {
 		return nil, fmt.Errorf("check table: %w", err)
@@ -610,7 +696,10 @@ func (s *SkillDB) Update(skillName, tableName, rowID string, data map[string]any
 		skillName, tableName,
 	).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return s.tableNotFoundError(skillName, tableName)
+		if !s.reconcileFromPhysical(skillName, tableName) {
+			return s.tableNotFoundError(skillName, tableName)
+		}
+		err = nil // reconciled: table is now registered, fall through
 	}
 	if err != nil {
 		return fmt.Errorf("check table: %w", err)
@@ -702,7 +791,10 @@ func (s *SkillDB) Delete(skillName, tableName, rowID string) error {
 		skillName, tableName,
 	).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return s.tableNotFoundError(skillName, tableName)
+		if !s.reconcileFromPhysical(skillName, tableName) {
+			return s.tableNotFoundError(skillName, tableName)
+		}
+		err = nil // reconciled: table is now registered, fall through
 	}
 	if err != nil {
 		return fmt.Errorf("check table: %w", err)
@@ -759,7 +851,10 @@ func (s *SkillDB) DropTable(skillName, tableName string) error {
 		skillName, tableName,
 	).Scan(&exists)
 	if err == sql.ErrNoRows {
-		return s.tableNotFoundError(skillName, tableName)
+		if !s.reconcileFromPhysical(skillName, tableName) {
+			return s.tableNotFoundError(skillName, tableName)
+		}
+		err = nil // reconciled: table is now registered, fall through
 	}
 	if err != nil {
 		return fmt.Errorf("check table: %w", err)
@@ -864,7 +959,10 @@ func (s *SkillDB) DescribeTable(skillName, tableName string) (*TableInfo, error)
 	).Scan(&t.SkillName, &t.TableName, &t.DisplayName, &t.Description, &schemaJSON, &t.RowCount, &t.CreatedAt, &t.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		return nil, s.tableNotFoundError(skillName, tableName)
+		if !s.reconcileFromPhysical(skillName, tableName) {
+			return nil, s.tableNotFoundError(skillName, tableName)
+		}
+		err = nil // reconciled: table is now registered, fall through
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query table: %w", err)

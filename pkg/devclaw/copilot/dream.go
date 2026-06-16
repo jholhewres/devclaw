@@ -44,6 +44,12 @@ type DreamConfig struct {
 
 	// IdleMinutes is how long the daemon must be idle before triggering. Default: 10.
 	IdleMinutes int `yaml:"idle_minutes"`
+
+	// DisableContradictionResolution is an escape hatch. When true, the dream
+	// cycle still detects and logs contradictions but never supersedes (deletes)
+	// the older side. Default false (resolution enabled). Negative flag so that a
+	// config that omits it keeps the safe, on-by-default behavior.
+	DisableContradictionResolution bool `yaml:"disable_contradiction_resolution"`
 }
 
 // DefaultDreamConfig returns sensible defaults.
@@ -68,12 +74,13 @@ type DreamState struct {
 
 // DreamResult holds the outcome of a dream consolidation run.
 type DreamResult struct {
-	MemoriesAnalyzed int           `json:"memories_analyzed"`
-	Duplicates       int           `json:"duplicates_merged"`
-	Contradictions   int           `json:"contradictions_found"`
-	Consolidated     int           `json:"consolidated"`
-	Duration         time.Duration `json:"duration"`
-	Error            error         `json:"-"`
+	MemoriesAnalyzed       int           `json:"memories_analyzed"`
+	Duplicates             int           `json:"duplicates_merged"`
+	Contradictions         int           `json:"contradictions_found"`
+	ContradictionsResolved int           `json:"contradictions_resolved"`
+	Consolidated           int           `json:"consolidated"`
+	Duration               time.Duration `json:"duration"`
+	Error                  error         `json:"-"`
 }
 
 // dreamClassifierBatchSize is the number of legacy files the classifier
@@ -330,65 +337,86 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 	duplicates := d.findDuplicates(entries)
 	result.Duplicates = len(duplicates)
 
-	contradictions := d.findContradictions(entries)
+	generalContradictions := d.findContradictions(entries)
 
 	// Evidence-based contradictions: detect negative facts that are contradicted
 	// by newer positive facts about the same entity.
 	evidenceContradictions := d.findEvidenceContradictions(entries)
-	contradictions = append(contradictions, evidenceContradictions...)
 
-	// Auto-expire stale negative entries that were contradicted by evidence.
-	// This lets Compact() below remove them from MEMORY.md entirely, so future
-	// memory searches don't return the outdated information.
-	if fileStore, ok := d.store.(*memory.FileStore); ok && len(evidenceContradictions) > 0 {
-		expired := d.expireStaleEntries(fileStore, evidenceContradictions)
-		d.logger.Info("dream: expired stale entries by evidence",
-			"count", expired,
-			"contradictions", len(evidenceContradictions),
-		)
-	}
+	result.Contradictions = len(generalContradictions) + len(evidenceContradictions)
 
-	result.Contradictions = len(contradictions)
-
-	// Phase 3: Consolidate — merge duplicates, flag contradictions.
+	// Phase 3: Consolidate — RESOLVE contradictions by superseding the older
+	// side, and merge duplicates. The previous implementation only appended
+	// "[Contradiction] A vs B" report entries, which grew MEMORY.md unboundedly
+	// and left the stale fact retrievable — the root cause of hundreds of
+	// unresolved contradictions accumulating in production while the agent kept
+	// recalling outdated information.
 	d.logger.Info("dream phase: consolidate",
 		"duplicates", len(duplicates),
-		"contradictions", len(contradictions),
+		"contradictions", result.Contradictions,
 	)
 
-	consolidated := 0
+	// Pinned memories are never superseded automatically.
+	pinned := make(map[string]bool)
+	for _, e := range entries {
+		if e.IsPinned() {
+			pinned[strings.TrimSpace(e.Content)] = true
+		}
+	}
 
-	// Compact the memory file: remove expired entries and exact duplicates.
-	// This replaces the old approach of appending [Consolidated] entries,
-	// which grew MEMORY.md unboundedly without actually removing dead data.
+	// Build the set to supersede. Resolution is on by default; the
+	// disable_contradiction_resolution escape hatch turns it off entirely
+	// (detect + log only) if a deployment sees a false positive.
+	resolvable := make([]contradiction, 0, result.Contradictions)
+	if !d.config.DisableContradictionResolution {
+		// Evidence-based contradictions are high-confidence: a newer positive
+		// fact about the same entity supersedes the older negative one.
+		for _, c := range evidenceContradictions {
+			if !pinned[strings.TrimSpace(c.entryA)] {
+				resolvable = append(resolvable, c)
+			}
+		}
+		// General negation-heuristic contradictions are a weaker signal, so only
+		// supersede when the pair is also a near-duplicate restatement (high
+		// token overlap). This prevents deleting a distinct fact that merely
+		// shares a topic and an opposing keyword.
+		for _, c := range generalContradictions {
+			if pinned[strings.TrimSpace(c.entryA)] {
+				continue
+			}
+			if contentsNearDuplicate(c.entryA, c.entryB) {
+				resolvable = append(resolvable, c)
+			}
+		}
+	}
+
+	consolidated := 0
+	resolved := 0
 	if fileStore, ok := d.store.(*memory.FileStore); ok {
+		// Supersede the older side of each contradiction with a soft [stale]
+		// marker. parseMemoryFile skips stale entries (so searches stop
+		// returning them) and Compact then drops them from disk. Soft and
+		// reversible — the raw content stays in the file's history until compact.
+		if len(resolvable) > 0 {
+			resolved = d.expireStaleEntries(fileStore, resolvable)
+		}
+		// Compact: remove stale/expired entries and exact duplicates.
 		removed, err := fileStore.Compact()
 		if err != nil {
 			d.logger.Warn("dream: compact failed", "error", err)
 		} else if removed > 0 {
-			d.logger.Info("dream: compacted memory file",
-				"removed", removed,
-				"duplicates_detected", len(duplicates),
-				"contradictions_detected", len(contradictions),
-			)
 			consolidated = removed
 		}
-	}
-
-	// Save contradiction reports (append-only — these are new information).
-	for _, c := range contradictions {
-		report := memory.Entry{
-			Content:   fmt.Sprintf("[Contradiction] %s vs %s", c.entryA, c.entryB),
-			Source:    "dream",
-			Category: "summary",
-			Timestamp: time.Now(),
-		}
-		if err := d.store.Save(report); err != nil {
-			d.logger.Warn("dream: failed to save contradiction report", "error", err)
-		}
+		d.logger.Info("dream: compacted memory file",
+			"removed", consolidated,
+			"duplicates_detected", len(duplicates),
+			"contradictions_detected", result.Contradictions,
+			"contradictions_resolved", resolved,
+		)
 	}
 
 	result.Consolidated = consolidated
+	result.ContradictionsResolved = resolved
 
 	// Phase 3b: Classify — opportunistically label legacy files (wing IS NULL).
 	// Error-isolated: a classifier panic or error MUST NOT abort the dream cycle.
@@ -576,9 +604,14 @@ func (d *DreamConsolidator) findContradictions(entries []memory.Entry) []contrad
 				aHasNeg := strings.Contains(a, neg)
 				bHasNeg := strings.Contains(b, neg)
 				if aHasNeg != bHasNeg {
+					// entryA = older entry (the one to supersede); entryB = newer.
+					older, newer := entries[i], entries[j]
+					if newer.Timestamp.Before(older.Timestamp) {
+						older, newer = newer, older
+					}
 					found = append(found, contradiction{
-						entryA: entries[i].Content,
-						entryB: entries[j].Content,
+						entryA: older.Content,
+						entryB: newer.Content,
 					})
 					break
 				}
@@ -795,6 +828,11 @@ func stripEntryBrackets(s string) string {
 	if strings.HasPrefix(s, "[expires:") {
 		s = skipBracket(s)
 	}
+	// [meta:...] optional v2 lifecycle metadata — must be peeled so content
+	// comparison (e.g. stale-matching during supersede) sees the bare content.
+	if strings.HasPrefix(s, "[meta:") {
+		s = skipBracket(s)
+	}
 	return strings.TrimSpace(s)
 }
 
@@ -857,6 +895,41 @@ func findSubstr(s, sub string) int {
 }
 
 // hasSignificantOverlap checks if two strings share enough words in common.
+// contentsNearDuplicate reports whether two memory contents are restatements of
+// the same fact (high token overlap), as opposed to merely sharing a topic. It
+// uses Jaccard similarity over words longer than 3 chars and is robust to word
+// order and an inserted negation. Used to gate destructive supersede on the weak
+// general-negation contradiction signal.
+func contentsNearDuplicate(a, b string) bool {
+	setA := significantWordSet(a)
+	setB := significantWordSet(b)
+	if len(setA) == 0 || len(setB) == 0 {
+		return false
+	}
+	inter := 0
+	for w := range setA {
+		if setB[w] {
+			inter++
+		}
+	}
+	union := len(setA) + len(setB) - inter
+	if union == 0 {
+		return false
+	}
+	return float64(inter)/float64(union) >= 0.6
+}
+
+// significantWordSet returns the set of normalized words longer than 3 chars.
+func significantWordSet(s string) map[string]bool {
+	set := make(map[string]bool)
+	for _, w := range splitWords(normalizeForComparison(s)) {
+		if len(w) > 3 {
+			set[w] = true
+		}
+	}
+	return set
+}
+
 func hasSignificantOverlap(a, b string) bool {
 	wordsA := splitWords(a)
 	wordsB := make(map[string]bool)

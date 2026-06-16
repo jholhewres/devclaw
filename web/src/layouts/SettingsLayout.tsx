@@ -1,63 +1,76 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft } from 'lucide-react';
-import { Button as AriaButton } from 'react-aria-components';
-import { Tabs } from '@/components/application/tabs/tabs';
-import { NativeSelect } from '@/components/base/select/select';
+import {
+  Monitor,
+  Radio,
+  Shield,
+  Code2,
+  Webhook,
+  Zap,
+  Database,
+  HardDrive,
+  CreditCard,
+  Globe,
+  Box,
+  Users,
+  FolderGit2,
+  ArrowLeft,
+  Settings,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { cx } from '@/utils/cx';
 
-const SETTINGS_TABS = [
-  {
-    id: 'system',
-    labelKey: 'settingsPage.tabSystem',
-    defaultRoute: '/system',
-    routes: ['/system'],
-  },
-  {
-    id: 'canais',
-    labelKey: 'settingsPage.tabCanais',
-    defaultRoute: '/channels',
-    routes: ['/channels', '/channels/whatsapp', '/channels/telegram'],
-  },
-  {
-    id: 'seguranca',
-    labelKey: 'settingsPage.tabSeguranca',
-    defaultRoute: '/security',
-    routes: ['/security'],
-  },
-  {
-    id: 'dev',
-    labelKey: 'settingsPage.tabDev',
-    defaultRoute: '/dev',
-    routes: ['/dev', '/config', '/webhooks', '/hooks', '/mcp', '/database', '/memory', '/budget', '/domain', '/access', '/groups'],
-  },
-] as const;
-
-function getActiveTab(pathname: string) {
-  return SETTINGS_TABS.find((tab) =>
-    tab.routes.some((r) => pathname === r || pathname.startsWith(`${r}/`))
-  );
+interface SettingsSection {
+  id: string;
+  labelKey: string;
+  icon: LucideIcon;
+  route: string;
+  routes: string[];
 }
 
-/** Routes that are sub-pages — show only Outlet with back button, no title or tabs */
-const SUB_ROUTES = [
-  '/config',
-  '/webhooks',
-  '/hooks',
-  '/memory',
-  '/database',
-  '/budget',
-  '/domain',
-  '/mcp',
-  '/access',
-  '/groups',
-  '/channels/whatsapp',
-  '/channels/telegram',
+interface SettingsGroup {
+  labelKey: string;
+  items: SettingsSection[];
+}
+
+const SETTINGS_GROUPS: SettingsGroup[] = [
+  {
+    labelKey: 'sidebarSections.system',
+    items: [
+      { id: 'system', labelKey: 'settingsPage.tabSystem', icon: Monitor, route: '/system', routes: ['/system'] },
+      { id: 'channels', labelKey: 'settingsPage.tabCanais', icon: Radio, route: '/channels', routes: ['/channels', '/channels/whatsapp', '/channels/telegram'] },
+      { id: 'security', labelKey: 'settingsPage.tabSeguranca', icon: Shield, route: '/security', routes: ['/security'] },
+    ],
+  },
+  {
+    labelKey: 'sidebarSections.settings',
+    items: [
+      { id: 'dev', labelKey: 'settingsPage.tabDev', icon: Code2, route: '/dev', routes: ['/dev'] },
+      { id: 'config', labelKey: 'sidebar.apiConfig', icon: Settings, route: '/config', routes: ['/config'] },
+      { id: 'webhooks', labelKey: 'sidebar.webhooks', icon: Webhook, route: '/webhooks', routes: ['/webhooks'] },
+      { id: 'hooks', labelKey: 'sidebar.hooks', icon: Zap, route: '/hooks', routes: ['/hooks'] },
+      { id: 'mcp', labelKey: 'sidebar.mcp', icon: Box, route: '/mcp', routes: ['/mcp'] },
+      { id: 'database', labelKey: 'sidebar.database', icon: Database, route: '/database', routes: ['/database'] },
+      { id: 'memory', labelKey: 'sidebar.memory', icon: HardDrive, route: '/memory', routes: ['/memory'] },
+      { id: 'budget', labelKey: 'sidebar.budget', icon: CreditCard, route: '/budget', routes: ['/budget'] },
+      { id: 'domain', labelKey: 'sidebar.domainNetwork', icon: Globe, route: '/domain', routes: ['/domain'] },
+      { id: 'access', labelKey: 'sidebar.access', icon: Users, route: '/access', routes: ['/access'] },
+      { id: 'groups', labelKey: 'sidebar.groups', icon: FolderGit2, route: '/groups', routes: ['/groups'] },
+    ],
+  },
 ];
 
-/** Get the parent route for a sub-page */
-function getParentRoute(pathname: string): string {
-  if (pathname.startsWith('/channels/')) return '/channels';
-  return '/dev';
+const SETTINGS_SECTIONS = SETTINGS_GROUPS.flatMap((group) => group.items);
+
+function findActiveSection(pathname: string): SettingsSection | null {
+  for (const group of SETTINGS_GROUPS) {
+    for (const item of group.items) {
+      if (item.routes.some((r) => pathname === r || pathname.startsWith(`${r}/`))) {
+        return item;
+      }
+    }
+  }
+  return null;
 }
 
 export function SettingsLayout() {
@@ -65,76 +78,69 @@ export function SettingsLayout() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const isSubPage = SUB_ROUTES.some(
-    (r) => location.pathname === r || location.pathname.startsWith(`${r}/`)
-  );
-
-  const activeTab = getActiveTab(location.pathname);
-  const selectedKey = activeTab?.id ?? 'system';
-
-  const handleTabChange = (id: string | number) => {
-    const tab = SETTINGS_TABS.find((t) => t.id === String(id));
-    if (tab) navigate(tab.defaultRoute);
-  };
-
-  const tabItems = SETTINGS_TABS.map((tab) => ({
-    id: tab.id,
-    children: t(tab.labelKey),
-  }));
-
-  const selectOptions = SETTINGS_TABS.map((tab) => ({
-    value: tab.id,
-    label: t(tab.labelKey),
-  }));
-
-  if (isSubPage) {
-    const parentRoute = getParentRoute(location.pathname);
-    return (
-      <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
-        <AriaButton
-          onPress={() => navigate(parentRoute)}
-          className="mb-4 inline-flex cursor-pointer items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-tertiary outline-hidden transition-colors hover:bg-secondary hover:text-primary"
-        >
-          <ArrowLeft className="size-4" />
-          {t('common.back')}
-        </AriaButton>
-        <Outlet />
-      </div>
-    );
-  }
+  const activeSection = findActiveSection(location.pathname);
+  const activeId = activeSection?.id ?? null;
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Header + Tabs */}
-      <div className="shrink-0 border-b border-secondary px-4 pt-6 sm:px-6 lg:px-8">
-        <div className="w-full">
-          <h1 className="text-display-xs font-semibold text-primary">
-            {t('settingsPage.title')}
-          </h1>
-
-          {/* Desktop: Tabs */}
-          <div className="mt-4 hidden lg:block">
-            <Tabs selectedKey={selectedKey} onSelectionChange={handleTabChange}>
-              <Tabs.List type="underline" items={tabItems}>
-                {(item) => <Tabs.Item id={item.id}>{item.children}</Tabs.Item>}
-              </Tabs.List>
-            </Tabs>
-          </div>
-
-          {/* Mobile: Select */}
-          <div className="mt-4 mb-4 lg:hidden">
-            <NativeSelect
-              options={selectOptions}
-              value={selectedKey}
-              onChange={(e) => handleTabChange(e.target.value)}
-            />
-          </div>
+    <div className="flex h-full">
+      <aside className="hidden w-52 shrink-0 border-r border-secondary bg-secondary/30 lg:flex lg:flex-col">
+        <div className="flex h-10 items-center border-b border-secondary px-4">
+          <button
+            onClick={() => navigate('/')}
+            className="flex items-center gap-2 text-xs font-medium text-secondary transition-colors hover:text-primary"
+          >
+            <ArrowLeft className="size-3.5" />
+            {t('common.back')}
+          </button>
         </div>
-      </div>
 
-      {/* Tab content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
+        <nav className="flex-1 overflow-y-auto p-3">
+          {SETTINGS_GROUPS.map((group) => (
+            <div key={group.labelKey} className="mb-4">
+              <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-quaternary">
+                {t(group.labelKey)}
+              </p>
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const active = activeId === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => navigate(item.route)}
+                      className={cx(
+                        'flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm font-medium transition-colors',
+                        active
+                          ? 'bg-active text-fg-primary'
+                          : 'text-fg-tertiary hover:bg-primary_hover hover:text-fg-secondary',
+                      )}
+                    >
+                      <Icon className="size-4" />
+                      <span>{t(item.labelKey)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </nav>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+        <div className="border-b border-secondary px-4 py-3 lg:hidden">
+          <select
+            value={activeSection?.route ?? '/system'}
+            onChange={(event) => navigate(event.target.value)}
+            className="w-full rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm font-medium text-primary outline-hidden"
+          >
+            {SETTINGS_SECTIONS.map((item) => (
+              <option key={item.id} value={item.route}>
+                {t(item.labelKey)}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="px-4 py-6 sm:px-6 lg:px-8">
           <Outlet />
         </div>
       </div>

@@ -10,7 +10,9 @@ package memory
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,12 +30,146 @@ import (
 const MemoryFileName = "MEMORY.md"
 
 // Entry represents a single memory fact or event.
+//
+// The v2 lifecycle fields (Supersedes..Superseded) are all optional and default
+// to their zero values, so entries written before they existed parse and behave
+// exactly as before. They are persisted in a compact, backward-compatible
+// "[meta:<base64-json>]" tag and only emitted when at least one is set.
 type Entry struct {
 	Content   string     `json:"content"`
-	Source    string     `json:"source"`              // "user", "agent", "system"
-	Category  string     `json:"category"`            // "fact", "preference", "event", "summary"
+	Source    string     `json:"source"`   // "user", "agent", "system"
+	Category  string     `json:"category"` // "fact", "preference", "event", "summary"
 	Timestamp time.Time  `json:"timestamp"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"` // nil = never expires
+
+	// ── v2 lifecycle metadata (all optional) ──
+	Supersedes   []string `json:"supersedes,omitempty"`   // content-keys this entry replaces
+	Consolidates []string `json:"consolidates,omitempty"` // content-keys merged into this entry
+	Importance   float64  `json:"importance,omitempty"`   // 0.0..1.0 ranking/retention hint
+	Pinned       bool     `json:"pinned,omitempty"`       // exempt from retention/demotion
+	Origin       string   `json:"origin,omitempty"`       // manual, dream, precompact, bootstrap, ...
+	MemoryType   string   `json:"memory_type,omitempty"`  // semantic, episodic, operational
+	ContextTier  string   `json:"context_tier,omitempty"` // L0, L1, L2
+	Superseded   bool     `json:"superseded,omitempty"`   // soft-invalidated by a newer entry
+}
+
+// IsExpired reports whether the entry has a TTL that has already passed.
+func (e Entry) IsExpired(now time.Time) bool {
+	return e.ExpiresAt != nil && e.ExpiresAt.Before(now)
+}
+
+// IsPinned reports whether the entry is exempt from retention/demotion.
+func (e Entry) IsPinned() bool { return e.Pinned }
+
+// IsSuperseded reports whether a newer entry has soft-invalidated this one.
+func (e Entry) IsSuperseded() bool { return e.Superseded }
+
+// ContentKey is a stable identifier for an entry, derived from its category and
+// content. Used for supersede/consolidate lineage without a separate ID column.
+func (e Entry) ContentKey() string {
+	h := sha256.Sum256([]byte(e.Category + "\x00" + e.Content))
+	return hex.EncodeToString(h[:])
+}
+
+// entryMetaV2 is the JSON shape persisted in the "[meta:...]" tag. It mirrors the
+// optional lifecycle fields of Entry. omitempty keeps the encoded payload empty
+// (and thus omitted entirely) for plain entries.
+type entryMetaV2 struct {
+	Supersedes   []string `json:"s,omitempty"`
+	Consolidates []string `json:"c,omitempty"`
+	Importance   float64  `json:"i,omitempty"`
+	Pinned       bool     `json:"p,omitempty"`
+	Origin       string   `json:"o,omitempty"`
+	MemoryType   string   `json:"mt,omitempty"`
+	ContextTier  string   `json:"ct,omitempty"`
+	Superseded   bool     `json:"sd,omitempty"`
+}
+
+// encodeEntryMeta returns a base64-encoded JSON metadata payload for the entry,
+// or "" when no v2 field is set (so plain entries stay byte-for-byte unchanged).
+// base64 (std alphabet) never contains ']', so the parser can safely split on
+// the first ']'.
+func encodeEntryMeta(e Entry) string {
+	m := entryMetaV2{
+		Supersedes:   e.Supersedes,
+		Consolidates: e.Consolidates,
+		Importance:   e.Importance,
+		Pinned:       e.Pinned,
+		Origin:       e.Origin,
+		MemoryType:   e.MemoryType,
+		ContextTier:  e.ContextTier,
+		Superseded:   e.Superseded,
+	}
+	if len(m.Supersedes) == 0 && len(m.Consolidates) == 0 && m.Importance == 0 &&
+		!m.Pinned && m.Origin == "" && m.MemoryType == "" && m.ContextTier == "" && !m.Superseded {
+		return ""
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+// applyEntryMeta decodes a base64-encoded JSON metadata payload into the entry.
+// Unparseable payloads are ignored so a corrupt tag never drops the entry.
+func applyEntryMeta(e *Entry, payload string) {
+	raw, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return
+	}
+	var m entryMetaV2
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return
+	}
+	e.Supersedes = m.Supersedes
+	e.Consolidates = m.Consolidates
+	e.Importance = m.Importance
+	e.Pinned = m.Pinned
+	e.Origin = m.Origin
+	e.MemoryType = m.MemoryType
+	e.ContextTier = m.ContextTier
+	e.Superseded = m.Superseded
+}
+
+// sanitizeEntryContent escapes structural tag prefixes in user content so they
+// are not re-parsed as [expires:]/[meta:] tags on the next read (which would
+// silently corrupt the entry). Must be applied once at save time — never inside
+// formatEntryLine, which Compact re-runs over already-stored content.
+func sanitizeEntryContent(s string) string {
+	s = strings.ReplaceAll(s, "[expires:", "[expires\\:")
+	s = strings.ReplaceAll(s, "[meta:", "[meta\\:")
+	return s
+}
+
+// formatEntryLine renders an entry as a single MEMORY.md markdown line:
+//
+//   - [YYYY-MM-DD HH:MM] [category] [expires:YYYY-MM-DD] [meta:...] content
+//
+// The expires and meta tags are only emitted when present, keeping legacy-shaped
+// entries identical. This is the single source of truth for the on-disk format
+// (used by Save, SaveIfNotDuplicate, and Compact).
+func formatEntryLine(e Entry) string {
+	var b strings.Builder
+	b.WriteString("- [")
+	b.WriteString(e.Timestamp.Format("2006-01-02 15:04"))
+	b.WriteString("] [")
+	b.WriteString(e.Category)
+	b.WriteString("]")
+	if e.ExpiresAt != nil {
+		b.WriteString(" [expires:")
+		b.WriteString(e.ExpiresAt.Format("2006-01-02"))
+		b.WriteString("]")
+	}
+	if meta := encodeEntryMeta(e); meta != "" {
+		b.WriteString(" [meta:")
+		b.WriteString(meta)
+		b.WriteString("]")
+	}
+	b.WriteString(" ")
+	b.WriteString(e.Content)
+	b.WriteString("\n")
+	return b.String()
 }
 
 // categoryTTL defines default time-to-live per category.
@@ -112,23 +248,12 @@ func (fs *FileStore) Save(entry Entry) error {
 
 	memFile := filepath.Join(fs.baseDir, MemoryFileName)
 
+	// Sanitize content to prevent [expires:]/[meta:] tag injection on reparse.
+	entry.Content = sanitizeEntryContent(entry.Content)
+
 	// Format the entry as a markdown list item.
 	// Include expires_at tag if set, for parsing on read.
-	var line string
-	if entry.ExpiresAt != nil {
-		line = fmt.Sprintf("- [%s] [%s] [expires:%s] %s\n",
-			entry.Timestamp.Format("2006-01-02 15:04"),
-			entry.Category,
-			entry.ExpiresAt.Format("2006-01-02"),
-			entry.Content,
-		)
-	} else {
-		line = fmt.Sprintf("- [%s] [%s] %s\n",
-			entry.Timestamp.Format("2006-01-02 15:04"),
-			entry.Category,
-			entry.Content,
-		)
-	}
+	line := formatEntryLine(entry)
 
 	f, err := os.OpenFile(memFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -175,25 +300,11 @@ func (fs *FileStore) SaveIfNotDuplicate(entry Entry, contentHash string, isDupli
 		}
 	}
 
-	// Sanitize content to prevent [expires:] injection.
-	entry.Content = strings.ReplaceAll(entry.Content, "[expires:", "[expires\\:")
+	// Sanitize content to prevent [expires:]/[meta:] tag injection on reparse.
+	entry.Content = sanitizeEntryContent(entry.Content)
 
 	// Format and write.
-	var line string
-	if entry.ExpiresAt != nil {
-		line = fmt.Sprintf("- [%s] [%s] [expires:%s] %s\n",
-			entry.Timestamp.Format("2006-01-02 15:04"),
-			entry.Category,
-			entry.ExpiresAt.Format("2006-01-02"),
-			entry.Content,
-		)
-	} else {
-		line = fmt.Sprintf("- [%s] [%s] %s\n",
-			entry.Timestamp.Format("2006-01-02 15:04"),
-			entry.Category,
-			entry.Content,
-		)
-	}
+	line := formatEntryLine(entry)
 
 	f, err := os.OpenFile(memFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -446,20 +557,7 @@ func (fs *FileStore) Compact() (int, error) {
 		if !keep[i] {
 			continue
 		}
-		if e.ExpiresAt != nil {
-			buf.WriteString(fmt.Sprintf("- [%s] [%s] [expires:%s] %s\n",
-				e.Timestamp.Format("2006-01-02 15:04"),
-				e.Category,
-				e.ExpiresAt.Format("2006-01-02"),
-				e.Content,
-			))
-		} else {
-			buf.WriteString(fmt.Sprintf("- [%s] [%s] %s\n",
-				e.Timestamp.Format("2006-01-02 15:04"),
-				e.Category,
-				e.Content,
-			))
-		}
+		buf.WriteString(formatEntryLine(e))
 	}
 
 	if err := os.WriteFile(tmpFile, []byte(buf.String()), 0o600); err != nil {
@@ -526,6 +624,16 @@ func parseMemoryFile(content, source string) []Entry {
 				if exp, err := time.Parse("2006-01-02", dateStr); err == nil {
 					entry.ExpiresAt = &exp
 				}
+				line = strings.TrimSpace(line[closeBracket+1:])
+			}
+		}
+
+		// Try to parse optional v2 lifecycle metadata: [meta:<base64-json>].
+		// The base64 std alphabet never contains ']', so the first ']' is safe.
+		if strings.HasPrefix(line, "[meta:") {
+			closeBracket := strings.Index(line, "]")
+			if closeBracket > 0 {
+				applyEntryMeta(&entry, line[len("[meta:"):closeBracket])
 				line = strings.TrimSpace(line[closeBracket+1:])
 			}
 		}

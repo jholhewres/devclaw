@@ -1,29 +1,23 @@
 import { useParams } from 'react-router-dom'
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Loader2,
-  GitBranch,
-  Container,
-  Database as DatabaseIcon,
-  Code,
-  Globe,
+  Search,
+  Lightbulb,
+  Pencil,
   Zap,
+  BarChart3,
+  Route,
+  type LucideIcon,
 } from 'lucide-react'
 import { ChatMessage } from '@/components/ChatMessage'
 import { ChatInput } from '@/components/ChatInput'
 import { useChat } from '@/hooks/useChat'
-import { useAppStore } from '@/stores/app'
 import { cn } from '@/lib/utils'
 
-/** Generate a unique session ID */
-function generateSessionId(): string {
-  const timestamp = Date.now().toString(36)
-  const random = Math.random().toString(36).substring(2, 8)
-  return `webui:${timestamp}-${random}`
-}
+const WEBUI_SESSION_ID = 'webui:main'
 
-/** Extracts a user-friendly message from raw LLM/API errors. */
 function friendlyError(raw: string, t: (key: string) => string): string {
   if (raw.includes('404')) return t('chatPage.errorModel')
   if (raw.includes('401') || raw.includes('authentication')) return t('chatPage.errorAuth')
@@ -39,26 +33,25 @@ function friendlyError(raw: string, t: (key: string) => string): string {
   return raw
 }
 
-/** Suggestion chip data */
-const SUGGESTION_CHIPS = [
-  { key: 'gitStatus', icon: GitBranch },
-  { key: 'processes', icon: Zap },
-  { key: 'dbSchema', icon: DatabaseIcon },
-  { key: 'analyzeCode', icon: Code },
-  { key: 'apiTest', icon: Globe },
-  { key: 'dockerPs', icon: Container },
-] as const
+interface SuggestionChip {
+  key: string
+  icon: LucideIcon
+  promptKey: string
+}
+
+const SUGGESTIONS: SuggestionChip[] = [
+  { key: 'research', icon: Search, promptKey: 'chatPage.researchPrompt' },
+  { key: 'explain', icon: Lightbulb, promptKey: 'chatPage.explainPrompt' },
+  { key: 'write', icon: Pencil, promptKey: 'chatPage.writePrompt' },
+  { key: 'automate', icon: Zap, promptKey: 'chatPage.automatePrompt' },
+  { key: 'analyze', icon: BarChart3, promptKey: 'chatPage.analyzePrompt' },
+  { key: 'plan', icon: Route, promptKey: 'chatPage.planPrompt' },
+]
 
 export function Chat() {
   const { t } = useTranslation()
   const { sessionId } = useParams<{ sessionId: string }>()
-
-  const urlSessionId = sessionId ? decodeURIComponent(sessionId) : null
-
-  const [localSessionId, setLocalSessionId] = useState<string | null>(null)
-  const [initialMessage, setInitialMessage] = useState<string | null>(null)
-
-  const resolvedId = urlSessionId || localSessionId
+  const resolvedSessionId = sessionId ? decodeURIComponent(sessionId) : WEBUI_SESSION_ID
 
   const {
     messages,
@@ -68,40 +61,14 @@ export function Chat() {
     isLoadingHistory,
     sendMessage: chatSend,
     abort,
-  } = useChat(resolvedId)
+  } = useChat(resolvedSessionId)
 
   const bottomRef = useRef<HTMLDivElement>(null)
-
-  const chatSendRef = useRef(chatSend)
-  useEffect(() => {
-    chatSendRef.current = chatSend
-  }, [chatSend])
-
-  const initialMessageSentRef = useRef(false)
-
-  useEffect(() => {
-    if (resolvedId && initialMessage && !initialMessageSentRef.current) {
-      initialMessageSentRef.current = true
-      const timeoutId = setTimeout(() => {
-        chatSendRef.current(initialMessage)
-      }, 50)
-      return () => clearTimeout(timeoutId)
-    }
-  }, [resolvedId, initialMessage])
-
-  useEffect(() => {
-    if (urlSessionId) {
-      setLocalSessionId(null)
-      setInitialMessage(null)
-      initialMessageSentRef.current = false
-    }
-  }, [urlSessionId])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamingContent])
 
-  /* Escape key aborts streaming */
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isStreaming) {
@@ -112,54 +79,29 @@ export function Chat() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isStreaming, abort])
 
-  /* Invalidate sidebar sessions when a new session gets messages */
-  const hasInvalidatedRef = useRef(false)
-  useEffect(() => {
-    if (localSessionId && messages.length > 0 && !hasInvalidatedRef.current) {
-      hasInvalidatedRef.current = true
-      useAppStore.getState().invalidateSessions()
-    }
-  }, [localSessionId, messages.length])
-
-  const hasMessages = messages.length > 0 || streamingContent || isStreaming
-  const showChatView = hasMessages || !!resolvedId
-
-  const friendlyErrorLocal = (raw: string) => friendlyError(raw, t)
-
   const sendMessage = useCallback(
     (content: string) => {
-      if (resolvedId) {
-        chatSend(content)
-      } else {
-        const newSessionId = generateSessionId()
-        initialMessageSentRef.current = false
-        setInitialMessage(content)
-        setLocalSessionId(newSessionId)
-      }
+      chatSend(content)
     },
-    [resolvedId, chatSend],
+    [chatSend],
   )
 
-  useEffect(() => {
-    if (localSessionId && hasMessages && !urlSessionId) {
-      window.history.replaceState({}, '', `/chat/${encodeURIComponent(localSessionId)}`)
-    }
-  }, [localSessionId, hasMessages, urlSessionId])
+  const hasMessages = messages.length > 0 || streamingContent || isStreaming
+  const friendlyErrorLocal = (raw: string) => friendlyError(raw, t)
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] flex-col lg:h-screen">
+    <div className="flex h-full flex-col">
       <div className="flex flex-1 overflow-hidden">
         <div className="flex flex-1 flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto">
-            {!showChatView ? (
-              /* ---- Empty state / Hero ---- */
+            {!hasMessages && !isLoadingHistory ? (
               <div className="flex h-full flex-col items-center justify-center px-6">
-                <div className="w-full max-w-3xl space-y-8">
+                <div className="w-full max-w-2xl space-y-8">
                   <div className="space-y-3 text-center">
-                    <h1 className="text-3xl font-bold tracking-tight text-primary md:text-[40px] md:leading-tight">
+                    <h1 className="text-3xl font-semibold tracking-tight text-primary sm:text-4xl">
                       {t('chatPage.howCanHelp')}
                     </h1>
-                    <p className="mx-auto max-w-md text-sm text-tertiary">
+                    <p className="text-base text-tertiary">
                       {t('chatPage.howCanHelpDesc')}
                     </p>
                   </div>
@@ -173,17 +115,17 @@ export function Chat() {
                   />
 
                   <div className="flex flex-wrap items-center justify-center gap-2">
-                    {SUGGESTION_CHIPS.map(({ key, icon: Icon }) => (
+                    {SUGGESTIONS.map(({ key, icon: Icon, promptKey }) => (
                       <button
                         key={key}
-                        onClick={() => sendMessage(t(`chatPage.${key}Prompt`))}
+                        onClick={() => sendMessage(t(promptKey))}
                         className={cn(
-                          'flex items-center gap-2 rounded-full border border-secondary px-3.5 py-2',
-                          'text-xs font-medium text-secondary',
-                          'transition-all hover:border-primary hover:bg-primary_hover hover:text-primary',
+                          'flex items-center gap-2.5 rounded-xl border border-secondary px-4 py-2.5',
+                          'text-sm font-medium text-secondary',
+                          'transition-all hover:border-brand/40 hover:bg-brand-primary/30 hover:text-brand',
                         )}
                       >
-                        <Icon className="h-3.5 w-3.5 text-tertiary" />
+                        <Icon className="size-4" />
                         {t(`chatPage.${key}`)}
                       </button>
                     ))}
@@ -191,7 +133,6 @@ export function Chat() {
                 </div>
               </div>
             ) : (
-              /* ---- Messages ---- */
               <div className="py-6">
                 <div className="mx-auto max-w-3xl space-y-5 px-4 sm:px-6 lg:px-8">
                   {isLoadingHistory && (
@@ -240,7 +181,7 @@ export function Chat() {
             )}
           </div>
 
-          {showChatView && (
+          {hasMessages && (
             <div className="mx-auto w-full max-w-3xl px-4 pb-4 sm:px-6 lg:px-8">
               <ChatInput onSend={sendMessage} onAbort={abort} isStreaming={isStreaming} />
             </div>
@@ -248,5 +189,5 @@ export function Chat() {
         </div>
       </div>
     </div>
-  )
+  );
 }

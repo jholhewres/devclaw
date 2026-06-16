@@ -2,6 +2,68 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.19.0] — 2026-06-15
+
+Memory/context reliability + web UI redesign. Diagnosed from production logs
+where the agent kept recalling stale/contradictory facts after compaction and
+failed on two execution bugs; also reskins the web UI and adds a Workflows
+surface. Builds on the v1.19.0-rc1 layered memory stack.
+
+### Added
+
+- **Web UI — "Parchment + Sienna" visual direction.** Reskinned at the Tailwind
+  token layer: warm parchment paper (ink #1a1714), burnt-sienna accent
+  (#b85a26), Geist / Geist Mono typography, and a three-slash claw-mark logo.
+  Dark mode tokens unchanged.
+- **Workflows page.** New UI to chain agents into multi-step automations (status
+  badges, search, create panel with per-step agent selection), replacing the
+  Plugins nav entry (`/plugins` redirects to `/workflows`). Renders mock data —
+  a functional UI preview ahead of backend persistence/execution. Translated in
+  en/es/pt.
+
+- **Memory lifecycle metadata v2** — `memory.Entry` gains optional, backward-
+  compatible fields (`Supersedes`, `Consolidates`, `Importance`, `Pinned`,
+  `Origin`, `MemoryType`, `ContextTier`, `Superseded`), persisted in a compact
+  `[meta:<base64-json>]` tag emitted only when set. Legacy `MEMORY.md` entries
+  parse and serialize unchanged. Helpers: `IsExpired`, `IsPinned`,
+  `IsSuperseded`, `ContentKey`.
+- **Pre-compaction working-context snapshot** — before compaction the assistant
+  saves a compact operational snapshot (goal, recent tools, last action) as an
+  `Origin=precompact`, `MemoryType=operational` memory with a 24h TTL, so the
+  agent no longer re-derives in-flight work it already did.
+- **Conservative retention sweep** — `FileStore.RetentionSweep` (dry-run by
+  default) archives aged operational/episodic and expired entries to
+  `MEMORY.archive.md` before removal (reversible soft-delete). Pinned and
+  semantic memories are never swept.
+
+### Changed
+
+- **Dream now resolves contradictions instead of only reporting them** — the
+  consolidation phase supersedes the older side of a contradiction via a soft
+  `[stale]` marker (skipped on read, dropped by Compact) and merges duplicates,
+  unifying the general and evidence-based paths. Pinned memories are never
+  superseded. Removes the unbounded append-only `[Contradiction]` reports that
+  accumulated in production. New telemetry: `contradictions_resolved`.
+  Resolution is conservative: evidence-based contradictions (a newer positive
+  fact about an entity) always resolve, while the weaker general negation
+  heuristic only supersedes when the pair is a near-duplicate restatement
+  (Jaccard ≥ 0.6). The `dream.disable_contradiction_resolution` escape hatch
+  turns auto-resolution off entirely (detect + log only).
+
+### Fixed
+
+- **Scheduled-message delivery JID** — `parseJID` strips a `whatsapp:` channel
+  prefix and companion device part before sending, and the scheduler strips a
+  duplicated channel prefix from `chat_id` at job creation. Fixes cron
+  announcements failing with "recipient must be a user JID with no device part".
+- **skill_db registry self-heal** — `skill_db_query`/related now reconcile a
+  table that exists physically but is missing from `_skill_tables_registry`
+  (e.g. created via raw SQL), recovering its real schema and row count, instead
+  of failing with "skill has no tables".
+- **Memory tag-injection hardening** — `Save` escapes `[expires:]`/`[meta:]`
+  prefixes in user content (previously only `SaveIfNotDuplicate` did), so a fact
+  containing those literals can't be re-parsed as structural metadata.
+
 ## [v1.19.0-rc1] — 2026-04-08
 
 ### Added

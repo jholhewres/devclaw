@@ -25,11 +25,11 @@ import (
 	"github.com/jholhewres/devclaw/pkg/devclaw/database"
 	"github.com/jholhewres/devclaw/pkg/devclaw/media"
 	"github.com/jholhewres/devclaw/pkg/devclaw/oauth"
+	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
+	"github.com/jholhewres/devclaw/pkg/devclaw/plugins"
 	"github.com/jholhewres/devclaw/pkg/devclaw/sandbox"
 	"github.com/jholhewres/devclaw/pkg/devclaw/scheduler"
-	"github.com/jholhewres/devclaw/pkg/devclaw/plugins"
 	"github.com/jholhewres/devclaw/pkg/devclaw/skills"
-	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
 	"github.com/jholhewres/devclaw/pkg/devclaw/tts"
 )
 
@@ -2246,35 +2246,40 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 	prompt := a.composeWorkspacePrompt(workspace, session, userContent)
 
 	// ── Step 7b: Agent routing (model/instructions override) ──
-	// If agent profiles are configured, route based on channel/user/group.
+	// Priority: session active profile > channel/user/group routing > workspace pattern.
 	var agentProfile *AgentProfileConfig
 	var modelOverride string
 	if a.agentRouter != nil {
-		// For group messages, use ChatID as group JID.
-		groupJID := ""
-		if msg.IsGroup {
-			groupJID = msg.ChatID
+		if activeID := session.GetConfig().ActiveProfileID; activeID != "" {
+			agentProfile = a.agentRouter.GetProfile(activeID)
+			if agentProfile != nil {
+				logger.Info("agent profile from session",
+					"profile", agentProfile.ID,
+					"session", sessionID,
+				)
+			}
 		}
-		agentProfile = a.agentRouter.Route(msg.Channel, msg.From, groupJID)
-		if agentProfile != nil {
-			logger.Info("agent routed",
-				"profile", agentProfile.ID,
-				"channel", msg.Channel,
-				"user", msg.From,
-				"group", groupJID,
-			)
+		if agentProfile == nil {
+			groupJID := ""
+			if msg.IsGroup {
+				groupJID = msg.ChatID
+			}
+			agentProfile = a.agentRouter.Route(msg.Channel, msg.From, groupJID)
+			if agentProfile != nil {
+				logger.Info("agent routed",
+					"profile", agentProfile.ID,
+					"channel", msg.Channel,
+					"user", msg.From,
+					"group", groupJID,
+				)
+			}
+		}
 
-			// Override model if specified in profile.
+		if agentProfile != nil {
 			if agentProfile.Model != "" {
 				modelOverride = agentProfile.Model
 			}
-
-			// Override prompt if profile has custom instructions.
-			if agentProfile.Instructions != "" {
-				// Replace the base instructions with profile instructions.
-				// Keep workspace context but use profile's system prompt.
-				prompt = a.composePromptWithAgent(agentProfile, workspace, session, userContent)
-			}
+			prompt = a.composePromptWithAgent(agentProfile, workspace, session, userContent)
 		}
 	}
 
@@ -2519,12 +2524,23 @@ func (a *Assistant) matchesTrigger(content, trigger string, isGroup bool) bool {
 }
 
 // resolveToolProfile returns the effective tool profile for a workspace.
-// Workspace profile takes precedence over global profile.
+// Session active profile takes precedence over session/workspace/global profiles.
 // Returns nil if no profile is configured.
 func (a *Assistant) resolveToolProfile(ws *Workspace, session *Session) *ToolProfile {
 	customs := a.config.Security.ToolGuard.CustomProfiles
 
-	// 1. Session-level profile takes highest precedence.
+	// 1. Active agent profile takes highest precedence while it is selected.
+	if session != nil && a.agentRouter != nil {
+		if activeID := session.GetConfig().ActiveProfileID; activeID != "" {
+			if activeProfile := a.agentRouter.GetProfile(activeID); activeProfile != nil && activeProfile.ToolProfile != "" {
+				if profile := GetProfile(activeProfile.ToolProfile, customs); profile != nil {
+					return profile
+				}
+			}
+		}
+	}
+
+	// 2. Session-level tool profile.
 	if session != nil {
 		cfg := session.GetConfig()
 		if cfg.ToolProfile != "" {
@@ -2534,19 +2550,19 @@ func (a *Assistant) resolveToolProfile(ws *Workspace, session *Session) *ToolPro
 		}
 	}
 
-	// 2. Workspace profile.
+	// 3. Workspace profile.
 	if ws != nil && ws.ToolProfile != "" {
 		if profile := GetProfile(ws.ToolProfile, customs); profile != nil {
 			return profile
 		}
 	}
 
-	// 3. Global profile from config.
+	// 4. Global profile from config.
 	if a.config.Security.ToolGuard.Profile != "" {
 		return GetProfile(a.config.Security.ToolGuard.Profile, customs)
 	}
 
-	// 4. Infer from channel (messaging channels get restricted profile).
+	// 5. Infer from channel (messaging channels get restricted profile).
 	if session != nil && session.Channel != "" {
 		profileName := InferProfileForChannel(session.Channel)
 		if profileName != "full" { // "full" is a no-op, skip
@@ -2606,9 +2622,10 @@ func (a *Assistant) composeWorkspacePrompt(ws *Workspace, session *Session, inpu
 	return a.promptComposer.Compose(session, input)
 }
 
-// composePromptWithAgent builds a prompt using agent profile instructions.
-// The agent profile's instructions replace the base instructions while
-// preserving workspace context.
+// composePromptWithAgent builds a prompt with active agent profile context.
+// If the profile defines instructions, they replace the base instructions while
+// preserving workspace context; otherwise the profile still contributes label,
+// description, memory scope, and identity metadata through PromptComposer.
 func (a *Assistant) composePromptWithAgent(profile *AgentProfileConfig, ws *Workspace, session *Session, input string) string {
 	// Serialize access — this function temporarily mutates shared state
 	// (a.config.Instructions and promptComposer.agentProfile).
@@ -2642,8 +2659,10 @@ func (a *Assistant) composePromptWithAgent(profile *AgentProfileConfig, ws *Work
 	// Also add workspace instructions as business context if available.
 	if ws.Instructions != "" {
 		cfg := session.GetConfig()
-		cfg.BusinessContext = ws.Instructions
-		session.SetConfig(cfg)
+		if cfg.BusinessContext != ws.Instructions {
+			cfg.BusinessContext = ws.Instructions
+			session.SetConfig(cfg)
+		}
 	}
 
 	// Compose with agent instructions.
@@ -3128,9 +3147,9 @@ func (a *Assistant) Scheduler() *scheduler.Scheduler {
 // that uses the full context window, similar to how OpenClaw handles history.
 func (a *Assistant) calculateDynamicHistorySize(systemPrompt, model string, session *Session) int {
 	const (
-		reserveTokens     = 20_000 // headroom for current message + tool calls + LLM response
-		avgEntryTokens    = 400    // estimated tokens per ConversationEntry (user ~150 + assistant ~250)
-		minEntries        = 10     // never go below this
+		reserveTokens  = 20_000 // headroom for current message + tool calls + LLM response
+		avgEntryTokens = 400    // estimated tokens per ConversationEntry (user ~150 + assistant ~250)
+		minEntries     = 10     // never go below this
 	)
 
 	ctxWindow := ResolveContextWindowTokens(a.config.Agent.ContextTokens, model)
@@ -3611,6 +3630,11 @@ func (a *Assistant) registerSystemTools() {
 	a.ssrfGuard = security.NewSSRFGuard(a.config.Security.SSRF, a.logger)
 	RegisterSystemTools(a.toolExecutor, sandboxRunner, a.memoryStore, a.sqliteMemory, a.config.Memory, a.contextRouter, a.scheduler, dataDir, a.ssrfGuard, a.vault, a.config.WebSearch, a.skillDB, a.config.Gateway, a.config.Security.ToolGuard)
 
+	RegisterProfileTools(a.toolExecutor, ProfileSwitcherConfig{
+		Router:       a.agentRouter,
+		SessionStore: a.sessionStore,
+	})
+
 	// Register skill database tools if available.
 	if a.skillDB != nil {
 		RegisterSkillDBTools(a.toolExecutor, a.skillDB)
@@ -4015,6 +4039,17 @@ func (a *Assistant) compactSummarize(session *Session, threshold int) {
 			a.logger.Warn("memory flush failed", "error", err)
 		} else {
 			a.logger.Info("memory flush completed before compaction")
+		}
+
+		// Step 1b: Persist an operational working-context snapshot so the agent
+		// keeps its current goal/recent activity after compaction instead of
+		// re-deriving work it already did.
+		if snap, ok := buildPreCompactSnapshot(session.RecentHistory(20), a.userNow()); ok {
+			if err := a.memoryStore.Save(snap); err != nil {
+				a.logger.Warn("precompact snapshot save failed", "error", err)
+			} else {
+				a.logger.Info("precompact snapshot saved", "origin", snap.Origin, "memory_type", snap.MemoryType)
+			}
 		}
 	}
 

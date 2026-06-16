@@ -6,7 +6,6 @@ export type Theme = 'light' | 'dark' | 'system';
 interface AppState {
   /* ── UI State ── */
   sidebarOpen: boolean;
-  sidebarCollapsed: boolean;
   theme: Theme;
   activeSessionId: string | null;
   sessionVersion: number;
@@ -14,8 +13,6 @@ interface AppState {
   /* ── Actions ── */
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
-  setSidebarCollapsed: (collapsed: boolean) => void;
-  toggleSidebarCollapsed: () => void;
   setTheme: (theme: Theme) => void;
   setActiveSession: (id: string | null) => void;
   invalidateSessions: () => void;
@@ -25,15 +22,12 @@ export const useAppStore = create<AppState>()(
   persist(
     (set) => ({
       sidebarOpen: false,
-      sidebarCollapsed: false,
-      theme: 'light',
+      theme: 'system',
       activeSessionId: null,
       sessionVersion: 0,
 
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
-      setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
-      toggleSidebarCollapsed: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setTheme: (theme) => {
         set({ theme });
         applyTheme(theme);
@@ -43,9 +37,8 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: 'devclaw-ui',
-      partialize: ({ sidebarOpen, sidebarCollapsed, theme, activeSessionId }) => ({
+      partialize: ({ sidebarOpen, theme, activeSessionId }) => ({
         sidebarOpen,
-        sidebarCollapsed,
         theme,
         activeSessionId,
       }),

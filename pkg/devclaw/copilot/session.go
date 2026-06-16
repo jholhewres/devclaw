@@ -126,6 +126,10 @@ type SessionConfig struct {
 	// FastMode enables faster processing with reduced quality.
 	// Anthropic: service_tier="auto". OpenAI: service_tier="priority", reasoning_effort="low".
 	FastMode bool `yaml:"fast_mode"`
+
+	// ActiveProfileID is the ID of the currently active agent profile.
+	// Empty = no profile active (use base config).
+	ActiveProfileID string `yaml:"active_profile_id"`
 }
 
 // ToolCallRecord stores a single tool invocation for session history fidelity.
@@ -485,8 +489,8 @@ func (s *Session) CompactHistory(summary string, keepRecent int) []ConversationE
 
 // ResetWithPreservation clears conversation history, compaction state, and token
 // counters while preserving session identity and configuration fields:
-// ThinkingLevel, FastMode, Model, Language, Verbose, ToolProfile, BusinessContext,
-// Trigger, activeSkills, and facts. Also syncs the persistence layer so that the
+// ThinkingLevel, FastMode, Model, Language, Verbose, ToolProfile, ActiveProfileID,
+// BusinessContext, Trigger, activeSkills, and facts. Also syncs the persistence layer so that the
 // next load does not restore stale data.
 // The lastActiveAt timestamp is bumped to prevent immediate pruning after reset.
 func (s *Session) ResetWithPreservation() {
@@ -506,7 +510,7 @@ func (s *Session) ResetWithPreservation() {
 	s.lastActiveAt = time.Now()
 
 	// Preserved: s.config (ThinkingLevel, FastMode, Model, Language, Verbose,
-	// ToolProfile, BusinessContext, Trigger), s.activeSkills, s.facts,
+	// ToolProfile, ActiveProfileID, BusinessContext, Trigger), s.activeSkills, s.facts,
 	// s.ID, s.Channel, s.ChatID, s.CreatedAt, s.persistence.
 
 	persistence := s.persistence
