@@ -2,6 +2,15 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.19.2] — 2026-06-15
+
+### Changed
+
+- **Removed the Workflows menu entry** — the Workflows page renders mock data and
+  has no backend yet, so it is not exposed in the UI. The Plugins nav entry and
+  `/plugins` route are restored; `/workflows` now redirects to `/plugins`. The
+  `Workflows.tsx` page is kept in the tree for when the backend lands.
+
 ## [v1.19.1] — 2026-06-15
 
 ### Fixed

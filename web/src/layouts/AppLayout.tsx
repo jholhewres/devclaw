@@ -28,7 +28,7 @@ const NAV_ITEMS = [
   { route: '/jobs', icon: Clock, labelKey: 'sidebar.jobs' },
   { route: '/skills', icon: Puzzle, labelKey: 'sidebar.skills' },
   { route: '/agents', icon: Bot, labelKey: 'sidebar.agents' },
-  { route: '/workflows', icon: Blocks, labelKey: 'sidebar.workflows' },
+  { route: '/plugins', icon: Blocks, labelKey: 'sidebar.plugins' },
   { route: '/sessions', icon: Store, labelKey: 'sidebar.sessions' },
 ] as const;
 

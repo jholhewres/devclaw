@@ -6,7 +6,7 @@ import { SettingsLayout } from '@/layouts/SettingsLayout'
 import { Chat } from '@/pages/Chat'
 import { Sessions } from '@/pages/Sessions'
 import { Skills } from '@/pages/Skills'
-import { Workflows } from '@/pages/Workflows'
+import { Plugins } from '@/pages/Plugins'
 import { Agents } from '@/pages/Agents'
 import { Jobs } from '@/pages/Jobs'
 import { Login } from '@/pages/Login'
@@ -122,7 +122,7 @@ export function App() {
           <Route path="/chat/:sessionId" element={<Chat />} />
           <Route path="/sessions" element={<Sessions />} />
           <Route path="/skills" element={<Skills />} />
-          <Route path="/workflows" element={<Workflows />} />
+          <Route path="/plugins" element={<Plugins />} />
           <Route path="/agents" element={<Agents />} />
           <Route path="/jobs" element={<Jobs />} />
 
@@ -158,7 +158,7 @@ export function App() {
 
         {/* Legacy redirects */}
         <Route path="/settings" element={<Navigate to="/system" replace />} />
-        <Route path="/plugins" element={<Navigate to="/workflows" replace />} />
+        <Route path="/workflows" element={<Navigate to="/plugins" replace />} />
       </Routes>
     </AuthGuard>
   )
