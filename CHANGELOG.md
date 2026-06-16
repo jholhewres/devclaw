@@ -66,8 +66,6 @@ surface. Builds on the v1.19.0-rc1 layered memory stack.
 
 ### Hardening (subagent delivery & stability)
 
-Merged from the `improvements-after-memory` track:
-
 - **Subagent announce/delivery** — populate `OriginChannel`/`OriginTo` on spawn,
   default delivery scope to `all`, actually implement `delivery_scope=external`,
   forbid subagents from self-delivering to channels, and unblock the announce
