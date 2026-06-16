@@ -29,7 +29,11 @@ type InputGuardrail struct {
 // NewInputGuardrail cria um novo guardrail de input.
 func NewInputGuardrail(maxLength, rateLimit int) *InputGuardrail {
 	if maxLength <= 0 {
-		maxLength = 4096
+		// Generous default: the validated input includes media/document enrichment
+		// (extracted document text, transcriptions), so a per-typed-message limit
+		// like 4096 wrongly rejected small attached files. 200000 matches the
+		// downstream maxInputChars bound; media size is separately capped.
+		maxLength = 200000
 	}
 	if rateLimit <= 0 {
 		rateLimit = 30

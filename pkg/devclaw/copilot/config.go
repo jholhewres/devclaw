@@ -1019,7 +1019,7 @@ func DefaultConfig() *Config {
 			Stack:     MemoryStackConfig{},
 		},
 		Security: SecurityConfig{
-			MaxInputLength:      4096,
+			MaxInputLength:      200000,
 			RateLimit:           30,
 			EnablePIIDetection:  false,
 			EnableURLValidation: true,

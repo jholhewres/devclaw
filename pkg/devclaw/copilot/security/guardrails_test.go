@@ -33,9 +33,9 @@ func TestInputGuardrail_PromptInjection(t *testing.T) {
 
 func TestInputGuardrail_DefaultValues(t *testing.T) {
 	t.Parallel()
-	g := NewInputGuardrail(0, 0) // should use defaults (4096, 30)
-	if g.maxLength != 4096 {
-		t.Errorf("default maxLength = %d, want 4096", g.maxLength)
+	g := NewInputGuardrail(0, 0) // should use defaults (200000, 30)
+	if g.maxLength != 200000 {
+		t.Errorf("default maxLength = %d, want 200000", g.maxLength)
 	}
 	if g.rateLimit != 30 {
 		t.Errorf("default rateLimit = %d, want 30", g.rateLimit)

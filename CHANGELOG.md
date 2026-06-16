@@ -2,6 +2,18 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.19.3] — 2026-06-15
+
+### Fixed
+
+- **Small attachments rejected with "mensagem excede o tamanho máximo permitido".**
+  The input guardrail validated the *enriched* message (which includes extracted
+  document text / transcriptions) against `security.max_input_length`, whose
+  default was only 4096 chars — so a document of a few KB tripped it. Raised the
+  default (and the guardrail fallback) to 200000, matching the downstream input
+  bound. Media payloads remain separately capped by `media.max_image_size` /
+  `max_audio_size`. Existing configs should bump `security.max_input_length`.
+
 ## [v1.19.2] — 2026-06-15
 
 ### Changed
