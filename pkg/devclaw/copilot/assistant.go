@@ -44,6 +44,10 @@ const (
 type Assistant struct {
 	config *Config
 
+	// configPath is the on-disk config.yaml path, used by the `settings` tool to
+	// persist whitelisted runtime changes. Empty when running without a config file.
+	configPath string
+
 	// channelMgr manages communication channels.
 	channelMgr *channels.Manager
 
@@ -335,6 +339,10 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 		}
 		return approvalMgr.Request(sessionID, callerJID, toolName, args, sendMsg)
 	})
+
+	// Wire the `settings` tool so the main agent can read/change a whitelisted
+	// set of runtime settings (media/model) with immediate hot-reload.
+	te.SetSettingsHandlers(a.getAgentSettings, a.setAgentSetting)
 
 	// Wire subagent announce callback: when a subagent completes, inject the
 	// result back into the parent session so the main agent can process and

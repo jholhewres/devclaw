@@ -67,6 +67,7 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 	RegisterApplyPatchTool(executor)
 	registerBashTool(executor)
 	registerCapabilitiesTool(executor) // Agent self-discovery tool
+	registerSettingsTool(executor)     // Agent self-configuration (media/model)
 
 	if sandboxRunner != nil {
 		registerExecTool(executor, sandboxRunner)

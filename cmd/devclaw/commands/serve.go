@@ -115,6 +115,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	// ── Create assistant ──
 	assistant := copilot.New(cfg, logger)
+	assistant.SetConfigPath(configPath)
 	if vault != nil {
 		assistant.SetVault(vault)
 	}

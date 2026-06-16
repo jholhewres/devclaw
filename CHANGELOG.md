@@ -2,7 +2,23 @@
 
 All notable changes to DevClaw are documented in this file.
 
-## [v1.19.3] — 2026-06-15
+## [v1.20.0] — 2026-06-16
+
+### Added
+
+- **Agent self-configuration (`settings` tool).** The main agent can now read and
+  change a whitelisted set of its own runtime settings and have them apply
+  immediately (hot-reload, no restart). Supported keys: `media.vision_enabled`,
+  `media.vision_model` (empty = use the main model), `media.vision_detail`,
+  `media.transcription_enabled`, `media.transcription_model`,
+  `media.transcription_base_url`, `media.transcription_language`, and `model`.
+  Changes are validated, persisted to `config.yaml` via the sanitized save path
+  (secrets become `${ENV}` refs, never written in plaintext), then applied live
+  via `UpdateMediaConfig` / `UpdateLLMClient`. Owner/admin only; the whitelist is
+  a hard security boundary — security, access, vault, channels, and API keys are
+  NOT settable through the tool.
+
+
 
 ### Fixed
 
