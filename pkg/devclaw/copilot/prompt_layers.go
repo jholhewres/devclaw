@@ -803,7 +803,7 @@ var coreToolSummaries = map[string]string{
 	"vault":          "Encrypted secret storage (action: status/save/get/list/delete)",
 	"message":        "Send messages, channel actions (polls, reactions, etc.)",
 	"sessions":       "Manage chat sessions (list/get/send/rename)",
-	"spawn_subagent": "Delegate complex subtasks to a child agent",
+	"spawn_subagent": "Delegate complex subtasks to a child agent; pair with sessions_yield to release the turn and get the result pushed back",
 	"list_subagents": "List running child agents",
 	"describe_image": "Describe image contents via Vision",
 	"browser":        "Control web browser (navigate/screenshot/click/fill/act)",
@@ -1057,6 +1057,14 @@ func (p *PromptComposer) loadBootstrapFileCached(cacheKey, filename string, sear
 	if len(text) > 20000 {
 		text = text[:20000] + "\n\n... [truncated at 20KB]"
 	}
+
+	// Scan bootstrap files for prompt-injection patterns. Default mode is
+	// warn, which only logs — content stays byte-identical for upgrades.
+	var scanMode BootstrapScanMode
+	if p.config != nil {
+		scanMode = BootstrapScanMode(p.config.Security.BootstrapScan)
+	}
+	text = ScanBootstrapContent(filename, text, scanMode, nil)
 
 	p.bootstrapCacheMu.Lock()
 	p.bootstrapCache[cacheKey] = &bootstrapCacheEntry{

@@ -315,7 +315,7 @@ func (s *SQLiteStore) indexChunksLocked(ctx context.Context, fileID string, chun
 				for i, emb := range embeddings {
 					idx := uncachedIndices[i]
 					newEmbeddings[idx] = emb
-					s.setEmbeddingCache(uncachedTexts[i], emb)
+					s.setEmbeddingCache(ctx, uncachedTexts[i], emb)
 				}
 			}
 		}
@@ -1311,19 +1311,25 @@ func (s *SQLiteStore) getEmbeddingCache(text string) []float32 {
 	return emb
 }
 
-// setEmbeddingCache stores an embedding in the cache.
-func (s *SQLiteStore) setEmbeddingCache(text string, embedding []float32) {
+// setEmbeddingCache stores an embedding in the cache. Fire-and-forget — a
+// failed cache write only loses the opportunity to reuse the embedding. The
+// retry wrapper absorbs SQLITE_BUSY bursts when concurrent indexing runs
+// (dream consolidation + conversation flush) race for the write lock.
+func (s *SQLiteStore) setEmbeddingCache(ctx context.Context, text string, embedding []float32) {
 	hash := hashText(text)
 	data, err := json.Marshal(embedding)
 	if err != nil {
 		return
 	}
-	_, _ = s.db.Exec(`
-		INSERT INTO embedding_cache (text_hash, provider, model, embedding, updated_at)
-		VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-		ON CONFLICT(text_hash, provider, model) DO UPDATE SET
-			embedding = excluded.embedding, updated_at = CURRENT_TIMESTAMP
-	`, hash, s.embedder.Name(), s.embedder.Model(), string(data))
+	_ = sqliteExecWithRetry(ctx, func(c context.Context) error {
+		_, execErr := s.db.ExecContext(c, `
+			INSERT INTO embedding_cache (text_hash, provider, model, embedding, updated_at)
+			VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+			ON CONFLICT(text_hash, provider, model) DO UPDATE SET
+				embedding = excluded.embedding, updated_at = CURRENT_TIMESTAMP
+		`, hash, s.embedder.Name(), s.embedder.Model(), string(data))
+		return execErr
+	}, DefaultRetryOpts())
 }
 
 // loadVectorCache loads all chunk embeddings into memory for fast search.
