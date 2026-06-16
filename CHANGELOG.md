@@ -64,6 +64,23 @@ surface. Builds on the v1.19.0-rc1 layered memory stack.
   prefixes in user content (previously only `SaveIfNotDuplicate` did), so a fact
   containing those literals can't be re-parsed as structural metadata.
 
+### Hardening (subagent delivery & stability)
+
+Merged from the `improvements-after-memory` track:
+
+- **Subagent announce/delivery** — populate `OriginChannel`/`OriginTo` on spawn,
+  default delivery scope to `all`, actually implement `delivery_scope=external`,
+  forbid subagents from self-delivering to channels, and unblock the announce
+  inject path. `spawn_subagent` hints pairing with `sessions_yield`.
+- **DaemonManager lifecycle** — tied to a parent context with a tested shutdown
+  cascade; context propagated through `wait_subagent` and hook dispatch.
+- **SQLite busy-retry** — opt-in retry helper with jitter, wired into embedding
+  cache writes, to absorb transient `database is locked` contention.
+- **Bootstrap injection scan** — bootstrap files scanned for prompt-injection
+  patterns (warn by default).
+- **Scheduler** — suppress delivery for silent scheduled output.
+- **Setup wizard** — defaults to the SQLite memory backend.
+
 ## [v1.19.0-rc1] — 2026-04-08
 
 ### Added
