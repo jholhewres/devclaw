@@ -28,7 +28,7 @@ const NAV_ITEMS = [
   { route: '/jobs', icon: Clock, labelKey: 'sidebar.jobs' },
   { route: '/skills', icon: Puzzle, labelKey: 'sidebar.skills' },
   { route: '/agents', icon: Bot, labelKey: 'sidebar.agents' },
-  { route: '/plugins', icon: Blocks, labelKey: 'sidebar.plugins' },
+  { route: '/workflows', icon: Blocks, labelKey: 'sidebar.workflows' },
   { route: '/sessions', icon: Store, labelKey: 'sidebar.sessions' },
 ] as const;
 
@@ -193,7 +193,7 @@ export function AppLayout() {
           <SidebarContent />
         </aside>
 
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-primary">
+        <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-primary">
           <Outlet />
         </main>
       </div>

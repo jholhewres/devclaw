@@ -53,6 +53,7 @@
     "jobs": "Jobs",
     "skills": "Habilidades",
     "plugins": "Plugins",
+    "workflows": "Workflows",
     "agents": "Agentes",
     "statistics": "Estatísticas",
     "sessions": "Sessões",
@@ -139,6 +140,24 @@
     "emptyDesc": "Adicione diretórios de plugins no config.yaml em plugins.dirs",
     "settings": "Configurações",
     "discard": "Descartar"
+  },
+  "workflows": {
+    "title": "Workflows",
+    "active": "Ativos",
+    "create": "Criar workflow",
+    "createDesc": "Encadeie agentes em uma automação repetível de múltiplas etapas.",
+    "empty": "Nenhum workflow ainda",
+    "emptyDesc": "Crie seu primeiro workflow para orquestrar agentes em várias etapas.",
+    "emptySearch": "Nenhum workflow corresponde à busca",
+    "searchPlaceholder": "Buscar workflows…",
+    "nameLabel": "Nome",
+    "namePlaceholder": "ex: Qualificação de leads",
+    "descriptionLabel": "Descrição",
+    "descriptionPlaceholder": "O que este workflow faz?",
+    "selectAgent": "Selecionar agente",
+    "addStep": "Adicionar etapa",
+    "stepNamePlaceholder": "Nome da etapa",
+    "steps": "Etapas"
   },
   "channelsPage": {
     "title": "Conecte um canal para conversar com o DevClaw",
