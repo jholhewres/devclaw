@@ -5,11 +5,11 @@
    ══════════════════════════════════════════════════════════════ */
 
 @theme {
-  /* ── FONT FAMILY ── */
-  --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
-  --font-display: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  /* ── FONT FAMILY (Parchment + Sienna — Geist / Geist Mono) ── */
+  --font-body: 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --font-display: 'Geist', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
   --font-mono:
-    ui-monospace, 'Roboto Mono', SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
     'Courier New', monospace;
 
   /* ── FONT SIZE ── */
@@ -112,33 +112,33 @@
   --color-alpha-white: rgb(255 255 255);
   --color-alpha-black: rgb(0 0 0);
 
-  /* ── BRAND BLUE (DevClaw primary brand) ── */
-  --color-brand-blue-25: #f5faff;
-  --color-brand-blue-50: #eff8ff;
-  --color-brand-blue-100: #d1e9ff;
-  --color-brand-blue-200: #b2d8ff;
-  --color-brand-blue-300: #84c1ff;
-  --color-brand-blue-400: #53a8ff;
-  --color-brand-blue-500: #0081f2;
-  --color-brand-blue-600: #0066c0;
-  --color-brand-blue-700: #004d91;
-  --color-brand-blue-800: #003d73;
-  --color-brand-blue-900: #002e57;
-  --color-brand-blue-950: #001a33;
+  /* ── BRAND SIENNA (DevClaw "Parchment + Sienna" — burnt copper, slightly red) ── */
+  --color-brand-blue-25: #fbf4ee;
+  --color-brand-blue-50: #f4e3d4;
+  --color-brand-blue-100: #eccfb3;
+  --color-brand-blue-200: #e0b289;
+  --color-brand-blue-300: #d28f5c;
+  --color-brand-blue-400: #c47038;
+  --color-brand-blue-500: #b85a26;
+  --color-brand-blue-600: #a54d1e;
+  --color-brand-blue-700: #8e3f12;
+  --color-brand-blue-800: #74330f;
+  --color-brand-blue-900: #5e2a0d;
+  --color-brand-blue-950: #3e1c08;
 
-  /* ── NEUTRAL (Cool Slate — AI-native palette) ── */
-  --color-gray-25: #fcfcfd;
-  --color-gray-50: #f8f8fa;
-  --color-gray-100: #f0f0f3;
-  --color-gray-200: #e2e2e7;
-  --color-gray-300: #cdcdd4;
-  --color-gray-400: #9d9da8;
-  --color-gray-500: #6b6b78;
-  --color-gray-600: #52525c;
-  --color-gray-700: #3a3a44;
-  --color-gray-800: #27272e;
-  --color-gray-900: #1a1a20;
-  --color-gray-950: #0e0e13;
+  /* ── NEUTRAL (Parchment — warm cream paper, no yellow cast) ── */
+  --color-gray-25: #fdfcfa;
+  --color-gray-50: #f7f5f0;
+  --color-gray-100: #efebe1;
+  --color-gray-200: #dcd5c5;
+  --color-gray-300: #c5bca5;
+  --color-gray-400: #a39c8c;
+  --color-gray-500: #8a8377;
+  --color-gray-600: #5a554c;
+  --color-gray-700: #46413a;
+  --color-gray-800: #2e2a24;
+  --color-gray-900: #1a1714;
+  --color-gray-950: #100d0a;
 
   /* ── ERROR (Red) ── */
   --color-error-25: rgb(255 251 250);
@@ -444,13 +444,13 @@
 
   /* ── SEMANTIC BACKGROUND COLORS ── */
 
-  --color-bg-primary: var(--color-white);
-  --color-bg-secondary: var(--color-gray-50);
+  --color-bg-primary: #fbf9f4;
+  --color-bg-secondary: #f3f1ec;
   --color-bg-tertiary: var(--color-gray-100);
   --color-bg-quaternary: var(--color-gray-200);
-  --color-bg-nav: #f6f6f8;
+  --color-bg-nav: #eae6dc;
   --color-bg-primary_hover: var(--color-gray-50);
-  --color-bg-primary_alt: var(--color-white);
+  --color-bg-primary_alt: #fbf9f4;
   --color-bg-secondary_hover: var(--color-gray-100);
   --color-bg-secondary_alt: var(--color-gray-50);
   --color-bg-secondary_subtle: var(--color-gray-25);
