@@ -102,6 +102,64 @@ func TestDreamDoesNotSupersedePinned(t *testing.T) {
 	}
 }
 
+// TestContentsNearDuplicate guards the gate that protects the weak general
+// negation-contradiction signal: only near-duplicate restatements are resolved.
+func TestContentsNearDuplicate(t *testing.T) {
+	// Same statement differing only by an inserted negation -> near-duplicate.
+	if !contentsNearDuplicate(
+		"User prefers the project to use PostgreSQL database for storage",
+		"User prefers the project to not use PostgreSQL database for storage",
+	) {
+		t.Error("negation-only restatement should be a near-duplicate")
+	}
+	// Two distinct facts that merely share a topic and an opposing keyword.
+	if contentsNearDuplicate(
+		"The deployment pipeline should always run database migrations automatically during releases",
+		"Never expose the internal admin dashboard to the public internet without VPN and MFA protection",
+	) {
+		t.Error("distinct facts sharing a topic must NOT be near-duplicates")
+	}
+}
+
+// TestDreamContradictionResolutionDisabled verifies the escape hatch: when
+// DisableContradictionResolution is set, contradictions are detected but the
+// older entry is never superseded.
+func TestDreamContradictionResolutionDisabled(t *testing.T) {
+	dir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
+
+	fs, err := memory.NewFileStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	older := time.Now().Add(-48 * time.Hour)
+	newer := time.Now().Add(-1 * time.Hour)
+	mustSave(t, fs, memory.Entry{Content: "User prefers the project to use PostgreSQL database for storage", Category: "preference", Source: "user", Timestamp: older})
+	mustSave(t, fs, memory.Entry{Content: "User prefers the project to not use PostgreSQL database for storage", Category: "preference", Source: "user", Timestamp: newer})
+	mustSave(t, fs, memory.Entry{Content: "API rate limit is 100 requests per minute", Category: "fact", Source: "user", Timestamp: newer})
+
+	cfg := DefaultDreamConfig()
+	cfg.DisableContradictionResolution = true
+	d := NewDreamConsolidator(cfg, fs, dir, logger)
+	if result := d.Run(context.Background()); result.Error != nil {
+		t.Fatalf("dream run: %v", result.Error)
+	}
+
+	all, err := fs.GetAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawOld bool
+	for _, e := range all {
+		if e.Content == "User prefers the project to use PostgreSQL database for storage" {
+			sawOld = true
+		}
+	}
+	if !sawOld {
+		t.Error("with resolution disabled, the older contradicting entry must be preserved")
+	}
+}
+
 func mustSave(t *testing.T, fs *memory.FileStore, e memory.Entry) {
 	t.Helper()
 	if err := fs.Save(e); err != nil {

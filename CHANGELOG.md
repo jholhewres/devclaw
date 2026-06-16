@@ -33,6 +33,11 @@ two execution bugs. Builds on the v1.19.0-rc1 layered memory stack.
   unifying the general and evidence-based paths. Pinned memories are never
   superseded. Removes the unbounded append-only `[Contradiction]` reports that
   accumulated in production. New telemetry: `contradictions_resolved`.
+  Resolution is conservative: evidence-based contradictions (a newer positive
+  fact about an entity) always resolve, while the weaker general negation
+  heuristic only supersedes when the pair is a near-duplicate restatement
+  (Jaccard ≥ 0.6). The `dream.disable_contradiction_resolution` escape hatch
+  turns auto-resolution off entirely (detect + log only).
 
 ### Fixed
 

@@ -44,6 +44,12 @@ type DreamConfig struct {
 
 	// IdleMinutes is how long the daemon must be idle before triggering. Default: 10.
 	IdleMinutes int `yaml:"idle_minutes"`
+
+	// DisableContradictionResolution is an escape hatch. When true, the dream
+	// cycle still detects and logs contradictions but never supersedes (deletes)
+	// the older side. Default false (resolution enabled). Negative flag so that a
+	// config that omits it keeps the safe, on-by-default behavior.
+	DisableContradictionResolution bool `yaml:"disable_contradiction_resolution"`
 }
 
 // DefaultDreamConfig returns sensible defaults.
@@ -331,14 +337,13 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 	duplicates := d.findDuplicates(entries)
 	result.Duplicates = len(duplicates)
 
-	contradictions := d.findContradictions(entries)
+	generalContradictions := d.findContradictions(entries)
 
 	// Evidence-based contradictions: detect negative facts that are contradicted
 	// by newer positive facts about the same entity.
 	evidenceContradictions := d.findEvidenceContradictions(entries)
-	contradictions = append(contradictions, evidenceContradictions...)
 
-	result.Contradictions = len(contradictions)
+	result.Contradictions = len(generalContradictions) + len(evidenceContradictions)
 
 	// Phase 3: Consolidate — RESOLVE contradictions by superseding the older
 	// side, and merge duplicates. The previous implementation only appended
@@ -348,7 +353,7 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 	// recalling outdated information.
 	d.logger.Info("dream phase: consolidate",
 		"duplicates", len(duplicates),
-		"contradictions", len(contradictions),
+		"contradictions", result.Contradictions,
 	)
 
 	// Pinned memories are never superseded automatically.
@@ -358,12 +363,31 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 			pinned[strings.TrimSpace(e.Content)] = true
 		}
 	}
-	resolvable := make([]contradiction, 0, len(contradictions))
-	for _, c := range contradictions {
-		if pinned[strings.TrimSpace(c.entryA)] {
-			continue // never supersede a pinned memory
+
+	// Build the set to supersede. Resolution is on by default; the
+	// disable_contradiction_resolution escape hatch turns it off entirely
+	// (detect + log only) if a deployment sees a false positive.
+	resolvable := make([]contradiction, 0, result.Contradictions)
+	if !d.config.DisableContradictionResolution {
+		// Evidence-based contradictions are high-confidence: a newer positive
+		// fact about the same entity supersedes the older negative one.
+		for _, c := range evidenceContradictions {
+			if !pinned[strings.TrimSpace(c.entryA)] {
+				resolvable = append(resolvable, c)
+			}
 		}
-		resolvable = append(resolvable, c)
+		// General negation-heuristic contradictions are a weaker signal, so only
+		// supersede when the pair is also a near-duplicate restatement (high
+		// token overlap). This prevents deleting a distinct fact that merely
+		// shares a topic and an opposing keyword.
+		for _, c := range generalContradictions {
+			if pinned[strings.TrimSpace(c.entryA)] {
+				continue
+			}
+			if contentsNearDuplicate(c.entryA, c.entryB) {
+				resolvable = append(resolvable, c)
+			}
+		}
 	}
 
 	consolidated := 0
@@ -386,7 +410,7 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 		d.logger.Info("dream: compacted memory file",
 			"removed", consolidated,
 			"duplicates_detected", len(duplicates),
-			"contradictions_detected", len(contradictions),
+			"contradictions_detected", result.Contradictions,
 			"contradictions_resolved", resolved,
 		)
 	}
@@ -871,6 +895,41 @@ func findSubstr(s, sub string) int {
 }
 
 // hasSignificantOverlap checks if two strings share enough words in common.
+// contentsNearDuplicate reports whether two memory contents are restatements of
+// the same fact (high token overlap), as opposed to merely sharing a topic. It
+// uses Jaccard similarity over words longer than 3 chars and is robust to word
+// order and an inserted negation. Used to gate destructive supersede on the weak
+// general-negation contradiction signal.
+func contentsNearDuplicate(a, b string) bool {
+	setA := significantWordSet(a)
+	setB := significantWordSet(b)
+	if len(setA) == 0 || len(setB) == 0 {
+		return false
+	}
+	inter := 0
+	for w := range setA {
+		if setB[w] {
+			inter++
+		}
+	}
+	union := len(setA) + len(setB) - inter
+	if union == 0 {
+		return false
+	}
+	return float64(inter)/float64(union) >= 0.6
+}
+
+// significantWordSet returns the set of normalized words longer than 3 chars.
+func significantWordSet(s string) map[string]bool {
+	set := make(map[string]bool)
+	for _, w := range splitWords(normalizeForComparison(s)) {
+		if len(w) > 3 {
+			set[w] = true
+		}
+	}
+	return set
+}
+
 func hasSignificantOverlap(a, b string) bool {
 	wordsA := splitWords(a)
 	wordsB := make(map[string]bool)
