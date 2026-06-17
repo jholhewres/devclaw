@@ -462,6 +462,10 @@ type Server struct {
 	// onSetupDone is called when the setup wizard completes (optional callback).
 	onSetupDone func()
 
+	// onMCPOAuthCallback completes an MCP OAuth flow from the redirect callback.
+	// Returns the server name on success. Optional.
+	onMCPOAuthCallback func(ctx context.Context, state, code string) (string, error)
+
 	// onVaultInit is called during setup finalize to create the encrypted vault.
 	// Receives (masterPassword, secrets map[name]value) and returns error.
 	onVaultInit func(password string, secrets map[string]string) error
@@ -522,6 +526,43 @@ func (s *Server) SetSetupMode(enabled bool) { s.setupMode = enabled }
 
 // OnSetupDone registers a callback invoked when the setup wizard finishes.
 func (s *Server) OnSetupDone(fn func()) { s.onSetupDone = fn }
+
+// SetMCPOAuthCallback registers the handler that completes an MCP OAuth flow.
+func (s *Server) SetMCPOAuthCallback(fn func(ctx context.Context, state, code string) (string, error)) {
+	s.onMCPOAuthCallback = fn
+}
+
+// handleMCPOAuthCallback receives the OAuth provider redirect, completes the
+// flow, and renders a simple status page. Unauthenticated: CSRF protection is
+// the opaque state parameter validated by the OAuth manager.
+func (s *Server) handleMCPOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	if oauthErr := q.Get("error"); oauthErr != "" {
+		s.renderOAuthResult(w, "", fmt.Errorf("%s: %s", oauthErr, q.Get("error_description")))
+		return
+	}
+	state, code := q.Get("state"), q.Get("code")
+	if state == "" || code == "" {
+		s.renderOAuthResult(w, "", fmt.Errorf("missing state or code"))
+		return
+	}
+	if s.onMCPOAuthCallback == nil {
+		s.renderOAuthResult(w, "", fmt.Errorf("oauth callback not configured"))
+		return
+	}
+	server, err := s.onMCPOAuthCallback(r.Context(), state, code)
+	s.renderOAuthResult(w, server, err)
+}
+
+func (s *Server) renderOAuthResult(w http.ResponseWriter, server string, err error) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "<html><body style=\"font-family:sans-serif\"><h2>Authorization failed</h2><p>%s</p><p>You can close this tab.</p></body></html>", err)
+		return
+	}
+	fmt.Fprintf(w, "<html><body style=\"font-family:sans-serif\"><h2>Authorized ✓</h2><p>MCP server <b>%s</b> is connected. You can close this tab.</p></body></html>", server)
+}
 
 // OnVaultInit registers a callback to create the encrypted vault during setup.
 func (s *Server) OnVaultInit(fn func(password string, secrets map[string]string) error) {
@@ -586,6 +627,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/auth/status", s.handleAuthStatus)
 	mux.HandleFunc("/api/health", s.handleAPIHealth)
 	mux.HandleFunc("/api/setup/", s.handleAPISetup)
+	mux.HandleFunc("/oauth/mcp/callback", s.handleMCPOAuthCallback)
 
 	// ── Protected routes (require auth, require assistant) ──
 	mux.HandleFunc("/api/dashboard", s.authMiddleware(s.requireAssistant(s.handleAPIDashboard)))

@@ -68,6 +68,7 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 	registerBashTool(executor)
 	registerCapabilitiesTool(executor) // Agent self-discovery tool
 	registerSettingsTool(executor)     // Agent self-configuration (media/model)
+	registerMCPManagementTool(executor) // Agent self-management of external MCP servers
 
 	if sandboxRunner != nil {
 		registerExecTool(executor, sandboxRunner)

@@ -34,9 +34,12 @@ import (
 
 type mcpRequest struct {
 	JSONRPC string `json:"jsonrpc"`
-	ID      int64  `json:"id"`
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
+	// ID is a pointer so notifications (no id) omit it entirely. Per JSON-RPC
+	// 2.0 a notification MUST NOT carry an id; sending "id":0 makes strict MCP
+	// servers treat it as a request and reply, desyncing the stream.
+	ID     *int64 `json:"id,omitempty"`
+	Method string `json:"method"`
+	Params any    `json:"params,omitempty"`
 }
 
 type mcpResponse struct {
@@ -76,22 +79,49 @@ type mcpContent struct {
 // MCPToolsBridge manages MCP server connections and tool registration
 // ---------------------------------------------------------------------------
 
+// mcpClient is the transport-agnostic interface a connected MCP server exposes
+// to the bridge. Implemented by mcpStdioClient (stdio) and mcpHTTPClient
+// (Streamable HTTP / SSE).
+type mcpClient interface {
+	initialize(ctx context.Context) error
+	listTools(ctx context.Context) ([]mcpToolDef, error)
+	callTool(ctx context.Context, name string, args map[string]any) (string, error)
+	Close()
+}
+
 // MCPToolsBridge connects MCP servers to the ToolExecutor.
 type MCPToolsBridge struct {
 	executor *ToolExecutor
 	logger   *slog.Logger
+	baseCtx  context.Context // lifetime ctx for runtime (re)connects
 
-	mu      sync.Mutex
-	clients map[string]*mcpStdioClient // key: server name
+	// authResolver, when set, supplies an OAuth-backed auth provider for HTTP
+	// servers. Wired by the OAuth layer (Phase 3); nil = headers-only auth.
+	authResolver func(ManagedMCPServerConfig) authProvider
+
+	mu            sync.Mutex
+	clients       map[string]mcpClient // key: server name
+	toolsByServer map[string][]string  // key: server name -> registered tool names
 }
 
 // NewMCPToolsBridge creates a bridge that will register MCP tools.
 func NewMCPToolsBridge(executor *ToolExecutor, logger *slog.Logger) *MCPToolsBridge {
 	return &MCPToolsBridge{
-		executor: executor,
-		logger:   logger.With("component", "mcp-tools"),
-		clients:  make(map[string]*mcpStdioClient),
+		executor:      executor,
+		logger:        logger.With("component", "mcp-tools"),
+		baseCtx:       context.Background(),
+		clients:       make(map[string]mcpClient),
+		toolsByServer: make(map[string][]string),
 	}
+}
+
+// SetBaseContext sets the long-lived context used for runtime (re)connects
+// triggered after startup (e.g. the agent `mcp` tool). MCP server processes
+// are tied to this context, so it should be the assistant's lifetime context.
+func (b *MCPToolsBridge) SetBaseContext(ctx context.Context) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.baseCtx = ctx
 }
 
 // ConnectAll launches all enabled auto-start MCP servers, discovers their
@@ -101,17 +131,109 @@ func (b *MCPToolsBridge) ConnectAll(ctx context.Context, servers []ManagedMCPSer
 		if !srv.Enabled || !srv.AutoStart {
 			continue
 		}
-		if srv.Type != MCPTypeStdio {
-			b.logger.Warn("mcp tools bridge: only stdio supported",
-				"server", srv.Name, "type", srv.Type)
-			continue
-		}
-
-		if err := b.connectStdio(ctx, srv); err != nil {
+		if err := b.ConnectOne(ctx, srv); err != nil {
 			b.logger.Error("mcp tools bridge: connect failed",
 				"server", srv.Name, "error", err)
 		}
 	}
+}
+
+// ConnectOne connects a single MCP server now and registers its tools,
+// regardless of the server's Enabled/AutoStart flags (the caller decides).
+// If the server is already connected it is first disconnected so tools are
+// refreshed cleanly. Currently only the stdio transport is supported.
+func (b *MCPToolsBridge) ConnectOne(ctx context.Context, srv ManagedMCPServerConfig) error {
+	if b.IsConnected(srv.Name) {
+		_ = b.DisconnectOne(srv.Name)
+	}
+	switch srv.Type {
+	case "", MCPTypeStdio:
+		return b.connectStdio(ctx, srv)
+	case MCPTypeHTTP, MCPTypeSSE:
+		return b.connectHTTP(ctx, srv)
+	default:
+		return fmt.Errorf("transport %q not supported (use stdio, http or sse)", srv.Type)
+	}
+}
+
+// finishConnect runs the shared post-connect steps: initialize the session,
+// discover tools, register them in the executor and record the client. Used by
+// every transport.
+func (b *MCPToolsBridge) finishConnect(ctx context.Context, srv ManagedMCPServerConfig, client mcpClient) error {
+	timeout := time.Duration(srv.Timeout) * time.Second
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	initCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	if err := client.initialize(initCtx); err != nil {
+		client.Close()
+		return fmt.Errorf("initialize: %w", err)
+	}
+	tools, err := client.listTools(initCtx)
+	if err != nil {
+		client.Close()
+		return fmt.Errorf("list tools: %w", err)
+	}
+
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, b.registerMCPTool(srv.Name, tool, client))
+	}
+
+	b.mu.Lock()
+	b.clients[srv.Name] = client
+	b.toolsByServer[srv.Name] = names
+	b.mu.Unlock()
+
+	b.logger.Info("mcp server connected", "server", srv.Name, "transport", mcpTypeOrDefault(srv.Type), "tools", len(tools))
+	return nil
+}
+
+// DisconnectOne closes a single MCP server connection and unregisters all of
+// its tools from the executor. Returns an error if the server is not connected.
+func (b *MCPToolsBridge) DisconnectOne(name string) error {
+	b.mu.Lock()
+	client, ok := b.clients[name]
+	tools := b.toolsByServer[name]
+	delete(b.clients, name)
+	delete(b.toolsByServer, name)
+	b.mu.Unlock()
+
+	if !ok {
+		return fmt.Errorf("server %q is not connected", name)
+	}
+
+	client.Close()
+	for _, tn := range tools {
+		b.executor.UnregisterTool(tn)
+	}
+	b.logger.Info("mcp server disconnected", "server", name, "tools_removed", len(tools))
+	return nil
+}
+
+// IsConnected reports whether the named MCP server currently has a live client.
+func (b *MCPToolsBridge) IsConnected(name string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, ok := b.clients[name]
+	return ok
+}
+
+// ServerTools returns the tool names currently registered for a connected
+// server (empty if not connected).
+func (b *MCPToolsBridge) ServerTools(name string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]string(nil), b.toolsByServer[name]...)
+}
+
+// BaseContext returns the long-lived context used for runtime connects.
+func (b *MCPToolsBridge) BaseContext() context.Context {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.baseCtx
 }
 
 // Shutdown gracefully closes all MCP server connections.
@@ -123,7 +245,8 @@ func (b *MCPToolsBridge) Shutdown() {
 		b.logger.Debug("shutting down mcp server", "server", name)
 		client.Close()
 	}
-	b.clients = make(map[string]*mcpStdioClient)
+	b.clients = make(map[string]mcpClient)
+	b.toolsByServer = make(map[string][]string)
 }
 
 // ---------------------------------------------------------------------------
@@ -162,8 +285,14 @@ func (b *MCPToolsBridge) connectStdio(ctx context.Context, srv ManagedMCPServerC
 		return fmt.Errorf("stdout pipe: %w", err)
 	}
 
-	// Discard stderr (MCP protocol uses stdout).
-	cmd.Stderr = io.Discard
+	// MCP protocol uses stdout; the server's stderr is its log channel. Discard
+	// it by default, but pass it through when DEVCLAW_MCP_STDERR is set so MCP
+	// servers can be debugged.
+	if os.Getenv("DEVCLAW_MCP_STDERR") != "" {
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stderr = io.Discard
+	}
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start %s: %w", srv.Command, err)
@@ -177,45 +306,12 @@ func (b *MCPToolsBridge) connectStdio(ctx context.Context, srv ManagedMCPServerC
 		logger: b.logger.With("server", srv.Name),
 	}
 
-	// Initialize the MCP connection.
-	timeout := time.Duration(srv.Timeout) * time.Second
-	if timeout == 0 {
-		timeout = 30 * time.Second
-	}
-
-	initCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	if err := client.initialize(initCtx); err != nil {
-		client.Close()
-		return fmt.Errorf("initialize: %w", err)
-	}
-
-	// Discover tools.
-	tools, err := client.listTools(initCtx)
-	if err != nil {
-		client.Close()
-		return fmt.Errorf("list tools: %w", err)
-	}
-
-	b.mu.Lock()
-	b.clients[srv.Name] = client
-	b.mu.Unlock()
-
-	// Register each tool in the ToolExecutor.
-	for _, tool := range tools {
-		b.registerMCPTool(srv.Name, tool, client)
-	}
-
-	b.logger.Info("mcp server connected",
-		"server", srv.Name,
-		"tools", len(tools),
-	)
-
-	return nil
+	return b.finishConnect(ctx, srv, client)
 }
 
-func (b *MCPToolsBridge) registerMCPTool(serverName string, tool mcpToolDef, client *mcpStdioClient) {
+// registerMCPTool registers a single MCP tool in the executor and returns the
+// full (prefixed) tool name under which it was registered.
+func (b *MCPToolsBridge) registerMCPTool(serverName string, tool mcpToolDef, client mcpClient) string {
 	// Prefix tool name with server name to avoid collisions.
 	fullName := sanitizeToolName("mcp_" + serverName + "_" + tool.Name)
 
@@ -247,6 +343,7 @@ func (b *MCPToolsBridge) registerMCPTool(serverName string, tool mcpToolDef, cli
 	}
 
 	b.executor.Register(def, handler)
+	return fullName
 }
 
 // ---------------------------------------------------------------------------
@@ -278,13 +375,7 @@ func (c *mcpStdioClient) listTools(ctx context.Context) ([]mcpToolDef, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	var result mcpToolsListResult
-	if err := json.Unmarshal(resp, &result); err != nil {
-		return nil, fmt.Errorf("parse tools/list: %w", err)
-	}
-
-	return result.Tools, nil
+	return parseToolsList(resp)
 }
 
 func (c *mcpStdioClient) callTool(ctx context.Context, name string, args map[string]any) (string, error) {
@@ -295,13 +386,26 @@ func (c *mcpStdioClient) callTool(ctx context.Context, name string, args map[str
 	if err != nil {
 		return "", err
 	}
+	return parseToolCallResult(resp)
+}
 
+// parseToolsList decodes a tools/list result. Shared across transports.
+func parseToolsList(raw json.RawMessage) ([]mcpToolDef, error) {
+	var result mcpToolsListResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("parse tools/list: %w", err)
+	}
+	return result.Tools, nil
+}
+
+// parseToolCallResult decodes a tools/call result, concatenating text content
+// blocks. Shared across transports.
+func parseToolCallResult(raw json.RawMessage) (string, error) {
 	var result mcpToolCallResult
-	if err := json.Unmarshal(resp, &result); err != nil {
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return "", fmt.Errorf("parse tools/call: %w", err)
 	}
 
-	// Concatenate text content blocks.
 	var sb strings.Builder
 	for _, c := range result.Content {
 		if c.Type == "text" || c.Type == "" {
@@ -316,7 +420,6 @@ func (c *mcpStdioClient) callTool(ctx context.Context, name string, args map[str
 	if result.IsError {
 		return "", fmt.Errorf("mcp tool error: %s", text)
 	}
-
 	return text, nil
 }
 
@@ -329,7 +432,7 @@ func (c *mcpStdioClient) sendRequest(ctx context.Context, method string, params 
 
 	req := mcpRequest{
 		JSONRPC: "2.0",
-		ID:      id,
+		ID:      &id,
 		Method:  method,
 		Params:  params,
 	}

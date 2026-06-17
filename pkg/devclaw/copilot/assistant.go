@@ -165,6 +165,9 @@ type Assistant struct {
 	// mcpBridge connects MCP servers to the ToolExecutor.
 	mcpBridge *MCPToolsBridge
 
+	// mcpOAuth runs OAuth flows and stores tokens for remote MCP servers.
+	mcpOAuth *MCPOAuthManager
+
 	// userMgr handles multi-user operations when team mode is enabled.
 	userMgr *UserManager
 
@@ -343,6 +346,10 @@ func New(cfg *Config, logger *slog.Logger) *Assistant {
 	// Wire the `settings` tool so the main agent can read/change a whitelisted
 	// set of runtime settings (media/model) with immediate hot-reload.
 	te.SetSettingsHandlers(a.getAgentSettings, a.setAgentSetting)
+
+	// Wire the `mcp` tool so the main agent can configure, start, stop and
+	// manage external MCP servers at runtime (persisted + applied live).
+	te.SetMCPHandler(a.handleMCPTool)
 
 	// Wire subagent announce callback: when a subagent completes, inject the
 	// result back into the parent session so the main agent can process and
@@ -3730,9 +3737,33 @@ func (a *Assistant) registerSystemTools() {
 		RegisterPluginManagementTools(a.toolExecutor, a.pluginRegistry)
 	}
 
-	// Register MCP tools (bridge external MCP servers to ToolExecutor).
-	if a.config.MCP.Enabled && len(a.config.MCP.Servers) > 0 {
+	// Always create the MCP bridge so the agent's `mcp` tool can manage
+	// servers at runtime even when none are configured yet. Connect the
+	// configured auto-start servers only when the subsystem is enabled.
+	if a.mcpBridge == nil {
 		a.mcpBridge = NewMCPToolsBridge(a.toolExecutor, a.logger)
+	}
+	a.mcpBridge.SetBaseContext(a.ctx)
+
+	// Wire OAuth for remote MCP servers when a vault is available. The bridge
+	// asks the resolver for a Bearer-token provider on http/sse servers flagged
+	// for OAuth or that already have a stored token.
+	if a.vault != nil {
+		a.mcpOAuth = NewMCPOAuthManager(a.vault, a.mcpOAuthRedirectURI(), a.logger)
+		a.mcpOAuth.onAuthorized = func(server string) {
+			if _, err := a.StartMCPServer(server); err != nil {
+				a.logger.Warn("mcp auto-connect after oauth failed", "server", server, "error", err)
+			}
+		}
+		a.mcpBridge.authResolver = func(srv ManagedMCPServerConfig) authProvider {
+			if srv.OAuth || a.mcpOAuth.HasToken(srv.Name) {
+				return a.mcpOAuth.provider(srv.Name)
+			}
+			return nil
+		}
+	}
+
+	if a.config.MCP.Enabled && len(a.config.MCP.Servers) > 0 {
 		a.mcpBridge.ConnectAll(a.ctx, a.config.MCP.Servers)
 	}
 

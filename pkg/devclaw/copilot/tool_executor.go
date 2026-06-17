@@ -556,6 +556,11 @@ type ToolExecutor struct {
 	settingsGet func() (string, error)
 	settingsSet func(key, value string) (string, error)
 
+	// mcpHandler backs the `mcp` tool, letting the main agent configure,
+	// start, stop and manage external MCP servers at runtime. Wired by the
+	// Assistant; nil = tool unavailable.
+	mcpHandler func(ctx context.Context, action string, args map[string]any) (string, error)
+
 	// hooks holds registered before/after tool execution hooks.
 	hooks []*ToolHook
 
@@ -703,6 +708,20 @@ func (e *ToolExecutor) settingsHandlers() (get func() (string, error), set func(
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.settingsGet, e.settingsSet
+}
+
+// SetMCPHandler wires the callback backing the `mcp` tool.
+func (e *ToolExecutor) SetMCPHandler(fn func(ctx context.Context, action string, args map[string]any) (string, error)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.mcpHandler = fn
+}
+
+// mcpHandlerFn returns the configured `mcp` tool callback (nil if unset).
+func (e *ToolExecutor) mcpHandlerFn() func(ctx context.Context, action string, args map[string]any) (string, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.mcpHandler
 }
 
 // MarkConcurrentSafe marks the named tools as safe for concurrent execution.

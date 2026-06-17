@@ -303,6 +303,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		adapter = buildWebUIAdapter(ctx, assistant, cfg, waInstances, configPath, logger)
 		webServer = webui.New(cfg.WebUI, adapter, logger)
 
+		// MCP OAuth: complete authorization flows redirected to the local callback.
+		webServer.SetMCPOAuthCallback(assistant.HandleMCPOAuthCallback)
+
 		// Register restart callback
 		webServer.OnRestartRequested(func() error {
 			logger.Info("restart requested via web UI")
@@ -2357,35 +2360,12 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 		return copilot.SaveConfigToFile(cfg, savePath)
 	}
 	adapter.StartMCPServerFn = func(name string) error {
-		// MCP server start/stop requires runtime management
-		// For now, we just validate the server exists
-		found := false
-		for _, srv := range cfg.MCP.Servers {
-			if srv.Name == name {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("MCP server %q not found", name)
-		}
-		// TODO: Implement actual start via MCP manager when available
-		return nil
+		_, err := assistant.StartMCPServer(name)
+		return err
 	}
 	adapter.StopMCPServerFn = func(name string) error {
-		// MCP server start/stop requires runtime management
-		found := false
-		for _, srv := range cfg.MCP.Servers {
-			if srv.Name == name {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("MCP server %q not found", name)
-		}
-		// TODO: Implement actual stop via MCP manager when available
-		return nil
+		_, err := assistant.StopMCPServer(name)
+		return err
 	}
 
 	// ── Database Status ──
