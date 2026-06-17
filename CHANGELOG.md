@@ -2,6 +2,38 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.21.0] — 2026-06-16
+
+### Added
+
+- **Runtime self-management of external MCP servers (`mcp` tool).** The main
+  agent can now configure, start, stop, manage and authenticate external MCP
+  (Model Context Protocol) servers without editing config or restarting. Actions:
+  `list`, `add`, `remove`, `enable`, `disable`, `start`, `stop`, `test`,
+  `authorize`. Connected servers expose their tools as `mcp_<server>_<tool>`.
+  Owner/admin only; changes are persisted to `config.yaml` (secrets sanitized to
+  `${ENV}`) and applied live.
+- **MCP transports.** Local processes via **stdio** and remote servers via
+  **Streamable HTTP / SSE** (session-id reuse, SSE response parsing).
+- **MCP OAuth 2.1.** Automatic endpoint discovery (RFC 8414 / RFC 9728) and
+  Dynamic Client Registration (RFC 7591) with PKCE. The agent returns a consent
+  URL through its channel; the provider redirects to the local callback
+  (`/oauth/mcp/callback`); tokens are stored in the encrypted vault per server
+  with transparent refresh. No manual client registration required.
+
+### Changed
+
+- WebUI MCP Start/Stop now connect/disconnect servers live (previously no-ops).
+- **Dependencies:** updated `whatsmeow` (~4 months of upstream connection/keepalive
+  fixes), `go.mau.fi/util` v0.9.10, `go.mau.fi/libsignal` v0.2.2. Build now
+  requires Go 1.25.
+
+### Fixed
+
+- MCP stdio notifications were sent with `"id":0`, which strict servers answer
+  as requests and desync the stream (0 tools discovered). Notifications now omit
+  the id per JSON-RPC 2.0.
+
 ## [v1.20.0] — 2026-06-16
 
 ### Added
