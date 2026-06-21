@@ -12,10 +12,14 @@ import (
 //
 // SCHEMA-VERSION REGISTRY (PRAGMA user_version is a single DB-level int shared
 // across the whole memory.db — coordinate all future schema migrations here):
-//   1 = (reserved / pre-v2 baseline)
-//   2 = MigrateMemoryV2 — lifecycle metadata columns on chunks
-//   3 = MigrateMemoryV2 — occurred_at column (original-event timestamp) + index
-// A future migration MUST claim the next integer (4, 5, …) and gate on it the
+//
+//	1 = (reserved / pre-v2 baseline)
+//	2 = MigrateMemoryV2 — lifecycle metadata columns on chunks
+//	3 = MigrateMemoryV2 — occurred_at column (original-event timestamp) + index
+//	4 = BackfillOccurredAt — restamp occurred_at from .md (US-002 self-heal;
+//	    owned by migration_backfill_occurred.go, NOT MigrateMemoryV2)
+//
+// A future migration MUST claim the next integer (5, 6, …) and gate on it the
 // same way; do not reuse a value owned above.
 const memoryV2SchemaVersion = 3
 
