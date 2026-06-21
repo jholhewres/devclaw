@@ -66,7 +66,11 @@ func RegisterMemoryTools(executor *ToolExecutor, cfg MemoryDispatcherConfig) {
 
 	// ── memory_search ──
 	searchDesc := "Search long-term memory for relevant facts, preferences, or past events. " +
-		"Use this before answering questions about prior work, decisions, dates, people, or preferences."
+		"Use this before answering questions about prior work, decisions, dates, people, or preferences. " +
+		"For date- or time-scoped questions (e.g. \"o que rolou na quinta\", \"resumo da semana passada\", " +
+		"\"dia 18/06\", \"ontem\", \"esses últimos dias\"), pass the natural-language question itself as the query: " +
+		"recall is automatically restricted to the matching date window using each memory's original event date. " +
+		"Prefer this over querying the conversation/session database directly via bash."
 	if sqliteStore != nil {
 		searchDesc += " Supports semantic search (vector + keyword hybrid)."
 	}
