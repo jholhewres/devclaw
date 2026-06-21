@@ -1300,11 +1300,22 @@ func (s *SQLiteStore) ApplyTemporalDecay(results []SearchResult, cfg TemporalDec
 	// Looked up per file from chunks.memory_type when a DB is available;
 	// nil-db callers (e.g. unit tests) fall back to the neutral 1x factor.
 	categories := s.memoryTypesForResults(results)
+	// occurred_at fallback: curated/imported memories (memory/imported|saved/<hash>)
+	// carry no date in their file_id, so without this they'd be treated as
+	// evergreen and never decay. Decay them by their real original date
+	// (occurred_at, backfilled by US-002). Files with neither a dated file_id nor
+	// an occurred_at stay evergreen.
+	occurred := s.occurredAtForResults(results)
 
 	for i := range results {
 		fileDate := extractDateFromFileID(results[i].FileID)
 		if fileDate == nil {
-			continue // Evergreen file, no decay
+			if t, ok := occurred[results[i].FileID]; ok && !t.IsZero() {
+				fileDate = &t
+			}
+		}
+		if fileDate == nil {
+			continue // Evergreen file (no dated file_id, no occurred_at)
 		}
 
 		ageDays := now.Sub(*fileDate).Hours() / 24
@@ -1382,6 +1393,55 @@ func (s *SQLiteStore) memoryTypesForResults(results []SearchResult) map[string]s
 			continue
 		}
 		out[fid] = mtype
+	}
+	return out
+}
+
+// occurredAtForResults batch-loads the original event date (chunks.occurred_at)
+// for the files in results, used by ApplyTemporalDecay as the age basis for
+// curated/imported memories whose file_id carries no date. One representative
+// occurred_at per file (MAX ignores NULLs). Files with a NULL occurred_at are
+// absent from the map (treated as evergreen by the caller).
+func (s *SQLiteStore) occurredAtForResults(results []SearchResult) map[string]time.Time {
+	out := make(map[string]time.Time, len(results))
+	if s == nil || s.db == nil || len(results) == 0 {
+		return out
+	}
+
+	uniqueIDs := make([]string, 0, len(results))
+	seen := make(map[string]struct{}, len(results))
+	for _, r := range results {
+		if _, ok := seen[r.FileID]; ok {
+			continue
+		}
+		seen[r.FileID] = struct{}{}
+		uniqueIDs = append(uniqueIDs, r.FileID)
+	}
+
+	placeholders := make([]string, len(uniqueIDs))
+	args := make([]any, len(uniqueIDs))
+	for i, id := range uniqueIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	q := "SELECT file_id, MAX(occurred_at) FROM chunks WHERE file_id IN (" +
+		strings.Join(placeholders, ",") + ") AND occurred_at IS NOT NULL GROUP BY file_id"
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var fid string
+		var occ sql.NullTime
+		if err := rows.Scan(&fid, &occ); err != nil {
+			continue
+		}
+		if occ.Valid {
+			out[fid] = occ.Time
+		}
 	}
 	return out
 }

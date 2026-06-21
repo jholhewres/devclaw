@@ -2,6 +2,29 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.22.2] — 2026-06-21 — Temporal recall (self-heal)
+
+### Fixed
+
+- **The agent couldn't answer "what happened on Thursday/Friday".** The v2 import
+  discarded each memory's original timestamp — every imported chunk was stamped
+  with the migration date — so date-scoped questions ("o que rolou na sexta",
+  "semana passada", "dia 18") could not retrieve the right memories, and temporal
+  decay was meaningless (all memories looked the same age). Fixed, **self-healing
+  on the next restart** (no manual steps, no DB edits; original dates are still in
+  the untouched .md files):
+  - **occurred_at column** preserves each memory's real original timestamp on
+    import (parsed in local time so it's a true instant). (`migration_memory_v2.go` schema v3, `migration_import.go`)
+  - **Boot-time backfill** re-reads the .md files and restamps occurred_at on
+    already-imported memories, matching by content hash. Version-gated (user_version=4),
+    idempotent, fail-open. (`migration_backfill_occurred.go`)
+  - **Date-aware recall**: a query carrying a temporal cue (PT-BR + EN: hoje/ontem,
+    weekday names, "semana passada", "dia N", dates) is resolved to a day-granular
+    local-time window and recall is filtered by occurred_at within it; pure-content
+    queries are unaffected. (`temporal_query.go`, `sqlite_store.go`, `memory_tools.go`)
+  - **Temporal decay now uses occurred_at** (fallback created_at), so memory age
+    reflects the real date again.
+
 ## [v1.22.1] — 2026-06-21 — Memory recall recalibration (self-heal)
 
 ### Fixed
