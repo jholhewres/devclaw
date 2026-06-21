@@ -203,6 +203,11 @@ type curatedEntry struct {
 	curationRule   string
 	expiresAt      *time.Time
 	supersedes     []string
+	// occurredAt is the memory's ORIGINAL event timestamp (the [YYYY-MM-DD HH:MM]
+	// parsed from the legacy .md line, or time.Now() for a live save). nil means
+	// the entry carried no parseable timestamp; the insert then falls back to
+	// created_at / NOW so the column is never spuriously empty.
+	occurredAt *time.Time
 }
 
 // curateEntry applies the full curation policy to a single parsed Entry and
@@ -249,6 +254,15 @@ func (s *SQLiteStore) curateEntry(e Entry, now time.Time) (curatedEntry, curateA
 
 	expiresAt := deriveExpiry(e, kind, memoryType, now)
 
+	// Preserve the original event timestamp. A zero Timestamp means the legacy
+	// line had no parseable [YYYY-MM-DD HH:MM]; leave occurredAt nil so the
+	// insert falls back to created_at / NOW.
+	var occurredAt *time.Time
+	if !e.Timestamp.IsZero() {
+		ts := e.Timestamp
+		occurredAt = &ts
+	}
+
 	return curatedEntry{
 		text:           content,
 		kind:           kind,
@@ -261,6 +275,7 @@ func (s *SQLiteStore) curateEntry(e Entry, now time.Time) (curatedEntry, curateA
 		curationRule:   verdict.CurationRule,
 		expiresAt:      expiresAt,
 		supersedes:     e.Supersedes,
+		occurredAt:     occurredAt,
 	}, curateKeep
 }
 
@@ -382,18 +397,23 @@ func (s *SQLiteStore) insertCuratedChunkWithPrefix(ctx context.Context, prefix, 
 		return fmt.Errorf("insert file: %w", err)
 	}
 
+	// occurred_at is set EXPLICITLY (never via a column default): preserve the
+	// entry's original event timestamp when present, else COALESCE to NOW so the
+	// column always matches created_at for entries that carried no timestamp.
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO chunks (
 			file_id, chunk_idx, text, hash, embedding,
 			expires_at, supersedes, curation_status, curation_rule,
-			importance, confidence, memory_type, kind, scope, scorer_version
-		) VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			importance, confidence, memory_type, kind, scope, scorer_version,
+			occurred_at
+		) VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
 		ON CONFLICT(file_id, chunk_idx) DO NOTHING
 	`,
 		fileID, c.text, chunkHash, embJSON,
 		nullableTime(c.expiresAt), supersedesJSON,
 		nullableString(c.curationStatus), nullableString(c.curationRule),
 		c.importance, c.confidence, c.memoryType, c.kind, c.scope, QualityScorerVersion,
+		nullableTime(c.occurredAt),
 	)
 	if err != nil {
 		return fmt.Errorf("insert chunk: %w", err)

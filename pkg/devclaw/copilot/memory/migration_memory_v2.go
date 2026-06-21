@@ -14,9 +14,10 @@ import (
 // across the whole memory.db — coordinate all future schema migrations here):
 //   1 = (reserved / pre-v2 baseline)
 //   2 = MigrateMemoryV2 — lifecycle metadata columns on chunks
-// A future migration MUST claim the next integer (3, 4, …) and gate on it the
+//   3 = MigrateMemoryV2 — occurred_at column (original-event timestamp) + index
+// A future migration MUST claim the next integer (4, 5, …) and gate on it the
 // same way; do not reuse a value owned above.
-const memoryV2SchemaVersion = 2
+const memoryV2SchemaVersion = 3
 
 // memoryV2Column describes a single additive column on the chunks table.
 type memoryV2Column struct {
@@ -42,6 +43,10 @@ var memoryV2Columns = []memoryV2Column{
 	{name: "used_count", ddl: "ALTER TABLE chunks ADD COLUMN used_count INTEGER DEFAULT 0"},
 	{name: "last_used_at", ddl: "ALTER TABLE chunks ADD COLUMN last_used_at DATETIME"},
 	{name: "scorer_version", ddl: "ALTER TABLE chunks ADD COLUMN scorer_version INTEGER DEFAULT 0"},
+	// v1.22.2 (schema v3): the memory's ORIGINAL event timestamp, preserved on
+	// write so temporal recall ("what happened Thursday") can query the real
+	// date rather than the import/save date carried by created_at.
+	{name: "occurred_at", ddl: "ALTER TABLE chunks ADD COLUMN occurred_at DATETIME"},
 }
 
 // memoryV2Indexes back the read-side lifecycle filtering wired in later
@@ -50,6 +55,7 @@ var memoryV2Indexes = []string{
 	"CREATE INDEX IF NOT EXISTS idx_chunks_deleted_at ON chunks(deleted_at)",
 	"CREATE INDEX IF NOT EXISTS idx_chunks_expires_at ON chunks(expires_at)",
 	"CREATE INDEX IF NOT EXISTS idx_chunks_curation ON chunks(curation_status)",
+	"CREATE INDEX IF NOT EXISTS idx_chunks_occurred_at ON chunks(occurred_at)",
 }
 
 // MigrateMemoryV2 adds the schema-v2 lifecycle metadata columns to the chunks
@@ -154,6 +160,7 @@ func downMemoryV2(db *sql.DB) error {
 		"DROP INDEX IF EXISTS idx_chunks_deleted_at",
 		"DROP INDEX IF EXISTS idx_chunks_expires_at",
 		"DROP INDEX IF EXISTS idx_chunks_curation",
+		"DROP INDEX IF EXISTS idx_chunks_occurred_at",
 	}
 	for _, stmt := range drops {
 		if _, err := db.Exec(stmt); err != nil {

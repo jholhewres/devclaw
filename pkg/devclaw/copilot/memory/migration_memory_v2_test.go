@@ -24,11 +24,12 @@ const minimalChunksDDL = `
 	);
 `
 
-// expectedV2Columns are the 14 lifecycle columns the migration must add.
+// expectedV2Columns are the lifecycle columns the migration must add.
 var expectedV2Columns = []string{
 	"deleted_at", "expires_at", "supersedes", "curation_status", "curation_rule",
 	"importance", "confidence", "memory_type", "kind", "scope",
 	"injected_count", "used_count", "last_used_at", "scorer_version",
+	"occurred_at",
 }
 
 func chunkColumns(t *testing.T, db *sql.DB) map[string]bool {
@@ -83,8 +84,8 @@ func TestMigrateMemoryV2_CleanDB(t *testing.T) {
 		t.Fatalf("MigrateMemoryV2: %v", err)
 	}
 
-	if v := userVersion(t, db); v != 2 {
-		t.Fatalf("user_version = %d, want 2", v)
+	if v := userVersion(t, db); v != memoryV2SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", v, memoryV2SchemaVersion)
 	}
 
 	cols := chunkColumns(t, db)
@@ -119,8 +120,8 @@ func TestMigrateMemoryV2_Idempotent(t *testing.T) {
 		t.Fatalf("third run: %v", err)
 	}
 
-	if v := userVersion(t, db); v != 2 {
-		t.Fatalf("user_version = %d, want 2 after repeats", v)
+	if v := userVersion(t, db); v != memoryV2SchemaVersion {
+		t.Fatalf("user_version = %d, want %d after repeats", v, memoryV2SchemaVersion)
 	}
 	cols := chunkColumns(t, db)
 	if got := len(cols); got != firstCols {
@@ -163,8 +164,8 @@ func TestMigrateMemoryV2_LegacyUpgrade(t *testing.T) {
 		t.Fatalf("MigrateMemoryV2 on legacy db: %v", err)
 	}
 
-	if v := userVersion(t, db); v != 2 {
-		t.Fatalf("user_version = %d, want 2", v)
+	if v := userVersion(t, db); v != memoryV2SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", v, memoryV2SchemaVersion)
 	}
 	cols := chunkColumns(t, db)
 	for _, c := range expectedV2Columns {
