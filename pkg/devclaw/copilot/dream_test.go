@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -225,6 +226,75 @@ func TestNormalizeForComparison(t *testing.T) {
 		got := normalizeForComparison(tt.input)
 		if got != tt.want {
 			t.Errorf("normalizeForComparison(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+// TestDreamSupersedesContradictionInSQLite is the US-006 write-side health
+// test: a dream run over a contradiction whose entries are resident in SQLite
+// must report contradictions_resolved>0, hard-exclude the losing memory from
+// recall, AND drop it from the in-memory vector cache — without ever appending
+// a "[Contradiction] A vs B" summary entry.
+func TestDreamSupersedesContradictionInSQLite(t *testing.T) {
+	sqlStore := newDreamTestStore(t)
+
+	// Evidence contradiction: an older negative fact and a newer positive fact
+	// about the same topic. The topic fingerprint is the first 60 chars, so both
+	// share an identical prefix (>60 chars) and diverge only in the trailing
+	// negative/positive sentiment word. entryA (loser) = the negative one.
+	prefix := "The staging payments service deployment on the primary cluster is currently "
+	loser := prefix + "down and unavailable."
+	winner := prefix + "working and available now."
+
+	// Seed BOTH into SQLite so the supersede has live chunks to match by content.
+	seedDreamFiles(t, sqlStore, map[string]string{
+		"loser.md":  loser,
+		"winner.md": winner,
+		"filler.md": "Unrelated note about the build pipeline using CGO and the sqlite tag.",
+	})
+
+	tmpDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	older := time.Now().Add(-2 * time.Hour)
+	newer := time.Now()
+	mock := &mockMemoryStore{
+		entries: []memory.Entry{
+			{Content: loser, Category: "fact", Timestamp: older},
+			{Content: winner, Category: "fact", Timestamp: newer},
+			{Content: "Unrelated note about the build pipeline using CGO and the sqlite tag.", Category: "fact", Timestamp: newer},
+		},
+	}
+	d := NewDreamConsolidator(DefaultDreamConfig(), mock, tmpDir, logger).
+		WithSQLiteStore(sqlStore)
+
+	result := d.Run(context.Background())
+	if result.Error != nil {
+		t.Fatalf("dream run error: %v", result.Error)
+	}
+	if result.ContradictionsResolved <= 0 {
+		t.Fatalf("expected contradictions_resolved>0, got %d (found=%d)",
+			result.ContradictionsResolved, result.Contradictions)
+	}
+
+	// The losing memory must be gone from BM25 recall.
+	bm25, err := sqlStore.SearchBM25("staging payments service deployment cluster", 10)
+	if err != nil {
+		t.Fatalf("SearchBM25: %v", err)
+	}
+	for _, h := range bm25 {
+		if strings.Contains(h.Text, "down and unavailable") {
+			t.Fatal("superseded loser still recallable via BM25 after dream")
+		}
+	}
+
+	// And gone from the in-memory vector cache (evicted immediately).
+	vec, err := sqlStore.SearchVector(context.Background(), "staging payments service deployment cluster", 10)
+	if err != nil {
+		t.Fatalf("SearchVector: %v", err)
+	}
+	for _, h := range vec {
+		if strings.Contains(h.Text, "down and unavailable") {
+			t.Fatal("superseded loser still in vector cache after dream")
 		}
 	}
 }

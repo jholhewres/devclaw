@@ -164,6 +164,25 @@ func handleMemorySave(ctx context.Context, store *memory.FileStore, sqliteStore 
 		}
 	}
 
+	// ── US-004 cutover: redirect new writes to SQLite ──
+	//
+	// Once the one-time legacy import has completed, new memories are written
+	// directly into the v2 chunks table (curated, embedded, lifecycle-tagged,
+	// content-hash deduped) instead of appended to MEMORY.md. The .md files are
+	// never touched again — only the write target changes. Pre-cutover the old
+	// FileStore.Save path below runs unchanged. Fail-open: if the gate check
+	// errors, fall through to the legacy path.
+	if sqliteStore != nil {
+		if done, gateErr := sqliteStore.LegacyImportDone(ctx); gateErr == nil && done {
+			if err := sqliteStore.SaveCuratedMemory(ctx, content, category, "agent"); err != nil {
+				return nil, fmt.Errorf("save memory to sqlite: %w", err)
+			}
+			return fmt.Sprintf("Saved to memory [%s]: %s", category, content), nil
+		} else if gateErr != nil {
+			slog.Warn("memory_save: cutover gate check failed, using legacy .md path", "error", gateErr)
+		}
+	}
+
 	// Atomic dedup check + save under a single lock (prevents TOCTOU race).
 	contentHash := sha256Hex(content)
 	contentTokens := tokenize(content)
@@ -373,6 +392,14 @@ func handleMemoryList(_ context.Context, store *memory.FileStore, args map[strin
 func handleMemoryIndex(ctx context.Context, sqliteStore *memory.SQLiteStore, cfg MemoryConfig) (any, error) {
 	if sqliteStore == nil {
 		return "Memory indexing not available (SQLite store not configured).", nil
+	}
+
+	// C1: after the v2 cutover the legacy .md files are no longer the source of
+	// truth; raw-indexing the whole dir would resurrect un-redacted/bloat chunks
+	// with NULL lifecycle columns that pass the recall guard. Refuse the raw
+	// reindex post-cutover — curated memory lives in SQLite.
+	if done, derr := sqliteStore.LegacyImportDone(ctx); derr == nil && done {
+		return "Memory v2 active: memory is curated in the SQLite store; legacy .md re-indexing is disabled.", nil
 	}
 
 	memDir := filepath.Join(filepath.Dir(cfg.Path), "memory")

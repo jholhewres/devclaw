@@ -813,7 +813,7 @@ type SearchConfig struct {
 	// MaxResults is the max results returned (default: 6).
 	MaxResults int `yaml:"max_results"`
 
-	// MinScore is the minimum score threshold (default: 0.1).
+	// MinScore is the minimum score threshold (default: 0.35).
 	MinScore float64 `yaml:"min_score"`
 
 	// TemporalDecay configures time-based score decay for memory search.
@@ -996,7 +996,7 @@ func DefaultConfig() *Config {
 				HybridWeightVector: 0.7,
 				HybridWeightBM25:   0.3,
 				MaxResults:         6,
-				MinScore:           0.1,
+				MinScore:           0.35,
 				TemporalDecay: TemporalDecayConfig{
 					Enabled:      true,
 					HalfLifeDays: 30,
