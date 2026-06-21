@@ -636,40 +636,52 @@ func (s *SQLiteStore) DeleteRawLegacyChunks(ctx context.Context, memoryDir strin
 		return 0, fmt.Errorf("delete raw legacy chunks: store not initialized")
 	}
 
-	// Enumerate the legacy file basenames that may have been indexed raw:
-	// MEMORY.md, the archive file, and any daily 20YY-MM-DD.md files actually
-	// present on disk. discoverLegacyFiles already covers MEMORY.md + 20*.md;
-	// we add the archive explicitly (it is not part of the import set but
-	// IndexMemoryDir would have indexed it).
-	basenames := make(map[string]struct{})
-	files, err := discoverLegacyFiles(memoryDir)
+	// Post-cutover the ONLY legitimate chunks are curated ones (importedFileIDPrefix
+	// and savedFileIDPrefix; the import marker lives under importedFileIDPrefix too).
+	// EVERYTHING else in the chunks table is a RAW copy that IndexMemoryDir wrote
+	// from a legacy .md file — regardless of the file_id form it used: a bare
+	// basename ("MEMORY.md"), a path-prefixed id ("data/memory/MEMORY.md", which is
+	// what production wrote), daily files, or the archive. Those carry NULL lifecycle
+	// columns and un-redacted text, so they MUST go. Matching on the curated prefixes
+	// (instead of enumerating basenames) is robust to whatever path form was indexed.
+	// The memoryDir param is retained for signature stability / future use.
+	_ = memoryDir
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT DISTINCT file_id FROM chunks WHERE file_id NOT LIKE ? AND file_id NOT LIKE ?`,
+		importedFileIDPrefix+"%", savedFileIDPrefix+"%")
 	if err != nil {
-		return 0, fmt.Errorf("discover legacy files: %w", err)
+		return 0, fmt.Errorf("enumerate raw chunks: %w", err)
 	}
-	for _, path := range files {
-		basenames[filepath.Base(path)] = struct{}{}
+	var rawIDs []string
+	for rows.Next() {
+		var id string
+		if scanErr := rows.Scan(&id); scanErr != nil {
+			rows.Close()
+			return 0, fmt.Errorf("scan raw file_id: %w", scanErr)
+		}
+		rawIDs = append(rawIDs, id)
 	}
-	if _, statErr := os.Stat(filepath.Join(memoryDir, MemoryArchiveFileName)); statErr == nil {
-		basenames[MemoryArchiveFileName] = struct{}{}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate raw chunks: %w", err)
 	}
 
 	total := 0
-	for basename := range basenames {
-		res, err := s.db.ExecContext(ctx, "DELETE FROM chunks WHERE file_id = ?", basename)
+	for _, id := range rawIDs {
+		res, err := s.db.ExecContext(ctx, "DELETE FROM chunks WHERE file_id = ?", id)
 		if err != nil {
-			return total, fmt.Errorf("delete raw chunks for %s: %w", basename, err)
+			return total, fmt.Errorf("delete raw chunks for %q: %w", id, err)
 		}
 		if n, aerr := res.RowsAffected(); aerr == nil {
 			total += int(n)
 		}
-		// Best-effort: drop the matching files row too so the bare basename is
-		// fully gone (the marker/imported rows use distinct prefixes).
-		if _, err := s.db.ExecContext(ctx, "DELETE FROM files WHERE file_id = ?", basename); err != nil {
-			return total, fmt.Errorf("delete raw file row for %s: %w", basename, err)
+		// Best-effort: drop the matching files row too.
+		if _, err := s.db.ExecContext(ctx, "DELETE FROM files WHERE file_id = ?", id); err != nil {
+			return total, fmt.Errorf("delete raw file row for %q: %w", id, err)
 		}
 		// Evict the raw file's vector-cache entries so they stop surfacing in
 		// SearchVector immediately, without a restart.
-		s.EvictFromVectorCache(basename)
+		s.EvictFromVectorCache(id)
 	}
 	return total, nil
 }

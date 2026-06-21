@@ -121,3 +121,60 @@ func TestC1_RawLegacyChunksDeletedAfterImport(t *testing.T) {
 		t.Fatalf("plaintext credential leaked in %d chunk(s) after cleanup", anyLeak)
 	}
 }
+
+// TestC1_DeletesPathPrefixedRawChunks guards the exact production regression the
+// VPS dry-run caught: prod indexed the legacy file under a PATH-PREFIXED file_id
+// ("data/memory/MEMORY.md"), not a bare basename, so a basename-only delete left
+// the un-redacted raw chunk (with the real password) recallable. DeleteRawLegacyChunks
+// must remove ANY non-curated chunk regardless of file_id form.
+func TestC1_DeletesPathPrefixedRawChunks(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	const secret = "081082se"
+
+	// A raw chunk exactly as production stored it: path-prefixed file_id, NULL
+	// lifecycle columns, un-redacted plaintext password.
+	if _, err := store.db.Exec(
+		"INSERT INTO chunks (file_id, chunk_idx, text, hash) VALUES (?, 0, ?, 'h1')",
+		"data/memory/MEMORY.md", "User's password for integrabot.ai is "+secret,
+	); err != nil {
+		t.Fatalf("insert raw path-prefixed chunk: %v", err)
+	}
+	// A legitimate curated chunk that must SURVIVE.
+	if _, err := store.db.Exec(
+		"INSERT INTO chunks (file_id, chunk_idx, text, hash) VALUES (?, 0, ?, 'h2')",
+		importedFileIDPrefix+"abc", "a normal curated memory about the gateway deploy",
+	); err != nil {
+		t.Fatalf("insert curated chunk: %v", err)
+	}
+
+	deleted, err := store.DeleteRawLegacyChunks(ctx, "/some/memory/dir")
+	if err != nil {
+		t.Fatalf("DeleteRawLegacyChunks: %v", err)
+	}
+	if deleted < 1 {
+		t.Fatalf("expected the path-prefixed raw chunk to be deleted, got %d", deleted)
+	}
+
+	// The path-prefixed raw chunk (and its secret) must be gone.
+	var leak int
+	if err := store.db.QueryRow(
+		"SELECT COUNT(1) FROM chunks WHERE text LIKE '%'||?||'%'", secret,
+	).Scan(&leak); err != nil {
+		t.Fatalf("scan leak: %v", err)
+	}
+	if leak != 0 {
+		t.Fatalf("path-prefixed raw chunk survived: %d leaking chunk(s)", leak)
+	}
+
+	// The curated chunk must remain.
+	var curated int
+	if err := store.db.QueryRow(
+		"SELECT COUNT(1) FROM chunks WHERE file_id LIKE ?", importedFileIDPrefix+"%",
+	).Scan(&curated); err != nil {
+		t.Fatalf("scan curated survivor: %v", err)
+	}
+	if curated != 1 {
+		t.Fatalf("expected the curated chunk to survive, got %d", curated)
+	}
+}
