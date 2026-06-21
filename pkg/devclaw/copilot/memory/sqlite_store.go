@@ -516,13 +516,9 @@ func (s *SQLiteStore) searchBM25WithWindow(query string, maxResults int, occ occ
 const chunkLifecycleGuard = `c.deleted_at IS NULL ` +
 	`AND (c.expires_at IS NULL OR c.expires_at > CURRENT_TIMESTAMP)`
 
-// occurredFilter carries an optional [from, to) occurred_at window (US-003).
-// The zero value (active=false) is a no-op so every legacy code path is
-// unchanged. When active, sqlFragment contributes a HARD window predicate to a
-// WHERE clause and args supplies its two bind parameters. Chunks with
-// occurred_at IS NULL are excluded by the ">= ?" comparison (NULL fails it),
-// which is the intended behavior — a chunk with no known instant cannot fall
-// inside a date window.
+// occurredFilter is an optional [from, to) occurred_at window (US-003). The zero
+// value is a no-op. Chunks with occurred_at IS NULL pass the window (undated ⇒
+// cannot be ruled out by a date); only dated chunks on other days are pruned.
 type occurredFilter struct {
 	active bool
 	from   time.Time
@@ -547,7 +543,7 @@ func (f occurredFilter) sqlFragment() string {
 	if !f.active {
 		return ""
 	}
-	return ` AND c.occurred_at >= ? AND c.occurred_at < ?`
+	return ` AND (c.occurred_at IS NULL OR (c.occurred_at >= ? AND c.occurred_at < ?))`
 }
 
 // args returns the bind parameters for sqlFragment (empty when inert).
@@ -558,15 +554,12 @@ func (f occurredFilter) args() []any {
 	return []any{f.from, f.to}
 }
 
-// matches reports whether an occurred_at value (nil = unknown) falls inside the
-// window. Used by the in-memory vector path. An inert filter matches everything;
-// an active filter excludes unknown (nil) timestamps.
+// matches reports whether occurredAt is admitted by the window (in-memory vector
+// path). Inert filter or nil (undated) ⇒ admitted; otherwise must fall in
+// [from, to). Mirrors sqlFragment's NULL pass-through.
 func (f occurredFilter) matches(occurredAt *time.Time) bool {
-	if !f.active {
+	if !f.active || occurredAt == nil {
 		return true
-	}
-	if occurredAt == nil {
-		return false
 	}
 	return !occurredAt.Before(f.from) && occurredAt.Before(f.to)
 }
@@ -877,9 +870,8 @@ func (s *SQLiteStore) searchVectorWithWindow(ctx context.Context, query string, 
 	s.lastQueryEmb = queryVec
 	s.lastQueryEmbMu.Unlock()
 
-	// Snapshot in-memory cache for lock-free iteration. When a window is set,
-	// filter to chunks whose occurred_at falls inside it (US-003); chunks with
-	// occurred_at IS NULL are excluded by the filter.
+	// Snapshot in-memory cache for lock-free iteration; occ.matches applies the
+	// window (NULL occurred_at passes through).
 	s.vectorCacheMu.RLock()
 	cache := make([]vectorCacheEntry, 0, len(s.vectorCacheByID))
 	for _, entry := range s.vectorCacheByID {
@@ -1018,12 +1010,10 @@ type HybridSearchOptions struct {
 	// Set to -1 for unlimited.
 	KGFactsPerEntity int
 
-	// OccurredFrom and OccurredTo, when BOTH non-nil, restrict recall to chunks
-	// whose occurred_at falls in the half-open window [OccurredFrom, OccurredTo)
-	// (US-003 date-aware recall). The window is a HARD filter: it is applied to
-	// the BM25/LIKE SELECTs (AND c.occurred_at >= ? AND c.occurred_at < ?) and to
-	// the in-memory vector cache. Chunks with occurred_at IS NULL are EXCLUDED
-	// from a window (they have no known instant to place inside it).
+	// OccurredFrom and OccurredTo, when BOTH non-nil, restrict recall to the
+	// half-open window [OccurredFrom, OccurredTo) (US-003 date-aware recall),
+	// applied to the BM25/LIKE SELECTs and the vector cache. NULL occurred_at
+	// passes (undated ⇒ not excluded); only dated chunks on other days are pruned.
 	//
 	// occurred_at is a real local-wall-clock instant (US-001); callers must build
 	// the window in time.Local at day granularity (see resolveTemporalWindow) so

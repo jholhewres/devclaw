@@ -74,17 +74,20 @@ func TestTemporalRecallSelectsRightDay(t *testing.T) {
 	}
 }
 
-// TestTemporalRecallExcludesNullOccurred confirms a chunk with NULL occurred_at
-// (no known instant) is excluded from a day-scoped window.
-func TestTemporalRecallExcludesNullOccurred(t *testing.T) {
+// TestTemporalRecallAdmitsNullOccurred: a NULL-occurred_at chunk survives a
+// day-scoped window (undated ⇒ not excluded) while a dated chunk on another day
+// is pruned. Guards the post-v1.22.2 fix for zero-recall on undated memories.
+func TestTemporalRecallAdmitsNullOccurred(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
 
 	token := "evento sem data conhecida"
 	seedFileWithWing(t, store, "dated.md", token+" sexta", "")
-	seedFileWithWing(t, store, "undated.md", token+" qualquer", "") // occurred_at stays NULL
+	seedFileWithWing(t, store, "undated.md", token+" qualquer", "")  // occurred_at stays NULL → must survive
+	seedFileWithWing(t, store, "otherday.md", token+" quarta", "")   // dated on a different day → must be pruned
 
 	setOccurredAt(t, store, "dated.md", localDay(2026, 6, 19))
+	setOccurredAt(t, store, "otherday.md", localDay(2026, 6, 17))
 	if err := store.loadVectorCache(); err != nil {
 		t.Fatalf("reload vector cache: %v", err)
 	}
@@ -108,8 +111,11 @@ func TestTemporalRecallExcludesNullOccurred(t *testing.T) {
 	if rankOf(results, "dated.md") == -1 {
 		t.Errorf("dated chunk inside window must be present, got %+v", results)
 	}
-	if rankOf(results, "undated.md") != -1 {
-		t.Errorf("NULL-occurred chunk must be excluded from a day window, got %+v", results)
+	if rankOf(results, "undated.md") == -1 {
+		t.Errorf("NULL-occurred chunk must NOT be excluded by a day window (it has no instant to rule out), got %+v", results)
+	}
+	if rankOf(results, "otherday.md") != -1 {
+		t.Errorf("dated chunk on a different day must still be pruned, got %+v", results)
 	}
 }
 

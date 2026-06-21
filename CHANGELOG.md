@@ -2,6 +2,27 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.22.3] — 2026-06-21 — Temporal recall regression fix
+
+### Fixed
+
+- **Date-scoped questions returned nothing when the relevant memory was undated.**
+  v1.22.2's occurred_at window was a HARD filter (`occurred_at >= ? AND < ?`), and
+  in SQL a NULL fails that comparison — so any query carrying a temporal cue
+  ("informações da minha viagem do dia 23", "o que rolou na sexta") excluded every
+  chunk with `occurred_at IS NULL`. Since most of the corpus (and freshly-saved
+  facts) are undated, recall collapsed to zero for those queries. The window now
+  lets NULL pass — undated chunks compete on relevance and only DATED chunks on
+  other days are pruned. (`sqlite_store.go`: `occurredFilter.sqlFragment`/`matches`)
+
+### Changed
+
+- **Temporal questions prefer `memory_search` over ad-hoc bash on the conversation
+  DB.** The `memory_search` tool description and the memory skill guide now instruct
+  the agent to pass the natural-language date-scoped question as the query (the date
+  window is applied automatically) instead of hand-writing SQL against `lcm_messages`.
+  (`memory_tools.go`, `builtin/skills/memory/SKILL.md`)
+
 ## [v1.22.2] — 2026-06-21 — Temporal recall (self-heal)
 
 ### Fixed
