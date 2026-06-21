@@ -12,8 +12,8 @@
 // import used, and backfills occurred_at with the real original timestamp.
 //
 // Properties (mirrors RecurateLowSignal):
-//   - Boot-triggered: wired into initSchema after MigrateMemoryV2 (so occurred_at
-//     exists before we write to it).
+//   - Boot-triggered: wired in the import startup goroutine in assistant.go (after
+//     ImportLegacyMarkdown, so imported chunks exist and occurred_at is present).
 //   - Version-gated via PRAGMA user_version: claims schema version 4. Once
 //     user_version >= 4 the pass is a no-op (and MigrateMemoryV2's gate at >= 3
 //     still holds, since 4 >= 3). The version is bumped to 4 only AFTER a fully
@@ -78,6 +78,9 @@ func (s *SQLiteStore) BackfillOccurredAt(ctx context.Context, memoryDir string, 
 	// import pipeline (curateEntry → importHash(TrimSpace(curated.text))) so the
 	// computed file_id matches the row insertCuratedChunk wrote. now is only used
 	// by curateEntry for expiry/fallback derivation; it does not affect the key.
+	// now is used by curateEntry only for deriveExpiry; that result is discarded —
+	// the backfill only needs curated.text for the hash key. curateEntry never
+	// drops an entry based on expiry, so a slightly stale now is safe.
 	now := time.Now().UTC()
 	for _, path := range files {
 		data, readErr := os.ReadFile(path) // READ ONLY — never written back.
