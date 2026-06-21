@@ -53,7 +53,7 @@ func IsCommand(content string) bool {
 // containsFlag checks if args contains a flag like --json or --full.
 func containsFlag(args []string, flag string) bool {
 	for _, arg := range args {
-		if strings.ToLower(arg) == strings.ToLower(flag) {
+		if strings.EqualFold(arg, flag) {
 			return true
 		}
 	}

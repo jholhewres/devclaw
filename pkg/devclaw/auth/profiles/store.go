@@ -337,8 +337,7 @@ func (s *vaultStore) Delete(id ProfileID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	profile, ok := s.profiles.Get(id)
-	if !ok {
+	if _, ok := s.profiles.Get(id); !ok {
 		return fmt.Errorf("profile %s not found", id)
 	}
 
@@ -348,10 +347,8 @@ func (s *vaultStore) Delete(id ProfileID) error {
 		return fmt.Errorf("failed to delete profile %s: %w", id, err)
 	}
 
-	// Also delete from OAuth manager if OAuth profile
-	if profile.Mode == ModeOAuth && profile.OAuth != nil && s.oauthMgr != nil {
-		// Note: OAuthManager doesn't have a delete method, but we could add one
-	}
+	// Note: OAuthManager has no delete method, so OAuth-backed profiles leave
+	// their token state in the manager. Nothing to do here for now.
 
 	s.logger.Info("deleted profile", "id", id)
 	return nil

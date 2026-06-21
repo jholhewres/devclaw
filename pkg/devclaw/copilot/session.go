@@ -213,7 +213,9 @@ func (s *Session) addEntry(entry ConversationEntry) {
 
 	if persistence != nil {
 		if err := persistence.SaveEntry(s.ID, entry); err != nil {
-			// Log is done inside SaveEntry; avoid holding lock during I/O
+			// Persistence is best-effort; SaveEntry also logs internally, but
+			// surface it here too so a silent failure is not swallowed.
+			slog.Warn("failed to persist conversation entry", "session", s.ID, "err", err)
 		}
 	}
 }
@@ -273,7 +275,9 @@ func (s *Session) AddFact(fact string) {
 
 	if persistence != nil {
 		if err := persistence.SaveFacts(s.ID, facts); err != nil {
-			// Log is done inside SaveFacts
+			// Persistence is best-effort; SaveFacts also logs internally, but
+			// surface it here too so a silent failure is not swallowed.
+			slog.Warn("failed to persist session facts", "session", s.ID, "err", err)
 		}
 	}
 }
