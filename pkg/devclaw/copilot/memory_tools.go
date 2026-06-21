@@ -932,6 +932,79 @@ func init() {
 	}
 }
 
+// credentialKeywordRe flags text that talks about a secret. The
+// natural-language redaction pass only fires on lines containing one of these
+// keywords, so random alphanumerics elsewhere are never touched.
+var credentialKeywordRe = regexp.MustCompile(`(?i)\b(senha|passwd|password|pwd|secret|token|api[_-]?key|apikey|credential|bearer|access[_-]?key)\b`)
+
+// secretishTokenRe matches candidate secret tokens on a keyword line.
+var secretishTokenRe = regexp.MustCompile(`[A-Za-z0-9][A-Za-z0-9._/+=@-]{5,}`)
+
+// looksSecretish reports whether a token has the shape of a secret value: a
+// long opaque string (>=20), or a 6+ char mix of letters and digits.
+func looksSecretish(tok string) bool {
+	if strings.Contains(tok, "REDACTED") {
+		return false
+	}
+	if len(tok) >= 20 {
+		return true
+	}
+	if len(tok) < 6 {
+		return false
+	}
+	var hasDigit, hasAlpha bool
+	for _, r := range tok {
+		switch {
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+			hasAlpha = true
+		}
+	}
+	return hasDigit && hasAlpha
+}
+
+// hasNaturalLanguageSecret reports whether any keyword line carries a
+// secret-shaped token (e.g. "password for the site is 081082se").
+func hasNaturalLanguageSecret(content string) bool {
+	if !credentialKeywordRe.MatchString(content) {
+		return false
+	}
+	for _, line := range strings.Split(content, "\n") {
+		if !credentialKeywordRe.MatchString(line) {
+			continue
+		}
+		for _, tok := range secretishTokenRe.FindAllString(line, -1) {
+			if looksSecretish(tok) && !credentialKeywordRe.MatchString(tok) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// redactSecretishInKeywordLines redacts secret-shaped tokens on every line that
+// mentions a credential keyword, catching natural-language secrets the
+// assignment patterns miss. The keyword word itself is preserved.
+func redactSecretishInKeywordLines(content string) string {
+	if !credentialKeywordRe.MatchString(content) {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if !credentialKeywordRe.MatchString(line) {
+			continue
+		}
+		lines[i] = secretishTokenRe.ReplaceAllStringFunc(line, func(tok string) string {
+			if !looksSecretish(tok) || credentialKeywordRe.MatchString(tok) {
+				return tok
+			}
+			return "[REDACTED — use vault]"
+		})
+	}
+	return strings.Join(lines, "\n")
+}
+
 // looksLikeCredential checks whether content contains patterns that
 // indicate passwords, API keys, tokens, or other secrets.
 func looksLikeCredential(content string) bool {
@@ -942,7 +1015,7 @@ func looksLikeCredential(content string) bool {
 			}
 		}
 	}
-	return false
+	return hasNaturalLanguageSecret(content)
 }
 
 // LooksLikeCredential is the exported version for use by the security package.
@@ -965,7 +1038,7 @@ func redactCredentials(content string) string {
 			return "[REDACTED — use vault]"
 		})
 	}
-	return content
+	return redactSecretishInKeywordLines(content)
 }
 
 // RedactCredentials is the exported version for use by the security package.
