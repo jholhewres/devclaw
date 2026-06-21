@@ -50,8 +50,8 @@ type SQLiteStore struct {
 
 	// lastQueryEmbedding stores the most recent query embedding from SearchVector.
 	// Reused by TopicChangeDetector to avoid extra embedding API calls.
-	lastQueryEmbMu  sync.RWMutex
-	lastQueryEmb    []float32
+	lastQueryEmbMu sync.RWMutex
+	lastQueryEmb   []float32
 
 	// indexGroup serializes concurrent IndexChunks calls for the same fileID.
 	// Without this, two writers indexing the same file could compute embeddings
@@ -62,11 +62,12 @@ type SQLiteStore struct {
 
 // vectorCacheEntry holds a chunk embedding for in-memory vector search.
 type vectorCacheEntry struct {
-	chunkID   int64
-	fileID    string
-	text      string
-	embedding []float32           // float32 path (used when quantize=false)
-	quantized *QuantizedEmbedding // uint8 path (used when quantize=true, ~4x less memory)
+	chunkID        int64
+	fileID         string
+	text           string
+	curationStatus string              // chunk curation_status ("low_signal" or "")
+	embedding      []float32           // float32 path (used when quantize=false)
+	quantized      *QuantizedEmbedding // uint8 path (used when quantize=true, ~4x less memory)
 }
 
 // SearchResult represents a single search hit with score.
@@ -81,6 +82,18 @@ type SearchResult struct {
 	Text   string
 	Score  float64
 	Wing   string
+
+	// CurationStatus carries the chunk's curation_status (e.g. "low_signal" or
+	// "" for normal). Since v1.22.1 low_signal chunks are no longer excluded
+	// from recall — they are returned and ranked down via a penalty applied in
+	// HybridSearchWithOpts. Empty for legacy rows and wing-unaware paths that
+	// do not select it.
+	CurationStatus string
+}
+
+// isLowSignal reports whether this result was curated as low_signal.
+func (r SearchResult) isLowSignal() bool {
+	return r.CurationStatus == CurationStatusLowSignal
 }
 
 // NewSQLiteStore opens or creates a SQLite memory database with FTS5.
@@ -238,6 +251,18 @@ func (s *SQLiteStore) initSchema() error {
 	// user_version; same non-fatal policy as the migrations above.
 	if err := MigrateMemoryV2(s.db, s.logger); err != nil {
 		slog.Warn("failed to migrate memory v2 schema", "error", err)
+	}
+
+	// v1.22.1 — boot-time re-curation. Re-score any chunk whose scorer_version
+	// is below the current QualityScorerVersion with the recalibrated scorer so
+	// facts wrongly demoted to low_signal become recallable again. Runs here,
+	// BEFORE loadVectorCache, so the cache naturally picks up the new statuses.
+	// Pure text scoring (no embeddings) → fast enough to run synchronously.
+	// Fail-open: log and continue, never block startup.
+	if rescored, err := s.RecurateLowSignal(context.Background(), s.logger); err != nil {
+		slog.Warn("failed to recurate low_signal chunks", "error", err)
+	} else if rescored > 0 {
+		slog.Info("memory recuration complete", "rescored", rescored)
 	}
 
 	return nil
@@ -471,19 +496,23 @@ func (s *SQLiteStore) SearchBM25(query string, maxResults int) ([]SearchResult, 
 }
 
 // chunkLifecycleGuard is the SQL fragment (referencing the chunks alias "c")
-// that excludes chunks which must never surface in recall: soft-deleted
-// chunks, expired chunks, and chunks curated as low-signal. The lifecycle
-// columns were added by migration_memory_v2.go (US-001); legacy rows have
-// NULL in all of them and therefore pass the guard. Always appended with a
-// leading "AND " to an existing WHERE clause.
+// that hard-excludes chunks which must never surface in recall: soft-deleted
+// chunks and expired chunks. The lifecycle columns were added by
+// migration_memory_v2.go (US-001); legacy rows have NULL in all of them and
+// therefore pass the guard. Always appended with a leading "AND " to an
+// existing WHERE clause.
+//
+// NOTE (v1.22.1): low_signal is NO LONGER hard-excluded here. low_signal chunks
+// are returned by every retrieval path and instead RANKED DOWN in the fusion
+// step (see the low_signal penalty in HybridSearchWithOpts). Only deleted /
+// expired remain hard filters.
 const chunkLifecycleGuard = `c.deleted_at IS NULL ` +
-	`AND (c.expires_at IS NULL OR c.expires_at > CURRENT_TIMESTAMP) ` +
-	`AND (c.curation_status IS NULL OR c.curation_status != 'low_signal')`
+	`AND (c.expires_at IS NULL OR c.expires_at > CURRENT_TIMESTAMP)`
 
 // ftsQuery runs a single FTS5 query and returns ranked results.
 func (s *SQLiteStore) ftsQuery(ftsQuery string, maxResults int) ([]SearchResult, error) {
 	rows, err := s.db.Query(`
-		SELECT c.file_id, c.text, rank
+		SELECT c.file_id, c.text, COALESCE(c.curation_status, ''), rank
 		FROM chunks_fts
 		JOIN chunks c ON c.id = chunks_fts.rowid
 		WHERE chunks_fts MATCH ?
@@ -500,7 +529,7 @@ func (s *SQLiteStore) ftsQuery(ftsQuery string, maxResults int) ([]SearchResult,
 	for rows.Next() {
 		var r SearchResult
 		var rank float64
-		if err := rows.Scan(&r.FileID, &r.Text, &rank); err != nil {
+		if err := rows.Scan(&r.FileID, &r.Text, &r.CurationStatus, &rank); err != nil {
 			continue
 		}
 		r.Score = 1.0 / (1.0 + math.Abs(rank))
@@ -531,7 +560,7 @@ func (s *SQLiteStore) searchLikeFallback(query string, maxResults int) ([]Search
 	// deleted/expired/low-signal chunks never surface via the LIKE path.
 	// The guard references alias "c", so the table is aliased here too.
 	sqlQuery := fmt.Sprintf(`
-		SELECT c.file_id, c.text FROM chunks c
+		SELECT c.file_id, c.text, COALESCE(c.curation_status, '') FROM chunks c
 		WHERE (%s)
 		AND `+chunkLifecycleGuard+`
 		LIMIT ?
@@ -546,7 +575,7 @@ func (s *SQLiteStore) searchLikeFallback(query string, maxResults int) ([]Search
 	var results []SearchResult
 	for rows.Next() {
 		var r SearchResult
-		if err := rows.Scan(&r.FileID, &r.Text); err != nil {
+		if err := rows.Scan(&r.FileID, &r.Text, &r.CurationStatus); err != nil {
 			continue
 		}
 		// Score based on word match count.
@@ -622,7 +651,7 @@ func (s *SQLiteStore) searchBM25WithWing(query string, maxResults int) ([]Search
 // extra column. Used only by the wing-aware code path.
 func (s *SQLiteStore) ftsQueryWithWing(ftsQuery string, maxResults int) ([]SearchResult, error) {
 	rows, err := s.db.Query(`
-		SELECT c.file_id, c.text, COALESCE(f.wing, ''), rank
+		SELECT c.file_id, c.text, COALESCE(f.wing, ''), COALESCE(c.curation_status, ''), rank
 		FROM chunks_fts
 		JOIN chunks c ON c.id = chunks_fts.rowid
 		LEFT JOIN files f ON f.file_id = c.file_id
@@ -648,7 +677,7 @@ func (s *SQLiteStore) ftsQueryWithWing(ftsQuery string, maxResults int) ([]Searc
 			r    SearchResult
 			rank float64
 		)
-		if err := rows.Scan(&r.FileID, &r.Text, &r.Wing, &rank); err != nil {
+		if err := rows.Scan(&r.FileID, &r.Text, &r.Wing, &r.CurationStatus, &rank); err != nil {
 			continue
 		}
 		r.Score = 1.0 / (1.0 + math.Abs(rank))
@@ -818,9 +847,10 @@ func (s *SQLiteStore) SearchVector(ctx context.Context, query string, maxResults
 	var results []SearchResult
 	for _, c := range candidates {
 		results = append(results, SearchResult{
-			FileID: c.entry.fileID,
-			Text:   c.entry.text,
-			Score:  c.score,
+			FileID:         c.entry.fileID,
+			Text:           c.entry.text,
+			Score:          c.score,
+			CurationStatus: c.entry.curationStatus,
 		})
 	}
 
@@ -842,6 +872,12 @@ const defaultWingBoostMatch = 1.3
 // whose wing differs from the query wing when WingBoostPenalty is unset.
 // Mirrors HierarchyConfig.WingBoostPenalty default.
 const defaultWingBoostPenalty = 0.4
+
+// lowSignalPenalty is the score multiplier applied (v1.22.1) to a fused result
+// whose chunk is curated as low_signal. It keeps low_signal chunks recallable
+// (they are no longer hard-excluded) while ranking them well below high-signal
+// results so they only surface when nothing better matches.
+const lowSignalPenalty = 0.15
 
 // HybridSearchOptions configures a hybrid (vector + BM25) memory search.
 //
@@ -1035,10 +1071,11 @@ func (s *SQLiteStore) HybridSearchWithOpts(ctx context.Context, query string, op
 				}
 			} else {
 				scoreMap[key] = &SearchResult{
-					FileID: r.FileID,
-					Text:   r.Text,
-					Score:  weight * (1.0 / float64(i+1)),
-					Wing:   r.Wing,
+					FileID:         r.FileID,
+					Text:           r.Text,
+					Score:          weight * (1.0 / float64(i+1)),
+					Wing:           r.Wing,
+					CurationStatus: r.CurationStatus,
 				}
 			}
 		}
@@ -1062,6 +1099,16 @@ func (s *SQLiteStore) HybridSearchWithOpts(ctx context.Context, query string, op
 	if wingAware {
 		for _, r := range scoreMap {
 			r.Score *= wingMultiplier(r.Wing, opts.QueryWing, matchBoost, penaltyBoost)
+		}
+	}
+
+	// Soft-demote low_signal chunks (v1.22.1). They are no longer excluded from
+	// recall — instead their fused score is heavily discounted so they rank
+	// below high-signal results but remain retrievable when nothing else
+	// matches. Applied BEFORE the minScore gate.
+	for _, r := range scoreMap {
+		if r.isLowSignal() {
+			r.Score *= lowSignalPenalty
 		}
 	}
 
@@ -1443,11 +1490,13 @@ func (s *SQLiteStore) setEmbeddingCache(ctx context.Context, text string, embedd
 // loadVectorCache loads all chunk embeddings into memory for fast search.
 // Called once on startup. Subsequent index operations use updateVectorCacheForFile.
 func (s *SQLiteStore) loadVectorCache() error {
-	// Exclude soft-deleted, expired, and low-signal chunks from the vector
-	// cache so SearchVector (which scores the in-memory cache, not SQL) can
-	// never return them. The lifecycle columns come from migration_memory_v2.go
-	// (US-001); legacy rows are NULL and pass the guard.
-	rows, err := s.db.Query("SELECT c.id, c.file_id, c.text, c.embedding FROM chunks c WHERE c.embedding IS NOT NULL AND " + chunkLifecycleGuard)
+	// Exclude soft-deleted and expired chunks from the vector cache so
+	// SearchVector (which scores the in-memory cache, not SQL) can never return
+	// them. low_signal chunks ARE loaded (since v1.22.1): they remain recallable
+	// and carry curation_status so the fusion step can rank them down. The
+	// lifecycle columns come from migration_memory_v2.go (US-001); legacy rows
+	// are NULL and pass the guard.
+	rows, err := s.db.Query("SELECT c.id, c.file_id, c.text, COALESCE(c.curation_status, ''), c.embedding FROM chunks c WHERE c.embedding IS NOT NULL AND " + chunkLifecycleGuard)
 	if err != nil {
 		return err
 	}
@@ -1458,7 +1507,7 @@ func (s *SQLiteStore) loadVectorCache() error {
 	for rows.Next() {
 		var e vectorCacheEntry
 		var embJSON string
-		if err := rows.Scan(&e.chunkID, &e.fileID, &e.text, &embJSON); err != nil {
+		if err := rows.Scan(&e.chunkID, &e.fileID, &e.text, &e.curationStatus, &embJSON); err != nil {
 			continue
 		}
 		if err := json.Unmarshal([]byte(embJSON), &e.embedding); err != nil {

@@ -2,6 +2,31 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.22.1] — 2026-06-21 — Memory recall recalibration (self-heal)
+
+### Fixed
+
+- **Recall stopped surfacing most real memories after the v2 migration.** The
+  curation quality scorer (ported from anchored) was miscalibrated for a personal
+  assistant: ordinary facts with no project/scope scored below the low-signal
+  threshold, so on a real store **94% of memories (2936/3120) were demoted to
+  `low_signal` and recall HARD-EXCLUDED them** — recent conversations (trips,
+  client proposals, receipts) became invisible. Three coordinated fixes, all
+  **self-healing on the next restart** (no manual steps, no DB edits):
+  - **Scorer recalibrated (v4):** `fact` now carries positive weight, the
+    "unscoped" penalty is removed, length/word penalties only hit near-empty
+    fragments. Genuine noise (test output, progress narration, error dumps) still
+    demotes. (`quality.go`)
+  - **Boot-time re-curation:** a version-gated, idempotent, fail-open pass re-scores
+    every chunk whose `scorer_version` is stale and clears the wrongful `low_signal`
+    flags on startup. (`migration_recurate.go`, wired in `initSchema`)
+  - **Soft-demote instead of hard-exclude:** recall now ranks `low_signal` lower
+    (×0.15) rather than removing it, so nothing is ever fully hidden again.
+    (`chunkLifecycleGuard` + ranking)
+  - Validated on a copy of the production store: recallable **184 → 2986**,
+    low_signal **2936 → 134**, credential leaks still **0**, and previously-hidden
+    topics recall again.
+
 ## [v1.22.0] — 2026-06-21 — Memory v2
 
 ### Added

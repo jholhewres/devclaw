@@ -37,7 +37,13 @@ const (
 
 // QualityScorerVersion identifies the scoring algorithm revision. Persisted in
 // chunks.scorer_version so a future weight change can re-curate selectively.
-const QualityScorerVersion = 3
+//
+// v4 (v1.22.1) recalibrates the scorer for a personal assistant: facts get a
+// positive weight, the no-scope penalty is removed, and length/word-count
+// penalties are softened so only genuine noise (test output, progress
+// narration, terminal dumps, near-empty fragments) falls below
+// LowSignalThreshold. A bump here triggers RecurateLowSignal at boot.
+const QualityScorerVersion = 4
 
 var (
 	// testOutputRe matches transient test-run chatter ("12 passed", "go test",
@@ -56,12 +62,15 @@ var (
 // scope/wing signal — DevClaw's analogue of the anchored scorer's "hasProject"
 // boost (a scoped memory is more durable than a free-floating one).
 //
-// Weights are preserved from the anchored implementation:
+// Weights (v4, recalibrated v1.22.1 for a personal assistant — genuine facts
+// must stay recallable; only real noise should fall below LowSignalThreshold):
 //   - base 0.62
-//   - +0.18 decision/learning, +0.08 summary/plan, -0.20 event/preference
-//   - +0.12 if scoped, -0.08 if not
-//   - length: -0.42 (<40 chars), -0.24 (<90), +0.08 (>220)
-//   - -0.18 if fewer than 6 words
+//   - +0.18 decision/learning, +0.10 fact, +0.08 summary/plan,
+//     -0.10 event/preference
+//   - +0.12 if scoped, NO penalty when unscoped (personal memories rarely
+//     carry scope)
+//   - length: -0.30 (<25 chars), -0.10 (<60), +0.08 (>220)
+//   - -0.12 if fewer than 4 words
 //   - -0.32 test-output, -0.28 progress, -0.18 terminal-error regex
 //   - -0.10 fact with >12 newlines; -0.12 punctuation-heavy short text
 //   - clamped to [0,1]
@@ -78,29 +87,31 @@ func ScoreQuality(content, category string, hasScope bool) float64 {
 	switch category {
 	case "decision", "learning":
 		score += 0.18
+	case "fact":
+		score += 0.1
 	case "summary", "plan":
 		score += 0.08
 	case "event", "preference":
-		score -= 0.2
+		score -= 0.1
 	}
 
+	// Scoped memories get a durability boost; unscoped ones are NOT penalized
+	// (personal facts/decisions rarely carry a scope/wing signal).
 	if hasScope {
 		score += 0.12
-	} else {
-		score -= 0.08
 	}
 
 	switch {
-	case chars < 40:
-		score -= 0.42
-	case chars < 90:
-		score -= 0.24
+	case chars < 25:
+		score -= 0.3
+	case chars < 60:
+		score -= 0.1
 	case chars > 220:
 		score += 0.08
 	}
 
-	if len(words) < 6 {
-		score -= 0.18
+	if len(words) < 4 {
+		score -= 0.12
 	}
 	if testOutputRe.MatchString(text) {
 		score -= 0.32
