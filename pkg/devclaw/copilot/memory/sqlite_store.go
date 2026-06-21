@@ -66,6 +66,7 @@ type vectorCacheEntry struct {
 	fileID         string
 	text           string
 	curationStatus string              // chunk curation_status ("low_signal" or "")
+	occurredAt     *time.Time          // chunk occurred_at (US-003); nil when unknown
 	embedding      []float32           // float32 path (used when quantize=false)
 	quantized      *QuantizedEmbedding // uint8 path (used when quantize=true, ~4x less memory)
 }
@@ -444,6 +445,12 @@ func (s *SQLiteStore) indexChunksLocked(ctx context.Context, fileID string, chun
 // Falls back to LIKE-based search when FTS5 is not available.
 // Applies query expansion to handle conversational queries.
 func (s *SQLiteStore) SearchBM25(query string, maxResults int) ([]SearchResult, error) {
+	return s.searchBM25WithWindow(query, maxResults, noOccurredFilter)
+}
+
+// searchBM25WithWindow is SearchBM25 with an optional occurred_at window
+// (US-003). Passing noOccurredFilter is byte-identical to the legacy SearchBM25.
+func (s *SQLiteStore) searchBM25WithWindow(query string, maxResults int, occ occurredFilter) ([]SearchResult, error) {
 	searchStart := time.Now()
 	if maxResults <= 0 {
 		maxResults = 10
@@ -451,7 +458,7 @@ func (s *SQLiteStore) SearchBM25(query string, maxResults int) ([]SearchResult, 
 
 	// If FTS5 is not available, use LIKE fallback with expanded keywords.
 	if !s.ftsAvailable {
-		results, err := s.searchLikeFallback(query, maxResults)
+		results, err := s.searchLikeFallback(query, maxResults, occ)
 		s.logger.Info("search_bm25 completed",
 			"elapsed_ms", time.Since(searchStart).Milliseconds(),
 			"results", len(results),
@@ -467,7 +474,7 @@ func (s *SQLiteStore) SearchBM25(query string, maxResults int) ([]SearchResult, 
 	var err error
 
 	if safeQuery != "" {
-		results, err = s.ftsQuery(safeQuery, maxResults)
+		results, err = s.ftsQuery(safeQuery, maxResults, occ)
 		if err == nil && len(results) >= maxResults/2 {
 			return results, nil
 		}
@@ -480,7 +487,7 @@ func (s *SQLiteStore) SearchBM25(query string, maxResults int) ([]SearchResult, 
 	if len(keywords) > 0 {
 		expandedQuery := expandQueryForFTS(keywords)
 		if expandedQuery != "" && expandedQuery != safeQuery {
-			moreResults, err := s.ftsQuery(expandedQuery, maxResults)
+			moreResults, err := s.ftsQuery(expandedQuery, maxResults, occ)
 			if err == nil {
 				results = mergeSearchResults(results, moreResults, maxResults*2)
 			}
@@ -509,19 +516,78 @@ func (s *SQLiteStore) SearchBM25(query string, maxResults int) ([]SearchResult, 
 const chunkLifecycleGuard = `c.deleted_at IS NULL ` +
 	`AND (c.expires_at IS NULL OR c.expires_at > CURRENT_TIMESTAMP)`
 
-// ftsQuery runs a single FTS5 query and returns ranked results.
-func (s *SQLiteStore) ftsQuery(ftsQuery string, maxResults int) ([]SearchResult, error) {
+// occurredFilter carries an optional [from, to) occurred_at window (US-003).
+// The zero value (active=false) is a no-op so every legacy code path is
+// unchanged. When active, sqlFragment contributes a HARD window predicate to a
+// WHERE clause and args supplies its two bind parameters. Chunks with
+// occurred_at IS NULL are excluded by the ">= ?" comparison (NULL fails it),
+// which is the intended behavior — a chunk with no known instant cannot fall
+// inside a date window.
+type occurredFilter struct {
+	active bool
+	from   time.Time
+	to     time.Time
+}
+
+// noOccurredFilter is the inert filter used by the legacy (window-unaware) call
+// paths so their SQL is byte-identical to before US-003.
+var noOccurredFilter = occurredFilter{}
+
+// occurredFilterFromOpts derives an occurredFilter from search options.
+func occurredFilterFromOpts(opts HybridSearchOptions) occurredFilter {
+	if from, to, ok := opts.occurredWindow(); ok {
+		return occurredFilter{active: true, from: from, to: to}
+	}
+	return noOccurredFilter
+}
+
+// sqlFragment returns the SQL predicate to AND into a chunks ("c") WHERE clause,
+// with a leading "AND ", or "" when the filter is inert.
+func (f occurredFilter) sqlFragment() string {
+	if !f.active {
+		return ""
+	}
+	return ` AND c.occurred_at >= ? AND c.occurred_at < ?`
+}
+
+// args returns the bind parameters for sqlFragment (empty when inert).
+func (f occurredFilter) args() []any {
+	if !f.active {
+		return nil
+	}
+	return []any{f.from, f.to}
+}
+
+// matches reports whether an occurred_at value (nil = unknown) falls inside the
+// window. Used by the in-memory vector path. An inert filter matches everything;
+// an active filter excludes unknown (nil) timestamps.
+func (f occurredFilter) matches(occurredAt *time.Time) bool {
+	if !f.active {
+		return true
+	}
+	if occurredAt == nil {
+		return false
+	}
+	return !occurredAt.Before(f.from) && occurredAt.Before(f.to)
+}
+
+// ftsQuery runs a single FTS5 query and returns ranked results. occ is an
+// optional occurred_at window (US-003); pass noOccurredFilter for legacy behavior.
+func (s *SQLiteStore) ftsQuery(ftsQuery string, maxResults int, occ occurredFilter) ([]SearchResult, error) {
+	args := []any{ftsQuery}
+	args = append(args, occ.args()...)
+	args = append(args, maxResults*2)
 	rows, err := s.db.Query(`
 		SELECT c.file_id, c.text, COALESCE(c.curation_status, ''), rank
 		FROM chunks_fts
 		JOIN chunks c ON c.id = chunks_fts.rowid
 		WHERE chunks_fts MATCH ?
-		AND `+chunkLifecycleGuard+`
+		AND `+chunkLifecycleGuard+occ.sqlFragment()+`
 		ORDER BY rank
 		LIMIT ?
-	`, ftsQuery, maxResults*2)
+	`, args...)
 	if err != nil {
-		return s.searchLikeFallback(ftsQuery, maxResults)
+		return s.searchLikeFallback(ftsQuery, maxResults, occ)
 	}
 	defer rows.Close()
 
@@ -540,7 +606,9 @@ func (s *SQLiteStore) ftsQuery(ftsQuery string, maxResults int) ([]SearchResult,
 }
 
 // searchLikeFallback performs a simple LIKE search when FTS5 is not available.
-func (s *SQLiteStore) searchLikeFallback(query string, maxResults int) ([]SearchResult, error) {
+// occ is an optional occurred_at window (US-003); pass noOccurredFilter for
+// legacy behavior.
+func (s *SQLiteStore) searchLikeFallback(query string, maxResults int, occ occurredFilter) ([]SearchResult, error) {
 	// Split query into words and search for each with LIKE.
 	words := strings.Fields(strings.ToLower(query))
 	if len(words) == 0 {
@@ -554,6 +622,7 @@ func (s *SQLiteStore) searchLikeFallback(query string, maxResults int) ([]Search
 		conditions = append(conditions, "LOWER(text) LIKE ?")
 		args = append(args, "%"+w+"%")
 	}
+	args = append(args, occ.args()...)
 	args = append(args, maxResults*2)
 
 	// Wrap the OR-list in parentheses, then AND the lifecycle guard so
@@ -562,7 +631,7 @@ func (s *SQLiteStore) searchLikeFallback(query string, maxResults int) ([]Search
 	sqlQuery := fmt.Sprintf(`
 		SELECT c.file_id, c.text, COALESCE(c.curation_status, '') FROM chunks c
 		WHERE (%s)
-		AND `+chunkLifecycleGuard+`
+		AND `+chunkLifecycleGuard+occ.sqlFragment()+`
 		LIMIT ?
 	`, strings.Join(conditions, " OR "))
 
@@ -601,14 +670,14 @@ func (s *SQLiteStore) searchLikeFallback(query string, maxResults int) ([]Search
 //
 // Falls back to fileWingFallback() when FTS5 is unavailable so the wing
 // metadata is still attached even on the LIKE-based code path.
-func (s *SQLiteStore) searchBM25WithWing(query string, maxResults int) ([]SearchResult, error) {
+func (s *SQLiteStore) searchBM25WithWing(query string, maxResults int, occ occurredFilter) ([]SearchResult, error) {
 	if maxResults <= 0 {
 		maxResults = 10
 	}
 
 	// FTS5 not available — fall back to LIKE search and attach wings.
 	if !s.ftsAvailable {
-		results, err := s.searchLikeFallback(query, maxResults)
+		results, err := s.searchLikeFallback(query, maxResults, occ)
 		if err != nil {
 			return nil, err
 		}
@@ -623,7 +692,7 @@ func (s *SQLiteStore) searchBM25WithWing(query string, maxResults int) ([]Search
 	var err error
 
 	if safeQuery != "" {
-		results, err = s.ftsQueryWithWing(safeQuery, maxResults)
+		results, err = s.ftsQueryWithWing(safeQuery, maxResults, occ)
 		if err == nil && len(results) >= maxResults/2 {
 			return results, nil
 		}
@@ -636,7 +705,7 @@ func (s *SQLiteStore) searchBM25WithWing(query string, maxResults int) ([]Search
 	if len(keywords) > 0 {
 		expandedQuery := expandQueryForFTS(keywords)
 		if expandedQuery != "" && expandedQuery != safeQuery {
-			moreResults, err := s.ftsQueryWithWing(expandedQuery, maxResults)
+			moreResults, err := s.ftsQueryWithWing(expandedQuery, maxResults, occ)
 			if err == nil {
 				results = mergeSearchResults(results, moreResults, maxResults*2)
 			}
@@ -649,20 +718,23 @@ func (s *SQLiteStore) searchBM25WithWing(query string, maxResults int) ([]Search
 // ftsQueryWithWing runs a single FTS5 query that JOINs against the files
 // table to attach files.wing to each row. Mirrors ftsQuery but with the
 // extra column. Used only by the wing-aware code path.
-func (s *SQLiteStore) ftsQueryWithWing(ftsQuery string, maxResults int) ([]SearchResult, error) {
+func (s *SQLiteStore) ftsQueryWithWing(ftsQuery string, maxResults int, occ occurredFilter) ([]SearchResult, error) {
+	args := []any{ftsQuery}
+	args = append(args, occ.args()...)
+	args = append(args, maxResults*2)
 	rows, err := s.db.Query(`
 		SELECT c.file_id, c.text, COALESCE(f.wing, ''), COALESCE(c.curation_status, ''), rank
 		FROM chunks_fts
 		JOIN chunks c ON c.id = chunks_fts.rowid
 		LEFT JOIN files f ON f.file_id = c.file_id
 		WHERE chunks_fts MATCH ?
-		AND `+chunkLifecycleGuard+`
+		AND `+chunkLifecycleGuard+occ.sqlFragment()+`
 		ORDER BY rank
 		LIMIT ?
-	`, ftsQuery, maxResults*2)
+	`, args...)
 	if err != nil {
 		// Fall back to the LIKE path and attach wings afterwards.
-		results, err := s.searchLikeFallback(ftsQuery, maxResults)
+		results, err := s.searchLikeFallback(ftsQuery, maxResults, occ)
 		if err != nil {
 			return nil, err
 		}
@@ -691,8 +763,8 @@ func (s *SQLiteStore) ftsQueryWithWing(ftsQuery string, maxResults int) ([]Searc
 // performs the same in-memory cosine search but then attaches files.wing
 // to every result via a single batched lookup. Used only by
 // HybridSearchWithOpts when QueryWing != "".
-func (s *SQLiteStore) searchVectorWithWing(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
-	results, err := s.SearchVector(ctx, query, maxResults)
+func (s *SQLiteStore) searchVectorWithWing(ctx context.Context, query string, maxResults int, occ occurredFilter) ([]SearchResult, error) {
+	results, err := s.searchVectorWithWindow(ctx, query, maxResults, occ)
 	if err != nil || len(results) == 0 {
 		return results, err
 	}
@@ -777,6 +849,14 @@ func (s *SQLiteStore) getWingsByFileIDs(fileIDs []string) map[string]string {
 
 // SearchVector performs a vector similarity search using in-memory cosine similarity.
 func (s *SQLiteStore) SearchVector(ctx context.Context, query string, maxResults int) ([]SearchResult, error) {
+	return s.searchVectorWithWindow(ctx, query, maxResults, noOccurredFilter)
+}
+
+// searchVectorWithWindow is SearchVector with an optional occurred_at window
+// (US-003). The window is applied to the in-memory cache before scoring, so a
+// day-scoped query only ever scores that day's chunks. Passing noOccurredFilter
+// is byte-identical to the legacy SearchVector.
+func (s *SQLiteStore) searchVectorWithWindow(ctx context.Context, query string, maxResults int, occ occurredFilter) ([]SearchResult, error) {
 	searchStart := time.Now()
 	if s.embedder.Name() == "none" {
 		return nil, nil
@@ -797,10 +877,15 @@ func (s *SQLiteStore) SearchVector(ctx context.Context, query string, maxResults
 	s.lastQueryEmb = queryVec
 	s.lastQueryEmbMu.Unlock()
 
-	// Snapshot in-memory cache for lock-free iteration.
+	// Snapshot in-memory cache for lock-free iteration. When a window is set,
+	// filter to chunks whose occurred_at falls inside it (US-003); chunks with
+	// occurred_at IS NULL are excluded by the filter.
 	s.vectorCacheMu.RLock()
 	cache := make([]vectorCacheEntry, 0, len(s.vectorCacheByID))
 	for _, entry := range s.vectorCacheByID {
+		if !occ.matches(entry.occurredAt) {
+			continue
+		}
 		cache = append(cache, entry)
 	}
 	s.vectorCacheMu.RUnlock()
@@ -932,6 +1017,30 @@ type HybridSearchOptions struct {
 	// entity in HybridSearchEnriched. Defaults to 3 when zero.
 	// Set to -1 for unlimited.
 	KGFactsPerEntity int
+
+	// OccurredFrom and OccurredTo, when BOTH non-nil, restrict recall to chunks
+	// whose occurred_at falls in the half-open window [OccurredFrom, OccurredTo)
+	// (US-003 date-aware recall). The window is a HARD filter: it is applied to
+	// the BM25/LIKE SELECTs (AND c.occurred_at >= ? AND c.occurred_at < ?) and to
+	// the in-memory vector cache. Chunks with occurred_at IS NULL are EXCLUDED
+	// from a window (they have no known instant to place inside it).
+	//
+	// occurred_at is a real local-wall-clock instant (US-001); callers must build
+	// the window in time.Local at day granularity (see resolveTemporalWindow) so
+	// the boundaries line up. When either field is nil the window is ignored and
+	// recall behaves exactly as before.
+	OccurredFrom *time.Time
+	OccurredTo   *time.Time
+}
+
+// occurredWindow reports whether a hard occurred_at window is configured and,
+// if so, returns its [from, to) bounds. Both fields must be set for the window
+// to apply.
+func (o HybridSearchOptions) occurredWindow() (from, to time.Time, ok bool) {
+	if o.OccurredFrom == nil || o.OccurredTo == nil {
+		return time.Time{}, time.Time{}, false
+	}
+	return *o.OccurredFrom, *o.OccurredTo, true
 }
 
 // HybridSearch performs a combined vector + BM25 search with configurable
@@ -1007,6 +1116,11 @@ func (s *SQLiteStore) HybridSearchWithOpts(ctx context.Context, query string, op
 		err     error
 	}
 
+	// US-003: an optional occurred_at window hard-filters both branches so a
+	// date-scoped query ("o que rolou na sexta") only retrieves that day's
+	// chunks. Inert (noOccurredFilter) when no window is set → legacy behavior.
+	occ := occurredFilterFromOpts(opts)
+
 	vecCh := make(chan searchResult, 1)
 	bm25Ch := make(chan searchResult, 1)
 
@@ -1016,9 +1130,9 @@ func (s *SQLiteStore) HybridSearchWithOpts(ctx context.Context, query string, op
 			err     error
 		)
 		if wingAware {
-			results, err = s.searchVectorWithWing(ctx, query, maxResults*4)
+			results, err = s.searchVectorWithWing(ctx, query, maxResults*4, occ)
 		} else {
-			results, err = s.SearchVector(ctx, query, maxResults*4)
+			results, err = s.searchVectorWithWindow(ctx, query, maxResults*4, occ)
 		}
 		vecCh <- searchResult{results, err}
 	}()
@@ -1029,9 +1143,9 @@ func (s *SQLiteStore) HybridSearchWithOpts(ctx context.Context, query string, op
 			err     error
 		)
 		if wingAware {
-			results, err = s.searchBM25WithWing(query, maxResults*4)
+			results, err = s.searchBM25WithWing(query, maxResults*4, occ)
 		} else {
-			results, err = s.SearchBM25(query, maxResults*4)
+			results, err = s.searchBM25WithWindow(query, maxResults*4, occ)
 		}
 		bm25Ch <- searchResult{results, err}
 	}()
@@ -1186,11 +1300,22 @@ func (s *SQLiteStore) ApplyTemporalDecay(results []SearchResult, cfg TemporalDec
 	// Looked up per file from chunks.memory_type when a DB is available;
 	// nil-db callers (e.g. unit tests) fall back to the neutral 1x factor.
 	categories := s.memoryTypesForResults(results)
+	// occurred_at fallback: curated/imported memories (memory/imported|saved/<hash>)
+	// carry no date in their file_id, so without this they'd be treated as
+	// evergreen and never decay. Decay them by their real original date
+	// (occurred_at, backfilled by US-002). Files with neither a dated file_id nor
+	// an occurred_at stay evergreen.
+	occurred := s.occurredAtForResults(results)
 
 	for i := range results {
 		fileDate := extractDateFromFileID(results[i].FileID)
 		if fileDate == nil {
-			continue // Evergreen file, no decay
+			if t, ok := occurred[results[i].FileID]; ok && !t.IsZero() {
+				fileDate = &t
+			}
+		}
+		if fileDate == nil {
+			continue // Evergreen file (no dated file_id, no occurred_at)
 		}
 
 		ageDays := now.Sub(*fileDate).Hours() / 24
@@ -1268,6 +1393,55 @@ func (s *SQLiteStore) memoryTypesForResults(results []SearchResult) map[string]s
 			continue
 		}
 		out[fid] = mtype
+	}
+	return out
+}
+
+// occurredAtForResults batch-loads the original event date (chunks.occurred_at)
+// for the files in results, used by ApplyTemporalDecay as the age basis for
+// curated/imported memories whose file_id carries no date. One representative
+// occurred_at per file (MAX ignores NULLs). Files with a NULL occurred_at are
+// absent from the map (treated as evergreen by the caller).
+func (s *SQLiteStore) occurredAtForResults(results []SearchResult) map[string]time.Time {
+	out := make(map[string]time.Time, len(results))
+	if s == nil || s.db == nil || len(results) == 0 {
+		return out
+	}
+
+	uniqueIDs := make([]string, 0, len(results))
+	seen := make(map[string]struct{}, len(results))
+	for _, r := range results {
+		if _, ok := seen[r.FileID]; ok {
+			continue
+		}
+		seen[r.FileID] = struct{}{}
+		uniqueIDs = append(uniqueIDs, r.FileID)
+	}
+
+	placeholders := make([]string, len(uniqueIDs))
+	args := make([]any, len(uniqueIDs))
+	for i, id := range uniqueIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	q := "SELECT file_id, MAX(occurred_at) FROM chunks WHERE file_id IN (" +
+		strings.Join(placeholders, ",") + ") AND occurred_at IS NOT NULL GROUP BY file_id"
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var fid string
+		var occ sql.NullTime
+		if err := rows.Scan(&fid, &occ); err != nil {
+			continue
+		}
+		if occ.Valid {
+			out[fid] = occ.Time
+		}
 	}
 	return out
 }
@@ -1496,7 +1670,7 @@ func (s *SQLiteStore) loadVectorCache() error {
 	// and carry curation_status so the fusion step can rank them down. The
 	// lifecycle columns come from migration_memory_v2.go (US-001); legacy rows
 	// are NULL and pass the guard.
-	rows, err := s.db.Query("SELECT c.id, c.file_id, c.text, COALESCE(c.curation_status, ''), c.embedding FROM chunks c WHERE c.embedding IS NOT NULL AND " + chunkLifecycleGuard)
+	rows, err := s.db.Query("SELECT c.id, c.file_id, c.text, COALESCE(c.curation_status, ''), c.occurred_at, c.embedding FROM chunks c WHERE c.embedding IS NOT NULL AND " + chunkLifecycleGuard)
 	if err != nil {
 		return err
 	}
@@ -1507,8 +1681,13 @@ func (s *SQLiteStore) loadVectorCache() error {
 	for rows.Next() {
 		var e vectorCacheEntry
 		var embJSON string
-		if err := rows.Scan(&e.chunkID, &e.fileID, &e.text, &e.curationStatus, &embJSON); err != nil {
+		var occ sql.NullTime
+		if err := rows.Scan(&e.chunkID, &e.fileID, &e.text, &e.curationStatus, &occ, &embJSON); err != nil {
 			continue
+		}
+		if occ.Valid {
+			t := occ.Time
+			e.occurredAt = &t
 		}
 		if err := json.Unmarshal([]byte(embJSON), &e.embedding); err != nil {
 			continue

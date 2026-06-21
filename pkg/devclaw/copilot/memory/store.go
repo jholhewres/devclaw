@@ -599,7 +599,13 @@ func parseMemoryFile(content, source string) []Entry {
 			closeBracket := strings.Index(line, "]")
 			if closeBracket > 0 {
 				ts := line[1:closeBracket]
-				t, err := time.Parse("2006-01-02 15:04", ts)
+				// Parse the [YYYY-MM-DD HH:MM] stamp in the LOCAL timezone (the
+				// wall clock the user actually saw), not UTC. This makes
+				// Entry.Timestamp — and the occurred_at it feeds — a real instant
+				// that lines up with date-window recall (US-003), which builds its
+				// windows in time.Local too. On a UTC host this is identical to
+				// time.Parse; on the BRT gateway it avoids a 3h skew.
+				t, err := time.ParseInLocation("2006-01-02 15:04", ts, time.Local)
 				if err == nil {
 					entry.Timestamp = t
 				}

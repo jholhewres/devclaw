@@ -24,11 +24,12 @@ const minimalChunksDDL = `
 	);
 `
 
-// expectedV2Columns are the 14 lifecycle columns the migration must add.
+// expectedV2Columns are the lifecycle columns the migration must add.
 var expectedV2Columns = []string{
 	"deleted_at", "expires_at", "supersedes", "curation_status", "curation_rule",
 	"importance", "confidence", "memory_type", "kind", "scope",
 	"injected_count", "used_count", "last_used_at", "scorer_version",
+	"occurred_at",
 }
 
 func chunkColumns(t *testing.T, db *sql.DB) map[string]bool {
@@ -83,8 +84,8 @@ func TestMigrateMemoryV2_CleanDB(t *testing.T) {
 		t.Fatalf("MigrateMemoryV2: %v", err)
 	}
 
-	if v := userVersion(t, db); v != 2 {
-		t.Fatalf("user_version = %d, want 2", v)
+	if v := userVersion(t, db); v != memoryV2SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", v, memoryV2SchemaVersion)
 	}
 
 	cols := chunkColumns(t, db)
@@ -119,8 +120,8 @@ func TestMigrateMemoryV2_Idempotent(t *testing.T) {
 		t.Fatalf("third run: %v", err)
 	}
 
-	if v := userVersion(t, db); v != 2 {
-		t.Fatalf("user_version = %d, want 2 after repeats", v)
+	if v := userVersion(t, db); v != memoryV2SchemaVersion {
+		t.Fatalf("user_version = %d, want %d after repeats", v, memoryV2SchemaVersion)
 	}
 	cols := chunkColumns(t, db)
 	if got := len(cols); got != firstCols {
@@ -163,8 +164,8 @@ func TestMigrateMemoryV2_LegacyUpgrade(t *testing.T) {
 		t.Fatalf("MigrateMemoryV2 on legacy db: %v", err)
 	}
 
-	if v := userVersion(t, db); v != 2 {
-		t.Fatalf("user_version = %d, want 2", v)
+	if v := userVersion(t, db); v != memoryV2SchemaVersion {
+		t.Fatalf("user_version = %d, want %d", v, memoryV2SchemaVersion)
 	}
 	cols := chunkColumns(t, db)
 	for _, c := range expectedV2Columns {
@@ -187,5 +188,55 @@ func TestMigrateMemoryV2_NilDB(t *testing.T) {
 	err := MigrateMemoryV2(nil, slog.Default())
 	if err == nil {
 		t.Fatal("expected error for nil db")
+	}
+}
+
+// TestMigrateMemoryV2_V2toV3Upgrade simulates an EXISTING production store that
+// ran the previous release (all v2 lifecycle columns present, user_version=2)
+// and verifies the new code adds occurred_at + its index and advances to v3 —
+// the exact upgrade path real deployments take.
+func TestMigrateMemoryV2_V2toV3Upgrade(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "v2.db")
+	db, err := sql.Open("sqlite3", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(minimalChunksDDL); err != nil {
+		t.Fatalf("create chunks: %v", err)
+	}
+	// Add every v2 column EXCEPT occurred_at, then stamp the DB as v2 — the
+	// state a store left by the previous release is in.
+	for _, col := range memoryV2Columns {
+		if col.name == "occurred_at" {
+			continue
+		}
+		if _, err := db.Exec(col.ddl); err != nil {
+			t.Fatalf("seed v2 column %s: %v", col.name, err)
+		}
+	}
+	if _, err := db.Exec("PRAGMA user_version = 2"); err != nil {
+		t.Fatalf("set user_version=2: %v", err)
+	}
+	if chunkColumns(t, db)["occurred_at"] {
+		t.Fatal("precondition failed: occurred_at should be absent in the simulated v2 store")
+	}
+
+	if err := MigrateMemoryV2(db, slog.Default()); err != nil {
+		t.Fatalf("v2->v3 migration: %v", err)
+	}
+
+	if v := userVersion(t, db); v != memoryV2SchemaVersion {
+		t.Fatalf("user_version = %d, want %d after v2->v3 upgrade", v, memoryV2SchemaVersion)
+	}
+	if !chunkColumns(t, db)["occurred_at"] {
+		t.Fatal("occurred_at column missing after v2->v3 upgrade")
+	}
+	var idxName string
+	if err := db.QueryRow(
+		"SELECT name FROM sqlite_master WHERE type='index' AND name='idx_chunks_occurred_at'",
+	).Scan(&idxName); err != nil {
+		t.Fatalf("idx_chunks_occurred_at missing after upgrade: %v", err)
 	}
 }

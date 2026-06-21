@@ -646,6 +646,22 @@ func (a *Assistant) Start(ctx context.Context) error {
 							a.logger.Info("deleted raw legacy chunks after import", "deleted", deleted)
 						}
 					}
+
+					// US-002 occurred_at self-heal. EXISTING stores imported all
+					// chunks with occurred_at = migration date (their import
+					// predated US-001). Re-read the untouched .md files and restamp
+					// occurred_at with each memory's real original date, matching
+					// chunks by the SAME content-hash file_id the import used. Runs
+					// AFTER the import above so the imported chunks exist (on a fresh
+					// store the import just populated them; on an already-imported
+					// store ImportLegacyMarkdown short-circuited but the chunks are
+					// present). Version-gated (PRAGMA user_version=4 → no-op after a
+					// successful pass), idempotent, fail-open, .md read-only.
+					if updated, berr := sqlStore.BackfillOccurredAt(a.ctx, memDir, a.logger.With("component", "memory-backfill")); berr != nil {
+						a.logger.Warn("occurred_at backfill failed (will retry next boot)", "error", berr)
+					} else if updated > 0 {
+						a.logger.Info("occurred_at backfill done", "updated", updated)
+					}
 				}()
 			}
 		}

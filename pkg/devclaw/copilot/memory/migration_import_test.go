@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // seedLegacyMemoryDir writes a MEMORY.md with a mix of normal facts,
@@ -199,5 +200,109 @@ func TestImportLegacyMarkdown_EventGetsTTL(t *testing.T) {
 	}
 	if expiresNull {
 		t.Error("event entry without explicit TTL should get a default expires_at")
+	}
+}
+
+// TestImportLegacyMarkdown_PreservesOccurredAt is the US-001 acceptance test:
+// an imported chunk's occurred_at must carry the memory's ORIGINAL event date
+// (parsed from the [YYYY-MM-DD HH:MM] line), NOT the import/migration date that
+// created_at records. This is what makes temporal recall ("what happened
+// Thursday") possible after the v2 import.
+func TestImportLegacyMarkdown_PreservesOccurredAt(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	memFile := filepath.Join(dir, MemoryFileName)
+
+	content := "- [2026-06-18 16:39] [fact] The deploy on Thursday shipped the temporal recall column to the production gateway VM cleanly.\n"
+	if err := os.WriteFile(memFile, []byte(content), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if _, err := store.ImportLegacyMarkdown(ctx, dir, nil); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+
+	var occurredAt time.Time
+	if err := store.db.QueryRow(`
+		SELECT occurred_at FROM chunks WHERE text LIKE '%deploy on Thursday%' LIMIT 1
+	`).Scan(&occurredAt); err != nil {
+		t.Fatalf("scan occurred_at: %v", err)
+	}
+
+	// The original date must be preserved.
+	wantY, wantM, wantD := 2026, time.June, 18
+	gotY, gotM, gotD := occurredAt.Date()
+	if gotY != wantY || gotM != wantM || gotD != wantD {
+		t.Fatalf("occurred_at = %v, want date %04d-%02d-%02d (original timestamp must be preserved)",
+			occurredAt, wantY, wantM, wantD)
+	}
+
+	// And it must NOT be today's import date.
+	ty, tm, td := time.Now().UTC().Date()
+	if gotY == ty && gotM == tm && gotD == td {
+		t.Fatalf("occurred_at fell back to today's import date %v — original date was lost", occurredAt)
+	}
+}
+
+// TestSaveCuratedMemory_SetsOccurredAtNow verifies the live save path stamps
+// occurred_at ~ now (no original-date dimension exists for a fresh save).
+func TestSaveCuratedMemory_SetsOccurredAtNow(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	before := time.Now().UTC().Add(-2 * time.Minute)
+	text := "The temporal recall feature stamps occurred_at to the wall clock on every live curated save into SQLite."
+	if err := store.SaveCuratedMemory(ctx, text, "fact", "test"); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	after := time.Now().UTC().Add(2 * time.Minute)
+
+	var occurredAt time.Time
+	if err := store.db.QueryRow(`
+		SELECT occurred_at FROM chunks WHERE text LIKE '%temporal recall feature stamps%' LIMIT 1
+	`).Scan(&occurredAt); err != nil {
+		t.Fatalf("scan occurred_at: %v", err)
+	}
+	if occurredAt.IsZero() {
+		t.Fatal("live save left occurred_at unset")
+	}
+	if occurredAt.Before(before) || occurredAt.After(after) {
+		t.Fatalf("occurred_at = %v, want within [%v, %v] (≈ now)", occurredAt, before, after)
+	}
+}
+
+// TestImportLegacyMarkdown_OccurredAtFallsBackWhenNoTimestamp verifies that an
+// entry with no parseable [timestamp] still gets occurred_at populated (to NOW,
+// matching created_at) rather than NULL — the column is never spuriously empty.
+func TestImportLegacyMarkdown_OccurredAtFallsBackWhenNoTimestamp(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	memFile := filepath.Join(dir, MemoryFileName)
+
+	// No leading [YYYY-MM-DD HH:MM] — parseMemoryFile leaves Timestamp zero.
+	content := "- [fact] A timestamp-less durable fact about the SQLite memory store using FTS5 and an in-memory vector cache for recall.\n"
+	if err := os.WriteFile(memFile, []byte(content), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	before := time.Now().UTC().Add(-2 * time.Minute)
+	if _, err := store.ImportLegacyMarkdown(ctx, dir, nil); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	after := time.Now().UTC().Add(2 * time.Minute)
+
+	var occurredAt time.Time
+	if err := store.db.QueryRow(`
+		SELECT occurred_at FROM chunks WHERE text LIKE '%timestamp-less durable fact%' LIMIT 1
+	`).Scan(&occurredAt); err != nil {
+		t.Fatalf("scan occurred_at: %v", err)
+	}
+	if occurredAt.IsZero() {
+		t.Fatal("entry without a timestamp must fall back to NOW, not NULL occurred_at")
+	}
+	if occurredAt.Before(before) || occurredAt.After(after) {
+		t.Fatalf("fallback occurred_at = %v, want ≈ now within [%v, %v]", occurredAt, before, after)
 	}
 }
