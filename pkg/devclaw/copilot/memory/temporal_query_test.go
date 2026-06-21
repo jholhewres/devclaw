@@ -77,6 +77,18 @@ func TestResolveTemporalWindow(t *testing.T) {
 		{"no-cue plain word", "memory recall design", false, time.Time{}, time.Time{}},
 		{"no-cue number only", "porta 8080", false, time.Time{}, time.Time{}},
 		{"no-cue substring ontem", "frontend", false, time.Time{}, time.Time{}},
+
+		// Fix 2: bare DD/MM false-positives on version/port strings must NOT fire.
+		{"no-cue nginx version", "nginx/1.24", false, time.Time{}, time.Time{}},
+		{"no-cue port slash", "porta 80/443", false, time.Time{}, time.Time{}},
+		{"no-cue v1/2", "v1/2", false, time.Time{}, time.Time{}},
+		{"no-cue ipv4 prefix", "IPv4/16", false, time.Time{}, time.Time{}},
+		{"no-cue flow step", "endpoint 1/2 do fluxo", false, time.Time{}, time.Time{}},
+
+		// Fix 2: genuine bare DD/MM dates must still resolve.
+		{"bare DD/MM genuine", "18/06", true, localDay(2026, 6, 18), localDay(2026, 6, 19)},
+		{"bare DD/MM with dia prefix", "dia 18/06", true, localDay(2026, 6, 18), localDay(2026, 6, 19)},
+		{"bare 5/10 genuine", "5/10", true, localDay(2025, 10, 5), localDay(2025, 10, 6)},
 	}
 
 	for _, tc := range tests {

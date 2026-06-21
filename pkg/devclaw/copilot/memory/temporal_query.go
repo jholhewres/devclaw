@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -60,6 +61,57 @@ var weekdayCue = map[string]time.Weekday{
 	"saturday":      time.Saturday,
 	"domingo":       time.Sunday,
 	"sunday":        time.Sunday,
+}
+
+// wordReCache caches compiled word-boundary regexps for hasWord / hasPhrase.
+// All fixed tokens (relative-day cues + weekday names + phrase fragments) are
+// seeded at init time; ad-hoc tokens compile-on-miss under the write lock.
+var (
+	wordReCacheMu sync.RWMutex
+	wordReCache   = map[string]*regexp.Regexp{}
+)
+
+func init() {
+	// Pre-seed every fixed token used by hasWord so the hot recall path never
+	// compiles a regexp at runtime.
+	fixedTokens := []string{
+		"anteontem", "ontem", "yesterday", "hoje", "today",
+	}
+	for _, tok := range fixedTokens {
+		wordReCache[tok] = regexp.MustCompile(`\b` + regexp.QuoteMeta(tok) + `\b`)
+	}
+	for tok := range weekdayCue {
+		wordReCache[tok] = regexp.MustCompile(`\b` + regexp.QuoteMeta(tok) + `\b`)
+	}
+
+	// Pre-seed every fixed phrase used by hasPhrase.
+	fixedPhrases := []string{
+		"semana passada", "last week",
+		"esta semana", "this week", "essa semana",
+		"mes passado", "mês passado", "last month",
+	}
+	for _, ph := range fixedPhrases {
+		parts := strings.Fields(ph)
+		for i := range parts {
+			parts[i] = regexp.QuoteMeta(parts[i])
+		}
+		hasPhraseReCache[ph] = regexp.MustCompile(`\b` + strings.Join(parts, `\s+`) + `\b`)
+	}
+}
+
+// compiledWordRe returns (creating if absent) the word-boundary regexp for tok.
+func compiledWordRe(tok string) *regexp.Regexp {
+	wordReCacheMu.RLock()
+	re, ok := wordReCache[tok]
+	wordReCacheMu.RUnlock()
+	if ok {
+		return re
+	}
+	compiled := regexp.MustCompile(`\b` + regexp.QuoteMeta(tok) + `\b`)
+	wordReCacheMu.Lock()
+	wordReCache[tok] = compiled
+	wordReCacheMu.Unlock()
+	return compiled
 }
 
 // ResolveTemporalWindow is the exported entry point for the recall wiring
@@ -114,6 +166,22 @@ func resolveTemporalWindow(query string, now time.Time) (start, end time.Time, o
 		return dayMonthWindow(m[1], m[2], now)
 	}
 	if m := reDateDM.FindStringSubmatch(q); m != nil {
+		// Validate captured day/month before treating as a date cue. Without
+		// this guard, "nginx/1.24", "porta 80/443", "v1/2" fire the regexp and
+		// produce a bogus window (80>31 passes the outer reDateDM but must not
+		// resolve). dayMonthWindow also validates, but we want ok=false not a
+		// calendar-reject silent drop — same effect, just explicit.
+		d, _ := strconv.Atoi(m[1])
+		mo, _ := strconv.Atoi(m[2])
+		if d < 1 || d > 31 || mo < 1 || mo > 12 {
+			return time.Time{}, time.Time{}, false
+		}
+		// Require at least one component to have ≥2 digits. A bare single-
+		// digit/single-digit match (e.g. "1/2", "endpoint 1/2 do fluxo") is
+		// too ambiguous to be a reliable date cue; "5/10" and "18/06" are fine.
+		if len(m[1]) < 2 && len(m[2]) < 2 {
+			return time.Time{}, time.Time{}, false
+		}
 		return dayMonthWindow(m[1], m[2], now)
 	}
 
@@ -259,20 +327,41 @@ func normalizeTemporalQuery(query string) string {
 
 // hasWord reports whether q contains word as a standalone token (word-boundary
 // matched), so "ontem" does not match inside "anteontem" etc.
+// The regexp for word is looked up from the precompiled cache (compile-on-miss).
 func hasWord(q, word string) bool {
-	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(word) + `\b`)
-	return re.MatchString(q)
+	return compiledWordRe(word).MatchString(q)
 }
 
-// hasPhrase reports whether q contains the (possibly multi-word) phrase,
-// tolerating arbitrary internal whitespace.
-func hasPhrase(q, phrase string) bool {
+// hasPhraseReCache caches the compiled multi-word phrase regexps separately
+// from single-token word regexps (different pattern structure).
+var (
+	hasPhraseReCacheMu sync.RWMutex
+	hasPhraseReCache   = map[string]*regexp.Regexp{}
+)
+
+func compiledPhraseRe(phrase string) *regexp.Regexp {
+	hasPhraseReCacheMu.RLock()
+	re, ok := hasPhraseReCache[phrase]
+	hasPhraseReCacheMu.RUnlock()
+	if ok {
+		return re
+	}
 	parts := strings.Fields(phrase)
 	for i := range parts {
 		parts[i] = regexp.QuoteMeta(parts[i])
 	}
-	re := regexp.MustCompile(`\b` + strings.Join(parts, `\s+`) + `\b`)
-	return re.MatchString(q)
+	compiled := regexp.MustCompile(`\b` + strings.Join(parts, `\s+`) + `\b`)
+	hasPhraseReCacheMu.Lock()
+	hasPhraseReCache[phrase] = compiled
+	hasPhraseReCacheMu.Unlock()
+	return compiled
+}
+
+// hasPhrase reports whether q contains the (possibly multi-word) phrase,
+// tolerating arbitrary internal whitespace.
+// The joined regexp is looked up from the precompiled cache (compile-on-miss).
+func hasPhrase(q, phrase string) bool {
+	return compiledPhraseRe(phrase).MatchString(q)
 }
 
 // matchWeekday returns the time.Weekday for the first weekday cue found in q.

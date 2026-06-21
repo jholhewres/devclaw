@@ -255,13 +255,16 @@ func (s *SQLiteStore) curateEntry(e Entry, now time.Time) (curatedEntry, curateA
 	expiresAt := deriveExpiry(e, kind, memoryType, now)
 
 	// Preserve the original event timestamp. A zero Timestamp means the legacy
-	// line had no parseable [YYYY-MM-DD HH:MM]; leave occurredAt nil so the
-	// insert falls back to created_at / NOW.
-	var occurredAt *time.Time
+	// line had no parseable [YYYY-MM-DD HH:MM]; default to now (the import
+	// instant, same time.Time passed to curateEntry) so occurred_at is ALWAYS
+	// bound as a real Go time.Time with a consistent timezone offset — never
+	// falling through to SQLite's CURRENT_TIMESTAMP which produces a bare UTC
+	// string and breaks string-comparison day-window filters on non-UTC hosts.
+	occurredAtVal := now
 	if !e.Timestamp.IsZero() {
-		ts := e.Timestamp
-		occurredAt = &ts
+		occurredAtVal = e.Timestamp
 	}
+	occurredAt := &occurredAtVal
 
 	return curatedEntry{
 		text:           content,
@@ -397,9 +400,10 @@ func (s *SQLiteStore) insertCuratedChunkWithPrefix(ctx context.Context, prefix, 
 		return fmt.Errorf("insert file: %w", err)
 	}
 
-	// occurred_at is set EXPLICITLY (never via a column default): preserve the
-	// entry's original event timestamp when present, else COALESCE to NOW so the
-	// column always matches created_at for entries that carried no timestamp.
+	// occurred_at is always bound as a real Go time.Time (never nil): curateEntry
+	// defaults to the import-time `now` for entries that carried no timestamp, so
+	// the stored value always uses a consistent offset string regardless of the
+	// host timezone. COALESCE is kept for safety but never reached.
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO chunks (
 			file_id, chunk_idx, text, hash, embedding,
