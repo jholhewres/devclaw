@@ -97,8 +97,8 @@ func (s *SQLiteStore) BackfillOccurredAt(ctx context.Context, memoryDir string, 
 			// so it is a real local instant — we restamp occurred_at with exactly the
 			// same value (and location) the import would have stored, keeping the
 			// two paths consistent (and consistent with US-003 local date windows).
-			if e.Timestamp.IsZero() {
-				continue
+			if !plausibleEventTime(e.Timestamp) {
+				continue // no real date (zero value or a year-1 parse artifact)
 			}
 			// `now` is passed to curateEntry only so deriveExpiry can compute an
 			// expires_at — which the backfill DISCARDS. We rely solely on

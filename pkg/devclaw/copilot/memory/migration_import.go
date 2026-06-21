@@ -41,6 +41,16 @@ import (
 	"time"
 )
 
+// plausibleEventTime reports whether a parsed entry timestamp is a real event
+// date worth storing as occurred_at. It rejects the zero value AND implausibly
+// old years (e.g. a malformed/partial stamp that time.Parse coerces to year 1):
+// such values must not be stamped — they'd land as "0001-01-01" garbage that
+// never matches a real date window and pollutes the data. DevClaw memory only
+// post-dates 2026, so any year before 2000 is a parse artifact.
+func plausibleEventTime(t time.Time) bool {
+	return !t.IsZero() && t.Year() >= 2000
+}
+
 // importMarkerFileID is the sentinel files row that records a completed legacy
 // import. Its presence makes ImportLegacyMarkdown a no-op on subsequent runs.
 const importMarkerFileID = "memory/imported/_marker"
@@ -260,8 +270,12 @@ func (s *SQLiteStore) curateEntry(e Entry, now time.Time) (curatedEntry, curateA
 	// bound as a real Go time.Time with a consistent timezone offset — never
 	// falling through to SQLite's CURRENT_TIMESTAMP which produces a bare UTC
 	// string and breaks string-comparison day-window filters on non-UTC hosts.
-	occurredAtVal := now
-	if !e.Timestamp.IsZero() {
+	// occurred_at is always a LOCAL instant: a parsed .md timestamp is already
+	// local (ParseInLocation), and the no-timestamp fallback uses now.Local() so
+	// it never gets a UTC (+00:00) offset that would mis-sort against the
+	// time.Local date windows in US-003 string comparisons.
+	occurredAtVal := now.Local()
+	if plausibleEventTime(e.Timestamp) {
 		occurredAtVal = e.Timestamp
 	}
 	occurredAt := &occurredAtVal
@@ -527,10 +541,14 @@ func (s *SQLiteStore) SaveCuratedMemory(ctx context.Context, content, category, 
 	}
 	now := time.Now().UTC()
 	curated, action := s.curateEntry(Entry{
-		Content:   text,
-		Category:  category,
-		Source:    source,
-		Timestamp: now,
+		Content:  text,
+		Category: category,
+		Source:   source,
+		// occurred_at must be a LOCAL instant so it lines up with US-003 date
+		// windows (built in time.Local) under string comparison; the UTC `now`
+		// is still used for deriveExpiry below. Mixing zones here would mis-bucket
+		// late-evening saves by a day on a non-UTC host.
+		Timestamp: now.Local(),
 	}, now)
 	if action != curateKeep {
 		// Contradiction/empty entries are intentionally not persisted.
