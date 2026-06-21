@@ -27,6 +27,7 @@ import (
 // SQLiteStore provides persistent memory storage with hybrid search.
 type SQLiteStore struct {
 	db       *sql.DB
+	dbPath   string // on-disk path, used to open a dedicated connection for VACUUM
 	embedder EmbeddingProvider
 	logger   *slog.Logger
 
@@ -98,6 +99,7 @@ func NewSQLiteStore(dbPath string, embedder EmbeddingProvider, logger *slog.Logg
 
 	store := &SQLiteStore{
 		db:                db,
+		dbPath:            dbPath,
 		embedder:          embedder,
 		logger:            logger,
 		vectorCacheByID:   make(map[int64]vectorCacheEntry),
@@ -231,6 +233,13 @@ func (s *SQLiteStore) initSchema() error {
 		}
 	}
 
+	// Memory v2 — lifecycle metadata columns on chunks (deleted_at, expires_at,
+	// curation, scoring counters). Idempotent + version-gated via PRAGMA
+	// user_version; same non-fatal policy as the migrations above.
+	if err := MigrateMemoryV2(s.db, s.logger); err != nil {
+		slog.Warn("failed to migrate memory v2 schema", "error", err)
+	}
+
 	return nil
 }
 
@@ -327,7 +336,7 @@ func (s *SQLiteStore) indexChunksLocked(ctx context.Context, fileID string, chun
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Re-check hash inside transaction to handle concurrent modifications.
 	var txHash string
@@ -461,6 +470,16 @@ func (s *SQLiteStore) SearchBM25(query string, maxResults int) ([]SearchResult, 
 	return results, nil
 }
 
+// chunkLifecycleGuard is the SQL fragment (referencing the chunks alias "c")
+// that excludes chunks which must never surface in recall: soft-deleted
+// chunks, expired chunks, and chunks curated as low-signal. The lifecycle
+// columns were added by migration_memory_v2.go (US-001); legacy rows have
+// NULL in all of them and therefore pass the guard. Always appended with a
+// leading "AND " to an existing WHERE clause.
+const chunkLifecycleGuard = `c.deleted_at IS NULL ` +
+	`AND (c.expires_at IS NULL OR c.expires_at > CURRENT_TIMESTAMP) ` +
+	`AND (c.curation_status IS NULL OR c.curation_status != 'low_signal')`
+
 // ftsQuery runs a single FTS5 query and returns ranked results.
 func (s *SQLiteStore) ftsQuery(ftsQuery string, maxResults int) ([]SearchResult, error) {
 	rows, err := s.db.Query(`
@@ -468,6 +487,7 @@ func (s *SQLiteStore) ftsQuery(ftsQuery string, maxResults int) ([]SearchResult,
 		FROM chunks_fts
 		JOIN chunks c ON c.id = chunks_fts.rowid
 		WHERE chunks_fts MATCH ?
+		AND `+chunkLifecycleGuard+`
 		ORDER BY rank
 		LIMIT ?
 	`, ftsQuery, maxResults*2)
@@ -507,9 +527,13 @@ func (s *SQLiteStore) searchLikeFallback(query string, maxResults int) ([]Search
 	}
 	args = append(args, maxResults*2)
 
+	// Wrap the OR-list in parentheses, then AND the lifecycle guard so
+	// deleted/expired/low-signal chunks never surface via the LIKE path.
+	// The guard references alias "c", so the table is aliased here too.
 	sqlQuery := fmt.Sprintf(`
-		SELECT file_id, text FROM chunks
-		WHERE %s
+		SELECT c.file_id, c.text FROM chunks c
+		WHERE (%s)
+		AND `+chunkLifecycleGuard+`
 		LIMIT ?
 	`, strings.Join(conditions, " OR "))
 
@@ -603,6 +627,7 @@ func (s *SQLiteStore) ftsQueryWithWing(ftsQuery string, maxResults int) ([]Searc
 		JOIN chunks c ON c.id = chunks_fts.rowid
 		LEFT JOIN files f ON f.file_id = c.file_id
 		WHERE chunks_fts MATCH ?
+		AND `+chunkLifecycleGuard+`
 		ORDER BY rank
 		LIMIT ?
 	`, ftsQuery, maxResults*2)
@@ -648,9 +673,12 @@ func (s *SQLiteStore) searchVectorWithWing(ctx context.Context, query string, ma
 
 // attachWings populates the Wing field on each result by batch-querying
 // the files table for the unique fileIDs in the slice. Files with
-// wing IS NULL get the empty string. Errors are non-fatal: a lookup
-// failure leaves Wing="" on every row, which the multiplier code then
-// treats as a legacy candidate (always neutral).
+// wing IS NULL get the empty string. Errors are non-fatal but NOT neutral:
+// since US-005, a Wing="" candidate is demoted by penaltyBoost when the query
+// carries a wing (queryWing != ""). So a lookup failure here silently demotes
+// every result in a wing-aware query rather than leaving them neutral — we
+// emit a WARN below so that degradation is visible, and callers of the
+// wing-aware path should treat an all-empty wing map as a degraded result set.
 func (s *SQLiteStore) attachWings(results []SearchResult) {
 	if len(results) == 0 {
 		return
@@ -666,6 +694,13 @@ func (s *SQLiteStore) attachWings(results []SearchResult) {
 	}
 
 	wings := s.getWingsByFileIDs(uniqueIDs)
+	if len(wings) == 0 && len(uniqueIDs) > 0 && s.logger != nil {
+		// Empty map for a non-empty input means the wing lookup failed (SQL
+		// error / lock contention). In a wing-aware query this demotes every
+		// result; surface it instead of degrading silently.
+		s.logger.Warn("attachWings: wing lookup returned no rows for non-empty input; wing-aware ranking may be degraded",
+			"file_ids", len(uniqueIDs))
+	}
 	for i := range results {
 		if w, ok := wings[results[i].FileID]; ok {
 			results[i].Wing = w
@@ -1059,17 +1094,18 @@ func (s *SQLiteStore) HybridSearchWithOpts(ctx context.Context, query string, op
 // wingMultiplier returns the score multiplier for a candidate file given
 // the candidate's wing and the query's wing. The rules are:
 //
-//   - candidateWing == "" (legacy NULL) → 1.0 (ALWAYS neutral, never penalized)
-//   - queryWing == "" → 1.0 (caller should not call this in that case anyway)
+//   - queryWing == "" → 1.0 (no wing context; never boost or penalize)
 //   - candidateWing == queryWing → matchBoost
-//   - otherwise → penaltyBoost
+//   - candidateWing == "" (legacy NULL) → penaltyBoost (demote stale legacy
+//     rows when the query has a clear wing context)
+//   - otherwise (different wing) → penaltyBoost
 //
-// The candidateWing == "" rule is the Sprint 1 retrocompat contract and
-// MUST NOT be removed. Tested by TestHybridSearchWingNullNeutral.
+// US-005 changes the legacy NULL-wing rule: previously legacy rows were
+// always neutral (1.0), which let stale/uncategorized chunks rank alongside
+// wing-matched recall. Now, when the query carries a wing, legacy NULL-wing
+// candidates are demoted like any non-matching wing. They remain neutral only
+// when the query itself has no wing context (queryWing == "").
 func wingMultiplier(candidateWing, queryWing string, matchBoost, penaltyBoost float64) float64 {
-	if candidateWing == "" {
-		return 1.0
-	}
 	if queryWing == "" {
 		return 1.0
 	}
@@ -1097,8 +1133,12 @@ func (s *SQLiteStore) ApplyTemporalDecay(results []SearchResult, cfg TemporalDec
 	if halfLife <= 0 {
 		halfLife = 30
 	}
-	lambda := math.Log(2) / halfLife
 	now := time.Now()
+
+	// Category-aware half-life scaling: durable memory types decay slower.
+	// Looked up per file from chunks.memory_type when a DB is available;
+	// nil-db callers (e.g. unit tests) fall back to the neutral 1x factor.
+	categories := s.memoryTypesForResults(results)
 
 	for i := range results {
 		fileDate := extractDateFromFileID(results[i].FileID)
@@ -1110,11 +1150,79 @@ func (s *SQLiteStore) ApplyTemporalDecay(results []SearchResult, cfg TemporalDec
 		if ageDays < 0 {
 			ageDays = 0
 		}
+		// Scale the half-life by the file's category so facts/decisions
+		// persist longer than ephemeral events.
+		scaledHalfLife := halfLife * categoryHalfLifeMultiplier(categories[results[i].FileID])
+		lambda := math.Log(2) / scaledHalfLife
 		decayFactor := math.Exp(-lambda * ageDays)
 		results[i].Score *= decayFactor
 	}
 
 	return results
+}
+
+// categoryHalfLifeMultiplier scales the temporal-decay half-life by memory
+// category so durable knowledge decays slower than ephemeral events:
+//
+//   - fact, decision        → 6x half-life (most durable)
+//   - learning, summary      → 3x half-life
+//   - event and everything else (incl. "") → 1x (baseline)
+func categoryHalfLifeMultiplier(category string) float64 {
+	switch category {
+	case "fact", "decision":
+		return 6.0
+	case "learning", "summary":
+		return 3.0
+	default:
+		return 1.0
+	}
+}
+
+// memoryTypesForResults returns a map[fileID]memory_type for the dated files
+// in results, used by temporal decay for category-aware half-life scaling.
+// Returns an empty map (every lookup → "" → 1x multiplier) when no DB is
+// attached or on any SQL error, preserving the legacy uniform-decay behavior.
+func (s *SQLiteStore) memoryTypesForResults(results []SearchResult) map[string]string {
+	out := make(map[string]string, len(results))
+	if s == nil || s.db == nil || len(results) == 0 {
+		return out
+	}
+
+	uniqueIDs := make([]string, 0, len(results))
+	seen := make(map[string]struct{}, len(results))
+	for _, r := range results {
+		if _, ok := seen[r.FileID]; ok {
+			continue
+		}
+		seen[r.FileID] = struct{}{}
+		uniqueIDs = append(uniqueIDs, r.FileID)
+	}
+
+	placeholders := make([]string, len(uniqueIDs))
+	args := make([]any, len(uniqueIDs))
+	for i, id := range uniqueIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	// One representative memory_type per file (MAX ignores NULLs); ties are
+	// irrelevant since chunks of a file share a category in practice.
+	q := "SELECT file_id, COALESCE(MAX(memory_type), '') FROM chunks WHERE file_id IN (" +
+		strings.Join(placeholders, ",") + ") GROUP BY file_id"
+
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var fid, mtype string
+		if err := rows.Scan(&fid, &mtype); err != nil {
+			continue
+		}
+		out[fid] = mtype
+	}
+	return out
 }
 
 // extractDateFromFileID extracts a date from file IDs like "memory/2026-02-25.md"
@@ -1335,7 +1443,11 @@ func (s *SQLiteStore) setEmbeddingCache(ctx context.Context, text string, embedd
 // loadVectorCache loads all chunk embeddings into memory for fast search.
 // Called once on startup. Subsequent index operations use updateVectorCacheForFile.
 func (s *SQLiteStore) loadVectorCache() error {
-	rows, err := s.db.Query("SELECT id, file_id, text, embedding FROM chunks WHERE embedding IS NOT NULL")
+	// Exclude soft-deleted, expired, and low-signal chunks from the vector
+	// cache so SearchVector (which scores the in-memory cache, not SQL) can
+	// never return them. The lifecycle columns come from migration_memory_v2.go
+	// (US-001); legacy rows are NULL and pass the guard.
+	rows, err := s.db.Query("SELECT c.id, c.file_id, c.text, c.embedding FROM chunks c WHERE c.embedding IS NOT NULL AND " + chunkLifecycleGuard)
 	if err != nil {
 		return err
 	}
@@ -1396,6 +1508,17 @@ func (s *SQLiteStore) updateVectorCacheForFile(fileID string, newEntries []vecto
 	if len(newIDs) > 0 {
 		s.vectorCacheByFile[fileID] = newIDs
 	}
+}
+
+// EvictFromVectorCache removes all in-memory vector-cache entries for a file
+// without re-indexing it. It MUST be called by any writer that sets a
+// lifecycle column (deleted_at, expires_at, curation_status) on a live chunk
+// out-of-band — otherwise that chunk keeps being returned by SearchVector
+// until the next process restart (loadVectorCache applies the lifecycle guard
+// only at startup). The BM25/LIKE paths are query-time guarded and unaffected;
+// this closes the gap for the in-memory vector path.
+func (s *SQLiteStore) EvictFromVectorCache(fileID string) {
+	s.updateVectorCacheForFile(fileID, nil)
 }
 
 // Close closes the database connection.

@@ -603,8 +603,48 @@ func (a *Assistant) Start(ctx context.Context) error {
 					if chunkCfg.MaxTokens <= 0 {
 						chunkCfg.MaxTokens = 500
 					}
-					if err := sqlStore.IndexMemoryDir(a.ctx, memDir, chunkCfg); err != nil {
-						a.logger.Warn("initial memory indexing failed", "error", err)
+					// C1: only index the raw flat-markdown files when the legacy
+					// import has NOT yet run. After migration the curated/redacted
+					// chunks are the only recallable copy; re-indexing the raw .md
+					// here would resurrect un-redacted credentials and bloat with
+					// NULL lifecycle columns (which pass chunkLifecycleGuard). On the
+					// FIRST boot the import has not run yet, so we still index raw
+					// (the import below then deletes those raw chunks once curated
+					// copies exist).
+					if done, derr := sqlStore.LegacyImportDone(a.ctx); derr != nil {
+						a.logger.Warn("legacy import gate check failed; skipping raw index", "error", derr)
+					} else if !done {
+						if err := sqlStore.IndexMemoryDir(a.ctx, memDir, chunkCfg); err != nil {
+							a.logger.Warn("initial memory indexing failed", "error", err)
+						}
+					}
+
+					// Memory v2 one-time legacy import (US-002/US-003): parse the
+					// flat .md files, curate (drop bloat, dedup, redact secrets,
+					// quality-score), re-embed, and write discrete chunks with
+					// lifecycle metadata. Idempotent (guarded by a marker row) and
+					// fail-open: an error is logged and leaves the marker unset so
+					// it retries next boot. Runs here, off the startup path, so the
+					// synchronous re-embedding never blocks the agent coming online.
+					if stats, err := sqlStore.ImportLegacyMarkdown(a.ctx, memDir, a.logger.With("component", "memory-import")); err != nil {
+						a.logger.Warn("legacy memory import failed (will retry next boot)", "error", err)
+					} else if !stats.AlreadyImported {
+						a.logger.Info("legacy memory import done",
+							"inserted", stats.Inserted,
+							"contradictions_dropped", stats.ContradictionsDropped,
+							"duplicates_dropped", stats.DuplicatesDropped,
+							"low_signal", stats.LowSignal,
+						)
+						// C1: drop the RAW chunks IndexMemoryDir wrote above on this
+						// first boot. They carry NULL lifecycle columns and un-redacted
+						// text, so they would remain recallable alongside the curated
+						// copies. Only the chunk ROWS are removed — the .md files on
+						// disk are never touched.
+						if deleted, derr := sqlStore.DeleteRawLegacyChunks(a.ctx, memDir); derr != nil {
+							a.logger.Warn("failed to delete raw legacy chunks after import", "error", derr)
+						} else if deleted > 0 {
+							a.logger.Info("deleted raw legacy chunks after import", "deleted", deleted)
+						}
 					}
 				}()
 			}
@@ -1022,6 +1062,11 @@ func (a *Assistant) Start(ctx context.Context) error {
 				}
 			}
 			return nil
+		})
+		// US-004 cutover gate: once the legacy import has run, the indexer stops
+		// re-indexing the migrated .md files (writes now go to SQLite directly).
+		a.memoryIndexer.SetLegacyImportDoneFunc(func() (bool, error) {
+			return a.sqliteMemory.LegacyImportDone(context.Background())
 		})
 		go a.memoryIndexer.Start(a.ctx)
 	}
@@ -1949,9 +1994,8 @@ func (a *Assistant) handleMessage(msg *channels.IncomingMessage) {
 				if approved {
 					logger.Info("access granted via pairing token",
 						"from", msg.From)
-					// Continue processing after pairing token approval.
-					accessAllowed = true
-					accessLevel = AccessUser
+					// Access is granted for the next inbound message; this one
+					// still returns after acknowledging the redemption.
 				}
 				return
 			}
@@ -4003,20 +4047,42 @@ func (a *Assistant) autoCaptureFacts(userMessage, assistantResponse, sessionID s
 		}
 	}
 
+	// Determine the cutover state once for this capture batch (US-004). After
+	// the legacy import has run, auto-captured facts go straight to SQLite;
+	// pre-cutover they append to MEMORY.md via the FileStore. Fail-open.
+	cutoverDone := false
+	if a.sqliteMemory != nil {
+		if done, gateErr := a.sqliteMemory.LegacyImportDone(context.Background()); gateErr == nil {
+			cutoverDone = done
+		}
+	}
+
 	// Save each fact to memory.
 	for _, fact := range facts {
 		fact = strings.TrimSpace(fact)
 		if fact == "" || len(fact) < 5 {
 			continue
 		}
-		// Block credentials from being persisted via auto-capture.
+		// US-006: redact credentials instead of dropping the fact, so the
+		// non-secret context is retained without the secret value.
 		if looksLikeCredential(fact) {
-			a.logger.Warn("auto-capture: credential pattern in extracted fact, skipping",
+			fact = RedactCredentials(fact)
+			a.logger.Warn("auto-capture: credential pattern in extracted fact, redacted",
+				"session", sessionID,
+			)
+		}
+		category := categorizeMemory(fact)
+		if cutoverDone {
+			if err := a.sqliteMemory.SaveCuratedMemory(context.Background(), fact, category, origin); err != nil {
+				a.logger.Warn("auto-capture: sqlite save failed", "session", sessionID, "error", err)
+			}
+			a.logger.Debug("auto-captured memory fact",
+				"fact_preview", truncateForCapture(fact, 60),
+				"source", origin,
 				"session", sessionID,
 			)
 			continue
 		}
-		category := categorizeMemory(fact)
 		_ = a.memoryStore.Save(memory.Entry{
 			Content:   fact,
 			Source:    origin,
@@ -4473,13 +4539,27 @@ Conversation:
 
 	a.logger.Info("session summary saved", "path", filePath)
 
-	// Re-index if SQLite memory is available.
+	// Persist the summary into SQLite memory if available.
 	if a.sqliteMemory != nil && a.config.Memory.Index.Auto {
-		chunkCfg := memory.ChunkConfig{MaxTokens: a.config.Memory.Index.ChunkMaxTokens, Overlap: 100}
-		if chunkCfg.MaxTokens <= 0 {
-			chunkCfg.MaxTokens = 500
+		// C1: after the v2 cutover, do NOT raw-index the whole memory dir — that
+		// would resurrect the raw legacy chunks (un-redacted, NULL lifecycle
+		// columns) the migration deleted. Route the summary through the curated
+		// SQLite path instead. Pre-cutover, keep the legacy whole-dir raw index.
+		cutoverDone := false
+		if done, gerr := a.sqliteMemory.LegacyImportDone(a.ctx); gerr == nil {
+			cutoverDone = done
 		}
-		_ = a.sqliteMemory.IndexMemoryDir(a.ctx, memDir, chunkCfg)
+		if cutoverDone {
+			if err := a.sqliteMemory.SaveCuratedMemory(a.ctx, content, "summary", filename); err != nil {
+				a.logger.Warn("failed to save session summary to curated memory", "error", err)
+			}
+		} else {
+			chunkCfg := memory.ChunkConfig{MaxTokens: a.config.Memory.Index.ChunkMaxTokens, Overlap: 100}
+			if chunkCfg.MaxTokens <= 0 {
+				chunkCfg.MaxTokens = 500
+			}
+			_ = a.sqliteMemory.IndexMemoryDir(a.ctx, memDir, chunkCfg)
+		}
 	}
 }
 

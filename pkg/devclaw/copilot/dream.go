@@ -392,13 +392,42 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 
 	consolidated := 0
 	resolved := 0
+
+	// US-006: REAL supersede for SQLite-resident memories. For each resolvable
+	// contradiction, hard-exclude the losing chunk (deleted_at + supersedes) and
+	// evict it from the vector cache so it disappears from recall immediately. We
+	// NEVER append a "[Contradiction] A vs B" summary entry. This is the
+	// authoritative resolution path; the disk [stale] marking below is a harmless
+	// best-effort for any .md-only (pre-cutover) entries.
+	if d.sqliteStore != nil && len(resolvable) > 0 {
+		for _, c := range resolvable {
+			n, err := d.sqliteStore.SupersedeByContent(ctx, c.entryA, c.entryB)
+			if err != nil {
+				d.logger.Warn("dream: sqlite supersede failed", "error", err)
+				continue
+			}
+			if n > 0 {
+				resolved++
+			}
+		}
+		if resolved > 0 {
+			d.logger.Info("dream: superseded contradicted memories in sqlite", "resolved", resolved)
+		}
+	}
+
 	if fileStore, ok := d.store.(*memory.FileStore); ok {
-		// Supersede the older side of each contradiction with a soft [stale]
-		// marker. parseMemoryFile skips stale entries (so searches stop
-		// returning them) and Compact then drops them from disk. Soft and
-		// reversible — the raw content stays in the file's history until compact.
+		// Best-effort disk hygiene for any .md-only entries (pre-cutover). The
+		// soft [stale] marker stops parseMemoryFile from returning them and
+		// Compact then drops them from disk. Harmless for SQLite-resident
+		// memories (which won't match a .md line) and does NOT double-count: the
+		// SQLite supersede above is the authoritative resolved tally.
 		if len(resolvable) > 0 {
-			resolved = d.expireStaleEntries(fileStore, resolvable)
+			diskResolved := d.expireStaleEntries(fileStore, resolvable)
+			// Only credit disk resolutions when SQLite resolved nothing, so the
+			// reported tally reflects what was actually excluded from recall.
+			if resolved == 0 {
+				resolved = diskResolved
+			}
 		}
 		// Compact: remove stale/expired entries and exact duplicates.
 		removed, err := fileStore.Compact()
@@ -852,7 +881,6 @@ func skipBracket(s string) string {
 // ── Helpers ──
 
 func normalizeForComparison(s string) string {
-	s = fmt.Sprintf("%s", s) // Ensure string type.
 	// Lowercase and collapse whitespace.
 	var result []byte
 	lastSpace := false
@@ -871,27 +899,6 @@ func normalizeForComparison(s string) string {
 		result = append(result, c)
 	}
 	return string(result)
-}
-
-func containsWord(text, word string) bool {
-	return len(text) > 0 && len(word) > 0 && (len(text) >= len(word)) &&
-		(text == word || // exact match
-			(len(text) > len(word) && text[:len(word)] == word) || // starts with
-			(len(text) > len(word) && text[len(text)-len(word):] == word) || // ends with
-			containsSubstr(text, " "+word) || containsSubstr(text, word+" "))
-}
-
-func containsSubstr(s, sub string) bool {
-	return len(sub) <= len(s) && findSubstr(s, sub) >= 0
-}
-
-func findSubstr(s, sub string) int {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }
 
 // hasSignificantOverlap checks if two strings share enough words in common.

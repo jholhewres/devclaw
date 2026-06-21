@@ -2,6 +2,51 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.22.0] — 2026-06-21 — Memory v2
+
+### Added
+
+- **Memory v2: SQLite becomes the single source of truth.** On startup, a
+  one-time, idempotent, fail-open migration imports and **curates** the legacy
+  flat-markdown memory (`MEMORY.md` + daily `20*.md`) into the vectorized SQLite
+  store, then the system stops reading/indexing those `.md` files. The `.md`
+  files are never deleted or edited — they remain on disk as a natural backup.
+  Existing users self-heal on first boot after `git pull && make build && restart`.
+  - Schema v2 lifecycle columns on `chunks` (`deleted_at`, `expires_at`,
+    `supersedes`, `curation_status`, `importance`, `confidence`, `memory_type`,
+    `kind`, `scope`, …), version-gated via `PRAGMA user_version`
+    (`migration_memory_v2.go`).
+  - Import + curation: drops `[Contradiction]` bloat, exact-hash dedup,
+    quality-scoring (low-signal demotion < 0.55), category classification +
+    TTLs, **credential redaction before storage**, re-embedding via the local
+    ONNX provider, then space reclaim (`migration_import.go`, `quality.go`,
+    `credential_redact.go`). Idempotent via a sentinel marker row; runs async
+    off the startup path so re-embedding never blocks the agent.
+
+### Fixed
+
+- **Recall no longer surfaces deleted/expired/garbage memories.** All recall
+  paths (BM25, vector cache, LIKE fallback, hybrid) now exclude
+  `deleted_at`/expired/`low_signal` chunks (`chunkLifecycleGuard`), and the
+  in-memory vector cache is evicted on lifecycle mutations
+  (`EvictFromVectorCache`).
+- **A trivial greeting no longer injects long-term memory.** Injection
+  `min_score` raised `0.1 → 0.35`; `shouldSkipMemoryRecall` skips recall for
+  greetings/extremely-short inputs (questions with `?` still search).
+- **Dream now actually resolves contradictions** by superseding the losing
+  memory (`deleted_at` + `supersedes` + cache eviction) instead of re-appending
+  `[Contradiction]` summaries that grew `MEMORY.md` unbounded.
+- Category-scaled temporal decay + MMR enabled by default; legacy null-wing
+  results are demoted (not neutral) in wing-aware queries.
+
+### Known limitations
+
+- Dream contradiction **detection** still reads from the FileStore; post-cutover
+  contradiction *resolution* operates on SQLite by content match (detection of
+  brand-new SQLite-only contradictions is a follow-up).
+- End-to-end migration test and the final independent architect/deslop review
+  pass are pending (org spend limit reached mid-run).
+
 ## [v1.21.0] — 2026-06-16
 
 ### Added

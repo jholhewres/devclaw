@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
 	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
@@ -1388,11 +1389,56 @@ func (p *PromptComposer) resolveActiveWingForSession(session *Session, input str
 	return res.Wing
 }
 
+// greetingInputs is the set of trivial greeting/acknowledgement openers that
+// must not trigger long-term memory recall. Matched case-insensitively against
+// the whole trimmed input. Kept conservative so real questions still search.
+var greetingInputs = map[string]struct{}{
+	"oi": {}, "olá": {}, "ola": {}, "hi": {}, "hello": {}, "hey": {},
+	"bom dia": {}, "boa tarde": {}, "boa noite": {}, "buenas": {},
+	"e aí": {}, "e ai": {}, "eai": {},
+}
+
+// shouldSkipMemoryRecall reports whether the input is a trivial greeting or so
+// short that running hybrid search would only surface noise. It is intentionally
+// conservative: it skips recall only for known greetings OR inputs that are both
+// very short in words (<= 3) AND very short in runes (<= 15), so genuine short
+// questions (e.g. "qual meu nome?") still search.
+func shouldSkipMemoryRecall(input string) bool {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return true
+	}
+
+	// Strip trailing punctuation for the greeting-set comparison so "Oi!" and
+	// "hello." still match.
+	lowered := strings.ToLower(trimmed)
+	normalized := strings.TrimRight(lowered, " !.?,…")
+	if _, ok := greetingInputs[normalized]; ok {
+		return true
+	}
+
+	// A question mark signals a genuine query even when it is short — always
+	// search in that case (keeps "qual meu nome?" recall-eligible).
+	if strings.Contains(trimmed, "?") {
+		return false
+	}
+
+	words := strings.Fields(trimmed)
+	if len(words) <= 3 && utf8.RuneCountInString(trimmed) <= 15 {
+		return true
+	}
+	return false
+}
+
 // buildMemoryLayer creates the memory context section.
 // Uses hybrid search (vector + BM25) when SQLite memory is available,
 // otherwise falls back to substring matching on the file store.
 func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string {
 	var parts []string
+
+	// Skip long-term memory recall entirely for trivial greetings / extremely
+	// short inputs — recall on "Oi" only surfaces noise and pollutes the prompt.
+	skipRecall := shouldSkipMemoryRecall(input)
 
 	// Resolve wing once — shared by the memory stack and hybrid search.
 	activeWing := p.resolveActiveWingForSession(session, input)
@@ -1413,7 +1459,7 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 	// Try hybrid search first (SQLite with FTS5 + vector).
 	// Use a tight timeout to avoid blocking prompt composition.
 	// 500ms is enough for local SQLite FTS5; the old 2s was too generous.
-	if p.sqliteMemory != nil && input != "" {
+	if p.sqliteMemory != nil && input != "" && !skipRecall {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 
 		searchCfg := p.config.Memory.Search
@@ -1487,7 +1533,7 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 	}
 
 	// Fallback: file-based substring search.
-	if len(parts) == 0 && p.memoryStore != nil {
+	if len(parts) == 0 && p.memoryStore != nil && !skipRecall {
 		facts := p.memoryStore.RecentFacts(15, input)
 		if facts != "" {
 			// Split fact lines, sanitize each, and wrap with untrusted boundary.
@@ -1531,7 +1577,9 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 			defer func() {
 				if r := recover(); r != nil {
 					// Silently skip this builder — panics in plugins must not
-					// break prompt composition.
+					// break prompt composition. No logger is in scope here; the
+					// recovered value is intentionally discarded.
+					_ = r
 				}
 			}()
 			if section := builder.BuildMemorySection(session, input); section != "" {
@@ -1569,92 +1617,6 @@ func (p *PromptComposer) buildTemporalLayer() string {
 	)
 }
 
-// buildConversationLayer creates a summary of recent history, using a
-// token-aware sliding window to stay within the history token budget.
-func (p *PromptComposer) buildConversationLayer(session *Session) string {
-	// Determine how many entries to request initially.
-	maxEntries := p.config.Memory.MaxMessages
-	if maxEntries <= 0 {
-		maxEntries = 100
-	}
-	// Only include the most recent portion for the prompt. The conversation
-	// layer is a summary that goes into the system prompt; the actual recent
-	// exchanges are passed separately as conversation history to the LLM.
-	// Keeping this small reduces prompt tokens and speeds up composition.
-	fetchEntries := maxEntries
-	if fetchEntries > 15 {
-		fetchEntries = 15
-	}
-
-	history := session.RecentHistory(fetchEntries)
-	if len(history) == 0 {
-		return ""
-	}
-
-	// Token budget for conversation history layer.
-	historyBudget := p.config.TokenBudget.History
-	if historyBudget <= 0 {
-		historyBudget = 8000
-	}
-
-	// Build from most recent backwards, stopping when we hit the budget.
-	type formattedEntry struct {
-		text   string
-		tokens int
-	}
-	var entries []formattedEntry
-	totalTokens := 0
-
-	for i := len(history) - 1; i >= 0; i-- {
-		entry := history[i]
-
-		// Truncate very long messages individually.
-		userMsg := entry.UserMessage
-		if len(userMsg) > 2000 {
-			userMsg = userMsg[:2000] + "..."
-		}
-		assistMsg := entry.AssistantResponse
-		if len(assistMsg) > 4000 {
-			assistMsg = assistMsg[:4000] + "..."
-		}
-
-		text := fmt.Sprintf("**User:** %s\n**Assistant:** %s\n", userMsg, assistMsg)
-		tokens := estimateTokens(text)
-
-		// Stop adding if we'd exceed the budget.
-		if totalTokens+tokens > historyBudget && len(entries) > 0 {
-			break
-		}
-
-		entries = append(entries, formattedEntry{text: text, tokens: tokens})
-		totalTokens += tokens
-	}
-
-	if len(entries) == 0 {
-		return ""
-	}
-
-	// Reverse to chronological order (we built backwards).
-	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
-		entries[i], entries[j] = entries[j], entries[i]
-	}
-
-	var b strings.Builder
-	b.WriteString("## Recent Conversation\n\n")
-
-	// If we had to skip older entries, note it.
-	if len(entries) < len(history) {
-		b.WriteString(fmt.Sprintf("_(%d older messages omitted to fit token budget)_\n\n",
-			len(history)-len(entries)))
-	}
-
-	for _, e := range entries {
-		b.WriteString(e.text)
-		b.WriteString("\n")
-	}
-
-	return b.String()
-}
 
 // buildBuiltinSkillsLayer creates a section with built-in skill documentation.
 // These are always loaded and provide guidance for using core tools.
@@ -1762,12 +1724,6 @@ func detectProcessManager() string {
 		}
 	}
 	return "standalone"
-}
-
-// estimateTokens approximates the token count for a string.
-// Uses the default heuristic (~4 chars per token).
-func estimateTokens(s string) int {
-	return estimateTokensForModel(s, "")
 }
 
 // charsPerToken returns the estimated chars-per-token ratio for a given model.

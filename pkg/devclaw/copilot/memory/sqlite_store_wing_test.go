@@ -5,7 +5,9 @@
 //
 //   - TestHybridSearchWingBoostMatch         — boosted wing ranks first.
 //   - TestHybridSearchWingBoostPenalty       — non-matching wings demoted.
-//   - TestHybridSearchWingNullNeutral        — wing IS NULL is never penalized.
+//   - TestHybridSearchWingNullPenalized      — wing IS NULL is demoted when the
+//                                              query has a wing (US-005), but
+//                                              stays neutral when it does not.
 //   - TestHybridSearchEmptyQueryWingByteIdentical — retrocompat gate.
 //   - TestHybridSearchZeroBoostUsesDefaults  — zero values fall back to 1.3/0.4.
 //   - TestHybridSearchEmptyDBWithWing        — empty store does not panic.
@@ -241,29 +243,32 @@ func TestHybridSearchWingBoostPenalty(t *testing.T) {
 	}
 }
 
-// TestHybridSearchWingNullNeutral is the CRITICAL retrocompat test for the
-// wing IS NULL invariant. A file with wing=NULL must never be penalized,
-// even when the query specifies a wing.
+// TestHybridSearchWingNullPenalized is the US-005 wing-penalty test. The
+// pre-US-005 contract treated wing IS NULL as ALWAYS neutral (multiplier 1.0)
+// even when the query carried a wing. US-005 changes that: stale/uncategorized
+// legacy rows are demoted (penaltyBoost) when the query has a clear wing, so
+// they no longer rank alongside wing-matched recall. Legacy rows stay neutral
+// only when the query itself has no wing (QueryWing == "").
 //
-// We seed three files: alpha-wing, NULL-wing, beta-wing. Then we query
-// twice: once with QueryWing="alpha" (boost on) and once with QueryWing=""
-// (boost off). The NULL file's score must be byte-identical between the
-// two runs to prove no multiplier ever touches it.
+// We seed three files: alpha-wing, NULL-wing, beta-wing. Then we query twice:
+// once with QueryWing="alpha" (penalty on) and once with QueryWing="" (penalty
+// off). The NULL file's score must DROP under the wing-aware run (penalized),
+// while remaining its un-multiplied baseline under the wingless run.
 //
 // Uses stableEmbedder so the non-parallel vectors give the vector branch
 // distinct cosine similarities. The generic deterministicEmbedder produces
 // scaled-parallel vectors (cosine similarity == 1 for every pair), which
 // collapses the fusion ranking to non-deterministic sort.Slice tie-breaking
 // and causes the legacy file to flip ranks between the wingless and
-// wing-aware calls — masking the real invariant under a flaky test.
-func TestHybridSearchWingNullNeutral(t *testing.T) {
+// wing-aware calls — masking the real behavior under a flaky test.
+func TestHybridSearchWingNullPenalized(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping slow wing test in short mode")
 	}
 	store := newStableStore(t)
 	ctx := context.Background()
 
-	text := "neutrality contract verification token"
+	text := "penalty contract verification token"
 	seedFileWithWing(t, store, "file_alpha.md", text+" one", "alpha")
 	seedFileWithWing(t, store, "file_legacy.md", text+" two", "") // wing IS NULL
 	seedFileWithWing(t, store, "file_beta.md", text+" three", "beta")
@@ -275,14 +280,14 @@ func TestHybridSearchWingNullNeutral(t *testing.T) {
 		BM25Weight:   0.3,
 	}
 
-	wingless, err := store.HybridSearchWithOpts(ctx, "neutrality contract verification", common)
+	wingless, err := store.HybridSearchWithOpts(ctx, "penalty contract verification", common)
 	if err != nil {
 		t.Fatalf("wingless search: %v", err)
 	}
 
 	withWing := common
 	withWing.QueryWing = "alpha"
-	withAlpha, err := store.HybridSearchWithOpts(ctx, "neutrality contract verification", withWing)
+	withAlpha, err := store.HybridSearchWithOpts(ctx, "penalty contract verification", withWing)
 	if err != nil {
 		t.Fatalf("alpha-wing search: %v", err)
 	}
@@ -293,10 +298,11 @@ func TestHybridSearchWingNullNeutral(t *testing.T) {
 		t.Fatalf("legacy file missing from results: wingless=%v withAlpha=%v", legacyA, legacyB)
 	}
 
-	// HARD INVARIANT: legacy file's score must be byte-identical (within
-	// 6 decimals) regardless of whether the query specified a wing.
-	if !almostEqual(legacyA.Score, legacyB.Score) {
-		t.Errorf("legacy NULL file score drifted: wingless=%.10f withAlpha=%.10f",
+	// US-005 INVARIANT: with a query wing set, the legacy NULL-wing file is
+	// demoted (penaltyBoost < 1.0), so its score must be strictly LOWER than
+	// in the wingless run where no multiplier touches it.
+	if !(legacyB.Score < legacyA.Score) {
+		t.Errorf("legacy NULL file should be penalized under wing-aware query: wingless=%.10f withAlpha=%.10f",
 			legacyA.Score, legacyB.Score)
 	}
 
@@ -306,7 +312,7 @@ func TestHybridSearchWingNullNeutral(t *testing.T) {
 		t.Errorf("legacy file wing = %q, want empty string", legacyB.Wing)
 	}
 
-	// Ordering check: alpha boosted, beta penalized, legacy unchanged.
+	// Ordering check: alpha boosted (rank 0); legacy and beta both penalized.
 	alphaRank := rankOf(withAlpha, "file_alpha.md")
 	legacyRank := rankOf(withAlpha, "file_legacy.md")
 	betaRank := rankOf(withAlpha, "file_beta.md")
@@ -314,13 +320,13 @@ func TestHybridSearchWingNullNeutral(t *testing.T) {
 		t.Fatalf("missing files in withAlpha: alpha=%d legacy=%d beta=%d",
 			alphaRank, legacyRank, betaRank)
 	}
-	// Alpha first (boosted), beta last (penalized), legacy in the middle.
 	if alphaRank != 0 {
 		t.Errorf("alpha rank = %d, want 0", alphaRank)
 	}
-	if betaRank <= legacyRank {
-		t.Errorf("beta rank %d should be below legacy rank %d (penalty vs neutral)",
-			betaRank, legacyRank)
+	// Both legacy and beta carry the same penaltyBoost now, so alpha must
+	// outrank both.
+	if legacyRank == 0 || betaRank == 0 {
+		t.Errorf("penalized wings should not rank first: legacy=%d beta=%d", legacyRank, betaRank)
 	}
 }
 
@@ -632,9 +638,10 @@ func TestHybridSearchFusionRegressionFixture(t *testing.T) {
 				}
 			}
 
-			// Once-passing wing-aware path with QueryWing="alpha"
-			// must NOT alter the legacy file scores (wing IS NULL is
-			// neutral).
+			// US-005: the wing-aware path with QueryWing="alpha" now DEMOTES
+			// legacy (wing IS NULL) files via penaltyBoost instead of leaving
+			// them neutral. For each legacy result that survived in both runs,
+			// the wing-aware score must be strictly lower than the legacy one.
 			withWing, err := store.HybridSearchWithOpts(ctx, q, HybridSearchOptions{
 				MaxResults:   maxResults,
 				MinScore:     minScore,
@@ -645,9 +652,6 @@ func TestHybridSearchFusionRegressionFixture(t *testing.T) {
 			if err != nil {
 				t.Fatalf("wing-aware: %v", err)
 			}
-			// For each legacy (wing="") result that survived the wing-aware
-			// run, the score must equal the legacy score because the
-			// multiplier for legacy files is always 1.0.
 			for _, want := range legacy {
 				// Was this file legacy? Check the seeding pattern.
 				idx := -1
@@ -661,8 +665,8 @@ func TestHybridSearchFusionRegressionFixture(t *testing.T) {
 					// alpha files — that's fine, only assert when present.
 					continue
 				}
-				if !almostEqual(got.Score, want.Score) {
-					t.Errorf("legacy file %s score drifted under wing-aware mode: legacy=%.10f wingAware=%.10f",
+				if !(got.Score < want.Score) {
+					t.Errorf("legacy file %s should be penalized under wing-aware mode: legacy=%.10f wingAware=%.10f",
 						want.FileID, want.Score, got.Score)
 				}
 			}

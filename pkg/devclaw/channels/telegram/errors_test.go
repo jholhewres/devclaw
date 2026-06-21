@@ -137,6 +137,7 @@ func TestAsTelegramAPIError(t *testing.T) {
 		got := asTelegramAPIError(err)
 		if got == nil {
 			t.Fatal("expected non-nil TelegramAPIError")
+			return
 		}
 		if got.Method != "test" {
 			t.Errorf("Method = %q, want %q", got.Method, "test")
@@ -149,6 +150,7 @@ func TestAsTelegramAPIError(t *testing.T) {
 		got := asTelegramAPIError(err)
 		if got == nil {
 			t.Fatal("expected non-nil TelegramAPIError from wrapped error")
+			return
 		}
 		if got.Method != "wrapped" {
 			t.Errorf("Method = %q, want %q", got.Method, "wrapped")

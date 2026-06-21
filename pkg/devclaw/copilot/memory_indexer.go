@@ -9,11 +9,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
 )
 
 // MemoryIndexer performs incremental indexing of memory files in the background.
@@ -44,6 +46,12 @@ type MemoryIndexer struct {
 	indexChunkFunc func(chunks []MemoryChunk) error
 	deleteFileFunc func(filepath string) error
 
+	// legacyImportDoneFunc reports whether the one-time flat-markdown → SQLite
+	// migration has completed (US-004 cutover gate). When it returns true, the
+	// indexer stops re-indexing the migrated legacy files (MEMORY.md + daily
+	// files). Nil (unset) keeps the pre-migration behavior: index everything.
+	legacyImportDoneFunc func() (bool, error)
+
 	mu     sync.Mutex
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -62,6 +70,16 @@ type SQLiteMemoryStore interface {
 	IndexChunks(chunks []MemoryChunk) error
 	DeleteByFilepath(filepath string) error
 	GetIndexedFiles() (map[string]string, error) // filepath -> hash
+}
+
+// dailyMemoryFileRe matches a legacy daily memory file basename (YYYY-MM-DD.md).
+// Used by the cutover gate to identify the migrated legacy files to skip.
+var dailyMemoryFileRe = regexp.MustCompile(`^20\d\d-\d\d-\d\d\.md$`)
+
+// isMigratedLegacyFile reports whether basename is one of the flat-markdown
+// files that the legacy import migrated into SQLite (MEMORY.md or a daily file).
+func isMigratedLegacyFile(basename string) bool {
+	return basename == memory.MemoryFileName || dailyMemoryFileRe.MatchString(basename)
 }
 
 // MemoryIndexerConfig configures the memory indexer.
@@ -112,6 +130,13 @@ func (m *MemoryIndexer) SetIndexChunkFunc(fn func(chunks []MemoryChunk) error) {
 // SetDeleteFileFunc sets the function for deleting file from index.
 func (m *MemoryIndexer) SetDeleteFileFunc(fn func(filepath string) error) {
 	m.deleteFileFunc = fn
+}
+
+// SetLegacyImportDoneFunc wires the US-004 cutover gate. fn reports whether the
+// one-time flat-markdown → SQLite migration has completed; when it returns true
+// the indexer stops re-indexing the migrated legacy files.
+func (m *MemoryIndexer) SetLegacyImportDoneFunc(fn func() (bool, error)) {
+	m.legacyImportDoneFunc = fn
 }
 
 // SetMemoryDir sets the memory directory to index.
@@ -264,6 +289,25 @@ func (m *MemoryIndexer) indexAll() {
 	start := time.Now()
 	m.logger.Debug("starting incremental memory index")
 
+	// Cutover gate (US-004): once the one-time flat-markdown → SQLite migration
+	// has completed, stop re-indexing the migrated legacy files (MEMORY.md +
+	// daily files). New writes go straight to SQLite (see SaveCuratedMemory), so
+	// continuing to index the .md would resurrect superseded/curated-out content.
+	// Pre-migration the behavior is unchanged. The .md files are never edited or
+	// deleted here — we only stop reading them into the index. Fail-open: a check
+	// error leaves indexing on.
+	legacyImported := false
+	if m.legacyImportDoneFunc != nil {
+		if done, err := m.legacyImportDoneFunc(); err == nil {
+			legacyImported = done
+		} else {
+			m.logger.Warn("memory index: legacy-import gate check failed, indexing legacy .md normally", "error", err)
+		}
+	}
+	if legacyImported {
+		m.logger.Info("memory index: legacy .md indexing disabled post-migration (MEMORY.md + daily files now live in SQLite)")
+	}
+
 	// Track which files we've seen
 	seen := make(map[string]bool)
 
@@ -282,6 +326,12 @@ func (m *MemoryIndexer) indexAll() {
 
 		// Only process markdown files
 		if filepath.Ext(path) != ".md" {
+			return nil
+		}
+
+		// Post-cutover: skip the migrated legacy files so they are no longer
+		// re-indexed. They stay on disk untouched; SQLite is now authoritative.
+		if legacyImported && isMigratedLegacyFile(filepath.Base(path)) {
 			return nil
 		}
 

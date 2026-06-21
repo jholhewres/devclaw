@@ -164,6 +164,25 @@ func handleMemorySave(ctx context.Context, store *memory.FileStore, sqliteStore 
 		}
 	}
 
+	// ── US-004 cutover: redirect new writes to SQLite ──
+	//
+	// Once the one-time legacy import has completed, new memories are written
+	// directly into the v2 chunks table (curated, embedded, lifecycle-tagged,
+	// content-hash deduped) instead of appended to MEMORY.md. The .md files are
+	// never touched again — only the write target changes. Pre-cutover the old
+	// FileStore.Save path below runs unchanged. Fail-open: if the gate check
+	// errors, fall through to the legacy path.
+	if sqliteStore != nil {
+		if done, gateErr := sqliteStore.LegacyImportDone(ctx); gateErr == nil && done {
+			if err := sqliteStore.SaveCuratedMemory(ctx, content, category, "agent"); err != nil {
+				return nil, fmt.Errorf("save memory to sqlite: %w", err)
+			}
+			return fmt.Sprintf("Saved to memory [%s]: %s", category, content), nil
+		} else if gateErr != nil {
+			slog.Warn("memory_save: cutover gate check failed, using legacy .md path", "error", gateErr)
+		}
+	}
+
 	// Atomic dedup check + save under a single lock (prevents TOCTOU race).
 	contentHash := sha256Hex(content)
 	contentTokens := tokenize(content)
@@ -373,6 +392,14 @@ func handleMemoryList(_ context.Context, store *memory.FileStore, args map[strin
 func handleMemoryIndex(ctx context.Context, sqliteStore *memory.SQLiteStore, cfg MemoryConfig) (any, error) {
 	if sqliteStore == nil {
 		return "Memory indexing not available (SQLite store not configured).", nil
+	}
+
+	// C1: after the v2 cutover the legacy .md files are no longer the source of
+	// truth; raw-indexing the whole dir would resurrect un-redacted/bloat chunks
+	// with NULL lifecycle columns that pass the recall guard. Refuse the raw
+	// reindex post-cutover — curated memory lives in SQLite.
+	if done, derr := sqliteStore.LegacyImportDone(ctx); derr == nil && done {
+		return "Memory v2 active: memory is curated in the SQLite store; legacy .md re-indexing is disabled.", nil
 	}
 
 	memDir := filepath.Join(filepath.Dir(cfg.Path), "memory")
@@ -905,6 +932,79 @@ func init() {
 	}
 }
 
+// credentialKeywordRe flags text that talks about a secret. The
+// natural-language redaction pass only fires on lines containing one of these
+// keywords, so random alphanumerics elsewhere are never touched.
+var credentialKeywordRe = regexp.MustCompile(`(?i)\b(senha|passwd|password|pwd|secret|token|api[_-]?key|apikey|credential|bearer|access[_-]?key)\b`)
+
+// secretishTokenRe matches candidate secret tokens on a keyword line.
+var secretishTokenRe = regexp.MustCompile(`[A-Za-z0-9][A-Za-z0-9._/+=@-]{5,}`)
+
+// looksSecretish reports whether a token has the shape of a secret value: a
+// long opaque string (>=20), or a 6+ char mix of letters and digits.
+func looksSecretish(tok string) bool {
+	if strings.Contains(tok, "REDACTED") {
+		return false
+	}
+	if len(tok) >= 20 {
+		return true
+	}
+	if len(tok) < 6 {
+		return false
+	}
+	var hasDigit, hasAlpha bool
+	for _, r := range tok {
+		switch {
+		case r >= '0' && r <= '9':
+			hasDigit = true
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+			hasAlpha = true
+		}
+	}
+	return hasDigit && hasAlpha
+}
+
+// hasNaturalLanguageSecret reports whether any keyword line carries a
+// secret-shaped token (e.g. "password for the site is 081082se").
+func hasNaturalLanguageSecret(content string) bool {
+	if !credentialKeywordRe.MatchString(content) {
+		return false
+	}
+	for _, line := range strings.Split(content, "\n") {
+		if !credentialKeywordRe.MatchString(line) {
+			continue
+		}
+		for _, tok := range secretishTokenRe.FindAllString(line, -1) {
+			if looksSecretish(tok) && !credentialKeywordRe.MatchString(tok) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// redactSecretishInKeywordLines redacts secret-shaped tokens on every line that
+// mentions a credential keyword, catching natural-language secrets the
+// assignment patterns miss. The keyword word itself is preserved.
+func redactSecretishInKeywordLines(content string) string {
+	if !credentialKeywordRe.MatchString(content) {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if !credentialKeywordRe.MatchString(line) {
+			continue
+		}
+		lines[i] = secretishTokenRe.ReplaceAllStringFunc(line, func(tok string) string {
+			if !looksSecretish(tok) || credentialKeywordRe.MatchString(tok) {
+				return tok
+			}
+			return "[REDACTED — use vault]"
+		})
+	}
+	return strings.Join(lines, "\n")
+}
+
 // looksLikeCredential checks whether content contains patterns that
 // indicate passwords, API keys, tokens, or other secrets.
 func looksLikeCredential(content string) bool {
@@ -915,7 +1015,7 @@ func looksLikeCredential(content string) bool {
 			}
 		}
 	}
-	return false
+	return hasNaturalLanguageSecret(content)
 }
 
 // LooksLikeCredential is the exported version for use by the security package.
@@ -938,7 +1038,7 @@ func redactCredentials(content string) string {
 			return "[REDACTED — use vault]"
 		})
 	}
-	return content
+	return redactSecretishInKeywordLines(content)
 }
 
 // RedactCredentials is the exported version for use by the security package.
