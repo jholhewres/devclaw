@@ -90,9 +90,17 @@ func (s *SQLiteStore) BackfillOccurredAt(ctx context.Context, memoryDir string, 
 
 		for _, e := range entries {
 			// Only entries that carry a real original date can correct a chunk.
+			// e.Timestamp is parsed by parseMemoryFile via ParseInLocation(time.Local),
+			// so it is a real local instant — we restamp occurred_at with exactly the
+			// same value (and location) the import would have stored, keeping the
+			// two paths consistent (and consistent with US-003 local date windows).
 			if e.Timestamp.IsZero() {
 				continue
 			}
+			// `now` is passed to curateEntry only so deriveExpiry can compute an
+			// expires_at — which the backfill DISCARDS. We rely solely on
+			// curated.text to recompute the import's content-hash key, so the exact
+			// value of `now` here cannot shift the key or mis-target a chunk.
 			curated, action := s.curateEntry(e, now)
 			if action != curateKeep {
 				continue
