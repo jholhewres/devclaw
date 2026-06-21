@@ -322,6 +322,16 @@ func handleMemorySearch(ctx context.Context, store *memory.FileStore, sqliteStor
 			WingBoostMatch:   cfg.Hierarchy.WingBoostMatch,
 			WingBoostPenalty: cfg.Hierarchy.WingBoostPenalty,
 		}
+
+		// US-003 date-aware recall: when the query carries a clear temporal cue
+		// ("ontem", "na sexta", "dia 18", "18/06", ...), hard-restrict recall to
+		// that day's window so the right-day memories surface even though the
+		// chunk text has no date. Built in time.Local to match occurred_at's
+		// local-wall-clock instants. No cue → window stays unset → normal recall.
+		if from, to, ok := memory.ResolveTemporalWindow(query, time.Now()); ok {
+			opts.OccurredFrom = &from
+			opts.OccurredTo = &to
+		}
 		results, err := sqliteStore.HybridSearchWithOptsAndPostFilters(
 			ctx, query, opts, decayCfg, mmrCfg,
 		)
@@ -891,13 +901,13 @@ var credentialPatterns = []string{
 	`(?i)(senha|password|api[_-]?key|secret[_-]?key|access[_-]?token|token)\s*[:=]\s*"[^"\r\n]{4,}"`,
 	`(?i)(senha|password|api[_-]?key|secret[_-]?key|access[_-]?token|token)\s*[:=]\s*'[^'\r\n]{4,}'`,
 	// Well-known provider token formats (match anywhere in text).
-	`ghp_[a-zA-Z0-9]{36}`,                  // GitHub classic PAT
-	`github_pat_[a-zA-Z0-9_]{82}`,          // GitHub fine-grained PAT
-	`gho_[a-zA-Z0-9]{36}`,                  // GitHub OAuth token
-	`sk-[a-zA-Z0-9]{32,}`,                  // OpenAI API key
-	`AIza[a-zA-Z0-9\-_]{35}`,               // Google API key
-	`AKIA[0-9A-Z]{16}`,                     // AWS access key ID
-	`xox[bpasr]-[a-zA-Z0-9\-]{10,}`,        // Slack token
+	`ghp_[a-zA-Z0-9]{36}`,                                  // GitHub classic PAT
+	`github_pat_[a-zA-Z0-9_]{82}`,                          // GitHub fine-grained PAT
+	`gho_[a-zA-Z0-9]{36}`,                                  // GitHub OAuth token
+	`sk-[a-zA-Z0-9]{32,}`,                                  // OpenAI API key
+	`AIza[a-zA-Z0-9\-_]{35}`,                               // Google API key
+	`AKIA[0-9A-Z]{16}`,                                     // AWS access key ID
+	`xox[bpasr]-[a-zA-Z0-9\-]{10,}`,                        // Slack token
 	`eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`, // JWT (header.payload.signature)
 }
 

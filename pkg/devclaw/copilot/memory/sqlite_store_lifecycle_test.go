@@ -65,7 +65,7 @@ func TestRecallExcludesLifecycleChunks(t *testing.T) {
 	assertPresentAbsent(t, "HybridSearchWithOpts", hyb, "file_ok.md", excluded)
 
 	// Also exercise the LIKE fallback path explicitly.
-	like, err := store.searchLikeFallback(token, 10)
+	like, err := store.searchLikeFallback(token, 10, noOccurredFilter)
 	if err != nil {
 		t.Fatalf("searchLikeFallback: %v", err)
 	}
