@@ -2,7 +2,7 @@
 
 All notable changes to DevClaw are documented in this file.
 
-## [Unreleased] — Memory v2 (branch `feature/memory-v2-migrator`)
+## [v1.22.0] — 2026-06-21 — Memory v2
 
 ### Added
 
