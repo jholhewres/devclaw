@@ -74,7 +74,10 @@ func TestBackfillOccurredAt_RestampsFromMarkdown(t *testing.T) {
 		t.Fatalf("expected 1 chunk restamped, got %d", updated)
 	}
 
-	want := time.Date(2026, 6, 18, 16, 39, 0, 0, time.UTC)
+	// occurred_at is parsed from the .md stamp in time.Local (see parseMemoryFile),
+	// so the expected instant is the same wall clock in the local zone — matching
+	// how the import/backfill store it and how US-003 date windows compare.
+	want := time.Date(2026, 6, 18, 16, 39, 0, 0, time.Local)
 	factKey := importHash(strings.TrimSpace(fact))
 	var got time.Time
 	if err := store.db.QueryRow(
@@ -166,7 +169,10 @@ func TestBackfillOccurredAt_VersionGate(t *testing.T) {
 	).Scan(&got); err != nil {
 		t.Fatalf("scan occurred_at: %v", err)
 	}
-	want := time.Date(2026, 6, 18, 16, 39, 0, 0, time.UTC)
+	// occurred_at is parsed from the .md stamp in time.Local (see parseMemoryFile),
+	// so the expected instant is the same wall clock in the local zone — matching
+	// how the import/backfill store it and how US-003 date windows compare.
+	want := time.Date(2026, 6, 18, 16, 39, 0, 0, time.Local)
 	if !got.Equal(want) {
 		t.Fatalf("occurred_at = %v, want %v (gate must prevent the second restamp)", got, want)
 	}

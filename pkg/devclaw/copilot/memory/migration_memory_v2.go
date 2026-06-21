@@ -64,9 +64,10 @@ var memoryV2Indexes = []string{
 
 // MigrateMemoryV2 adds the schema-v2 lifecycle metadata columns to the chunks
 // table and creates the supporting indexes. It is idempotent and version-gated
-// via PRAGMA user_version: once user_version >= 2 it returns immediately as a
-// no-op. On the first real run it sets user_version = 2 and emits a single INFO
-// log; subsequent runs stay silent.
+// via PRAGMA user_version: once user_version >= memoryV2SchemaVersion it returns
+// immediately as a no-op. On a real run it adds any missing columns/indexes
+// (so an existing v2 store gains the v3 occurred_at column on the next boot),
+// sets user_version = memoryV2SchemaVersion, and emits a single INFO log.
 //
 // Follows the same non-fatal policy as MigrateKgSchema: the caller logs a
 // warning but never blocks startup.
@@ -78,7 +79,7 @@ func MigrateMemoryV2(db *sql.DB, logger *slog.Logger) error {
 		logger = slog.Default()
 	}
 
-	// Version gate — skip entirely if already at v2 or beyond.
+	// Version gate — skip entirely if already at memoryV2SchemaVersion or beyond.
 	var userVersion int
 	if err := db.QueryRow("PRAGMA user_version").Scan(&userVersion); err != nil {
 		return fmt.Errorf("read user_version: %w", err)
@@ -115,7 +116,7 @@ func MigrateMemoryV2(db *sql.DB, logger *slog.Logger) error {
 		return fmt.Errorf("set user_version: %w", err)
 	}
 
-	logger.Info("memory schema v2: lifecycle columns added")
+	logger.Info("memory schema migrated", "version", memoryV2SchemaVersion)
 	return nil
 }
 
