@@ -672,6 +672,17 @@ func (a *Assistant) Start(ctx context.Context) error {
 					} else if changed {
 						a.logger.Info("embedding model changed: re-embedded corpus", "chunks", n)
 					}
+
+					// Atomic re-chunk self-heal: split already-stored long, multi-fact
+					// curated memories into atomic facts so narrow queries match a
+					// focused chunk instead of a diluted blob. Marker-gated,
+					// idempotent, fail-open. Runs after re-embed so new pieces embed
+					// with the active model.
+					if split, rerr := sqlStore.RechunkLongCuratedMemories(a.ctx); rerr != nil {
+						a.logger.Warn("atomic re-chunk failed (will retry next boot)", "error", rerr)
+					} else if split > 0 {
+						a.logger.Info("atomic re-chunk done", "memories_split", split)
+					}
 				}()
 			}
 		}
