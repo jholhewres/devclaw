@@ -2,6 +2,29 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.23.2] — 2026-06-22 — Scheduled routines run as real tasks
+
+### Fixed
+
+- **Scheduled task-routines could never complete.** Every scheduled job ran
+  through a 1-turn, "do NOT use any tools" delivery path (the SQLite job store
+  has no `as_subagent` column, so no job could opt into the richer path). Routines
+  that need real work — financial summary (skill + DB), daily English-study PDF
+  (skill + DB + PDF + send), flight-price search (web_search) — hit the turn
+  budget at turn 2 and force-summarized before doing anything, emitting half-baked
+  output. Scheduled jobs now run as autonomous owner tasks: full prompt (skills +
+  memory), tools enabled, a 15-turn budget. Simple reminders still deliver in one
+  turn. (`assistant.go`)
+- **Reasoning leaked to users.** Output sanitization matched only the long
+  `<thinking>`/`<reasoning>` tags and kept their content; the short `<think>` form
+  (emitted by GLM) slipped through entirely. `StripInternalTags` and the block
+  streamer now remove the whole `<think|thinking|reasoning>` block — content
+  included — plus a trailing unclosed reasoning block. (`markdown.go`,
+  `block_streamer.go`)
+- **Leaked foreign control tokens.** A trailing CJK continuation phrase that GLM
+  occasionally appends to an otherwise Portuguese/English answer is now stripped;
+  genuine CJK messages (majority CJK) are left untouched. (`markdown.go`)
+
 ## [v1.23.1] — 2026-06-22 — Atomic chunking of rich memories
 
 ### Changed

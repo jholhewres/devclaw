@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // FormatForWhatsApp converts standard Markdown to WhatsApp-compatible formatting.
@@ -186,7 +187,18 @@ var replyTagRe = regexp.MustCompile(`\[\[reply_to[^\]]*\]\]`)
 // user: <final>, </final>, <thinking>, </thinking>, <tool_provenance>, and
 // their content when it duplicates the already-streamed response.
 // The \w+_proven\w+ pattern catches LLM variants like <tool_provenace>, <skill_provenance>, etc.
-var internalTagRe = regexp.MustCompile(`</?(?:final|thinking|reasoning|\w+_proven\w+)>`)
+var internalTagRe = regexp.MustCompile(`</?(?:final|think|thinking|reasoning|\w+_proven\w+)>`)
+
+// reasoningBlockRe matches an ENTIRE reasoning block — tags AND the content
+// between them — for <think>, <thinking>, and <reasoning>. The short <think>
+// form (emitted by some models, e.g. GLM) was previously not covered, so its
+// reasoning leaked to the user. Non-greedy, dot-matches-newline, case-insensitive.
+var reasoningBlockRe = regexp.MustCompile(`(?is)<(think|thinking|reasoning)\b[^>]*>.*?</(think|thinking|reasoning)>`)
+
+// unclosedReasoningRe matches a reasoning block that opened but never closed
+// (the model emitted <think> and ran to the end). Everything from the opener to
+// EOL/EOF is reasoning and must not reach the user.
+var unclosedReasoningRe = regexp.MustCompile(`(?is)<(think|thinking|reasoning)\b[^>]*>.*$`)
 
 // toolsUsedRe matches "[Tools used: ...]" annotations that may be generated
 // by the LLM mimicking the internal history format. These must be stripped
@@ -231,6 +243,12 @@ var toolProvenanceRe = regexp.MustCompile(`(?s)<\w+_proven\w+>.*?</\w+_proven\w+
 //   - Fake "System: ..." messages fabricated by the LLM
 //   - NO_REPLY / HEARTBEAT_OK sentinel tokens
 func StripInternalTags(text string) string {
+	// Remove entire reasoning blocks (tags + content) first, including the short
+	// <think> form and any trailing unclosed reasoning. Reasoning must never
+	// reach the user.
+	text = reasoningBlockRe.ReplaceAllString(text, "")
+	text = unclosedReasoningRe.ReplaceAllString(text, "")
+
 	// Unwrap <final>...</final> blocks — keep inner content, remove wrapper tags.
 	// The content inside <final> is the user-visible response.
 	text = finalTagRe.ReplaceAllString(text, "$1")
@@ -260,7 +278,41 @@ func StripInternalTags(text string) string {
 	text = strings.ReplaceAll(text, TokenNoReply, "")
 	text = strings.ReplaceAll(text, TokenHeartbeatOK, "")
 
+	// Drop leaked foreign control tokens: some models (e.g. GLM) occasionally
+	// append a CJK continuation phrase ("根据以上信息，我继续执行任务。") to an
+	// otherwise Latin-script answer. Strip a trailing CJK run when the message is
+	// predominantly non-CJK so genuine CJK content is never touched.
+	text = stripForeignControlTail(text)
+
 	return text
+}
+
+// cjkTailRe matches a trailing run of CJK characters (plus surrounding spaces /
+// light punctuation) at the very end of the text.
+var cjkTailRe = regexp.MustCompile(`[\p{Han}\p{Hiragana}\p{Katakana}][\p{Han}\p{Hiragana}\p{Katakana}\s，。、！？：；…·]*\s*$`)
+
+// stripForeignControlTail removes a trailing CJK run from an otherwise
+// Latin-script message — a leaked model control/continuation token. It is a
+// no-op when the message is mostly CJK (a genuine CJK reply) so real content is
+// preserved.
+func stripForeignControlTail(text string) string {
+	var cjk, total int
+	for _, r := range text {
+		if r > 0x2E7F && (unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r)) {
+			cjk++
+		}
+		if !unicode.IsSpace(r) {
+			total++
+		}
+	}
+	if total == 0 || cjk == 0 {
+		return text
+	}
+	// Mostly-CJK message → leave it alone.
+	if float64(cjk)/float64(total) > 0.5 {
+		return text
+	}
+	return strings.TrimRight(cjkTailRe.ReplaceAllString(text, ""), " \n\t")
 }
 
 // StripReplyTags is an alias for StripInternalTags for backward compatibility.
