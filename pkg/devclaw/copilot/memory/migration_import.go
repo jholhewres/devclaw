@@ -540,22 +540,29 @@ func (s *SQLiteStore) SaveCuratedMemory(ctx context.Context, content, category, 
 		return nil
 	}
 	now := time.Now().UTC()
-	curated, action := s.curateEntry(Entry{
-		Content:  text,
-		Category: category,
-		Source:   source,
-		// occurred_at must be a LOCAL instant so it lines up with US-003 date
-		// windows (built in time.Local) under string comparison; the UTC `now`
-		// is still used for deriveExpiry below. Mixing zones here would mis-bucket
-		// late-evening saves by a day on a non-UTC host.
-		Timestamp: now.Local(),
-	}, now)
-	if action != curateKeep {
-		// Contradiction/empty entries are intentionally not persisted.
-		return nil
+	// Split rich multi-fact content into atomic facts so a narrow query
+	// ("qual o localizador") matches a short focused chunk instead of being
+	// diluted in one long blob. Short/single-fact content yields one piece.
+	for _, fact := range splitAtomicFacts(text) {
+		curated, action := s.curateEntry(Entry{
+			Content:  fact,
+			Category: category,
+			Source:   source,
+			// occurred_at must be a LOCAL instant so it lines up with US-003 date
+			// windows (built in time.Local) under string comparison; the UTC `now`
+			// is still used for deriveExpiry below. Mixing zones here would mis-bucket
+			// late-evening saves by a day on a non-UTC host.
+			Timestamp: now.Local(),
+		}, now)
+		if action != curateKeep {
+			continue
+		}
+		key := importHash(strings.TrimSpace(curated.text))
+		if err := s.insertSavedChunk(ctx, key, curated); err != nil {
+			return err
+		}
 	}
-	key := importHash(strings.TrimSpace(curated.text))
-	return s.insertSavedChunk(ctx, key, curated)
+	return nil
 }
 
 // insertSavedChunk is insertCuratedChunk with the savedFileIDPrefix namespace.
