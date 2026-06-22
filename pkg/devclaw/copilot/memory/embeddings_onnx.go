@@ -25,21 +25,61 @@ import (
 )
 
 const (
-	onnxModelName      = "all-MiniLM-L6-v2"
-	onnxModelDims      = 384
-	onnxMaxSeqLen      = 128
 	onnxRuntimeVersion = "1.24.1"
 
-	// Download URLs.
 	onnxRuntimeURLTemplate = "https://github.com/microsoft/onnxruntime/releases/download/v%s/onnxruntime-linux-x64-%s.tgz"
-	onnxModelBaseURL       = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx"
 )
+
+// onnxModelSpec describes a downloadable local embedding model. Both shipped
+// models are 384-dim BERT-family (3 inputs incl token_type_ids, last_hidden_state),
+// so only the tokenizer and download URLs differ.
+type onnxModelSpec struct {
+	name      string // model dir, Model()/re-embed marker name
+	onnxURL   string
+	tokURL    string
+	tokFile   string // local tokenizer filename
+	tokKind   string // "wordpiece" | "unigram"
+	dims      int
+	maxSeqLen int
+}
+
+var (
+	modelEnglishMiniLM = onnxModelSpec{
+		name:      "all-MiniLM-L6-v2",
+		onnxURL:   "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx",
+		tokURL:    "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/vocab.txt",
+		tokFile:   "vocab.txt",
+		tokKind:   "wordpiece",
+		dims:      384,
+		maxSeqLen: 128,
+	}
+	modelMultilingualMiniLM = onnxModelSpec{
+		name:      "paraphrase-multilingual-MiniLM-L12-v2",
+		onnxURL:   "https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/main/onnx/model.onnx",
+		tokURL:    "https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/main/tokenizer.json",
+		tokFile:   "tokenizer.json",
+		tokKind:   "unigram",
+		dims:      384,
+		maxSeqLen: 128,
+	}
+
+	// activeONNXModel selects the local embedding model. Multilingual fixes
+	// poor PT-BR recall (English MiniLM couldn't match Portuguese paraphrases).
+	activeONNXModel = modelMultilingualMiniLM
+)
+
+// onnxTokenizer is implemented by both WordPiece and Unigram tokenizers.
+type onnxTokenizer interface {
+	Tokenize(text string) (inputIDs, attentionMask, tokenTypeIDs []int64)
+}
 
 // ONNXEmbedder generates embeddings using a local ONNX sentence-transformer.
 type ONNXEmbedder struct {
 	session   *ort.AdvancedSession
-	tokenizer *WordPieceTokenizer
+	tokenizer onnxTokenizer
 	dims      int
+	seqLen    int
+	modelName string
 	logger    *slog.Logger
 
 	// Pre-allocated tensors (reused across calls).
@@ -53,9 +93,9 @@ type ONNXEmbedder struct {
 
 // ONNXPaths holds resolved paths for ONNX runtime and model files.
 type ONNXPaths struct {
-	RuntimeLib string // path to libonnxruntime.so
-	ModelFile  string // path to model.onnx
-	VocabFile  string // path to vocab.txt
+	RuntimeLib    string // path to libonnxruntime.so
+	ModelFile     string // path to model.onnx
+	TokenizerFile string // path to vocab.txt (wordpiece) or tokenizer.json (unigram)
 }
 
 // NewONNXEmbedder creates a local ONNX embedding provider.
@@ -84,14 +124,20 @@ func NewONNXEmbedder(cfg EmbeddingConfig) (*ONNXEmbedder, error) {
 		}
 	}
 
-	// Load tokenizer.
-	tokenizer, err := NewWordPieceTokenizer(paths.VocabFile, onnxMaxSeqLen)
+	// Load tokenizer (kind depends on the model).
+	var tokenizer onnxTokenizer
+	switch activeONNXModel.tokKind {
+	case "unigram":
+		tokenizer, err = NewUnigramTokenizer(paths.TokenizerFile, activeONNXModel.maxSeqLen)
+	default:
+		tokenizer, err = NewWordPieceTokenizer(paths.TokenizerFile, activeONNXModel.maxSeqLen)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("onnx: load tokenizer: %w", err)
 	}
 
 	// Create pre-allocated tensors.
-	shape := ort.NewShape(1, int64(onnxMaxSeqLen))
+	shape := ort.NewShape(1, int64(activeONNXModel.maxSeqLen))
 	inputIDs, err := ort.NewEmptyTensor[int64](shape)
 	if err != nil {
 		return nil, fmt.Errorf("onnx: create input_ids tensor: %w", err)
@@ -105,7 +151,7 @@ func NewONNXEmbedder(cfg EmbeddingConfig) (*ONNXEmbedder, error) {
 		return nil, fmt.Errorf("onnx: create token_type_ids tensor: %w", err)
 	}
 
-	outputShape := ort.NewShape(1, int64(onnxMaxSeqLen), int64(onnxModelDims))
+	outputShape := ort.NewShape(1, int64(activeONNXModel.maxSeqLen), int64(activeONNXModel.dims))
 	output, err := ort.NewEmptyTensor[float32](outputShape)
 	if err != nil {
 		return nil, fmt.Errorf("onnx: create output tensor: %w", err)
@@ -125,15 +171,17 @@ func NewONNXEmbedder(cfg EmbeddingConfig) (*ONNXEmbedder, error) {
 	}
 
 	logger.Info("ONNX embedder initialized",
-		"model", onnxModelName,
-		"dims", onnxModelDims,
-		"max_seq_len", onnxMaxSeqLen,
+		"model", activeONNXModel.name,
+		"dims", activeONNXModel.dims,
+		"max_seq_len", activeONNXModel.maxSeqLen,
 	)
 
 	return &ONNXEmbedder{
 		session:       session,
 		tokenizer:     tokenizer,
-		dims:          onnxModelDims,
+		dims:          activeONNXModel.dims,
+		seqLen:        activeONNXModel.maxSeqLen,
+		modelName:     activeONNXModel.name,
 		logger:        logger,
 		inputIDs:      inputIDs,
 		attentionMask: attentionMask,
@@ -175,7 +223,7 @@ func (e *ONNXEmbedder) embedSingle(text string) ([]float32, error) {
 
 	// Mean pooling over token embeddings (respecting attention mask).
 	raw := e.output.GetData() // [1, seq_len, dims] flattened
-	vec := meanPool(raw, mask, onnxMaxSeqLen, e.dims)
+	vec := meanPool(raw, mask, e.seqLen, e.dims)
 
 	// L2 normalize.
 	l2Normalize(vec)
@@ -193,7 +241,7 @@ func (e *ONNXEmbedder) Dimensions() int { return e.dims }
 func (e *ONNXEmbedder) Name() string { return "onnx" }
 
 // Model returns the model name.
-func (e *ONNXEmbedder) Model() string { return onnxModelName }
+func (e *ONNXEmbedder) Model() string { return e.modelName }
 
 // Close releases ONNX resources.
 func (e *ONNXEmbedder) Close() error {
@@ -265,7 +313,7 @@ func resolveONNXPaths() (*ONNXPaths, error) {
 	}
 
 	libDir := filepath.Join(dataDir, "onnx", "lib")
-	modelDir := filepath.Join(dataDir, "onnx", "models", onnxModelName)
+	modelDir := filepath.Join(dataDir, "onnx", "models", activeONNXModel.name)
 
 	libName := "libonnxruntime.so"
 	if runtime.GOOS == "darwin" {
@@ -273,9 +321,9 @@ func resolveONNXPaths() (*ONNXPaths, error) {
 	}
 
 	return &ONNXPaths{
-		RuntimeLib: filepath.Join(libDir, libName),
-		ModelFile:  filepath.Join(modelDir, "model.onnx"),
-		VocabFile:  filepath.Join(modelDir, "vocab.txt"),
+		RuntimeLib:    filepath.Join(libDir, libName),
+		ModelFile:     filepath.Join(modelDir, "model.onnx"),
+		TokenizerFile: filepath.Join(modelDir, activeONNXModel.tokFile),
 	}, nil
 }
 
@@ -298,28 +346,26 @@ func ensureONNXRuntime(paths *ONNXPaths, logger *slog.Logger) error {
 
 func ensureONNXModel(paths *ONNXPaths, logger *slog.Logger) error {
 	modelExists := fileExists(paths.ModelFile)
-	vocabExists := fileExists(paths.VocabFile)
+	tokExists := fileExists(paths.TokenizerFile)
 
-	if modelExists && vocabExists {
+	if modelExists && tokExists {
 		return nil
 	}
 
-	logger.Info("downloading ONNX model (first run)...", "model", onnxModelName)
+	logger.Info("downloading ONNX model (first run)...", "model", activeONNXModel.name)
 	if err := os.MkdirAll(filepath.Dir(paths.ModelFile), 0o755); err != nil {
 		return err
 	}
 
 	if !modelExists {
-		modelURL := onnxModelBaseURL + "/model.onnx"
-		if err := downloadFile(modelURL, paths.ModelFile, logger); err != nil {
+		if err := downloadFile(activeONNXModel.onnxURL, paths.ModelFile, logger); err != nil {
 			return fmt.Errorf("download model: %w", err)
 		}
 	}
 
-	if !vocabExists {
-		vocabURL := "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/vocab.txt"
-		if err := downloadFile(vocabURL, paths.VocabFile, logger); err != nil {
-			return fmt.Errorf("download vocab: %w", err)
+	if !tokExists {
+		if err := downloadFile(activeONNXModel.tokURL, paths.TokenizerFile, logger); err != nil {
+			return fmt.Errorf("download tokenizer: %w", err)
 		}
 	}
 

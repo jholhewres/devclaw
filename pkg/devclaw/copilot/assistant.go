@@ -662,6 +662,16 @@ func (a *Assistant) Start(ctx context.Context) error {
 					} else if updated > 0 {
 						a.logger.Info("occurred_at backfill done", "updated", updated)
 					}
+
+					// Embedding-model self-heal: when the active model changed (e.g.
+					// English → multilingual MiniLM), stored vectors live in the old
+					// space and must be recomputed. Marker-gated (no-op once recorded),
+					// idempotent, fail-open. Runs last so all chunks exist first.
+					if changed, n, eerr := sqlStore.EnsureEmbeddingModel(a.ctx); eerr != nil {
+						a.logger.Warn("embedding re-embed failed (will retry next boot)", "error", eerr)
+					} else if changed {
+						a.logger.Info("embedding model changed: re-embedded corpus", "chunks", n)
+					}
 				}()
 			}
 		}
