@@ -2,6 +2,34 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.23.0] — 2026-06-22 — Multilingual embeddings
+
+### Changed
+
+- **Local embedding model swapped to multilingual** — `all-MiniLM-L6-v2` (English)
+  → `paraphrase-multilingual-MiniLM-L12-v2`. The English model couldn't match
+  Portuguese paraphrases (e.g. "bilhetes"/"vôos" against stored "voo"/"localizador"),
+  so PT-BR recall was poor: relevant memories scored below threshold or didn't rank.
+  The multilingual model fixes semantic recall for PT-BR. Same BERT interface
+  (3 inputs, 384-dim, mean-pooled `last_hidden_state`) so the ONNX session, pooling
+  and vector storage are unchanged — only the tokenizer differs.
+  - New pure-Go SentencePiece **Unigram tokenizer** (`tokenizer_unigram.go`) loaded
+    from `tokenizer.json` (Viterbi + Metaspace + NFKC), with exact token-id parity
+    against the reference `tokenizers` library.
+  - **Self-healing re-embed on boot** (`reembed.go`): when the active model differs
+    from the recorded marker, the whole corpus is re-embedded in the new vector
+    space and the marker updated. Marker-gated (no-op once recorded), idempotent,
+    fail-open — no manual steps, no DB surgery.
+
+### Notes
+
+- First restart after upgrade re-embeds the corpus (~minutes for a few thousand
+  chunks); during that window vector recall is briefly degraded while BM25 keeps
+  working. One-time.
+- Known follow-up: rich multi-fact saves (e.g. a full flight itinerary) are stored
+  as one long chunk, which dilutes retrieval for narrow queries ("qual o
+  localizador"). Atomic chunking of such saves is the next recall improvement.
+
 ## [v1.22.3] — 2026-06-21 — Temporal recall regression fix
 
 ### Fixed
