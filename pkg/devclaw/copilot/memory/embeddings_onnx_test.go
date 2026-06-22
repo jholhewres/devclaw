@@ -139,7 +139,7 @@ func TestResolveONNXPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if paths.RuntimeLib == "" || paths.ModelFile == "" || paths.VocabFile == "" {
+	if paths.RuntimeLib == "" || paths.ModelFile == "" || paths.TokenizerFile == "" {
 		t.Error("paths should not be empty")
 	}
 }

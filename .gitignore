@@ -89,3 +89,4 @@ workspace-*/
 .omc/
 .omx/
 node-compile-cache/
+pkg/devclaw/copilot/memory/testdata/mlm_tokenizer.json
