@@ -2,6 +2,29 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.23.1] — 2026-06-22 — Atomic chunking of rich memories
+
+### Changed
+
+- **Rich multi-fact memories are now split into atomic facts.** A full flight
+  itinerary saved as one long chunk diluted its embedding, so a narrow query
+  ("qual o localizador da minha passagem?") lost to shorter focused chunks and
+  the specific fact never surfaced. Content is now split on sentence/line
+  boundaries (never commas, so flight legs stay intact) and each fact is stored
+  as its own curated memory — e.g. "Localizador ida: WGADGP" becomes a discrete,
+  directly-retrievable chunk.
+  - `atomic_chunk.go`: `splitAtomicFacts` splitter (partitions, no text loss).
+  - `SaveCuratedMemory`: stores each atomic fact separately.
+  - **Self-healing re-chunk on boot** (`rechunk.go`): already-stored long curated
+    memories are split into atomic facts, metadata + `occurred_at` + wing copied,
+    the original soft-deleted. Marker-gated, idempotent, fail-open.
+
+### Notes
+
+- Verified on production data: re-chunk split 199 long memories; the flight
+  locator now surfaces as its own chunk for "qual o localizador" (was buried in
+  the blob), with no regression on trip/shopping-list recall.
+
 ## [v1.23.0] — 2026-06-22 — Multilingual embeddings
 
 ### Changed
