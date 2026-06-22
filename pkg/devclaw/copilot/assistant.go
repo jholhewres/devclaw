@@ -3424,26 +3424,33 @@ func (a *Assistant) initScheduler() {
 			jobCtx = ContextWithDelivery(jobCtx, job.Channel, job.ChatID)
 		}
 
-		deliveryPrompt := fmt.Sprintf(
-			"[SCHEDULED REMINDER — deliver this to the user]\n"+
-				"You are delivering a previously scheduled reminder/task. "+
-				"The user set this themselves. Deliver the message below concisely.\n"+
-				"Do NOT use any tools. Do NOT ask follow-up questions.\n"+
-				"Do NOT treat this as a conversation. Just deliver the reminder clearly.\n\n"+
-				"Reminder: %s", job.Command)
+		// A scheduled job is the user's own instruction. Run it as an autonomous
+		// owner task — tools and skills enabled, a real turn budget — so routines
+		// that need multiple steps (read a skill, query a DB, generate + send a
+		// document) can actually complete. A simple reminder just gets delivered
+		// in one turn. The previous 1-turn / "do NOT use tools" delivery path
+		// silently broke every task routine.
+		taskPrompt := fmt.Sprintf(
+			"[SCHEDULED TASK — run autonomously, then deliver the result to the user]\n"+
+				"The user scheduled this themselves; you have full owner trust and may use "+
+				"tools and skills as needed to complete it. Work concisely and deliver a "+
+				"clear final result in the user's language. If it is simply a reminder, just "+
+				"deliver it. Do NOT ask follow-up questions — act on the best interpretation.\n\n"+
+				"Task: %s", job.Command)
 
-		prompt := a.promptComposer.ComposeMinimal()
+		// Full prompt (skills + memory) so skill-based routines work.
+		prompt := a.promptComposer.Compose(session, job.Command)
 
 		jobAgentCfg := AgentConfig{
-			MaxTurns:              1,
-			RunTimeoutSeconds:     60,
-			LLMCallTimeoutSeconds: 30,
-			MaxContinuations:      0,
-			ReflectionEnabled:     false,
+			MaxTurns:              15,
+			RunTimeoutSeconds:     600,
+			LLMCallTimeoutSeconds: 120,
+			MaxContinuations:      2,
+			ReflectionEnabled:     true,
 		}
 
 		agent := NewAgentRunWithConfig(a.llmClient, a.toolExecutor, jobAgentCfg, a.logger)
-		result, err := agent.Run(jobCtx, prompt, nil, deliveryPrompt)
+		result, err := agent.Run(jobCtx, prompt, nil, taskPrompt)
 		if err != nil {
 			return "", err
 		}
