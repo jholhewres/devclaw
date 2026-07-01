@@ -6,6 +6,8 @@ import { api, type SessionInfo } from '@/lib/api';
 import { Button } from '@/components/ui/Button';
 import { timeAgo } from '@/lib/utils';
 import { useAppStore } from '@/stores/app';
+import { useChatStore } from '@/stores/chat';
+import { abortActiveStream } from '@/hooks/useChat';
 import { PageContainer } from '@/components/PageContainer';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { SearchInput } from '@/components/ui/SearchInput';
@@ -61,9 +63,15 @@ export function Sessions() {
   });
 
   const handleDelete = async (id: string) => {
+
+    const session = sessions.find((s) => s.id === id);
+    const chatId: string = session?.chat_id || id;
+
     try {
+      abortActiveStream(chatId);
       await api.sessions.delete(id);
       setSessions((prev) => prev.filter((s) => s.id !== id));
+      useChatStore.getState().clearSession(chatId);
       useAppStore.getState().invalidateSessions();
     } catch {
       /* silent */

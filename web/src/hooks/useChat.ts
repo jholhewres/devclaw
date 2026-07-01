@@ -1,6 +1,41 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { api, type MessageInfo, type MediaAttachment } from '@/lib/api';
+import { useCallback, useEffect } from 'react';
+import { api, type MediaAttachment } from '@/lib/api';
 import { createPOSTSSEConnection, type SSEEvent } from '@/lib/sse';
+import { useChatStore } from '@/stores/chat';
+
+/**
+ * Global map to track active stream abort functions across unmounts.
+ * This allows background persistence when navigating between pages.
+ */
+const activeAbortControllers: Record<string, () => void> = {};
+
+/**
+ * Aborts an active stream for a specific session ID.
+ * Exported to be used in external components like Sessions.tsx.
+ * Uses substring search to handle ID mismatch (prefixed vs non-prefixed).
+ */
+export const abortActiveStream = (id: string) => {
+  const actualKey = Object.keys(activeAbortControllers).find((key) => key.includes(id));
+  
+  if (actualKey && activeAbortControllers[actualKey]) {
+    activeAbortControllers[actualKey]();
+    delete activeAbortControllers[actualKey];
+  }
+}
+
+/**
+ * FAIL-SAFE SUBSCRIPTION: Monitors the store for session removals.
+ * Redundant to handleDelete but essential as a state-level watchdog 
+ * to ensure no ghost connections persist if a session is cleared 
+ * from the store by any other side effect or global reset.
+ */
+useChatStore.subscribe((state) => {
+  Object.keys(activeAbortControllers).forEach((id) => {
+    if (!state.sessions[id]) {
+      abortActiveStream(id);
+    }
+  });
+});
 
 /**
  * Strips internal LLM tags that should never be shown to the user.
@@ -22,119 +57,98 @@ function stripInternalTags(text: string): string {
   );
 }
 
-interface ChatState {
-  messages: MessageInfo[];
-  streamingContent: string;
-  isStreaming: boolean;
-  error: string | null;
-  isLoadingHistory: boolean;
-}
-
 /**
- * Hook para gerenciar o chat com SSE streaming.
- * Conecta ao endpoint de stream da sessão e acumula tokens.
+ * Hook to manage chat logic with SSE streaming and global state persistence.
+ * Connects to the session stream endpoint and accumulates tokens.
  */
 export function useChat(sessionId: string | null) {
-  const [state, setState] = useState<ChatState>({
-    messages: [],
-    streamingContent: '',
-    isStreaming: false,
-    error: null,
-    isLoadingHistory: false,
-  });
-  const cleanupRef = useRef<(() => void) | null>(null);
-  const streamContentRef = useRef('');
+  const sessionState = useChatStore((s) => (sessionId ? s.sessions[sessionId] : null));
+  const { setSessionState, addMessage, resetStreaming } = useChatStore();
+  const messages = sessionState?.messages || [];
+  const streamingContent = sessionState?.streamingContent || '';
+  const isStreaming = sessionState?.isStreaming || false;
+  const error = sessionState?.error || null;
+  const isLoadingHistory = sessionState?.isLoadingHistory || false;
 
-  /* Carregar histórico ao mudar de sessão */
+  // const cleanupRef = useRef<(() => void) | null>(null); // Removed to allow background persistence across unmounts
+
+  /* Load history when session changes */
   useEffect(() => {
     // FIX: Clean up any active SSE stream from the previous session
-    // to prevent events from leaking across sessions.
-    cleanupRef.current?.();
-    cleanupRef.current = null;
-    streamContentRef.current = '';
+    // to prevent events from leaking across sessions.    
+    /* if (cleanupRef.current) {
+      cleanupRef.current();
+      cleanupRef.current = null;
+    } // Removed: Switching sessions should not abort background streams 
+    */    
 
     if (!sessionId) {
-      setState({
-        messages: [],
-        streamingContent: '',
-        isStreaming: false,
-        error: null,
-        isLoadingHistory: false,
-      });
+      // If no session, the store will naturally be empty/null, 
+      // but we ensure clean state for the UI if needed.
       return;
     }
 
-    setState({
-      messages: [],
-      streamingContent: '',
-      isStreaming: false,
-      error: null,
-      isLoadingHistory: true,
-    });
+    // ANTI-LOOP GUARD: Do not fetch if already loading, if an error occurred, 
+    // if history has already been attempted, OR if we are already streaming.
+    const session = useChatStore.getState().sessions[sessionId];
+    const hasLoadedHistory = session?.hasLoadedHistory || false;
 
-    api.chat
-      .history(sessionId)
+    if (hasLoadedHistory || isLoadingHistory || error || isStreaming) {
+      return;
+    }
+
+    setSessionState(sessionId, { isLoadingHistory: true });
+    api.chat.history(sessionId)
       .then((msgs) => {
         const cleaned = (msgs || []).map((m) =>
           m.role === 'assistant' ? { ...m, content: stripInternalTags(m.content).trim() } : m
         );
-        setState((s) => ({ ...s, messages: cleaned, error: null, isLoadingHistory: false }));
+
+        const currentState = useChatStore.getState().sessions[sessionId];
+        
+        // RACE CONDITION CHECK: Prevent overwriting state if the user started streaming 
+        // while the history request was still in flight.
+        if (currentState && !currentState.isStreaming) {
+          setSessionState(sessionId, {
+            messages: currentState.messages.length === 0 ? cleaned : currentState.messages,
+            error: null,
+            isLoadingHistory: false,
+            hasLoadedHistory: true,
+          });
+        } else if (currentState) {
+          setSessionState(sessionId, {
+            isLoadingHistory: false,
+            hasLoadedHistory: true,
+          });
+        }
       })
-      .catch(() => {
-        // Sessão nova, sem histórico - stop loading
-        setState((s) => ({ ...s, isLoadingHistory: false }));
-      });
-  }, [sessionId]);
-
-  /* Enviar mensagem */
-  const sendMessage = useCallback(
-    async (content: string) => {
-      if (!sessionId || !content.trim()) return;
-
-      // Add user message immediately
-      const userMsg: MessageInfo = {
-        role: 'user',
-        content: content.trim(),
-        timestamp: new Date().toISOString(),
-      };
-      setState((s) => ({
-        ...s,
-        messages: [...s.messages, userMsg],
-        streamingContent: '',
-        isStreaming: true,
-        error: null,
-      }));
-      streamContentRef.current = '';
-
-      try {
-        // Unified endpoint: POST with body, receive SSE on the same connection.
-        // Eliminates the extra round-trip of send → GET stream.
-        cleanupRef.current?.();
-        cleanupRef.current = createPOSTSSEConnection({
-          url: `/api/chat/${sessionId}/stream`,
-          body: { content: content.trim() },
-          onEvent: (event: SSEEvent) => handleStreamEvent(event),
-          onError: (err) => {
-            setState((s) => ({
-              ...s,
-              isStreaming: false,
-              error: err.message || 'Stream error',
-            }));
-          },
+      .catch((err) => {
+        // New session, no history - stop loading and mark as attempted to prevent loop
+        setSessionState(sessionId, {
+          isLoadingHistory: false,
+          error: err.message,
+          hasLoadedHistory: true,
         });
-      } catch (err) {
-        setState((s) => ({
-          ...s,
-          isStreaming: false,
-          error: err instanceof Error ? err.message : 'Failed to send message',
-        }));
-      }
-    },
-    [sessionId]
-  );
+      });
+  }, [
+    sessionId,
+    isLoadingHistory,
+    isStreaming,
+    error,
+    setSessionState,
+  ]);
 
-  /* Processar eventos SSE do stream */
-  const handleStreamEvent = useCallback((event: SSEEvent) => {
+  /* Process SSE stream events */
+  const handleStreamEvent = useCallback((event: SSEEvent, targetId: string) => {
+    // Immediate safety check: if session is gone, kill the stream
+    if (!useChatStore.getState().sessions[targetId]) {
+      abortActiveStream(targetId);
+      return;
+    }
+
+    // Read current buffer directly from store to ensure we have the latest data for the specific session
+    const currentBuffer = useChatStore.getState().sessions[targetId]?.streamBuffer || '';
+
     switch (event.type) {
       case 'run_start': {
         // Unified endpoint sends run_id on start — no action needed,
@@ -143,100 +157,136 @@ export function useChat(sessionId: string | null) {
       }
       case 'delta': {
         const data = event.data as { content: string };
-        streamContentRef.current += data.content;
-        setState((s) => ({
-          ...s,
-          streamingContent: stripInternalTags(streamContentRef.current),
-        }));
+        const newBuffer = currentBuffer + data.content;
+        setSessionState(targetId, {
+          streamBuffer: newBuffer,
+          streamingContent: stripInternalTags(newBuffer),
+        });
         break;
       }
       case 'tool_use': {
         const data = event.data as { tool: string; input: Record<string, unknown> };
-        const toolMsg: MessageInfo = {
+        addMessage(targetId, {
           role: 'tool',
           content: data.tool,
           timestamp: new Date().toISOString(),
           tool_name: data.tool,
           tool_input: JSON.stringify(data.input, null, 2),
-        };
-        setState((s) => ({
-          ...s,
-          messages: [...s.messages, toolMsg],
-        }));
+        });
         break;
       }
       case 'tool_result': {
         const data = event.data as { tool: string; output: string; is_error?: boolean };
-        const resultMsg: MessageInfo = {
+        addMessage(targetId, {
           role: 'tool',
           content: data.output,
           timestamp: new Date().toISOString(),
           tool_name: data.tool,
           is_error: data.is_error,
-        };
-        setState((s) => ({
-          ...s,
-          messages: [...s.messages, resultMsg],
-        }));
+        });
         break;
       }
       case 'media': {
         const data = event.data as MediaAttachment;
-        const mediaMsg: MessageInfo = {
+        addMessage(targetId, {
           role: 'assistant',
           content: data.caption || '',
           timestamp: new Date().toISOString(),
           media: data,
-        };
-        setState((s) => ({
-          ...s,
-          messages: [...s.messages, mediaMsg],
-        }));
+        });
         break;
       }
       case 'done': {
         // Flush streaming content as final message, stripping internal tags
-        if (streamContentRef.current) {
-          const cleanContent = stripInternalTags(streamContentRef.current).trim();
-          const assistantMsg: MessageInfo = {
+        if (currentBuffer) {
+          addMessage(targetId, {
             role: 'assistant',
-            content: cleanContent,
+            content: stripInternalTags(currentBuffer).trim(),
             timestamp: new Date().toISOString(),
-          };
-          setState((s) => ({
-            ...s,
-            messages: [...s.messages, assistantMsg],
-            streamingContent: '',
-            isStreaming: false,
-          }));
-        } else {
-          setState((s) => ({ ...s, isStreaming: false, streamingContent: '' }));
+          });
         }
-        streamContentRef.current = '';
-        cleanupRef.current?.();
-        cleanupRef.current = null;
+        resetStreaming(targetId);
+        delete activeAbortControllers[targetId];
         break;
       }
       case 'error': {
         const data = event.data as { message: string };
-        setState((s) => ({
-          ...s,
+        setSessionState(targetId, {
           isStreaming: false,
           streamingContent: '',
           error: data.message,
-        }));
-        cleanupRef.current?.();
-        cleanupRef.current = null;
+        });
+        delete activeAbortControllers[targetId];
         break;
       }
     }
-  }, []);
+  }, [
+    setSessionState,
+    addMessage,
+    resetStreaming,
+  ]);
 
-  /* Abortar */
+  /* Send message */
+  const sendMessage = useCallback(async (content: string) => {
+    if (!sessionId || !content.trim()) return;
+
+    // Maintain closure for background processing
+    const currentId = sessionId;
+
+    addMessage(currentId, {
+      role: 'user',
+      content: content.trim(),
+      timestamp: new Date().toISOString(),
+    });
+
+    // KILL SWITCH: Set hasLoadedHistory to true immediately to block the history useEffect.
+    setSessionState(currentId, {
+      streamingContent: '',
+      streamBuffer: '',
+      isStreaming: true,
+      error: null,
+      hasLoadedHistory: true, 
+    });
+
+    try {
+      // cleanupRef.current?.(); // Removed: Handled via session-specific mapping in activeAbortControllers
+
+      abortActiveStream(currentId);
+      activeAbortControllers[currentId] = createPOSTSSEConnection({
+        url: `/api/chat/${currentId}/stream`,
+        body: { content: content.trim() },
+        onEvent: (event: SSEEvent) => handleStreamEvent(event, currentId),
+        onError: (err) => {
+          setSessionState(currentId, {
+            isStreaming: false,
+            error: err.message || 'Stream error',
+          });
+          delete activeAbortControllers[currentId];
+        },
+      });
+    } catch (err) {
+      setSessionState(currentId, {
+        isStreaming: false,
+        error: err instanceof Error ? err.message : 'Failed to send message',
+      });
+    }
+  }, [
+    sessionId,
+    addMessage,
+    setSessionState,
+    handleStreamEvent,
+  ]);
+
+  /* Abort explicitly */
   const abort = useCallback(async () => {
     if (!sessionId) return;
-    cleanupRef.current?.();
-    cleanupRef.current = null;
+
+    // cleanupRef.current?.(); // Removed in favor of global controller mapping
+    // cleanupRef.current = null;
+
+    abortActiveStream(sessionId);
+
+    const currentBuffer = useChatStore.getState().sessions[sessionId]?.streamBuffer || '';
 
     try {
       await api.chat.abort(sessionId);
@@ -244,38 +294,41 @@ export function useChat(sessionId: string | null) {
       /* ignore */
     }
 
-    // Flush o que tiver
-    if (streamContentRef.current) {
-      const msg: MessageInfo = {
+    if (currentBuffer) {
+      addMessage(sessionId, {
         role: 'assistant',
-        content: `${streamContentRef.current}\n\n*[Aborted]*`,
+        content: `${stripInternalTags(currentBuffer)}\n\n*[Aborted]*`,
         timestamp: new Date().toISOString(),
-      };
-      setState((s) => ({
-        ...s,
-        messages: [...s.messages, msg],
-        streamingContent: '',
-        isStreaming: false,
-      }));
-    } else {
-      setState((s) => ({ ...s, isStreaming: false, streamingContent: '' }));
+      });
     }
-    streamContentRef.current = '';
-  }, [sessionId]);
+    resetStreaming(sessionId);
+  }, [
+    sessionId,
+    addMessage,
+    resetStreaming,
+  ]);
 
-  /* Cleanup ao desmontar */
+  /* Global lifecycle and cleanup listeners */
   useEffect(() => {
+    // Ensure all streams are aborted if the page is refreshed or closed
+    const handleBeforeUnload = () => {
+      Object.values(activeAbortControllers).forEach((abortFn) => abortFn());
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     return () => {
-      cleanupRef.current?.();
+      // cleanupRef.current?.(); // Removed: Allow streaming to continue when navigating away from the chat page
+      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);
 
   return {
-    messages: state.messages,
-    streamingContent: state.streamingContent,
-    isStreaming: state.isStreaming,
-    error: state.error,
-    isLoadingHistory: state.isLoadingHistory,
+    messages,
+    streamingContent,
+    isStreaming,
+    error,
+    isLoadingHistory,
     sendMessage,
     abort,
   };
