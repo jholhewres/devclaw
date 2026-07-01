@@ -224,7 +224,7 @@ func RegisterSessionsYieldTool(executor *ToolExecutor) {
 
 	executor.Register(
 		MakeToolDefinition("sessions_yield",
-			"End current turn to receive pending subagent results. Call this when you have spawned subagents and want to wait for their results before continuing.",
+			"End current turn to receive pending subagent results. Call this after spawn_subagent when you have no other parallel work — the completed result is pushed back automatically when the subagent finishes, triggering a new turn.",
 			schema),
 		func(ctx context.Context, args map[string]any) (any, error) {
 			agent := AgentRunFromCtx(ctx)

@@ -75,7 +75,7 @@ vi.mock('react-i18next', () => ({
 // Mock useAppStore (used by UnsavedChangesBar)
 vi.mock('@/stores/app', () => ({
   useAppStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ sidebarOpen: false, sidebarCollapsed: false }),
+    selector({ sidebarOpen: false }),
 }))
 
 // Mock API

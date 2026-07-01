@@ -2,6 +2,413 @@
 
 All notable changes to DevClaw are documented in this file.
 
+## [v1.23.2] — 2026-06-22 — Scheduled routines run as real tasks
+
+### Fixed
+
+- **Scheduled task-routines could never complete.** Every scheduled job ran
+  through a 1-turn, "do NOT use any tools" delivery path (the SQLite job store
+  has no `as_subagent` column, so no job could opt into the richer path). Routines
+  that need real work — financial summary (skill + DB), daily English-study PDF
+  (skill + DB + PDF + send), flight-price search (web_search) — hit the turn
+  budget at turn 2 and force-summarized before doing anything, emitting half-baked
+  output. Scheduled jobs now run as autonomous owner tasks: full prompt (skills +
+  memory), tools enabled, a 15-turn budget. Simple reminders still deliver in one
+  turn. (`assistant.go`)
+- **Reasoning leaked to users.** Output sanitization matched only the long
+  `<thinking>`/`<reasoning>` tags and kept their content; the short `<think>` form
+  (emitted by GLM) slipped through entirely. `StripInternalTags` and the block
+  streamer now remove the whole `<think|thinking|reasoning>` block — content
+  included — plus a trailing unclosed reasoning block. (`markdown.go`,
+  `block_streamer.go`)
+- **Leaked foreign control tokens.** A trailing CJK continuation phrase that GLM
+  occasionally appends to an otherwise Portuguese/English answer is now stripped;
+  genuine CJK messages (majority CJK) are left untouched. (`markdown.go`)
+
+## [v1.23.1] — 2026-06-22 — Atomic chunking of rich memories
+
+### Changed
+
+- **Rich multi-fact memories are now split into atomic facts.** A full flight
+  itinerary saved as one long chunk diluted its embedding, so a narrow query
+  ("qual o localizador da minha passagem?") lost to shorter focused chunks and
+  the specific fact never surfaced. Content is now split on sentence/line
+  boundaries (never commas, so flight legs stay intact) and each fact is stored
+  as its own curated memory — e.g. "Localizador ida: WGADGP" becomes a discrete,
+  directly-retrievable chunk.
+  - `atomic_chunk.go`: `splitAtomicFacts` splitter (partitions, no text loss).
+  - `SaveCuratedMemory`: stores each atomic fact separately.
+  - **Self-healing re-chunk on boot** (`rechunk.go`): already-stored long curated
+    memories are split into atomic facts, metadata + `occurred_at` + wing copied,
+    the original soft-deleted. Marker-gated, idempotent, fail-open.
+
+### Notes
+
+- Verified on production data: re-chunk split 199 long memories; the flight
+  locator now surfaces as its own chunk for "qual o localizador" (was buried in
+  the blob), with no regression on trip/shopping-list recall.
+
+## [v1.23.0] — 2026-06-22 — Multilingual embeddings
+
+### Changed
+
+- **Local embedding model swapped to multilingual** — `all-MiniLM-L6-v2` (English)
+  → `paraphrase-multilingual-MiniLM-L12-v2`. The English model couldn't match
+  Portuguese paraphrases (e.g. "bilhetes"/"vôos" against stored "voo"/"localizador"),
+  so PT-BR recall was poor: relevant memories scored below threshold or didn't rank.
+  The multilingual model fixes semantic recall for PT-BR. Same BERT interface
+  (3 inputs, 384-dim, mean-pooled `last_hidden_state`) so the ONNX session, pooling
+  and vector storage are unchanged — only the tokenizer differs.
+  - New pure-Go SentencePiece **Unigram tokenizer** (`tokenizer_unigram.go`) loaded
+    from `tokenizer.json` (Viterbi + Metaspace + NFKC), with exact token-id parity
+    against the reference `tokenizers` library.
+  - **Self-healing re-embed on boot** (`reembed.go`): when the active model differs
+    from the recorded marker, the whole corpus is re-embedded in the new vector
+    space and the marker updated. Marker-gated (no-op once recorded), idempotent,
+    fail-open — no manual steps, no DB surgery.
+
+### Notes
+
+- First restart after upgrade re-embeds the corpus (~minutes for a few thousand
+  chunks); during that window vector recall is briefly degraded while BM25 keeps
+  working. One-time.
+- Known follow-up: rich multi-fact saves (e.g. a full flight itinerary) are stored
+  as one long chunk, which dilutes retrieval for narrow queries ("qual o
+  localizador"). Atomic chunking of such saves is the next recall improvement.
+
+## [v1.22.3] — 2026-06-21 — Temporal recall regression fix
+
+### Fixed
+
+- **Date-scoped questions returned nothing when the relevant memory was undated.**
+  v1.22.2's occurred_at window was a HARD filter (`occurred_at >= ? AND < ?`), and
+  in SQL a NULL fails that comparison — so any query carrying a temporal cue
+  ("informações da minha viagem do dia 23", "o que rolou na sexta") excluded every
+  chunk with `occurred_at IS NULL`. Since most of the corpus (and freshly-saved
+  facts) are undated, recall collapsed to zero for those queries. The window now
+  lets NULL pass — undated chunks compete on relevance and only DATED chunks on
+  other days are pruned. (`sqlite_store.go`: `occurredFilter.sqlFragment`/`matches`)
+
+### Changed
+
+- **Temporal questions prefer `memory_search` over ad-hoc bash on the conversation
+  DB.** The `memory_search` tool description and the memory skill guide now instruct
+  the agent to pass the natural-language date-scoped question as the query (the date
+  window is applied automatically) instead of hand-writing SQL against `lcm_messages`.
+  (`memory_tools.go`, `builtin/skills/memory/SKILL.md`)
+
+## [v1.22.2] — 2026-06-21 — Temporal recall (self-heal)
+
+### Fixed
+
+- **The agent couldn't answer "what happened on Thursday/Friday".** The v2 import
+  discarded each memory's original timestamp — every imported chunk was stamped
+  with the migration date — so date-scoped questions ("o que rolou na sexta",
+  "semana passada", "dia 18") could not retrieve the right memories, and temporal
+  decay was meaningless (all memories looked the same age). Fixed, **self-healing
+  on the next restart** (no manual steps, no DB edits; original dates are still in
+  the untouched .md files):
+  - **occurred_at column** preserves each memory's real original timestamp on
+    import (parsed in local time so it's a true instant). (`migration_memory_v2.go` schema v3, `migration_import.go`)
+  - **Boot-time backfill** re-reads the .md files and restamps occurred_at on
+    already-imported memories, matching by content hash. Version-gated (user_version=4),
+    idempotent, fail-open. (`migration_backfill_occurred.go`)
+  - **Date-aware recall**: a query carrying a temporal cue (PT-BR + EN: hoje/ontem,
+    weekday names, "semana passada", "dia N", dates) is resolved to a day-granular
+    local-time window and recall is filtered by occurred_at within it; pure-content
+    queries are unaffected. (`temporal_query.go`, `sqlite_store.go`, `memory_tools.go`)
+  - **Temporal decay now uses occurred_at** (fallback created_at), so memory age
+    reflects the real date again.
+
+## [v1.22.1] — 2026-06-21 — Memory recall recalibration (self-heal)
+
+### Fixed
+
+- **Recall stopped surfacing most real memories after the v2 migration.** The
+  curation quality scorer (ported from anchored) was miscalibrated for a personal
+  assistant: ordinary facts with no project/scope scored below the low-signal
+  threshold, so on a real store **94% of memories (2936/3120) were demoted to
+  `low_signal` and recall HARD-EXCLUDED them** — recent conversations (trips,
+  client proposals, receipts) became invisible. Three coordinated fixes, all
+  **self-healing on the next restart** (no manual steps, no DB edits):
+  - **Scorer recalibrated (v4):** `fact` now carries positive weight, the
+    "unscoped" penalty is removed, length/word penalties only hit near-empty
+    fragments. Genuine noise (test output, progress narration, error dumps) still
+    demotes. (`quality.go`)
+  - **Boot-time re-curation:** a version-gated, idempotent, fail-open pass re-scores
+    every chunk whose `scorer_version` is stale and clears the wrongful `low_signal`
+    flags on startup. (`migration_recurate.go`, wired in `initSchema`)
+  - **Soft-demote instead of hard-exclude:** recall now ranks `low_signal` lower
+    (×0.15) rather than removing it, so nothing is ever fully hidden again.
+    (`chunkLifecycleGuard` + ranking)
+  - Validated on a copy of the production store: recallable **184 → 2986**,
+    low_signal **2936 → 134**, credential leaks still **0**, and previously-hidden
+    topics recall again.
+
+## [v1.22.0] — 2026-06-21 — Memory v2
+
+### Added
+
+- **Memory v2: SQLite becomes the single source of truth.** On startup, a
+  one-time, idempotent, fail-open migration imports and **curates** the legacy
+  flat-markdown memory (`MEMORY.md` + daily `20*.md`) into the vectorized SQLite
+  store, then the system stops reading/indexing those `.md` files. The `.md`
+  files are never deleted or edited — they remain on disk as a natural backup.
+  Existing users self-heal on first boot after `git pull && make build && restart`.
+  - Schema v2 lifecycle columns on `chunks` (`deleted_at`, `expires_at`,
+    `supersedes`, `curation_status`, `importance`, `confidence`, `memory_type`,
+    `kind`, `scope`, …), version-gated via `PRAGMA user_version`
+    (`migration_memory_v2.go`).
+  - Import + curation: drops `[Contradiction]` bloat, exact-hash dedup,
+    quality-scoring (low-signal demotion < 0.55), category classification +
+    TTLs, **credential redaction before storage**, re-embedding via the local
+    ONNX provider, then space reclaim (`migration_import.go`, `quality.go`,
+    `credential_redact.go`). Idempotent via a sentinel marker row; runs async
+    off the startup path so re-embedding never blocks the agent.
+
+### Fixed
+
+- **Recall no longer surfaces deleted/expired/garbage memories.** All recall
+  paths (BM25, vector cache, LIKE fallback, hybrid) now exclude
+  `deleted_at`/expired/`low_signal` chunks (`chunkLifecycleGuard`), and the
+  in-memory vector cache is evicted on lifecycle mutations
+  (`EvictFromVectorCache`).
+- **A trivial greeting no longer injects long-term memory.** Injection
+  `min_score` raised `0.1 → 0.35`; `shouldSkipMemoryRecall` skips recall for
+  greetings/extremely-short inputs (questions with `?` still search).
+- **Dream now actually resolves contradictions** by superseding the losing
+  memory (`deleted_at` + `supersedes` + cache eviction) instead of re-appending
+  `[Contradiction]` summaries that grew `MEMORY.md` unbounded.
+- Category-scaled temporal decay + MMR enabled by default; legacy null-wing
+  results are demoted (not neutral) in wing-aware queries.
+
+### Known limitations
+
+- Dream contradiction **detection** still reads from the FileStore; post-cutover
+  contradiction *resolution* operates on SQLite by content match (detection of
+  brand-new SQLite-only contradictions is a follow-up).
+- End-to-end migration test and the final independent architect/deslop review
+  pass are pending (org spend limit reached mid-run).
+
+## [v1.21.0] — 2026-06-16
+
+### Added
+
+- **Runtime self-management of external MCP servers (`mcp` tool).** The main
+  agent can now configure, start, stop, manage and authenticate external MCP
+  (Model Context Protocol) servers without editing config or restarting. Actions:
+  `list`, `add`, `remove`, `enable`, `disable`, `start`, `stop`, `test`,
+  `authorize`. Connected servers expose their tools as `mcp_<server>_<tool>`.
+  Owner/admin only; changes are persisted to `config.yaml` (secrets sanitized to
+  `${ENV}`) and applied live.
+- **MCP transports.** Local processes via **stdio** and remote servers via
+  **Streamable HTTP / SSE** (session-id reuse, SSE response parsing).
+- **MCP OAuth 2.1.** Automatic endpoint discovery (RFC 8414 / RFC 9728) and
+  Dynamic Client Registration (RFC 7591) with PKCE. The agent returns a consent
+  URL through its channel; the provider redirects to the local callback
+  (`/oauth/mcp/callback`); tokens are stored in the encrypted vault per server
+  with transparent refresh. No manual client registration required.
+
+### Changed
+
+- WebUI MCP Start/Stop now connect/disconnect servers live (previously no-ops).
+- **Dependencies:** updated `whatsmeow` (~4 months of upstream connection/keepalive
+  fixes), `go.mau.fi/util` v0.9.10, `go.mau.fi/libsignal` v0.2.2. Build now
+  requires Go 1.25.
+
+### Fixed
+
+- MCP stdio notifications were sent with `"id":0`, which strict servers answer
+  as requests and desync the stream (0 tools discovered). Notifications now omit
+  the id per JSON-RPC 2.0.
+
+## [v1.20.0] — 2026-06-16
+
+### Added
+
+- **Agent self-configuration (`settings` tool).** The main agent can now read and
+  change a whitelisted set of its own runtime settings and have them apply
+  immediately (hot-reload, no restart). Supported keys: `media.vision_enabled`,
+  `media.vision_model` (empty = use the main model), `media.vision_detail`,
+  `media.transcription_enabled`, `media.transcription_model`,
+  `media.transcription_base_url`, `media.transcription_language`, and `model`.
+  Changes are validated, persisted to `config.yaml` via the sanitized save path
+  (secrets become `${ENV}` refs, never written in plaintext), then applied live
+  via `UpdateMediaConfig` / `UpdateLLMClient`. Owner/admin only; the whitelist is
+  a hard security boundary — security, access, vault, channels, and API keys are
+  NOT settable through the tool.
+
+
+
+### Fixed
+
+- **Small attachments rejected with "mensagem excede o tamanho máximo permitido".**
+  The input guardrail validated the *enriched* message (which includes extracted
+  document text / transcriptions) against `security.max_input_length`, whose
+  default was only 4096 chars — so a document of a few KB tripped it. Raised the
+  default (and the guardrail fallback) to 200000, matching the downstream input
+  bound. Media payloads remain separately capped by `media.max_image_size` /
+  `max_audio_size`. Existing configs should bump `security.max_input_length`.
+
+## [v1.19.2] — 2026-06-15
+
+### Changed
+
+- **Removed the Workflows menu entry** — the Workflows page renders mock data and
+  has no backend yet, so it is not exposed in the UI. The Plugins nav entry and
+  `/plugins` route are restored; `/workflows` now redirects to `/plugins`. The
+  `Workflows.tsx` page is kept in the tree for when the backend lands.
+
+## [v1.19.1] — 2026-06-15
+
+### Fixed
+
+- **WhatsApp replies misdelivered (regression from v1.19.0).** The JID fix in
+  v1.19.0 routed the outgoing recipient through `normalizeJID`, which applies
+  `normalizeBRPhone` and inserts the mobile 9th digit into genuine 12-digit
+  Brazilian numbers (e.g. `558287015132` → `5582987015132`). Replies were then
+  sent to a non-existent number — WhatsApp accepted the send with no error, so
+  the agent processed messages but the user never received responses. The send
+  path now strips only the channel prefix and companion device part
+  (`stripDevicePart`), never mutating the phone digits. Lookups are unaffected.
+
+## [v1.19.0] — 2026-06-15
+
+Memory/context reliability + web UI redesign. Diagnosed from production logs
+where the agent kept recalling stale/contradictory facts after compaction and
+failed on two execution bugs; also reskins the web UI and adds a Workflows
+surface. Builds on the v1.19.0-rc1 layered memory stack.
+
+### Added
+
+- **Web UI — "Parchment + Sienna" visual direction.** Reskinned at the Tailwind
+  token layer: warm parchment paper (ink #1a1714), burnt-sienna accent
+  (#b85a26), Geist / Geist Mono typography, and a three-slash claw-mark logo.
+  Dark mode tokens unchanged.
+- **Workflows page.** New UI to chain agents into multi-step automations (status
+  badges, search, create panel with per-step agent selection), replacing the
+  Plugins nav entry (`/plugins` redirects to `/workflows`). Renders mock data —
+  a functional UI preview ahead of backend persistence/execution. Translated in
+  en/es/pt.
+
+- **Memory lifecycle metadata v2** — `memory.Entry` gains optional, backward-
+  compatible fields (`Supersedes`, `Consolidates`, `Importance`, `Pinned`,
+  `Origin`, `MemoryType`, `ContextTier`, `Superseded`), persisted in a compact
+  `[meta:<base64-json>]` tag emitted only when set. Legacy `MEMORY.md` entries
+  parse and serialize unchanged. Helpers: `IsExpired`, `IsPinned`,
+  `IsSuperseded`, `ContentKey`.
+- **Pre-compaction working-context snapshot** — before compaction the assistant
+  saves a compact operational snapshot (goal, recent tools, last action) as an
+  `Origin=precompact`, `MemoryType=operational` memory with a 24h TTL, so the
+  agent no longer re-derives in-flight work it already did.
+- **Conservative retention sweep** — `FileStore.RetentionSweep` (dry-run by
+  default) archives aged operational/episodic and expired entries to
+  `MEMORY.archive.md` before removal (reversible soft-delete). Pinned and
+  semantic memories are never swept.
+
+### Changed
+
+- **Dream now resolves contradictions instead of only reporting them** — the
+  consolidation phase supersedes the older side of a contradiction via a soft
+  `[stale]` marker (skipped on read, dropped by Compact) and merges duplicates,
+  unifying the general and evidence-based paths. Pinned memories are never
+  superseded. Removes the unbounded append-only `[Contradiction]` reports that
+  accumulated in production. New telemetry: `contradictions_resolved`.
+  Resolution is conservative: evidence-based contradictions (a newer positive
+  fact about an entity) always resolve, while the weaker general negation
+  heuristic only supersedes when the pair is a near-duplicate restatement
+  (Jaccard ≥ 0.6). The `dream.disable_contradiction_resolution` escape hatch
+  turns auto-resolution off entirely (detect + log only).
+
+### Fixed
+
+- **Scheduled-message delivery JID** — `parseJID` strips a `whatsapp:` channel
+  prefix and companion device part before sending, and the scheduler strips a
+  duplicated channel prefix from `chat_id` at job creation. Fixes cron
+  announcements failing with "recipient must be a user JID with no device part".
+- **skill_db registry self-heal** — `skill_db_query`/related now reconcile a
+  table that exists physically but is missing from `_skill_tables_registry`
+  (e.g. created via raw SQL), recovering its real schema and row count, instead
+  of failing with "skill has no tables".
+- **Memory tag-injection hardening** — `Save` escapes `[expires:]`/`[meta:]`
+  prefixes in user content (previously only `SaveIfNotDuplicate` did), so a fact
+  containing those literals can't be re-parsed as structural metadata.
+
+### Hardening (subagent delivery & stability)
+
+- **Subagent announce/delivery** — populate `OriginChannel`/`OriginTo` on spawn,
+  default delivery scope to `all`, actually implement `delivery_scope=external`,
+  forbid subagents from self-delivering to channels, and unblock the announce
+  inject path. `spawn_subagent` hints pairing with `sessions_yield`.
+- **DaemonManager lifecycle** — tied to a parent context with a tested shutdown
+  cascade; context propagated through `wait_subagent` and hook dispatch.
+- **SQLite busy-retry** — opt-in retry helper with jitter, wired into embedding
+  cache writes, to absorb transient `database is locked` contention.
+- **Bootstrap injection scan** — bootstrap files scanned for prompt-injection
+  patterns (warn by default).
+- **Scheduler** — suppress delivery for silent scheduled output.
+- **Setup wizard** — defaults to the SQLite memory backend.
+
+## [v1.19.0-rc1] — 2026-04-08
+
+### Added
+
+- **Layered memory stack** — new L0 (identity) / L1 (essential per-wing
+  story) / L2 (on-demand entity-driven retrieval) layers compose into
+  the prompt via the new `MemoryStack` type. Defaults to ON when
+  `memory.hierarchy.enabled: true`. See `docs/memory-system.md` for
+  details.
+- `devclaw identity edit` — new CLI subcommand that opens `$EDITOR`
+  on `~/.devclaw/identity.md`, creating a default template on first
+  run. The file is hot-reloaded via fsnotify.
+- **Wing-aware hybrid search** — queries tagged with a wing boost
+  matching files (default ×1.3) and penalize mismatched non-NULL
+  wings (default ×0.4). `wing IS NULL` files are always neutral
+  (multiplier 1.0) to preserve Sprint 1 retrocompat.
+- **Automatic wing routing on save** — `memory_save` now assigns
+  `files.wing` from either an explicit LLM argument or the session's
+  channel/chatID via `ContextRouter`, with zero cost for unrouted
+  CLI/MCP sessions.
+- **Legacy classifier in the dream cycle** — background dream
+  consolidation runs a bounded pattern-based classifier over
+  `wing IS NULL` files when the user has configured
+  `memory.hierarchy.legacy_keywords`. No LLM calls. User must opt in
+  with their own keyword map — the binary ships zero defaults.
+- **New telemetry counters:** `layer_tokens_l0`, `layer_tokens_l1`,
+  `layer_tokens_l2`, `l1_cache_hit_total`, `l1_cache_miss_total`,
+  `classifier_pass_total`, `save_wing_routed_total`.
+- `memory.stack.force_legacy` escape hatch — set to `true` in YAML
+  to bypass the layered stack entirely and fall back to v1.18.0
+  prompt composition.
+
+### Fixed
+
+- **`DreamConsolidator` no longer orphan** — the dream system shipped
+  in v1.17.0 was never wired into the Assistant runtime. Sprint 2
+  fixes this: dream now actually starts with the daemon. Existing
+  users get background consolidation for the first time on upgrade.
+- Accent stripping is unified between the router and memory packages
+  via exported `memory.StripAccents` — eliminates the NFD-combining-
+  mark divergence that silently broke router heuristic matching for
+  macOS/iOS inputs.
+
+### Changed
+
+- `HybridSearch`/`HybridSearchWithOptions` are now thin wrappers over
+  the new `HybridSearchWithOpts(ctx, query, opts HybridSearchOptions)`
+  — external callers see byte-identical behavior; internal code gains
+  wing-awareness. `QueryWing=""` remains byte-identical to v1.18.0
+  (proven by `TestHybridSearchEmptyQueryWingByteIdentical`).
+
+### Retrocompat
+
+- Existing v1.18.0 databases upgrade without migration. New tables
+  (`essential_stories`) are added via idempotent `CREATE TABLE IF NOT
+  EXISTS`. Existing rows are never rewritten. Users with
+  `memory.hierarchy.enabled: false` see zero behavior change.
+
+---
+
 ## [1.17.0] — 2026-03-31
 
 ### Core — Agent Intelligence

@@ -261,11 +261,15 @@ func OpenDatabase(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("create database directory %q: %w", dir, err)
 	}
 
-	dsn := path + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=ON"
+	dsn := path + "?_journal_mode=WAL&_busy_timeout=30000&_foreign_keys=ON&_txlock=immediate"
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database %q: %w", path, err)
 	}
+	// Allow multiple readers but keep pool bounded. WAL mode supports
+	// concurrent reads while serializing writes via busy_timeout.
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(2)
 
 	// Verify connectivity.
 	if err := db.Ping(); err != nil {

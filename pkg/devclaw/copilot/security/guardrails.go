@@ -29,7 +29,11 @@ type InputGuardrail struct {
 // NewInputGuardrail cria um novo guardrail de input.
 func NewInputGuardrail(maxLength, rateLimit int) *InputGuardrail {
 	if maxLength <= 0 {
-		maxLength = 4096
+		// Generous default: the validated input includes media/document enrichment
+		// (extracted document text, transcriptions), so a per-typed-message limit
+		// like 4096 wrongly rejected small attached files. 200000 matches the
+		// downstream maxInputChars bound; media size is separately capped.
+		maxLength = 200000
 	}
 	if rateLimit <= 0 {
 		rateLimit = 30
@@ -92,6 +96,11 @@ func detectPromptInjection(input string) bool {
 // OutputGuardrail valida respostas geradas pelo LLM antes do envio.
 type OutputGuardrail struct {
 	logger *slog.Logger
+
+	// CredentialChecker is an optional function that detects credential patterns
+	// in text. When set, ValidateWithContext uses it to detect credential leaks
+	// in the final output. Injected by the copilot package to avoid circular imports.
+	CredentialChecker func(string) bool
 }
 
 // NewOutputGuardrail cria um novo guardrail de output.
@@ -123,7 +132,15 @@ func (g *OutputGuardrail) ValidateWithContext(output string, toolResults []ToolR
 		return ErrSystemPromptLeak
 	}
 
-	// 3. URL grounding check (when tool results are available).
+	// 3. Credential leak detection in final output.
+	if g.CredentialChecker != nil && g.CredentialChecker(output) {
+		if g.logger != nil {
+			g.logger.Warn("output guardrail: credential detected in response, redacting")
+		}
+		return ErrCredentialLeak
+	}
+
+	// 4. URL grounding check (when tool results are available).
 	if len(toolResults) > 0 {
 		ungrounded := checkURLGrounding(output, toolResults)
 		if len(ungrounded) > 0 && g.logger != nil {
@@ -311,4 +328,5 @@ var (
 	ErrHallucinatedURL      = fmt.Errorf("URL na resposta não corresponde aos resultados")
 	ErrConfirmationRequired = fmt.Errorf("esta ação requer confirmação do usuário")
 	ErrToolNotAllowed       = fmt.Errorf("tool não permitida pela política de segurança")
+	ErrCredentialLeak       = fmt.Errorf("credential detected in output — redacting")
 )

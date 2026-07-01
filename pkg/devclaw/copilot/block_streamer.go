@@ -232,8 +232,10 @@ func (bs *BlockStreamer) flushLocked() {
 		}
 	}
 
-	// Quick format for <think> blocks to render beautifully for the user.
-	// Since `<think>` is typically a single LLM token, it rarely cross-cuts flushes.
+	// Remove fully-closed reasoning blocks (tags + content) — reasoning must not
+	// reach the user. A lone unclosed opener in this flush becomes the "thinking"
+	// placeholder; its closing tag (in a later flush) is dropped.
+	sendText = reasoningBlockRe.ReplaceAllString(sendText, "")
 	sendText = strings.ReplaceAll(sendText, "<think>", "💭 *Thinking...*\n")
 	sendText = strings.ReplaceAll(sendText, "</think>", "")
 
@@ -242,6 +244,10 @@ func (bs *BlockStreamer) flushLocked() {
 	if len(strings.TrimSpace(sendText)) == 0 {
 		return // Empty after stripping tags — nothing to send.
 	}
+
+	// Sanitize and redact credentials before sending to prevent leaking secrets via streaming.
+	sendText = sanitizeOutput(sendText)
+	sendText = RedactCredentials(sendText)
 
 	msg := &channels.OutgoingMessage{
 		Content: strings.TrimSpace(sendText),

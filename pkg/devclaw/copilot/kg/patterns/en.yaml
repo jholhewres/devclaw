@@ -1,0 +1,55 @@
+language: en
+version: 1
+clause_separators:
+  - " and "
+  - ", "
+  - "; "
+  - ". "
+patterns:
+  - name: works_at
+    predicate: works_at
+    functional: true
+    confidence: 0.5
+    templates:
+      - "{{subject}} works (?:at|for) {{object}}"
+      - "{{subject}} is (?:an? )?employee (?:at|of) {{object}}"
+      - "{{subject}} is from {{object}}"
+
+  - name: lives_in
+    predicate: lives_in
+    functional: true
+    confidence: 0.5
+    templates:
+      - "{{subject}} lives in {{object}}"
+      - "{{subject}} resides in {{object}}"
+      - "{{subject}} is based in {{object}}"
+      - "{{subject}} is from {{object}}"
+      - "{{subject}} moved to {{object}}"
+
+  - name: likes
+    predicate: likes
+    functional: false
+    confidence: 0.4
+    templates:
+      - "{{subject}} likes {{object}}"
+      - "{{subject}} loves {{object}}"
+      - "{{subject}} enjoys {{object}}"
+      - "{{subject}} prefers {{object}}"
+
+  - name: knows
+    predicate: knows
+    functional: false
+    confidence: 0.5
+    templates:
+      - "{{subject}} knows {{object}}"
+      - "{{subject}} is (?:a )?friend(?:s)? (?:of|with) {{object}}"
+      - "{{subject}} met {{object}}"
+
+  - name: met
+    predicate: met
+    functional: false
+    confidence: 0.5
+    templates:
+      - "{{subject}} met (?:with )?{{object}}"
+      - "{{subject}} saw {{object}}"
+      - "{{subject}} visited {{object}}"

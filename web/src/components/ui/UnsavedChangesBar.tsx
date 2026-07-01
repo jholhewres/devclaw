@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
-import { useAppStore } from '@/stores/app';
 import { cn } from '@/lib/utils';
 
 type Feedback = 'success' | 'error' | null;
@@ -24,8 +23,6 @@ export function UnsavedChangesBar({
   const [visible, setVisible] = useState(false);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const frozenFeedback = useRef<Feedback>(null);
-  const sidebarOpen = useAppStore((s) => s.sidebarOpen);
-  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
 
   // Stable refs for callbacks
   const onSaveRef = useRef(onSave);
@@ -95,12 +92,6 @@ export function UnsavedChangesBar({
     return () => window.removeEventListener('beforeunload', handler);
   }, [hasChanges]);
 
-  // Sidebar width for positioning
-  let sidebarWidth = 0;
-  if (sidebarOpen) {
-    sidebarWidth = sidebarCollapsed ? 64 : 296;
-  }
-
   if (!visible) return null;
 
   const isError = activeFeedback === 'error';
@@ -108,8 +99,7 @@ export function UnsavedChangesBar({
 
   return (
     <div
-      className="fixed right-3 bottom-3 z-40 transition-all duration-300 max-lg:!left-3"
-      style={{ left: sidebarWidth > 0 ? `calc(${sidebarWidth}px + 0.75rem)` : '0.75rem' }}
+      className="fixed right-3 bottom-3 left-3 z-40 transition-all duration-300 lg:left-[14.75rem]"
     >
       <div className="flex justify-center">
         <div

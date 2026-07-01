@@ -1,0 +1,197 @@
+# Test fixture for PT-BR pattern extraction.
+# Each phrase has an input and a list of expected (subject, predicate, object) triples.
+# Subjects and objects are lowercased and accent-stripped because the extractor normalizes.
+
+phrases:
+  # --- works_at ---
+  - input: "Maria trabalha na ACME"
+    expected:
+      - subject: maria
+        predicate: works_at
+        object: acme
+
+  - input: "João trabalha no banco"
+    expected:
+      - subject: joao
+        predicate: works_at
+        object: banco
+
+  - input: "Carlos trabalha em casa"
+    expected:
+      - subject: carlos
+        predicate: works_at
+        object: casa
+
+  - input: "Ana trabalha para a prefeitura"
+    expected:
+      - subject: ana
+        predicate: works_at
+        object: a prefeitura
+
+  - input: "Pedro é funcionário da Petrobras"
+    expected:
+      - subject: pedro
+        predicate: works_at
+        object: petrobras
+
+  - input: "Lucia é funcionária do hospital"
+    expected:
+      - subject: lucia
+        predicate: works_at
+        object: hospital
+
+  - input: "Roberto é da equipe"
+    expected:
+      - subject: roberto
+        predicate: works_at
+        object: equipe
+
+  # --- lives_in ---
+  - input: "João mora em São Paulo"
+    expected:
+      - subject: joao
+        predicate: lives_in
+        object: sao paulo
+
+  - input: "Ana reside no Rio de Janeiro"
+    expected:
+      - subject: ana
+        predicate: lives_in
+        object: rio de janeiro
+
+  - input: "Carlos vive na Bahia"
+    expected:
+      - subject: carlos
+        predicate: lives_in
+        object: bahia
+
+  - input: "Fernanda é de Belo Horizonte"
+    expected:
+      - subject: fernanda
+        predicate: lives_in
+        object: belo horizonte
+
+  - input: "Mariana mora na praia"
+    expected:
+      - subject: mariana
+        predicate: lives_in
+        object: praia
+
+  # --- likes ---
+  - input: "Pedro gosta de café"
+    expected:
+      - subject: pedro
+        predicate: likes
+        object: cafe
+
+  - input: "Maria gosta da música"
+    expected:
+      - subject: maria
+        predicate: likes
+        object: musica
+
+  - input: "João gosta do futebol"
+    expected:
+      - subject: joao
+        predicate: likes
+        object: futebol
+
+  - input: "Ana adora chocolate"
+    expected:
+      - subject: ana
+        predicate: likes
+        object: chocolate
+
+  - input: "Carlos ama programar"
+    expected:
+      - subject: carlos
+        predicate: likes
+        object: programar
+
+  - input: "Fernanda curte rock"
+    expected:
+      - subject: fernanda
+        predicate: likes
+        object: rock
+
+  # --- knows ---
+  - input: "Ana conhece Carlos"
+    expected:
+      - subject: ana
+        predicate: knows
+        object: carlos
+
+  - input: "Pedro é amigo de Maria"
+    expected:
+      - subject: pedro
+        predicate: knows
+        object: maria
+
+  - input: "Lucia é amiga da Julia"
+    expected:
+      - subject: lucia
+        predicate: knows
+        object: julia
+
+  - input: "Roberto conheceu Fernanda"
+    expected:
+      - subject: roberto
+        predicate: knows
+        object: fernanda
+
+  # --- met ---
+  - input: "João se encontrou com Maria"
+    expected:
+      - subject: joao
+        predicate: met
+        object: maria
+
+  - input: "Carlos se encontrou com Ana"
+    expected:
+      - subject: carlos
+        predicate: met
+        object: ana
+
+  - input: "Pedro se viu com Lucia"
+    expected:
+      - subject: pedro
+        predicate: met
+        object: lucia
+
+  # --- multi-triple sentences ---
+  - input: "Maria trabalha na ACME e gosta de café"
+    expected:
+      - subject: maria
+        predicate: works_at
+        object: acme
+      - subject: maria
+        predicate: likes
+        object: cafe
+
+  - input: "João mora em Curitiba e trabalha na Tesla"
+    expected:
+      - subject: joao
+        predicate: lives_in
+        object: curitiba
+      - subject: joao
+        predicate: works_at
+        object: tesla
+
+  - input: "Ana conhece Pedro e adora pizza"
+    expected:
+      - subject: ana
+        predicate: knows
+        object: pedro
+      - subject: ana
+        predicate: likes
+        object: pizza
+
+  # --- negative cases: no extraction expected ---
+  - input: "o gato sentou no tapete"
+    expected: []
+
+  - input: "a reunião foi adiada para amanhã"
+    expected: []
+
+  - input: "o sol brilha forte hoje"
+    expected: []

@@ -126,6 +126,10 @@ type SessionConfig struct {
 	// FastMode enables faster processing with reduced quality.
 	// Anthropic: service_tier="auto". OpenAI: service_tier="priority", reasoning_effort="low".
 	FastMode bool `yaml:"fast_mode"`
+
+	// ActiveProfileID is the ID of the currently active agent profile.
+	// Empty = no profile active (use base config).
+	ActiveProfileID string `yaml:"active_profile_id"`
 }
 
 // ToolCallRecord stores a single tool invocation for session history fidelity.
@@ -209,7 +213,9 @@ func (s *Session) addEntry(entry ConversationEntry) {
 
 	if persistence != nil {
 		if err := persistence.SaveEntry(s.ID, entry); err != nil {
-			// Log is done inside SaveEntry; avoid holding lock during I/O
+			// Persistence is best-effort; SaveEntry also logs internally, but
+			// surface it here too so a silent failure is not swallowed.
+			slog.Warn("failed to persist conversation entry", "session", s.ID, "err", err)
 		}
 	}
 }
@@ -269,7 +275,9 @@ func (s *Session) AddFact(fact string) {
 
 	if persistence != nil {
 		if err := persistence.SaveFacts(s.ID, facts); err != nil {
-			// Log is done inside SaveFacts
+			// Persistence is best-effort; SaveFacts also logs internally, but
+			// surface it here too so a silent failure is not swallowed.
+			slog.Warn("failed to persist session facts", "session", s.ID, "err", err)
 		}
 	}
 }
@@ -485,8 +493,8 @@ func (s *Session) CompactHistory(summary string, keepRecent int) []ConversationE
 
 // ResetWithPreservation clears conversation history, compaction state, and token
 // counters while preserving session identity and configuration fields:
-// ThinkingLevel, FastMode, Model, Language, Verbose, ToolProfile, BusinessContext,
-// Trigger, activeSkills, and facts. Also syncs the persistence layer so that the
+// ThinkingLevel, FastMode, Model, Language, Verbose, ToolProfile, ActiveProfileID,
+// BusinessContext, Trigger, activeSkills, and facts. Also syncs the persistence layer so that the
 // next load does not restore stale data.
 // The lastActiveAt timestamp is bumped to prevent immediate pruning after reset.
 func (s *Session) ResetWithPreservation() {
@@ -506,7 +514,7 @@ func (s *Session) ResetWithPreservation() {
 	s.lastActiveAt = time.Now()
 
 	// Preserved: s.config (ThinkingLevel, FastMode, Model, Language, Verbose,
-	// ToolProfile, BusinessContext, Trigger), s.activeSkills, s.facts,
+	// ToolProfile, ActiveProfileID, BusinessContext, Trigger), s.activeSkills, s.facts,
 	// s.ID, s.Channel, s.ChatID, s.CreatedAt, s.persistence.
 
 	persistence := s.persistence

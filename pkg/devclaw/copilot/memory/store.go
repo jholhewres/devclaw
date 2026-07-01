@@ -9,6 +9,10 @@
 package memory
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,12 +22,169 @@ import (
 	"time"
 )
 
+// MemoryFileName is the bare filename of the curated long-term facts file
+// that FileStore.Save writes to and IndexDirectory keys indexed chunks under.
+// Cross-package callers (e.g. copilot.handleMemorySave) MUST reference this
+// constant instead of hardcoding the literal so that a future rename cannot
+// silently break wing assignment, indexing, or decay filtering.
+const MemoryFileName = "MEMORY.md"
+
 // Entry represents a single memory fact or event.
+//
+// The v2 lifecycle fields (Supersedes..Superseded) are all optional and default
+// to their zero values, so entries written before they existed parse and behave
+// exactly as before. They are persisted in a compact, backward-compatible
+// "[meta:<base64-json>]" tag and only emitted when at least one is set.
 type Entry struct {
-	Content   string    `json:"content"`
-	Source    string    `json:"source"`    // "user", "agent", "system"
-	Category string    `json:"category"`  // "fact", "preference", "event", "summary"
-	Timestamp time.Time `json:"timestamp"`
+	Content   string     `json:"content"`
+	Source    string     `json:"source"`   // "user", "agent", "system"
+	Category  string     `json:"category"` // "fact", "preference", "event", "summary"
+	Timestamp time.Time  `json:"timestamp"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"` // nil = never expires
+
+	// ── v2 lifecycle metadata (all optional) ──
+	Supersedes   []string `json:"supersedes,omitempty"`   // content-keys this entry replaces
+	Consolidates []string `json:"consolidates,omitempty"` // content-keys merged into this entry
+	Importance   float64  `json:"importance,omitempty"`   // 0.0..1.0 ranking/retention hint
+	Pinned       bool     `json:"pinned,omitempty"`       // exempt from retention/demotion
+	Origin       string   `json:"origin,omitempty"`       // manual, dream, precompact, bootstrap, ...
+	MemoryType   string   `json:"memory_type,omitempty"`  // semantic, episodic, operational
+	ContextTier  string   `json:"context_tier,omitempty"` // L0, L1, L2
+	Superseded   bool     `json:"superseded,omitempty"`   // soft-invalidated by a newer entry
+}
+
+// IsExpired reports whether the entry has a TTL that has already passed.
+func (e Entry) IsExpired(now time.Time) bool {
+	return e.ExpiresAt != nil && e.ExpiresAt.Before(now)
+}
+
+// IsPinned reports whether the entry is exempt from retention/demotion.
+func (e Entry) IsPinned() bool { return e.Pinned }
+
+// IsSuperseded reports whether a newer entry has soft-invalidated this one.
+func (e Entry) IsSuperseded() bool { return e.Superseded }
+
+// ContentKey is a stable identifier for an entry, derived from its category and
+// content. Used for supersede/consolidate lineage without a separate ID column.
+func (e Entry) ContentKey() string {
+	h := sha256.Sum256([]byte(e.Category + "\x00" + e.Content))
+	return hex.EncodeToString(h[:])
+}
+
+// entryMetaV2 is the JSON shape persisted in the "[meta:...]" tag. It mirrors the
+// optional lifecycle fields of Entry. omitempty keeps the encoded payload empty
+// (and thus omitted entirely) for plain entries.
+type entryMetaV2 struct {
+	Supersedes   []string `json:"s,omitempty"`
+	Consolidates []string `json:"c,omitempty"`
+	Importance   float64  `json:"i,omitempty"`
+	Pinned       bool     `json:"p,omitempty"`
+	Origin       string   `json:"o,omitempty"`
+	MemoryType   string   `json:"mt,omitempty"`
+	ContextTier  string   `json:"ct,omitempty"`
+	Superseded   bool     `json:"sd,omitempty"`
+}
+
+// encodeEntryMeta returns a base64-encoded JSON metadata payload for the entry,
+// or "" when no v2 field is set (so plain entries stay byte-for-byte unchanged).
+// base64 (std alphabet) never contains ']', so the parser can safely split on
+// the first ']'.
+func encodeEntryMeta(e Entry) string {
+	m := entryMetaV2{
+		Supersedes:   e.Supersedes,
+		Consolidates: e.Consolidates,
+		Importance:   e.Importance,
+		Pinned:       e.Pinned,
+		Origin:       e.Origin,
+		MemoryType:   e.MemoryType,
+		ContextTier:  e.ContextTier,
+		Superseded:   e.Superseded,
+	}
+	if len(m.Supersedes) == 0 && len(m.Consolidates) == 0 && m.Importance == 0 &&
+		!m.Pinned && m.Origin == "" && m.MemoryType == "" && m.ContextTier == "" && !m.Superseded {
+		return ""
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(b)
+}
+
+// applyEntryMeta decodes a base64-encoded JSON metadata payload into the entry.
+// Unparseable payloads are ignored so a corrupt tag never drops the entry.
+func applyEntryMeta(e *Entry, payload string) {
+	raw, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return
+	}
+	var m entryMetaV2
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return
+	}
+	e.Supersedes = m.Supersedes
+	e.Consolidates = m.Consolidates
+	e.Importance = m.Importance
+	e.Pinned = m.Pinned
+	e.Origin = m.Origin
+	e.MemoryType = m.MemoryType
+	e.ContextTier = m.ContextTier
+	e.Superseded = m.Superseded
+}
+
+// sanitizeEntryContent escapes structural tag prefixes in user content so they
+// are not re-parsed as [expires:]/[meta:] tags on the next read (which would
+// silently corrupt the entry). Must be applied once at save time — never inside
+// formatEntryLine, which Compact re-runs over already-stored content.
+func sanitizeEntryContent(s string) string {
+	s = strings.ReplaceAll(s, "[expires:", "[expires\\:")
+	s = strings.ReplaceAll(s, "[meta:", "[meta\\:")
+	return s
+}
+
+// formatEntryLine renders an entry as a single MEMORY.md markdown line:
+//
+//   - [YYYY-MM-DD HH:MM] [category] [expires:YYYY-MM-DD] [meta:...] content
+//
+// The expires and meta tags are only emitted when present, keeping legacy-shaped
+// entries identical. This is the single source of truth for the on-disk format
+// (used by Save, SaveIfNotDuplicate, and Compact).
+func formatEntryLine(e Entry) string {
+	var b strings.Builder
+	b.WriteString("- [")
+	b.WriteString(e.Timestamp.Format("2006-01-02 15:04"))
+	b.WriteString("] [")
+	b.WriteString(e.Category)
+	b.WriteString("]")
+	if e.ExpiresAt != nil {
+		b.WriteString(" [expires:")
+		b.WriteString(e.ExpiresAt.Format("2006-01-02"))
+		b.WriteString("]")
+	}
+	if meta := encodeEntryMeta(e); meta != "" {
+		b.WriteString(" [meta:")
+		b.WriteString(meta)
+		b.WriteString("]")
+	}
+	b.WriteString(" ")
+	b.WriteString(e.Content)
+	b.WriteString("\n")
+	return b.String()
+}
+
+// categoryTTL defines default time-to-live per category.
+// Zero means the category never expires.
+var categoryTTL = map[string]time.Duration{
+	"event":      7 * 24 * time.Hour,  // 7 days
+	"summary":    30 * 24 * time.Hour, // 30 days
+	"fact":       0,                   // never expires
+	"preference": 0,                   // never expires
+}
+
+// DefaultTTLForCategory returns the default TTL for a category.
+// Returns 0 (never expires) for unknown categories.
+func DefaultTTLForCategory(category string) time.Duration {
+	return categoryTTL[category]
 }
 
 // Store defines the interface for memory persistence.
@@ -55,6 +216,11 @@ type FileStore struct {
 }
 
 // NewFileStore creates a file-based memory store at the given directory.
+// BaseDir returns the directory where memory files are stored.
+func (fs *FileStore) BaseDir() string {
+	return fs.baseDir
+}
+
 func NewFileStore(baseDir string) (*FileStore, error) {
 	if baseDir == "" {
 		baseDir = "./data/memory"
@@ -72,16 +238,24 @@ func (fs *FileStore) Save(entry Entry) error {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
-	memFile := filepath.Join(fs.baseDir, "MEMORY.md")
+	// Set TTL-based expiration if not already set.
+	if entry.ExpiresAt == nil {
+		if ttl := DefaultTTLForCategory(entry.Category); ttl > 0 {
+			exp := entry.Timestamp.Add(ttl)
+			entry.ExpiresAt = &exp
+		}
+	}
+
+	memFile := filepath.Join(fs.baseDir, MemoryFileName)
+
+	// Sanitize content to prevent [expires:]/[meta:] tag injection on reparse.
+	entry.Content = sanitizeEntryContent(entry.Content)
 
 	// Format the entry as a markdown list item.
-	line := fmt.Sprintf("- [%s] [%s] %s\n",
-		entry.Timestamp.Format("2006-01-02 15:04"),
-		entry.Category,
-		entry.Content,
-	)
+	// Include expires_at tag if set, for parsing on read.
+	line := formatEntryLine(entry)
 
-	f, err := os.OpenFile(memFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(memFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening memory file: %w", err)
 	}
@@ -95,6 +269,59 @@ func (fs *FileStore) Save(entry Entry) error {
 
 	_, err = f.WriteString(line)
 	return err
+}
+
+// SaveIfNotDuplicate atomically checks for duplicates and saves under a single lock.
+// Returns (saved bool, existingContent string, error).
+// If saved is false, existingContent contains the matching entry's content.
+func (fs *FileStore) SaveIfNotDuplicate(entry Entry, contentHash string, isDuplicate func(existing Entry) bool) (bool, string, error) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	// Read existing entries under the write lock (atomic check+write).
+	memFile := filepath.Join(fs.baseDir, MemoryFileName)
+	content, err := os.ReadFile(memFile)
+	if err != nil && !os.IsNotExist(err) {
+		return false, "", fmt.Errorf("reading memory file: %w", err)
+	}
+	existing := parseMemoryFile(string(content), "memory")
+
+	for _, e := range existing {
+		if isDuplicate(e) {
+			return false, e.Content, nil
+		}
+	}
+
+	// Set TTL-based expiration if not already set.
+	if entry.ExpiresAt == nil {
+		if ttl := DefaultTTLForCategory(entry.Category); ttl > 0 {
+			exp := entry.Timestamp.Add(ttl)
+			entry.ExpiresAt = &exp
+		}
+	}
+
+	// Sanitize content to prevent [expires:]/[meta:] tag injection on reparse.
+	entry.Content = sanitizeEntryContent(entry.Content)
+
+	// Format and write.
+	line := formatEntryLine(entry)
+
+	f, err := os.OpenFile(memFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return false, "", fmt.Errorf("opening memory file: %w", err)
+	}
+	defer f.Close()
+
+	info, _ := f.Stat()
+	if info != nil && info.Size() == 0 {
+		f.WriteString("# DevClaw Memory\n\nLong-term facts and preferences.\n\n")
+	}
+
+	_, err = f.WriteString(line)
+	if err != nil {
+		return false, "", err
+	}
+	return true, "", nil
 }
 
 // Search returns entries whose content matches the query (case-insensitive).
@@ -159,7 +386,17 @@ func (fs *FileStore) GetByDate(date time.Time) ([]Entry, error) {
 		return nil, err
 	}
 
-	return parseMemoryFile(string(content), "daily"), nil
+	entries := parseMemoryFile(string(content), "daily")
+
+	// Filter out expired entries (same contract as GetAll).
+	now := time.Now()
+	valid := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		if e.ExpiresAt == nil || e.ExpiresAt.After(now) {
+			valid = append(valid, e)
+		}
+	}
+	return valid, nil
 }
 
 // GetAll reads and parses all entries from MEMORY.md.
@@ -167,7 +404,7 @@ func (fs *FileStore) GetAll() ([]Entry, error) {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
 
-	memFile := filepath.Join(fs.baseDir, "MEMORY.md")
+	memFile := filepath.Join(fs.baseDir, MemoryFileName)
 	content, err := os.ReadFile(memFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -176,7 +413,17 @@ func (fs *FileStore) GetAll() ([]Entry, error) {
 		return nil, err
 	}
 
-	return parseMemoryFile(string(content), "memory"), nil
+	entries := parseMemoryFile(string(content), "memory")
+
+	// Filter out expired entries.
+	now := time.Now()
+	valid := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		if e.ExpiresAt == nil || e.ExpiresAt.After(now) {
+			valid = append(valid, e)
+		}
+	}
+	return valid, nil
 }
 
 // SaveDailyLog appends a conversation summary to the daily log file.
@@ -186,7 +433,7 @@ func (fs *FileStore) SaveDailyLog(date time.Time, content string) error {
 
 	dayFile := filepath.Join(fs.baseDir, date.Format("2006-01-02")+".md")
 
-	f, err := os.OpenFile(dayFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(dayFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("opening daily log: %w", err)
 	}
@@ -197,7 +444,7 @@ func (fs *FileStore) SaveDailyLog(date time.Time, content string) error {
 		f.WriteString(fmt.Sprintf("# Daily Log – %s\n\n", date.Format("2006-01-02")))
 	}
 
-	timestamp := time.Now().Format("15:04")
+	timestamp := date.Format("15:04")
 	_, err = f.WriteString(fmt.Sprintf("## %s\n\n%s\n\n", timestamp, content))
 	return err
 }
@@ -238,13 +485,90 @@ func (fs *FileStore) ListDailyLogs() ([]string, error) {
 	var dates []string
 	for _, e := range entries {
 		name := e.Name()
-		if strings.HasSuffix(name, ".md") && name != "MEMORY.md" {
+		if strings.HasSuffix(name, ".md") && name != MemoryFileName {
 			dates = append(dates, strings.TrimSuffix(name, ".md"))
 		}
 	}
 
 	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
 	return dates, nil
+}
+
+// Compact rewrites MEMORY.md, removing expired and duplicate entries.
+// Uses atomic write (temp file + rename) to prevent corruption.
+// Returns the number of entries removed.
+func (fs *FileStore) Compact() (int, error) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+
+	memFile := filepath.Join(fs.baseDir, MemoryFileName)
+	content, err := os.ReadFile(memFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("reading memory file: %w", err)
+	}
+
+	entries := parseMemoryFile(string(content), "memory")
+	if len(entries) == 0 {
+		return 0, nil
+	}
+
+	now := time.Now()
+	seen := make(map[string]int) // content hash → index of newest entry
+	keep := make([]bool, len(entries))
+
+	// First pass: mark non-expired, non-duplicate entries to keep.
+	for i := len(entries) - 1; i >= 0; i-- {
+		e := entries[i]
+		// Filter expired.
+		if e.ExpiresAt != nil && e.ExpiresAt.Before(now) {
+			continue
+		}
+		// Dedup by category+content hash (keep newest = first seen in reverse scan).
+		// Including category prevents a "fact" from being silently replaced by a
+		// "summary" with a 30-day TTL.
+		h := sha256.Sum256([]byte(e.Category + "\x00" + e.Content))
+		hash := hex.EncodeToString(h[:])
+		if _, exists := seen[hash]; exists {
+			continue
+		}
+		seen[hash] = i
+		keep[i] = true
+	}
+
+	// Count removals.
+	removed := 0
+	for _, k := range keep {
+		if !k {
+			removed++
+		}
+	}
+	if removed == 0 {
+		return 0, nil
+	}
+
+	// Write surviving entries to temp file, then atomic rename.
+	tmpFile := memFile + ".compact.tmp"
+	var buf strings.Builder
+	buf.WriteString("# DevClaw Memory\n\nLong-term facts and preferences.\n\n")
+	for i, e := range entries {
+		if !keep[i] {
+			continue
+		}
+		buf.WriteString(formatEntryLine(e))
+	}
+
+	if err := os.WriteFile(tmpFile, []byte(buf.String()), 0o600); err != nil {
+		return 0, fmt.Errorf("writing temp compact file: %w", err)
+	}
+	if err := os.Rename(tmpFile, memFile); err != nil {
+		os.Remove(tmpFile)
+		return 0, fmt.Errorf("atomic rename: %w", err)
+	}
+
+	return removed, nil
 }
 
 // ---------- Parsing ----------
@@ -261,6 +585,13 @@ func parseMemoryFile(content, source string) []Entry {
 		}
 
 		line = strings.TrimPrefix(line, "- ")
+
+		// Skip entries marked as [stale] — they were invalidated by evidence
+		// during a dream cycle and should not be returned in searches.
+		if strings.HasPrefix(line, "[stale]") {
+			continue
+		}
+
 		entry := Entry{Source: source}
 
 		// Try to parse timestamp: [YYYY-MM-DD HH:MM]
@@ -268,7 +599,13 @@ func parseMemoryFile(content, source string) []Entry {
 			closeBracket := strings.Index(line, "]")
 			if closeBracket > 0 {
 				ts := line[1:closeBracket]
-				t, err := time.Parse("2006-01-02 15:04", ts)
+				// Parse the [YYYY-MM-DD HH:MM] stamp in the LOCAL timezone (the
+				// wall clock the user actually saw), not UTC. This makes
+				// Entry.Timestamp — and the occurred_at it feeds — a real instant
+				// that lines up with date-window recall (US-003), which builds its
+				// windows in time.Local too. On a UTC host this is identical to
+				// time.Parse; on the BRT gateway it avoids a 3h skew.
+				t, err := time.ParseInLocation("2006-01-02 15:04", ts, time.Local)
 				if err == nil {
 					entry.Timestamp = t
 				}
@@ -281,6 +618,28 @@ func parseMemoryFile(content, source string) []Entry {
 			closeBracket := strings.Index(line, "]")
 			if closeBracket > 0 {
 				entry.Category = line[1:closeBracket]
+				line = strings.TrimSpace(line[closeBracket+1:])
+			}
+		}
+
+		// Try to parse optional expiration: [expires:YYYY-MM-DD]
+		if strings.HasPrefix(line, "[expires:") {
+			closeBracket := strings.Index(line, "]")
+			if closeBracket > 0 {
+				dateStr := line[len("[expires:"):closeBracket]
+				if exp, err := time.Parse("2006-01-02", dateStr); err == nil {
+					entry.ExpiresAt = &exp
+				}
+				line = strings.TrimSpace(line[closeBracket+1:])
+			}
+		}
+
+		// Try to parse optional v2 lifecycle metadata: [meta:<base64-json>].
+		// The base64 std alphabet never contains ']', so the first ']' is safe.
+		if strings.HasPrefix(line, "[meta:") {
+			closeBracket := strings.Index(line, "]")
+			if closeBracket > 0 {
+				applyEntryMeta(&entry, line[len("[meta:"):closeBracket])
 				line = strings.TrimSpace(line[closeBracket+1:])
 			}
 		}

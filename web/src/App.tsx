@@ -156,8 +156,9 @@ export function App() {
           </Route>
         </Route>
 
-        {/* Fallback: redirect old /settings to /system */}
+        {/* Legacy redirects */}
         <Route path="/settings" element={<Navigate to="/system" replace />} />
+        <Route path="/workflows" element={<Navigate to="/plugins" replace />} />
       </Routes>
     </AuthGuard>
   )

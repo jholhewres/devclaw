@@ -468,6 +468,74 @@ func TestNormalizeJID(t *testing.T) {
 	}
 }
 
+func TestStripChannelPrefix(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"strips whatsapp prefix", "whatsapp:5511999999999@s.whatsapp.net", "5511999999999@s.whatsapp.net"},
+		{"strips case-insensitive", "WhatsApp:5511999999999@s.whatsapp.net", "5511999999999@s.whatsapp.net"},
+		{"no prefix unchanged", "5511999999999@s.whatsapp.net", "5511999999999@s.whatsapp.net"},
+		{"group unchanged", "120363012345678901@g.us", "120363012345678901@g.us"},
+		{"does not touch device colon", "5511999999999:48@s.whatsapp.net", "5511999999999:48@s.whatsapp.net"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := stripChannelPrefix(tt.input); got != tt.expected {
+				t.Errorf("stripChannelPrefix(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+// TestParseJIDNormalizesRecipient guards the scheduled-delivery bug where a
+// chat id like "whatsapp:5511...:48@s.whatsapp.net" reached the send path and
+// whatsmeow rejected it with "recipient must be a user JID with no device part".
+func TestParseJIDNormalizesRecipient(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantUser string
+		wantAgg  string // server
+	}{
+		{"channel prefix + device part", "whatsapp:5511999999999:48@s.whatsapp.net", "5511999999999", "s.whatsapp.net"},
+		{"channel prefix only", "whatsapp:5511999999999@s.whatsapp.net", "5511999999999", "s.whatsapp.net"},
+		{"device part only", "5511999999999:48@s.whatsapp.net", "5511999999999", "s.whatsapp.net"},
+		{"clean user jid", "5511999999999@s.whatsapp.net", "5511999999999", "s.whatsapp.net"},
+		// Regression: a genuine 12-digit BR recipient must be sent verbatim — the
+		// send path must NOT insert the mobile 9th digit (that misdelivered replies).
+		{"12-digit BR recipient unchanged", "558287015132@s.whatsapp.net", "558287015132", "s.whatsapp.net"},
+		{"12-digit BR with prefix + device", "whatsapp:558287015132:48@s.whatsapp.net", "558287015132", "s.whatsapp.net"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jid, err := parseJID(tt.input)
+			if err != nil {
+				t.Fatalf("parseJID(%q) error: %v", tt.input, err)
+			}
+			if jid.User != tt.wantUser {
+				t.Errorf("parseJID(%q).User = %q, want %q", tt.input, jid.User, tt.wantUser)
+			}
+			if jid.Device != 0 {
+				t.Errorf("parseJID(%q).Device = %d, want 0 (no device part)", tt.input, jid.Device)
+			}
+			if jid.Server != tt.wantAgg {
+				t.Errorf("parseJID(%q).Server = %q, want %q", tt.input, jid.Server, tt.wantAgg)
+			}
+		})
+	}
+
+	// Group JIDs must remain untouched.
+	g, err := parseJID("120363012345678901@g.us")
+	if err != nil {
+		t.Fatalf("parseJID(group) error: %v", err)
+	}
+	if g.Server != "g.us" {
+		t.Errorf("group JID server = %q, want g.us", g.Server)
+	}
+}
+
 func TestNormalizeBRPhone(t *testing.T) {
 	tests := []struct {
 		name     string

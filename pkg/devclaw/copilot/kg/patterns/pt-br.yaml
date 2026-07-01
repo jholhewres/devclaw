@@ -1,0 +1,54 @@
+language: pt-br
+version: 1
+clause_separators:
+  - " e "
+  - ", "
+  - "; "
+  - ". "
+patterns:
+  - name: works_at
+    predicate: works_at
+    functional: true
+    confidence: 0.5
+    templates:
+      - "{{subject}} trabalha (?:na|no|em) {{object}}"
+      - "{{subject}} trabalha para {{object}}"
+      - "{{subject}} é (?:funcionário|funcionária) (?:da|do) {{object}}"
+      - "{{subject}} é da {{object}}"
+
+  - name: lives_in
+    predicate: lives_in
+    functional: true
+    confidence: 0.5
+    templates:
+      - "{{subject}} mora (?:em|no|na) {{object}}"
+      - "{{subject}} reside (?:em|no|na) {{object}}"
+      - "{{subject}} vive (?:em|no|na) {{object}}"
+      - "{{subject}} é de {{object}}"
+
+  - name: likes
+    predicate: likes
+    functional: false
+    confidence: 0.4
+    templates:
+      - "{{subject}} gosta (?:de|da|do) {{object}}"
+      - "{{subject}} adora {{object}}"
+      - "{{subject}} ama {{object}}"
+      - "{{subject}} curte {{object}}"
+
+  - name: knows
+    predicate: knows
+    functional: false
+    confidence: 0.5
+    templates:
+      - "{{subject}} conhece {{object}}"
+      - "{{subject}} (?:é amigo|é amiga) (?:de|da|do) {{object}}"
+      - "{{subject}} conheceu {{object}}"
+
+  - name: met
+    predicate: met
+    functional: false
+    confidence: 0.5
+    templates:
+      - "{{subject}} (?:se )?encontrou com {{object}}"
+      - "{{subject}} (?:se )?viu com {{object}}"

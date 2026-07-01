@@ -115,6 +115,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	// ── Create assistant ──
 	assistant := copilot.New(cfg, logger)
+	assistant.SetConfigPath(configPath)
 	if vault != nil {
 		assistant.SetVault(vault)
 	}
@@ -301,6 +302,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if cfg.WebUI.Enabled {
 		adapter = buildWebUIAdapter(ctx, assistant, cfg, waInstances, configPath, logger)
 		webServer = webui.New(cfg.WebUI, adapter, logger)
+
+		// MCP OAuth: complete authorization flows redirected to the local callback.
+		webServer.SetMCPOAuthCallback(assistant.HandleMCPOAuthCallback)
 
 		// Register restart callback
 		webServer.OnRestartRequested(func() error {
@@ -532,8 +536,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	)
 
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	<-sigChan
+	signal.Notify(sigChan, shutdownSignals()...)
+
+	for {
+		sig := <-sigChan
+		if handleForceDreamSignal(sig, assistant, logger) {
+			continue
+		}
+		break
+	}
 
 	logger.Info("shutdown signal received, stopping...")
 
@@ -687,13 +698,7 @@ func reloadProcess() error {
 	// Get the original arguments (skip the program name)
 	args := os.Args[1:]
 
-	// Replace current process with a new instance
-	err = syscall.Exec(executable, append([]string{executable}, args...), os.Environ())
-	if err != nil {
-		return fmt.Errorf("failed to reload process: %w", err)
-	}
-
-	return nil
+	return execReplace(executable, args, os.Environ())
 }
 
 // getServerIP returns the first non-loopback IP address of the server.
@@ -1437,8 +1442,8 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 			prompt := assistant.ComposePrompt(session, content)
 			ctx := copilot.ContextWithDelivery(context.Background(), "webui", sessionID)
 			resp := assistant.ExecuteAgent(ctx, prompt, session, content)
-			session.AddMessage(content, resp)
-			return resp, nil
+			session.AddMessage(content, copilot.RedactCredentials(resp))
+			return copilot.RedactCredentials(resp), nil
 		},
 		StartChatStreamFn: func(_ context.Context, sessionID, content string) (*webui.RunHandle, error) {
 			store := assistant.SessionStore()
@@ -1499,7 +1504,7 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 				// Stream text tokens to the SSE channel.
 				agent.SetStreamCallback(func(chunk string) {
 					// Strip internal tags like [[reply_to_current]] before sending to UI
-					cleanChunk := copilot.StripInternalTags(chunk)
+					cleanChunk := copilot.RedactCredentials(copilot.StripInternalTags(chunk))
 					if cleanChunk == "" {
 						return // Skip empty chunks after stripping
 					}
@@ -1542,8 +1547,8 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 					return
 				}
 
-				// Persist the conversation.
-				session.AddMessage(content, resp)
+				// Persist the conversation (redact credentials before saving to disk).
+				session.AddMessage(content, copilot.RedactCredentials(resp))
 
 				if usage != nil {
 					session.AddTokenUsage(usage.PromptTokens, usage.CompletionTokens)
@@ -1793,9 +1798,9 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 		result := make([]webui.ChannelInstanceInfo, 0, len(chs))
 		for _, ch := range chs {
 			info := webui.ChannelInstanceInfo{
-				Type:      channelType,
-				FullName:  ch.Name(),
-				Connected: ch.IsConnected(),
+				Type:       channelType,
+				FullName:   ch.Name(),
+				Connected:  ch.IsConnected(),
 				ErrorCount: ch.Health().ErrorCount,
 				Configured: true,
 			}
@@ -2355,35 +2360,12 @@ func buildWebUIAdapter(ctx context.Context, assistant *copilot.Assistant, cfg *c
 		return copilot.SaveConfigToFile(cfg, savePath)
 	}
 	adapter.StartMCPServerFn = func(name string) error {
-		// MCP server start/stop requires runtime management
-		// For now, we just validate the server exists
-		found := false
-		for _, srv := range cfg.MCP.Servers {
-			if srv.Name == name {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("MCP server %q not found", name)
-		}
-		// TODO: Implement actual start via MCP manager when available
-		return nil
+		_, err := assistant.StartMCPServer(name)
+		return err
 	}
 	adapter.StopMCPServerFn = func(name string) error {
-		// MCP server start/stop requires runtime management
-		found := false
-		for _, srv := range cfg.MCP.Servers {
-			if srv.Name == name {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("MCP server %q not found", name)
-		}
-		// TODO: Implement actual stop via MCP manager when available
-		return nil
+		_, err := assistant.StopMCPServer(name)
+		return err
 	}
 
 	// ── Database Status ──
@@ -2833,14 +2815,14 @@ func wireAgentAdapter(adapter *webui.AssistantAdapter, assistant *copilot.Assist
 				}
 				for _, agentName := range pi.Agents {
 					result = append(result, webui.AgentInfoAPI{
-						ID:       pi.ID + ":" + agentName,
-						Name:     agentName,
-						Source:   "plugin",
-						Active:   pi.Enabled,
-						Skills:   []string{},
-						Channels: []string{},
-						Members:  []string{},
-						Groups:   []string{},
+						ID:         pi.ID + ":" + agentName,
+						Name:       agentName,
+						Source:     "plugin",
+						Active:     pi.Enabled,
+						Skills:     []string{},
+						Channels:   []string{},
+						Members:    []string{},
+						Groups:     []string{},
 						ToolsAllow: []string{},
 						ToolsDeny:  []string{},
 					})

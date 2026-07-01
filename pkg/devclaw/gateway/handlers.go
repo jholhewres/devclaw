@@ -220,8 +220,8 @@ func (g *Gateway) handleChatCompletions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	resp := g.assistant.ExecuteAgent(reqCtx, prompt, session, lastUser)
-	session.AddMessage(lastUser, resp)
-	g.writeOpenAINonStream(w, model, resp)
+	session.AddMessage(lastUser, copilot.RedactCredentials(resp))
+	g.writeOpenAINonStream(w, model, copilot.RedactCredentials(resp))
 }
 
 func (g *Gateway) openAIToCopilotMessages(msgs []openAIChatMessage) ([]copilotChatMessage, error) {
@@ -274,6 +274,7 @@ func (g *Gateway) handleChatStream(w http.ResponseWriter, r *http.Request, sessi
 	agent := copilot.NewAgentRunWithConfig(g.assistant.LLMClient(), g.assistant.ToolExecutor(), g.assistant.Config().Agent, g.logger)
 	agent.SetModelOverride(model)
 	agent.SetStreamCallback(func(chunk string) {
+		chunk = copilot.RedactCredentials(chunk)
 		contentBuilder.WriteString(chunk)
 		chunkResp := openAIChatResponse{
 			ID:      "chatcmpl-devclaw",
@@ -319,7 +320,7 @@ func (g *Gateway) handleChatStream(w http.ResponseWriter, r *http.Request, sessi
 		fmt.Fprintf(w, "data: %s\n\n", mustJSON(errChunk))
 		return
 	}
-	session.AddMessage(userMsg, resp)
+	session.AddMessage(userMsg, copilot.RedactCredentials(resp))
 	finishChunk := openAIChatResponse{
 		ID:      "chatcmpl-devclaw",
 		Object:  "chat.completion.chunk",

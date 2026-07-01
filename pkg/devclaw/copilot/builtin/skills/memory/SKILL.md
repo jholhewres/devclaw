@@ -51,6 +51,28 @@ Long-term memory for remembering information across conversations and sessions.
 |--------|---------|
 | `save` | User shares personal info, preferences, important context |
 | `search` | Before answering questions that might relate to past context |
+| `search` (temporal) | Date/time-scoped questions: "o que rolou na quinta", "resumo da semana", "dia 18", "ontem", "esses últimos dias" |
+
+## ⏱️ Date-Scoped / Temporal Questions
+
+When the user asks what happened on a specific day or period, **use `memory(action="search")` with the
+question itself as the query** — do **NOT** hand-write SQL against the conversation/session database via `bash`.
+
+Recall automatically detects temporal cues (PT-BR + EN: `hoje`, `ontem`, weekday names, `semana passada`,
+`dia N`, `DD/MM`, explicit dates) and restricts results to the matching **day-granular window** using each
+memory's *original event date* (not the date it was stored). Pure-content queries are unaffected.
+
+```bash
+# User: "me dá um resumo dos dias de segunda até hoje"
+memory(action="search", query="resumo dos dias de segunda até hoje")
+
+# User: "o que a gente combinou na quinta?"
+memory(action="search", query="o que combinamos na quinta")
+```
+
+**Why not bash/SQL on the conversation log?** The curated memory store carries the real event dates and
+survives compaction; ad-hoc DB queries are fragile (schema drift) and miss curated facts. Reach for `bash`
+on the DB only if memory search genuinely returns nothing relevant.
 
 ## When NOT to Use Memory
 | Data Type | Use Instead |
@@ -110,3 +132,4 @@ memory(action="search", query="indentation preference")
 | Storing API keys in memory | Use vault for secrets |
 | Vague content | Be specific |
 | Not searching before answering | Search for relevant context |
+| Writing SQL on the conversation DB via bash for "what happened on X" | Use `memory(action="search")` with the temporal question — the date window is applied automatically |

@@ -1801,6 +1801,39 @@ func (w *WhatsApp) seedGroupPoliciesFromConfig() {
 	}
 }
 
+// stripChannelPrefix removes a leading "whatsapp:" routing prefix that delivery
+// targets and scheduled jobs may prepend to a chat id (e.g.
+// "whatsapp:5511999999999@s.whatsapp.net"). It only strips the known channel
+// prefix, never a device-part colon inside a real JID.
+func stripChannelPrefix(s string) string {
+	const prefix = "whatsapp:"
+	if len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix) {
+		return strings.TrimSpace(s[len(prefix):])
+	}
+	return s
+}
+
+// stripDevicePart removes a companion device suffix (":NN") from a user JID
+// (e.g. 5511999999999:48@s.whatsapp.net -> 5511999999999@s.whatsapp.net), for
+// @s.whatsapp.net and @lid. Unlike normalizeJID it does NOT touch the phone
+// digits, so it is safe for the SEND path where the recipient must be verbatim
+// (normalizeBRPhone would mutate a genuine 12-digit BR number and misdeliver).
+// Group JIDs (@g.us) and anything else are returned unchanged.
+func stripDevicePart(jid string) string {
+	for _, suffix := range []string{"@s.whatsapp.net", "@lid"} {
+		if strings.HasSuffix(jid, suffix) {
+			base := strings.TrimSuffix(jid, suffix)
+			if idx := strings.LastIndex(base, ":"); idx > 0 {
+				if _, err := strconv.Atoi(base[idx+1:]); err == nil {
+					base = base[:idx]
+				}
+			}
+			return base + suffix
+		}
+	}
+	return jid
+}
+
 // normalizeJID normalizes a JID for consistent lookups.
 // Strips companion device suffix (:XX) so that messages from linked devices
 // are treated as coming from the same user.

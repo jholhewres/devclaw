@@ -10,9 +10,103 @@
 package copilot
 
 import (
+	"log/slog"
 	"regexp"
 	"strings"
 )
+
+// BootstrapScanMode controls what happens when an injection pattern is found
+// inside a bootstrap file (SOUL.md, AGENTS.md, USER.md, IDENTITY.md, TOOLS.md).
+// Default behavior (warn) preserves content — this is safe for upgrades.
+type BootstrapScanMode string
+
+const (
+	// BootstrapScanWarn logs a Warn record and returns the content untouched.
+	// Default when config.Security.BootstrapScan is empty.
+	BootstrapScanWarn BootstrapScanMode = "warn"
+	// BootstrapScanBlock replaces each matching pattern with a redaction
+	// placeholder while keeping the rest of the file intact.
+	BootstrapScanBlock BootstrapScanMode = "block"
+	// BootstrapScanOff disables scanning entirely (useful for test fixtures
+	// that intentionally contain phrases like "ignore previous instructions").
+	BootstrapScanOff BootstrapScanMode = "off"
+)
+
+// bootstrapScanIgnoreMarker whitelists a specific bootstrap file even when
+// the global mode is warn or block. Place the marker anywhere in the file.
+const bootstrapScanIgnoreMarker = "<!-- devclaw-scan:ignore -->"
+
+// bootstrapInjectionPatterns is a stricter subset of injectionPatterns tuned
+// for files authored by the operator (SOUL.md, AGENTS.md, ...). The memory
+// scanner is aggressive by design because it guards replay of untrusted user
+// messages; bootstrap files are high-trust, so matching on generic phrases
+// like "system prompt" or "you are now" floods logs with false positives.
+// Only the highest-signal patterns stay here.
+var bootstrapInjectionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)ignore\s+(all\s+)?(previous\s+)?instructions`),
+	regexp.MustCompile(`(?i)ignore\s+the\s+above`),
+	regexp.MustCompile(`(?i)forget\s+(all\s+)?(previous|prior|earlier)`),
+	regexp.MustCompile(`(?i)override\s+(system|instructions|rules)`),
+	regexp.MustCompile(`(?i)disregard\s+(all|previous|prior)`),
+	regexp.MustCompile(`(?i)jailbreak`),
+	regexp.MustCompile(`(?i)DAN\s+mode`),
+}
+
+// detectBootstrapInjection reports whether any stricter bootstrap pattern
+// matches. Returns (matched, indexes) to allow callers to redact precisely.
+func detectBootstrapInjection(text string) bool {
+	for _, p := range bootstrapInjectionPatterns {
+		if p.MatchString(text) {
+			return true
+		}
+	}
+	return false
+}
+
+// ScanBootstrapContent applies the bootstrap-tuned injection detector to
+// content loaded from a bootstrap file. It returns the (possibly redacted)
+// content to inject into the prompt.
+//
+// Retrocompat: the default mode is warn, which logs but never modifies the
+// returned content. Callers upgrading from a version without this scanner
+// see identical prompt output plus at most one Warn record per file that
+// actually contains a high-signal injection pattern.
+func ScanBootstrapContent(path, content string, mode BootstrapScanMode, logger *slog.Logger) string {
+	if strings.Contains(content, bootstrapScanIgnoreMarker) {
+		return content
+	}
+	if mode == BootstrapScanOff {
+		return content
+	}
+	if mode == "" {
+		mode = BootstrapScanWarn
+	}
+	if !detectBootstrapInjection(content) {
+		return content
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	switch mode {
+	case BootstrapScanBlock:
+		logger.Warn("bootstrap scan: injection pattern detected (redacted)", "path", path)
+		return redactBootstrapInjections(content)
+	default:
+		logger.Warn("bootstrap scan: injection pattern detected (content preserved)", "path", path)
+		return content
+	}
+}
+
+// redactBootstrapInjections replaces matches from the bootstrap-tuned set
+// with a short placeholder. Memory-level patterns are intentionally not used
+// here so operator-authored docs are not mangled by false positives.
+func redactBootstrapInjections(content string) string {
+	out := content
+	for _, p := range bootstrapInjectionPatterns {
+		out = p.ReplaceAllString(out, "[REDACTED: injection pattern]")
+	}
+	return out
+}
 
 // injectionPatterns detects common prompt injection patterns that should not
 // be auto-captured into memory (which would be replayed on every future turn).

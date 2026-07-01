@@ -283,7 +283,9 @@ var requiredCompactionSections = []string{
 	"## Open TODOs",
 	"## Constraints/Rules",
 	"## Pending user asks",
+	"## Conversation Topics",
 	"## Exact identifiers",
+	"## Operational Playbook",
 }
 
 // buildStructuredCompactionPrompt creates the structured compaction prompt that
@@ -305,7 +307,19 @@ func buildStructuredCompactionPrompt(cfg CompactionConfig, toolFailures []string
 	b.WriteString("- Under '## Open TODOs': list incomplete tasks and their status.\n")
 	b.WriteString("- Under '## Constraints/Rules': list active constraints from the user or system.\n")
 	b.WriteString("- Under '## Pending user asks': describe what the user most recently asked for.\n")
+	b.WriteString("- Under '## Conversation Topics': list ALL distinct subjects discussed " +
+		"(e.g. 'LiteLLM proxy setup', 'SSH server heartbeat investigation'), " +
+		"including purely informational discussions where no action was taken.\n")
 	b.WriteString("- Under '## Exact identifiers': list ALL file paths, UUIDs, URLs, commit hashes, branch names, session IDs, and API keys (masked) verbatim.\n")
+	b.WriteString("- Under '## Operational Playbook': list ALL working access patterns discovered during the conversation:\n")
+	b.WriteString("  - SSH access: exact user@host, auth method (key file path or sshpass), working command template\n")
+	b.WriteString("  - Database connections: exact host, port, user, database name, credential source (e.g. secret name)\n")
+	b.WriteString("  - Cloud CLI: exact syntax that succeeded (e.g. 'gcloud secrets versions access latest --secret=X')\n")
+	b.WriteString("  - API endpoints: base URL, auth method used\n")
+	b.WriteString("  - For each, note the credential resolution path (e.g. 'password from gcloud secret hg-db-supergator-prod')\n")
+	b.WriteString("  - Mask actual passwords/tokens but preserve the full command structure verbatim\n")
+	b.WriteString("  - Keep ONLY the latest working pattern per server/service (supersede failed attempts)\n")
+	b.WriteString("  - Maximum 500 tokens for this section\n")
 	b.WriteString("- Focus ONLY on CONFIRMED facts from tool results. Do NOT speculate or invent outcomes.\n")
 	b.WriteString("- If a tool result was ambiguous or errored, say so explicitly.\n")
 	b.WriteString("- Do NOT assert that something was done successfully unless the tool result confirmed it.\n")
@@ -594,6 +608,16 @@ func buildProtectedSet(messages []chatMessage, protectRecentTurns int) map[int]b
 		}
 	}
 
+	// Note: an earlier iteration of this function also flagged every recent
+	// "substantial" tool result (≥100 chars, non-error) as protected. That
+	// collided with pruneByContextRatio, whose entire purpose is to trim
+	// exactly those results when context pressure grows — any tool result
+	// big enough to be worth pruning was simultaneously marked untrimmable,
+	// producing a no-op pass at high ratios. Recent conversation content is
+	// already covered by the ProtectRecentTurns sweep above; distilling
+	// older tool output is the compaction summarizer's job. Keep this
+	// function narrow.
+
 	return protected
 }
 
@@ -622,6 +646,7 @@ func buildMinimalFallbackSummary(messages []chatMessage) string {
 	}
 	b.WriteString("\n\n")
 
+	b.WriteString("## Conversation Topics\n(unknown — summarization failed)\n\n")
 	b.WriteString("## Exact identifiers\n")
 
 	// Collect tool names used.
@@ -660,6 +685,8 @@ func buildMinimalFallbackSummary(messages []chatMessage) string {
 			b.WriteString("- " + id + "\n")
 		}
 	}
+
+	b.WriteString("\n## Operational Playbook\n(LLM summarization failed — operational patterns not preserved)\n")
 
 	return b.String()
 }

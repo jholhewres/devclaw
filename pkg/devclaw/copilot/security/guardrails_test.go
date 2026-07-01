@@ -33,9 +33,9 @@ func TestInputGuardrail_PromptInjection(t *testing.T) {
 
 func TestInputGuardrail_DefaultValues(t *testing.T) {
 	t.Parallel()
-	g := NewInputGuardrail(0, 0) // should use defaults (4096, 30)
-	if g.maxLength != 4096 {
-		t.Errorf("default maxLength = %d, want 4096", g.maxLength)
+	g := NewInputGuardrail(0, 0) // should use defaults (200000, 30)
+	if g.maxLength != 200000 {
+		t.Errorf("default maxLength = %d, want 200000", g.maxLength)
 	}
 	if g.rateLimit != 30 {
 		t.Errorf("default rateLimit = %d, want 30", g.rateLimit)
@@ -271,6 +271,48 @@ func TestCheckURLGrounding(t *testing.T) {
 		ungrounded := checkURLGrounding(output, results)
 		if len(ungrounded) != 1 || ungrounded[0] != "https://fake.example.com/invented" {
 			t.Errorf("expected 1 ungrounded URL (fake), got %v", ungrounded)
+		}
+	})
+}
+
+// ---------- Credential Leak Detection ----------
+
+func TestOutputGuardrail_DetectsCredential(t *testing.T) {
+	t.Parallel()
+	g := NewOutputGuardrail(nil)
+	// Wire a credential checker that detects "password:" pattern.
+	g.CredentialChecker = func(s string) bool {
+		return strings.Contains(strings.ToLower(s), "password:") ||
+			strings.Contains(strings.ToLower(s), "senha:")
+	}
+
+	t.Run("detects_password", func(t *testing.T) {
+		err := g.Validate("Your password: hunter2 has been saved")
+		if err != ErrCredentialLeak {
+			t.Errorf("expected ErrCredentialLeak, got %v", err)
+		}
+	})
+
+	t.Run("detects_senha", func(t *testing.T) {
+		err := g.Validate("A senha: example123 está no arquivo")
+		if err != ErrCredentialLeak {
+			t.Errorf("expected ErrCredentialLeak, got %v", err)
+		}
+	})
+
+	t.Run("clean_output_passes", func(t *testing.T) {
+		err := g.Validate("The weather today is sunny and warm.")
+		if err != nil {
+			t.Errorf("expected nil, got %v", err)
+		}
+	})
+
+	t.Run("no_checker_passes", func(t *testing.T) {
+		g2 := NewOutputGuardrail(nil)
+		// No CredentialChecker set — backward compatible.
+		err := g2.Validate("password: secret123")
+		if err != nil {
+			t.Errorf("expected nil (no checker), got %v", err)
 		}
 	})
 }

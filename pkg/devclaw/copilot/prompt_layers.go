@@ -19,6 +19,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
 	"github.com/jholhewres/devclaw/pkg/devclaw/paths"
@@ -58,6 +59,7 @@ const (
 	LayerSafety         PromptLayer = 5  // Safety rules.
 	LayerIdentity       PromptLayer = 10 // Custom instructions.
 	LayerThinking       PromptLayer = 12 // Extended thinking level hint (from /think).
+	LayerProfile        PromptLayer = 13 // Active rotatable profile context.
 	LayerBootstrap      PromptLayer = 15 // SOUL.md, AGENTS.md, etc.
 	LayerBuiltinSkills  PromptLayer = 18 // Built-in tool guides (memory, agents, etc.)
 	LayerPluginAgents   PromptLayer = 19 // Available plugin agents for delegation.
@@ -112,17 +114,17 @@ type promptLayerCache struct {
 
 // PromptComposer assembles the final system prompt from multiple layers.
 type PromptComposer struct {
-	config        *Config
-	agentProfile  *AgentProfileConfig // Active agent profile (nil = default).
-	memoryStore   *memory.FileStore
-	sqliteMemory  *memory.SQLiteStore
-	skillGetter   func(name string) (interface{ SystemPrompt() string }, bool)
-	skillLister   func() []SkillInfo // Returns all available skills with name, description, tools
-	builtinSkills *BuiltinSkills
-	toolExecutor     *ToolExecutor // For dynamic tool list generation
+	config            *Config
+	agentProfile      *AgentProfileConfig // Active agent profile (nil = default).
+	memoryStore       *memory.FileStore
+	sqliteMemory      *memory.SQLiteStore
+	skillGetter       func(name string) (interface{ SystemPrompt() string }, bool)
+	skillLister       func() []SkillInfo // Returns all available skills with name, description, tools
+	builtinSkills     *BuiltinSkills
+	toolExecutor      *ToolExecutor            // For dynamic tool list generation
 	pluginAgentLister func() []pluginAgentInfo // Lists available plugin agents.
-	isSubagent    bool // When true, only AGENTS.md + TOOLS.md are loaded.
-	contextEngines *ContextEngineRegistry // Pluggable context engines.
+	isSubagent        bool                     // When true, only AGENTS.md + TOOLS.md are loaded.
+	contextEngines    *ContextEngineRegistry   // Pluggable context engines.
 
 	// workspaceID identifies the active workspace for cache key namespacing.
 	// Empty = main agent (global bootstrap dirs).
@@ -135,6 +137,24 @@ type PromptComposer struct {
 	// Each builder contributes an additional section to the memory layer.
 	memorySectionBuildersMu sync.RWMutex
 	memorySectionBuilders   []MemoryPromptSectionBuilder
+
+	// memoryStack is the Sprint 2 Room 2.4 layered memory composer
+	// (L0 Identity + L1 Essential + L2 OnDemand). When non-nil, its
+	// Build output is prepended to the legacy L3 buildMemoryLayer
+	// output. When nil or when all layers return empty, buildMemoryLayer
+	// is byte-identical to v1.18.0.
+	memoryStack *MemoryStack
+
+	// lcmStore is the optional LCM store used by buildMemoryLayer to
+	// supplement long-term memory recall with recent conversation context.
+	// When non-nil, an FTS search on the session's LCM conversation is
+	// merged into the recalled memories section. Nil = no LCM recall.
+	lcmStore *LCMStore
+
+	// contextRouter is the optional wing resolver used by the memory
+	// stack to scope L1/L2 retrieval to the session's active wing.
+	// Nil = legacy wing (empty string) for every session.
+	contextRouter *ContextRouter
 
 	// bootstrapCache caches bootstrap file contents to avoid re-reading from disk
 	// on every prompt compose. Invalidated when file content changes (hash mismatch).
@@ -157,8 +177,8 @@ type PromptComposer struct {
 type SkillInfo struct {
 	Name          string
 	Description   string
-	Location      string   // Absolute path to SKILL.md ("" for built-in skills)
-	HasReferences bool     // True if the skill has a references/ directory
+	Location      string // Absolute path to SKILL.md ("" for built-in skills)
+	HasReferences bool   // True if the skill has a references/ directory
 	Tools         []string
 }
 
@@ -225,6 +245,26 @@ func (p *PromptComposer) SetSQLiteMemory(store *memory.SQLiteStore) {
 	p.sqliteMemory = store
 }
 
+// SetMemoryStack wires a Sprint 2 Room 2.4 layered memory stack into the
+// composer. The stack renders L0+L1+L2 as a prefix that buildMemoryLayer
+// prepends to its legacy L3 output. Passing nil detaches any previously
+// configured stack and restores v1.18.0 byte-identical behavior.
+func (p *PromptComposer) SetMemoryStack(stack *MemoryStack) {
+	p.memoryStack = stack
+}
+
+// SetContextRouter wires the context router used by the memory stack to
+// resolve the active wing for a session. Nil means every session uses
+// the legacy wing ("").
+func (p *PromptComposer) SetContextRouter(router *ContextRouter) {
+	p.contextRouter = router
+}
+
+// SetLCMStore sets the LCM store for conversation-aware memory recall.
+func (p *PromptComposer) SetLCMStore(store *LCMStore) {
+	p.lcmStore = store
+}
+
 // SetContextEngines sets the pluggable context engine registry.
 func (p *PromptComposer) SetContextEngines(registry *ContextEngineRegistry) {
 	p.contextEngines = registry
@@ -284,6 +324,9 @@ func (p *PromptComposer) Compose(session *Session, input string) string {
 	}
 	if thinkingPrompt := p.buildThinkingLayer(session); thinkingPrompt != "" {
 		layers = append(layers, layerEntry{layer: LayerThinking, content: thinkingPrompt})
+	}
+	if profileLayer := p.buildProfileLayer(); profileLayer != "" {
+		layers = append(layers, layerEntry{layer: LayerProfile, content: profileLayer})
 	}
 	cfg := session.GetConfig()
 	if cfg.BusinessContext != "" {
@@ -619,6 +662,33 @@ func (p *PromptComposer) buildProjectContextLayer() string {
 
 // ---------- Layer Builders ----------
 
+func (p *PromptComposer) buildProfileLayer() string {
+	if p.agentProfile == nil {
+		return ""
+	}
+	prof := p.agentProfile
+	var b strings.Builder
+	b.WriteString("## Active Profile: ")
+	if prof.Label != "" {
+		b.WriteString(prof.Label)
+	} else {
+		b.WriteString(prof.ID)
+	}
+	b.WriteString("\n\n")
+	if prof.Description != "" {
+		b.WriteString(prof.Description)
+		b.WriteString("\n\n")
+	}
+	if prof.Instructions != "" {
+		b.WriteString(prof.Instructions)
+		b.WriteString("\n\n")
+	}
+	if prof.MemoryScope != "" {
+		b.WriteString("Memory scope: " + prof.MemoryScope + "\n")
+	}
+	return b.String()
+}
+
 // buildCoreLayer creates the base identity and tooling guidance.
 // Matches structure exactly: identity → tooling → tool call style → safety → workspace → reply tags → messaging.
 // Behavioral guidance lives in AGENTS.md/SOUL.md, not here.
@@ -688,6 +758,16 @@ func (p *PromptComposer) buildCoreLayer() string {
 	b.WriteString("2. Do NOT assume you remember — always verify with memory first.\n")
 	b.WriteString("3. If memory returns no results, tell the user you don't have that information saved.\n\n")
 
+	// ## Operational Pre-flight — mandatory skill/memory consultation before
+	// invoking tools against external systems. Wording is deliberately
+	// protocol-agnostic so no past incident's vocabulary biases the agent.
+	b.WriteString("## Operational Pre-flight (MANDATORY)\n\n")
+	b.WriteString("Before invoking any tool that reaches an external system (network, remote host, database, cloud service, message bus, or third-party API), take these steps in order:\n\n")
+	b.WriteString("STEP 1 — Consult available knowledge. Call list_skills for candidates related to the target and, when matched, get_skill_instructions. Then call memory(action=\"search\") with the target identifier.\n\n")
+	b.WriteString("STEP 2 — Choose the access method from those sources, not from assumption. If both return nothing, ask the user how to proceed before running the tool.\n\n")
+	b.WriteString("STEP 3 — After a successful call, save what actually worked: memory(action=\"save\", content=\"<target>: <method that succeeded>\", category=\"fact\").\n\n")
+	b.WriteString("STEP 4 — If a tool call fails, investigate (skills, vault, user) rather than saving the failure. The system already rejects fact saves whose content echoes a just-failed tool — do not try to bypass that by paraphrasing.\n\n")
+
 	// ## Workspace - matches structure (comes BEFORE Reply Tags)
 	b.WriteString("## Workspace\n\n")
 	b.WriteString("Your working directory is: ./workspace/\n")
@@ -741,30 +821,30 @@ func (p *PromptComposer) buildCoreLayer() string {
 // Only tools present in the executor's visible set AND in this map are included.
 // This avoids hardcoding the list — if a tool is hidden or removed, it disappears.
 var coreToolSummaries = map[string]string{
-	"read_file":      "Read file contents",
-	"write_file":     "Write/create a file",
-	"edit_file":      "Apply targeted edits to a file",
-	"list_files":     "List directory contents",
-	"search_files":   "Search file contents with regex",
-	"glob_files":     "Find files by glob pattern",
-	"bash":           "Run shell commands",
-	"web_search":     "Search the web",
-	"web_fetch":      "Fetch a URL and extract content",
-	"memory":         "Long-term memory (action: save/search/list/index)",
-	"scheduler":      "Scheduled tasks and reminders (action: add/list/remove/search)",
-	"vault":          "Encrypted secret storage (action: status/save/get/list/delete)",
-	"message":        "Send messages, channel actions (polls, reactions, etc.)",
-	"sessions":       "Manage chat sessions (list/get/send/rename)",
-	"spawn_subagent": "Delegate complex subtasks to a child agent",
-	"list_subagents": "List running child agents",
-	"describe_image": "Describe image contents via Vision",
-	"browser":        "Control web browser (navigate/screenshot/click/fill/act)",
-	"daemon":         "Manage background daemons",
-	"apply_patch":    "Apply a unified diff patch to files",
-	"skill_init":     "Create a new skill",
-	"skill_list":     "List available skills",
-	"skill_install":  "Install a skill from URL",
-	"skill_db_query": "Query a skill's SQLite database",
+	"read_file":            "Read file contents",
+	"write_file":           "Write/create a file",
+	"edit_file":            "Apply targeted edits to a file",
+	"list_files":           "List directory contents",
+	"search_files":         "Search file contents with regex",
+	"glob_files":           "Find files by glob pattern",
+	"bash":                 "Run shell commands",
+	"web_search":           "Search the web",
+	"web_fetch":            "Fetch a URL and extract content",
+	"memory":               "Long-term memory (action: save/search/list/index)",
+	"scheduler":            "Scheduled tasks and reminders (action: add/list/remove/search)",
+	"vault":                "Encrypted secret storage (action: status/save/get/list/delete)",
+	"message":              "Send messages, channel actions (polls, reactions, etc.)",
+	"sessions":             "Manage chat sessions (list/get/send/rename)",
+	"spawn_subagent":       "Delegate complex subtasks to a child agent; pair with sessions_yield to release the turn and get the result pushed back",
+	"list_subagents":       "List running child agents",
+	"describe_image":       "Describe image contents via Vision",
+	"browser":              "Control web browser (navigate/screenshot/click/fill/act)",
+	"daemon":               "Manage background daemons",
+	"apply_patch":          "Apply a unified diff patch to files",
+	"skill_init":           "Create a new skill",
+	"skill_list":           "List available skills",
+	"skill_install":        "Install a skill from URL",
+	"skill_db_query":       "Query a skill's SQLite database",
 	"skill_db_list_tables": "List tables in a skill's database",
 }
 
@@ -1009,6 +1089,14 @@ func (p *PromptComposer) loadBootstrapFileCached(cacheKey, filename string, sear
 	if len(text) > 20000 {
 		text = text[:20000] + "\n\n... [truncated at 20KB]"
 	}
+
+	// Scan bootstrap files for prompt-injection patterns. Default mode is
+	// warn, which only logs — content stays byte-identical for upgrades.
+	var scanMode BootstrapScanMode
+	if p.config != nil {
+		scanMode = BootstrapScanMode(p.config.Security.BootstrapScan)
+	}
+	text = ScanBootstrapContent(filename, text, scanMode, nil)
 
 	p.bootstrapCacheMu.Lock()
 	p.bootstrapCache[cacheKey] = &bootstrapCacheEntry{
@@ -1283,18 +1371,96 @@ func (p *PromptComposer) buildSkillsLayerLegacy(session *Session) string {
 	return b.String()
 }
 
+// resolveActiveWingForSession returns the wing the memory stack should
+// use for the given session. Uses the context router when available,
+// falling back to an empty string (legacy wing) on any failure. Any
+// error from the router is treated as a degradation signal and does
+// not propagate — the stack MUST be able to render regardless.
+func (p *PromptComposer) resolveActiveWingForSession(session *Session, input string) string {
+	if p.agentProfile != nil && p.agentProfile.MemoryScope != "" {
+		return p.agentProfile.MemoryScope
+	}
+	if session == nil || p.contextRouter == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	res := p.contextRouter.Resolve(ctx, session.Channel, session.ChatID, input)
+	return res.Wing
+}
+
+// greetingInputs is the set of trivial greeting/acknowledgement openers that
+// must not trigger long-term memory recall. Matched case-insensitively against
+// the whole trimmed input. Kept conservative so real questions still search.
+var greetingInputs = map[string]struct{}{
+	"oi": {}, "olá": {}, "ola": {}, "hi": {}, "hello": {}, "hey": {},
+	"bom dia": {}, "boa tarde": {}, "boa noite": {}, "buenas": {},
+	"e aí": {}, "e ai": {}, "eai": {},
+}
+
+// shouldSkipMemoryRecall reports whether the input is a trivial greeting or so
+// short that running hybrid search would only surface noise. It is intentionally
+// conservative: it skips recall only for known greetings OR inputs that are both
+// very short in words (<= 3) AND very short in runes (<= 15), so genuine short
+// questions (e.g. "qual meu nome?") still search.
+func shouldSkipMemoryRecall(input string) bool {
+	trimmed := strings.TrimSpace(input)
+	if trimmed == "" {
+		return true
+	}
+
+	// Strip trailing punctuation for the greeting-set comparison so "Oi!" and
+	// "hello." still match.
+	lowered := strings.ToLower(trimmed)
+	normalized := strings.TrimRight(lowered, " !.?,…")
+	if _, ok := greetingInputs[normalized]; ok {
+		return true
+	}
+
+	// A question mark signals a genuine query even when it is short — always
+	// search in that case (keeps "qual meu nome?" recall-eligible).
+	if strings.Contains(trimmed, "?") {
+		return false
+	}
+
+	words := strings.Fields(trimmed)
+	if len(words) <= 3 && utf8.RuneCountInString(trimmed) <= 15 {
+		return true
+	}
+	return false
+}
+
 // buildMemoryLayer creates the memory context section.
 // Uses hybrid search (vector + BM25) when SQLite memory is available,
 // otherwise falls back to substring matching on the file store.
 func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string {
 	var parts []string
 
+	// Skip long-term memory recall entirely for trivial greetings / extremely
+	// short inputs — recall on "Oi" only surfaces noise and pollutes the prompt.
+	skipRecall := shouldSkipMemoryRecall(input)
+
+	// Resolve wing once — shared by the memory stack and hybrid search.
+	activeWing := p.resolveActiveWingForSession(session, input)
+
+	// Sprint 2 Room 2.4: stack-produced L0+L1+L2 prefix (if any).
+	// When the stack returns empty (nil stack, all layers empty, or
+	// ForceLegacy), the code below is byte-identical to v1.18.0.
+	// This is the retrocompat gate — locked by the golden fixture test
+	// in prompt_layers_golden_test.go.
+	if p.memoryStack != nil {
+		stackCtx, stackCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		if prefix := p.memoryStack.Build(stackCtx, activeWing, input); prefix != "" {
+			parts = append(parts, prefix)
+		}
+		stackCancel()
+	}
+
 	// Try hybrid search first (SQLite with FTS5 + vector).
 	// Use a tight timeout to avoid blocking prompt composition.
 	// 500ms is enough for local SQLite FTS5; the old 2s was too generous.
-	if p.sqliteMemory != nil && input != "" {
+	if p.sqliteMemory != nil && input != "" && !skipRecall {
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-		defer cancel()
 
 		searchCfg := p.config.Memory.Search
 		maxResults := searchCfg.MaxResults
@@ -1302,9 +1468,24 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 			maxResults = 6
 		}
 
-		results, err := p.sqliteMemory.HybridSearchWithOptions(
-			ctx, input, maxResults, searchCfg.MinScore,
-			searchCfg.HybridWeightVector, searchCfg.HybridWeightBM25,
+		// Resolve wing for fusion biasing — reuse activeWing from the
+		// memory-stack block above so recall and stack share the same wing.
+		var queryWing string
+		if p.config.Memory.Hierarchy.Enabled {
+			queryWing = activeWing
+		}
+
+		results, err := p.sqliteMemory.HybridSearchWithOptsAndPostFilters(
+			ctx, input,
+			memory.HybridSearchOptions{
+				MaxResults:       maxResults,
+				MinScore:         searchCfg.MinScore,
+				VectorWeight:     searchCfg.HybridWeightVector,
+				BM25Weight:       searchCfg.HybridWeightBM25,
+				QueryWing:        queryWing,
+				WingBoostMatch:   p.config.Memory.Hierarchy.WingBoostMatch,
+				WingBoostPenalty: p.config.Memory.Hierarchy.WingBoostPenalty,
+			},
 			memory.TemporalDecayConfig{
 				Enabled:      searchCfg.TemporalDecay.Enabled,
 				HalfLifeDays: searchCfg.TemporalDecay.HalfLifeDays,
@@ -1314,6 +1495,7 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 				Lambda:  searchCfg.MMR.Lambda,
 			},
 		)
+		cancel()
 		if err == nil && len(results) > 0 {
 			memTexts := make([]string, 0, len(results))
 			for _, r := range results {
@@ -1330,8 +1512,28 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 		}
 	}
 
+	// Supplement with recent conversation context from LCM FTS.
+	// This bridges the gap between long-term memory (.md files) and the
+	// LCM store (conversation messages), ensuring the agent recalls
+	// what was discussed recently even before memory_save is called.
+	if p.lcmStore != nil && session != nil && input != "" && session.Channel != "subagent" {
+		lcmConvID := MakeSessionID(session.Channel, session.ChatID)
+		lcmResults, err := p.lcmStore.SearchFTS(lcmConvID, input, 4)
+		if err == nil && len(lcmResults) > 0 {
+			var convTexts []string
+			for _, r := range lcmResults {
+				text := r.Content
+				if len(text) > 400 {
+					text = text[:400] + "..."
+				}
+				convTexts = append(convTexts, fmt.Sprintf("[recent:%s] %s", r.EntityType, text))
+			}
+			parts = append(parts, "## Recent Conversation Context\n\n"+WrapMemoriesForPrompt(convTexts))
+		}
+	}
+
 	// Fallback: file-based substring search.
-	if len(parts) == 0 && p.memoryStore != nil {
+	if len(parts) == 0 && p.memoryStore != nil && !skipRecall {
 		facts := p.memoryStore.RecentFacts(15, input)
 		if facts != "" {
 			// Split fact lines, sanitize each, and wrap with untrusted boundary.
@@ -1375,7 +1577,9 @@ func (p *PromptComposer) buildMemoryLayer(session *Session, input string) string
 			defer func() {
 				if r := recover(); r != nil {
 					// Silently skip this builder — panics in plugins must not
-					// break prompt composition.
+					// break prompt composition. No logger is in scope here; the
+					// recovered value is intentionally discarded.
+					_ = r
 				}
 			}()
 			if section := builder.BuildMemorySection(session, input); section != "" {
@@ -1413,92 +1617,6 @@ func (p *PromptComposer) buildTemporalLayer() string {
 	)
 }
 
-// buildConversationLayer creates a summary of recent history, using a
-// token-aware sliding window to stay within the history token budget.
-func (p *PromptComposer) buildConversationLayer(session *Session) string {
-	// Determine how many entries to request initially.
-	maxEntries := p.config.Memory.MaxMessages
-	if maxEntries <= 0 {
-		maxEntries = 100
-	}
-	// Only include the most recent portion for the prompt. The conversation
-	// layer is a summary that goes into the system prompt; the actual recent
-	// exchanges are passed separately as conversation history to the LLM.
-	// Keeping this small reduces prompt tokens and speeds up composition.
-	fetchEntries := maxEntries
-	if fetchEntries > 15 {
-		fetchEntries = 15
-	}
-
-	history := session.RecentHistory(fetchEntries)
-	if len(history) == 0 {
-		return ""
-	}
-
-	// Token budget for conversation history layer.
-	historyBudget := p.config.TokenBudget.History
-	if historyBudget <= 0 {
-		historyBudget = 8000
-	}
-
-	// Build from most recent backwards, stopping when we hit the budget.
-	type formattedEntry struct {
-		text   string
-		tokens int
-	}
-	var entries []formattedEntry
-	totalTokens := 0
-
-	for i := len(history) - 1; i >= 0; i-- {
-		entry := history[i]
-
-		// Truncate very long messages individually.
-		userMsg := entry.UserMessage
-		if len(userMsg) > 2000 {
-			userMsg = userMsg[:2000] + "..."
-		}
-		assistMsg := entry.AssistantResponse
-		if len(assistMsg) > 4000 {
-			assistMsg = assistMsg[:4000] + "..."
-		}
-
-		text := fmt.Sprintf("**User:** %s\n**Assistant:** %s\n", userMsg, assistMsg)
-		tokens := estimateTokens(text)
-
-		// Stop adding if we'd exceed the budget.
-		if totalTokens+tokens > historyBudget && len(entries) > 0 {
-			break
-		}
-
-		entries = append(entries, formattedEntry{text: text, tokens: tokens})
-		totalTokens += tokens
-	}
-
-	if len(entries) == 0 {
-		return ""
-	}
-
-	// Reverse to chronological order (we built backwards).
-	for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
-		entries[i], entries[j] = entries[j], entries[i]
-	}
-
-	var b strings.Builder
-	b.WriteString("## Recent Conversation\n\n")
-
-	// If we had to skip older entries, note it.
-	if len(entries) < len(history) {
-		b.WriteString(fmt.Sprintf("_(%d older messages omitted to fit token budget)_\n\n",
-			len(history)-len(entries)))
-	}
-
-	for _, e := range entries {
-		b.WriteString(e.text)
-		b.WriteString("\n")
-	}
-
-	return b.String()
-}
 
 // buildBuiltinSkillsLayer creates a section with built-in skill documentation.
 // These are always loaded and provide guidance for using core tools.
@@ -1606,12 +1724,6 @@ func detectProcessManager() string {
 		}
 	}
 	return "standalone"
-}
-
-// estimateTokens approximates the token count for a string.
-// Uses the default heuristic (~4 chars per token).
-func estimateTokens(s string) int {
-	return estimateTokensForModel(s, "")
 }
 
 // charsPerToken returns the estimated chars-per-token ratio for a given model.

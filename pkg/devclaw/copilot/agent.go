@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/kg"
 )
 
 const (
@@ -143,6 +145,17 @@ type AgentConfig struct {
 
 	// Compaction configures how context compaction preserves important information.
 	Compaction CompactionConfig `yaml:"compaction"`
+
+	// KG configures Knowledge Graph extraction during compaction and dream cycles.
+	KG KGAgentConfig `yaml:"kg"`
+}
+
+// KGAgentConfig mirrors the relevant KGConfig fields for use in AgentConfig.
+type KGAgentConfig struct {
+	AutoExtract       string `yaml:"auto_extract"`
+	LLMBudgetPerCycle int    `yaml:"llm_budget_per_cycle"`
+	LLMConsentACK     bool   `yaml:"llm_consent_acknowledged"`
+	FactsPerInjection int    `yaml:"facts_per_injection"`
 }
 
 // MemoryFlushConfig configures pre-compaction memory flush behavior.
@@ -294,6 +307,15 @@ type AgentRun struct {
 	assistantFragments []string
 
 	logger *slog.Logger
+
+	// kg is the Knowledge Graph for context-residual extraction during compaction.
+	// Nil when KG is disabled. Set via SetKG().
+	kg *kg.KG
+}
+
+// SetKG sets the Knowledge Graph reference for context-residual extraction.
+func (a *AgentRun) SetKG(k *kg.KG) {
+	a.kg = k
 }
 
 // UsageAccumulator tracks token usage across multiple LLM calls within a run.
@@ -2245,12 +2267,13 @@ func (a *AgentRun) doLLMCallWithOverflowRetry(ctx context.Context, messages []ch
 			}
 		}
 
-		// Step 2: Memory flush before first compaction (if enabled)
-		// This gives the agent a chance to save important memories before compaction
+		// Step 2: Memory flush before first compaction (if enabled).
+		// Runs synchronously to avoid races on AgentRun fields.
 		if attempt == 0 && a.cfg.MemoryFlush.Enabled {
-			// Estimate tokens based on message content
 			tokenEstimate := a.estimateTokens(messages)
-			a.maybeMemoryFlush(ctx, messages, tokenEstimate)
+			flushCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			a.maybeMemoryFlush(flushCtx, messages, tokenEstimate)
+			cancel()
 		}
 
 		// Step 3+4: Compact messages using LLM summarization.
@@ -2495,6 +2518,61 @@ func (a *AgentRun) maybeMemoryFlush(ctx context.Context, messages []chatMessage,
 	}
 
 	a.logger.Info("memory flush completed", "extracted", len(memories))
+
+	// KG extraction as "context residual" — captures structured facts
+	// that survive compaction even when the narrative is summarized away.
+	// Runs AFTER MemoryExtractor (which produces flat markdown memories).
+	// Best-effort: errors logged, never block compaction.
+	if a.kg != nil && a.cfg.KG.AutoExtract != "off" {
+		a.kgExtractFromMemories(ctx, memories)
+	}
+}
+
+// kgExtractFromMemories extracts structured KG triples from pre-compaction
+// memories. Pattern-based extraction is fast (~1ms/memory) and always runs.
+// LLM-based extraction is optional, budget-capped, and circuit-breaker gated.
+// This is best-effort: any error is logged and swallowed.
+func (a *AgentRun) kgExtractFromMemories(ctx context.Context, memories []ExtractedMemory) {
+	patternSets := kg.DefaultPatternSets()
+	if patternSets == nil {
+		a.logger.Warn("kg extraction: no default pattern sets available")
+		return
+	}
+
+	// Pattern-based extraction (fast, always runs when enabled).
+	mode := a.cfg.KG.AutoExtract
+	if mode == "pattern" || mode == "both" {
+		patternCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		extractor, err := kg.NewExtractor(patternSets, a.logger)
+		if err != nil {
+			a.logger.Warn("kg extraction: failed to create extractor", "error", err)
+			return
+		}
+
+		var totalExtracted int
+		for _, mem := range memories {
+			if patternCtx.Err() != nil {
+				break
+			}
+			if mem.Importance >= 3 {
+				n, err := extractor.ExtractAndStore(patternCtx, a.kg, mem.Content, "", a.sessionID)
+				if err != nil {
+					a.logger.Warn("kg pattern extraction failed", "error", err)
+					continue
+				}
+				totalExtracted += n
+			}
+		}
+		if totalExtracted > 0 {
+			a.logger.Info("kg pattern extraction complete", "triples", totalExtracted)
+		}
+	}
+
+	// LLM-based extraction is supported when the LLM client implements
+	// kg.LLMProvider. Currently deferred — pattern extraction covers the
+	// primary use case. Future: add adapter for LLMClient → kg.LLMProvider.
 }
 
 // estimateTokens provides a rough token estimate for a slice of messages.
@@ -2667,6 +2745,11 @@ func (a *AgentRun) managedCompaction(ctx context.Context, messages []chatMessage
 		summary = "Compaction timed out. Earlier conversation context was discarded."
 	}
 
+	// Append topic anchors so conversation subjects survive re-compaction.
+	if anchors := extractTopicAnchors(middle); anchors != "" {
+		summary += "\n\n## Conversation Topics (pre-compaction)\n" + anchors
+	}
+
 	var compacted []chatMessage
 	compacted = append(compacted, header...)
 	compacted = append(compacted, goal)
@@ -2836,14 +2919,18 @@ func (a *AgentRun) aggressiveCompaction(ctx context.Context, messages []chatMess
 	goal := body[0]
 	// Aggressive: keep 1/3 of the adaptive value, minimum 2.
 	keepRecent := a.computeAdaptiveKeepRecent(body) / 3
-	if keepRecent < 2 {
-		keepRecent = 2
+	if keepRecent < 4 {
+		keepRecent = 4
 	}
 
 	var summary string
 	if len(body)-1 > keepRecent {
 		middle := body[1 : len(body)-keepRecent]
 		summary = a.summarizeInStages(ctx, middle)
+		// Append topic anchors so conversation subjects survive re-compaction.
+		if anchors := extractTopicAnchors(middle); anchors != "" {
+			summary += "\n\n## Conversation Topics (pre-compaction)\n" + anchors
+		}
 	} else {
 		summary = "History was aggressively truncated."
 	}
@@ -2959,9 +3046,43 @@ func (a *AgentRun) emergencyCompression(ctx context.Context, messages []chatMess
 	return compacted
 }
 
+// extractTopicAnchors scans user messages from a compacted section and extracts
+// a deduplicated bullet list of conversation topics (first 150 chars of each).
+// Zero-cost: pure string extraction, no LLM call.
+func extractTopicAnchors(messages []chatMessage) string {
+	seen := make(map[string]bool)
+	var topics []string
+	for _, m := range messages {
+		if m.Role != "user" {
+			continue
+		}
+		s, ok := m.Content.(string)
+		if !ok || len(s) < 15 {
+			continue
+		}
+		// Skip system/compaction injected messages.
+		if strings.HasPrefix(s, "[System:") || strings.HasPrefix(s, "[Old tool result") {
+			continue
+		}
+		preview := s
+		if len([]rune(preview)) > 150 {
+			preview = string([]rune(preview)[:150])
+		}
+		key := strings.ToLower(strings.TrimSpace(preview))
+		if !seen[key] {
+			seen[key] = true
+			topics = append(topics, "- "+preview)
+		}
+	}
+	if len(topics) == 0 {
+		return ""
+	}
+	return strings.Join(topics, "\n")
+}
+
 // computeAdaptiveKeepRecent calculates how many recent messages to keep during compaction
 // based on the average message size and context window capacity.
-// Small messages (<200 tokens avg) → keep up to 8; large messages (>2000 tokens avg) → keep min 3.
+// Range: min 3, max 15. Larger messages → fewer kept; smaller messages → more kept.
 func (a *AgentRun) computeAdaptiveKeepRecent(body []chatMessage) int {
 	if len(body) == 0 {
 		return 6 // default
@@ -2982,8 +3103,8 @@ func (a *AgentRun) computeAdaptiveKeepRecent(body []chatMessage) int {
 	if computed < 3 {
 		computed = 3
 	}
-	if computed > 8 {
-		computed = 8
+	if computed > 15 {
+		computed = 15
 	}
 
 	return computed
@@ -3034,7 +3155,7 @@ func (a *AgentRun) summarizeInStages(ctx context.Context, messages []chatMessage
 			Role: "system",
 			Content: "You are a summarizing assistant. Combine these partial conversation summaries " +
 				"into a single coherent summary preserving all section headings " +
-				"(## Decisions, ## Open TODOs, ## Constraints/Rules, ## Pending user asks, ## Exact identifiers). " +
+				"(## Decisions, ## Open TODOs, ## Constraints/Rules, ## Pending user asks, ## Conversation Topics, ## Exact identifiers, ## Operational Playbook). " +
 				"Merge entries under the same heading. Keep it concise. " +
 				"Preserve key facts, tool results, and current status. " +
 				"NEVER use text formatting like bold.",

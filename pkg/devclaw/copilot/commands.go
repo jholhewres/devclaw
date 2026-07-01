@@ -53,7 +53,7 @@ func IsCommand(content string) bool {
 // containsFlag checks if args contains a flag like --json or --full.
 func containsFlag(args []string, flag string) bool {
 	for _, arg := range args {
-		if strings.ToLower(arg) == strings.ToLower(flag) {
+		if strings.EqualFold(arg, flag) {
 			return true
 		}
 	}
@@ -504,7 +504,7 @@ func (a *Assistant) newCommand(msg *channels.IncomingMessage) string {
 	}
 
 	sessionID := MakeSessionID(msg.Channel, msg.ChatID)
-	a.hookMgr.Dispatch(context.Background(), HookPayload{
+	a.hookMgr.Dispatch(a.ctx, HookPayload{
 		Event:     HookBeforeReset,
 		SessionID: sessionID,
 		Channel:   msg.Channel,
@@ -523,7 +523,7 @@ func (a *Assistant) resetCommand(msg *channels.IncomingMessage) string {
 	session := resolved.Session
 
 	sessionID := MakeSessionID(msg.Channel, msg.ChatID)
-	a.hookMgr.Dispatch(context.Background(), HookPayload{
+	a.hookMgr.Dispatch(a.ctx, HookPayload{
 		Event:     HookBeforeReset,
 		SessionID: sessionID,
 		Channel:   msg.Channel,
@@ -879,8 +879,9 @@ func (a *Assistant) skillsCommand(args []string, msg *channels.IncomingMessage) 
 
 		installed, skipped, failed := skills.InstallDefaultSkills(skillsDir, names)
 
-		// Hot-reload registry.
-		reloadCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Hot-reload registry — inherit from assistant lifetime so a
+		// shutdown cancels the reload instead of orphaning a timeout.
+		reloadCtx, cancel := context.WithTimeout(a.ctx, 10*time.Second)
 		defer cancel()
 		reloaded, _ := a.skillRegistry.Reload(reloadCtx)
 

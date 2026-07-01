@@ -21,8 +21,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/kg"
 	"github.com/jholhewres/devclaw/pkg/devclaw/copilot/memory"
 )
 
@@ -42,13 +44,19 @@ type DreamConfig struct {
 
 	// IdleMinutes is how long the daemon must be idle before triggering. Default: 10.
 	IdleMinutes int `yaml:"idle_minutes"`
+
+	// DisableContradictionResolution is an escape hatch. When true, the dream
+	// cycle still detects and logs contradictions but never supersedes (deletes)
+	// the older side. Default false (resolution enabled). Negative flag so that a
+	// config that omits it keeps the safe, on-by-default behavior.
+	DisableContradictionResolution bool `yaml:"disable_contradiction_resolution"`
 }
 
 // DefaultDreamConfig returns sensible defaults.
 func DefaultDreamConfig() DreamConfig {
 	return DreamConfig{
 		Enabled:              true,
-		MinHoursBetween:      6,
+		MinHoursBetween:      1,
 		MinSessionsBetween:   2,
 		MaxMemoriesToProcess: 100,
 		IdleMinutes:          10,
@@ -57,21 +65,28 @@ func DefaultDreamConfig() DreamConfig {
 
 // DreamState persists the dream system's state between restarts.
 type DreamState struct {
-	LastDreamAt    time.Time `json:"last_dream_at"`
-	SessionsSince  int       `json:"sessions_since"`
-	TotalDreams    int       `json:"total_dreams"`
-	LastResult     string    `json:"last_result"` // "success", "error", "no_changes"
+	LastDreamAt      time.Time `json:"last_dream_at"`
+	SessionsSince    int       `json:"sessions_since"`
+	CompactionsSince int       `json:"compactions_since"` // proxy for sessions in persistent channels (WhatsApp)
+	TotalDreams      int       `json:"total_dreams"`
+	LastResult       string    `json:"last_result"` // "success", "error", "no_changes"
 }
 
 // DreamResult holds the outcome of a dream consolidation run.
 type DreamResult struct {
-	MemoriesAnalyzed int           `json:"memories_analyzed"`
-	Duplicates       int           `json:"duplicates_merged"`
-	Contradictions   int           `json:"contradictions_found"`
-	Consolidated     int           `json:"consolidated"`
-	Duration         time.Duration `json:"duration"`
-	Error            error         `json:"-"`
+	MemoriesAnalyzed       int           `json:"memories_analyzed"`
+	Duplicates             int           `json:"duplicates_merged"`
+	Contradictions         int           `json:"contradictions_found"`
+	ContradictionsResolved int           `json:"contradictions_resolved"`
+	Consolidated           int           `json:"consolidated"`
+	Duration               time.Duration `json:"duration"`
+	Error                  error         `json:"-"`
 }
+
+// dreamClassifierBatchSize is the number of legacy files the classifier
+// pass inspects per dream cycle. Bounded to prevent a single pass from
+// hogging the DB. Configurable in Sprint 3.
+const dreamClassifierBatchSize = 20
 
 // DreamConsolidator manages background memory consolidation.
 type DreamConsolidator struct {
@@ -80,8 +95,19 @@ type DreamConsolidator struct {
 	stateDir string
 	logger   *slog.Logger
 
+	// sqliteStore is optional. When set (via WithSQLiteStore), the dream
+	// cycle runs the legacy classifier phase. When nil, the phase is a no-op.
+	sqliteStore *memory.SQLiteStore
+	// hierarchyCfg gates the classifier phase. Zero value = disabled.
+	hierarchyCfg HierarchyConfig
+
 	state DreamState
 	mu    sync.Mutex
+
+	// running guards against concurrent Run() invocations. A scheduled
+	// trigger and a ForceRun (SIGUSR1) can race; the CAS ensures only
+	// one dream cycle executes at a time.
+	running atomic.Bool
 
 	// stopCh signals the background goroutine to stop.
 	stopCh chan struct{}
@@ -89,8 +115,26 @@ type DreamConsolidator struct {
 	done chan struct{}
 }
 
+// WithSQLiteStore wires an optional *SQLiteStore into the consolidator so
+// the classifier phase can run during dream cycles. Keeps the memory.Store
+// interface unbroken (Option A).
+func (d *DreamConsolidator) WithSQLiteStore(s *memory.SQLiteStore) *DreamConsolidator {
+	d.sqliteStore = s
+	return d
+}
+
+// WithHierarchyConfig provides the hierarchy feature flag and keyword map
+// needed to gate and drive the legacy classifier phase.
+func (d *DreamConsolidator) WithHierarchyConfig(cfg HierarchyConfig) *DreamConsolidator {
+	d.hierarchyCfg = cfg
+	return d
+}
+
 // NewDreamConsolidator creates a new dream consolidator.
 func NewDreamConsolidator(config DreamConfig, store memory.Store, stateDir string, logger *slog.Logger) *DreamConsolidator {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	d := &DreamConsolidator{
 		config:   config,
 		store:    store,
@@ -174,6 +218,16 @@ func (d *DreamConsolidator) RecordSession() {
 	d.saveState()
 }
 
+// RecordCompaction increments the compaction counter.
+// For persistent sessions (WhatsApp), compactions serve as the activity
+// signal since sessions never formally end.
+func (d *DreamConsolidator) RecordCompaction() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.state.CompactionsSince++
+	d.saveState()
+}
+
 // shouldDream checks all three gates.
 func (d *DreamConsolidator) shouldDream() bool {
 	d.mu.Lock()
@@ -188,12 +242,15 @@ func (d *DreamConsolidator) shouldDream() bool {
 		return false
 	}
 
-	// Gate 2: Sessions since last dream.
+	// Gate 2: Activity since last dream (sessions OR compactions).
+	// For persistent sessions (WhatsApp), compactions serve as the activity
+	// signal since sessions never formally end.
 	minSessions := d.config.MinSessionsBetween
 	if minSessions <= 0 {
 		minSessions = 2
 	}
-	if d.state.SessionsSince < minSessions {
+	activityCount := d.state.SessionsSince + d.state.CompactionsSince
+	if activityCount < minSessions {
 		return false
 	}
 
@@ -218,6 +275,22 @@ func (d *DreamConsolidator) shouldDream() bool {
 func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 	start := time.Now()
 	result := DreamResult{}
+
+	// In-process reentry guard. The file lock below is the cross-process
+	// authority; this CAS is a fast-path rejection for same-process races
+	// (scheduled ticker firing while a SIGUSR1-triggered ForceRun is active).
+	if !d.running.CompareAndSwap(false, true) {
+		d.logger.Warn("dream: run skipped — already running in this process")
+		result.Error = fmt.Errorf("dream already running")
+		return result
+	}
+	defer d.running.Store(false)
+
+	// Ensure state directory exists before acquiring lock.
+	if err := os.MkdirAll(d.stateDir, 0o700); err != nil {
+		result.Error = fmt.Errorf("create dream state dir: %w", err)
+		return result
+	}
 
 	// Acquire lock atomically using O_CREATE|O_EXCL to prevent TOCTOU races.
 	lockPath := filepath.Join(d.stateDir, "dream.lock")
@@ -264,46 +337,125 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 	duplicates := d.findDuplicates(entries)
 	result.Duplicates = len(duplicates)
 
-	contradictions := d.findContradictions(entries)
-	result.Contradictions = len(contradictions)
+	generalContradictions := d.findContradictions(entries)
 
-	// Phase 3: Consolidate — merge duplicates, flag contradictions.
+	// Evidence-based contradictions: detect negative facts that are contradicted
+	// by newer positive facts about the same entity.
+	evidenceContradictions := d.findEvidenceContradictions(entries)
+
+	result.Contradictions = len(generalContradictions) + len(evidenceContradictions)
+
+	// Phase 3: Consolidate — RESOLVE contradictions by superseding the older
+	// side, and merge duplicates. The previous implementation only appended
+	// "[Contradiction] A vs B" report entries, which grew MEMORY.md unboundedly
+	// and left the stale fact retrievable — the root cause of hundreds of
+	// unresolved contradictions accumulating in production while the agent kept
+	// recalling outdated information.
 	d.logger.Info("dream phase: consolidate",
 		"duplicates", len(duplicates),
-		"contradictions", len(contradictions),
+		"contradictions", result.Contradictions,
 	)
 
-	consolidated := 0
-
-	// Save consolidated entries (merge duplicates into single entries).
-	for _, dup := range duplicates {
-		merged := memory.Entry{
-			Content:   fmt.Sprintf("[Consolidated] %s (merged from %d similar entries)", dup.canonical, dup.count),
-			Source:    "dream",
-			Category: "summary",
-			Timestamp: time.Now(),
+	// Pinned memories are never superseded automatically.
+	pinned := make(map[string]bool)
+	for _, e := range entries {
+		if e.IsPinned() {
+			pinned[strings.TrimSpace(e.Content)] = true
 		}
-		if err := d.store.Save(merged); err != nil {
-			d.logger.Warn("dream: failed to save consolidated memory", "error", err)
-			continue
-		}
-		consolidated++
 	}
 
-	// Save contradiction reports.
-	for _, c := range contradictions {
-		report := memory.Entry{
-			Content:   fmt.Sprintf("[Contradiction] %s vs %s", c.entryA, c.entryB),
-			Source:    "dream",
-			Category: "summary",
-			Timestamp: time.Now(),
+	// Build the set to supersede. Resolution is on by default; the
+	// disable_contradiction_resolution escape hatch turns it off entirely
+	// (detect + log only) if a deployment sees a false positive.
+	resolvable := make([]contradiction, 0, result.Contradictions)
+	if !d.config.DisableContradictionResolution {
+		// Evidence-based contradictions are high-confidence: a newer positive
+		// fact about the same entity supersedes the older negative one.
+		for _, c := range evidenceContradictions {
+			if !pinned[strings.TrimSpace(c.entryA)] {
+				resolvable = append(resolvable, c)
+			}
 		}
-		if err := d.store.Save(report); err != nil {
-			d.logger.Warn("dream: failed to save contradiction report", "error", err)
+		// General negation-heuristic contradictions are a weaker signal, so only
+		// supersede when the pair is also a near-duplicate restatement (high
+		// token overlap). This prevents deleting a distinct fact that merely
+		// shares a topic and an opposing keyword.
+		for _, c := range generalContradictions {
+			if pinned[strings.TrimSpace(c.entryA)] {
+				continue
+			}
+			if contentsNearDuplicate(c.entryA, c.entryB) {
+				resolvable = append(resolvable, c)
+			}
 		}
+	}
+
+	consolidated := 0
+	resolved := 0
+
+	// US-006: REAL supersede for SQLite-resident memories. For each resolvable
+	// contradiction, hard-exclude the losing chunk (deleted_at + supersedes) and
+	// evict it from the vector cache so it disappears from recall immediately. We
+	// NEVER append a "[Contradiction] A vs B" summary entry. This is the
+	// authoritative resolution path; the disk [stale] marking below is a harmless
+	// best-effort for any .md-only (pre-cutover) entries.
+	if d.sqliteStore != nil && len(resolvable) > 0 {
+		for _, c := range resolvable {
+			n, err := d.sqliteStore.SupersedeByContent(ctx, c.entryA, c.entryB)
+			if err != nil {
+				d.logger.Warn("dream: sqlite supersede failed", "error", err)
+				continue
+			}
+			if n > 0 {
+				resolved++
+			}
+		}
+		if resolved > 0 {
+			d.logger.Info("dream: superseded contradicted memories in sqlite", "resolved", resolved)
+		}
+	}
+
+	if fileStore, ok := d.store.(*memory.FileStore); ok {
+		// Best-effort disk hygiene for any .md-only entries (pre-cutover). The
+		// soft [stale] marker stops parseMemoryFile from returning them and
+		// Compact then drops them from disk. Harmless for SQLite-resident
+		// memories (which won't match a .md line) and does NOT double-count: the
+		// SQLite supersede above is the authoritative resolved tally.
+		if len(resolvable) > 0 {
+			diskResolved := d.expireStaleEntries(fileStore, resolvable)
+			// Only credit disk resolutions when SQLite resolved nothing, so the
+			// reported tally reflects what was actually excluded from recall.
+			if resolved == 0 {
+				resolved = diskResolved
+			}
+		}
+		// Compact: remove stale/expired entries and exact duplicates.
+		removed, err := fileStore.Compact()
+		if err != nil {
+			d.logger.Warn("dream: compact failed", "error", err)
+		} else if removed > 0 {
+			consolidated = removed
+		}
+		d.logger.Info("dream: compacted memory file",
+			"removed", consolidated,
+			"duplicates_detected", len(duplicates),
+			"contradictions_detected", result.Contradictions,
+			"contradictions_resolved", resolved,
+		)
 	}
 
 	result.Consolidated = consolidated
+	result.ContradictionsResolved = resolved
+
+	// Phase 3b: Classify — opportunistically label legacy files (wing IS NULL).
+	// Error-isolated: a classifier panic or error MUST NOT abort the dream cycle.
+	d.runClassifierPhase(ctx)
+	IncClassifierPass()
+
+	// Phase 3c: KG extraction — extract structured facts from memories.
+	// Pattern-based only (no LLM budget consumed during idle consolidation).
+	// Error-isolated: same as classifier phase.
+	d.runKGExtractionPhase(ctx)
 
 	// Phase 4: Apply — record results and update state.
 	d.logger.Info("dream phase: apply", "consolidated", consolidated)
@@ -311,6 +463,92 @@ func (d *DreamConsolidator) Run(ctx context.Context) DreamResult {
 
 	result.Duration = time.Since(start)
 	return result
+}
+
+// runClassifierPhase runs the legacy classifier pass during a dream cycle.
+// It is fully error-isolated: any panic or error is logged and swallowed so
+// the rest of the dream cycle continues unaffected.
+func (d *DreamConsolidator) runClassifierPhase(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			d.logger.Warn("legacy classifier phase panicked — isolated from dream cycle", "panic", r)
+		}
+	}()
+
+	if !d.hierarchyCfg.Enabled || d.sqliteStore == nil {
+		return
+	}
+
+	passCfg := memory.LegacyClassificationConfig{
+		BatchSize: dreamClassifierBatchSize,
+		Keywords:  d.hierarchyCfg.LegacyKeywords,
+	}
+	stats, err := d.sqliteStore.RunLegacyClassificationPass(ctx, passCfg)
+	if err != nil {
+		d.logger.Warn("legacy classifier phase error — continuing dream cycle", "error", err)
+		return
+	}
+	if stats.Classified > 0 {
+		d.logger.Info("legacy classifier classified files", "count", stats.Classified)
+	}
+}
+
+// runKGExtractionPhase extracts KG triples from indexed memories during
+// the dream cycle. Pattern-based only (no LLM budget consumed during idle
+// consolidation). Capped at 100 extractions per cycle to bound runtime.
+// Fully error-isolated: any panic or error is logged and swallowed.
+func (d *DreamConsolidator) runKGExtractionPhase(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			d.logger.Warn("kg extraction phase panicked — isolated from dream cycle", "panic", r)
+		}
+	}()
+
+	if d.sqliteStore == nil {
+		return
+	}
+	kgStore := d.sqliteStore.KG()
+	if kgStore == nil {
+		return
+	}
+	if d.hierarchyCfg.KG.AutoExtract == "off" || d.hierarchyCfg.KG.AutoExtract == "" {
+		return
+	}
+
+	patternSets := kg.DefaultPatternSets()
+	if patternSets == nil {
+		return
+	}
+	extractor, err := kg.NewExtractor(patternSets, d.logger)
+	if err != nil {
+		d.logger.Warn("kg extraction phase: failed to create extractor", "error", err)
+		return
+	}
+
+	// Read indexed memories from the store for extraction.
+	entries, err := d.store.GetAll()
+	if err != nil {
+		d.logger.Warn("kg extraction phase: failed to get memories", "error", err)
+		return
+	}
+
+	extracted := 0
+	const maxPerCycle = 100
+	for _, entry := range entries {
+		if ctx.Err() != nil || extracted >= maxPerCycle {
+			break
+		}
+		n, err := extractor.ExtractAndStore(ctx, kgStore, entry.Content, "", "dream-cycle")
+		if err != nil {
+			d.logger.Warn("kg extraction phase: extraction error", "error", err)
+			continue
+		}
+		extracted += n
+	}
+
+	if extracted > 0 {
+		d.logger.Info("dream kg extraction complete", "triples", extracted)
+	}
 }
 
 // State returns the current dream state (for observability).
@@ -395,9 +633,14 @@ func (d *DreamConsolidator) findContradictions(entries []memory.Entry) []contrad
 				aHasNeg := strings.Contains(a, neg)
 				bHasNeg := strings.Contains(b, neg)
 				if aHasNeg != bHasNeg {
+					// entryA = older entry (the one to supersede); entryB = newer.
+					older, newer := entries[i], entries[j]
+					if newer.Timestamp.Before(older.Timestamp) {
+						older, newer = newer, older
+					}
 					found = append(found, contradiction{
-						entryA: entries[i].Content,
-						entryB: entries[j].Content,
+						entryA: older.Content,
+						entryB: newer.Content,
 					})
 					break
 				}
@@ -408,10 +651,236 @@ func (d *DreamConsolidator) findContradictions(entries []memory.Entry) []contrad
 	return found
 }
 
+// findEvidenceContradictions detects negative memory facts that are contradicted
+// by newer positive facts about the same entity. Generic — works for any topic
+// (servers, APIs, services, tools), not just SSH or specific protocols.
+func (d *DreamConsolidator) findEvidenceContradictions(entries []memory.Entry) []contradiction {
+	// Generic negative sentiment indicators (PT + EN).
+	negativeKeywords := []string{
+		"bloqueado", "blocked", "unavailable", "indisponível",
+		"denied", "refused", "failed", "erro", "error",
+		"não consegue", "can't", "cannot", "unable",
+		"não funciona", "doesn't work", "broken", "down",
+		"deprecated", "removido", "removed", "desativado", "disabled",
+	}
+
+	// Generic positive sentiment indicators (PT + EN).
+	positiveKeywords := []string{
+		"access:", "acesso:", "funciona", "works", "working",
+		"succeeded", "connected", "conectou", "accessible",
+		"acessível", "deployed", "running", "active", "ativo",
+		"fixed", "corrigido", "resolved", "resolvido",
+		"enabled", "habilitado", "available", "disponível",
+	}
+
+	type taggedEntry struct {
+		entry    memory.Entry
+		negative bool
+		topic    string // normalized topic for matching
+	}
+
+	// Extract a topic identifier from the entry: any IP, hostname, URL,
+	// or the first significant noun phrase (lowercased first 60 chars).
+	extractTopic := func(s string) string {
+		lower := strings.ToLower(s)
+		// Try IP address first.
+		for i := 0; i < len(lower)-6; i++ {
+			if lower[i] >= '0' && lower[i] <= '9' {
+				end := i
+				for end < len(lower) && (lower[end] >= '0' && lower[end] <= '9' || lower[end] == '.') {
+					end++
+				}
+				candidate := lower[i:end]
+				if strings.Count(candidate, ".") >= 2 && len(candidate) >= 7 {
+					return candidate
+				}
+			}
+		}
+		// Fallback: use first 60 chars as topic fingerprint for overlap check.
+		if len(lower) > 60 {
+			lower = lower[:60]
+		}
+		return lower
+	}
+
+	var negatives, positives []taggedEntry
+
+	for _, e := range entries {
+		lower := strings.ToLower(e.Content)
+		topic := extractTopic(e.Content)
+
+		for _, kw := range negativeKeywords {
+			if strings.Contains(lower, kw) {
+				negatives = append(negatives, taggedEntry{entry: e, negative: true, topic: topic})
+				break
+			}
+		}
+		for _, kw := range positiveKeywords {
+			if strings.Contains(lower, kw) {
+				positives = append(positives, taggedEntry{entry: e, negative: false, topic: topic})
+				break
+			}
+		}
+	}
+
+	// Cross-reference: if a positive fact targets the same topic as a negative,
+	// and is newer, the negative is contradicted by evidence.
+	var found []contradiction
+	for _, neg := range negatives {
+		for _, pos := range positives {
+			sameEntity := neg.topic == pos.topic ||
+				(len(neg.topic) > 10 && strings.Contains(pos.topic, neg.topic)) ||
+				(len(pos.topic) > 10 && strings.Contains(neg.topic, pos.topic))
+
+			if sameEntity && pos.entry.Timestamp.After(neg.entry.Timestamp) {
+				found = append(found, contradiction{
+					entryA: neg.entry.Content,
+					entryB: fmt.Sprintf("[Evidence] %s (%s)",
+						pos.entry.Content, pos.entry.Timestamp.Format("2006-01-02")),
+				})
+				break
+			}
+		}
+	}
+
+	return found
+}
+
+// expireStaleEntries scans all memory .md files and marks contradicted entries
+// with "[stale]" prefix. Stale entries are skipped by memory search filtering
+// and removed by the next Compact() pass. Returns the number of entries marked.
+func (d *DreamConsolidator) expireStaleEntries(fileStore *memory.FileStore, contradictions []contradiction) int {
+	if len(contradictions) == 0 {
+		return 0
+	}
+
+	// Build a set of stale contents to match.
+	stale := make(map[string]bool, len(contradictions))
+	for _, c := range contradictions {
+		stale[strings.TrimSpace(c.entryA)] = true
+	}
+
+	// Read all .md files in the memory directory.
+	memDir := fileStore.BaseDir()
+	entries, err := os.ReadDir(memDir)
+	if err != nil {
+		d.logger.Warn("dream: failed to read memory dir for expiration", "error", err)
+		return 0
+	}
+
+	expired := 0
+	for _, fi := range entries {
+		if fi.IsDir() || !strings.HasSuffix(fi.Name(), ".md") {
+			continue
+		}
+		path := filepath.Join(memDir, fi.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		lines := strings.Split(string(data), "\n")
+		modified := false
+		for i, line := range lines {
+			// Parse the line as a memory entry and compare by exact trimmed
+			// content. This avoids the previous bug where a short stale string
+			// could substring-match an unrelated entry, and works for any
+			// leading whitespace / prefix variation (the memory format reserves
+			// "- " as the bullet prefix).
+			bulletIdx := indexBullet(line)
+			if bulletIdx < 0 {
+				continue
+			}
+			inner := strings.TrimSpace(line[bulletIdx+2:])
+			if strings.HasPrefix(inner, "[stale]") {
+				continue // already marked
+			}
+			parsedContent := stripEntryBrackets(inner)
+			if parsedContent == "" {
+				continue
+			}
+			if !stale[parsedContent] {
+				continue
+			}
+			// Insert [stale] marker right after the "- " bullet, preserving
+			// any indentation and the original entry body verbatim.
+			lines[i] = line[:bulletIdx+2] + "[stale] " + line[bulletIdx+2:]
+			modified = true
+			expired++
+		}
+
+		if modified {
+			if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+				d.logger.Warn("dream: failed to write expired entries", "file", path, "error", err)
+			}
+		}
+	}
+
+	return expired
+}
+
+// ForceRun bypasses all trigger gates and runs a dream cycle immediately.
+// Used by the memory(action="dream_force") tool for on-demand consolidation.
+func (d *DreamConsolidator) ForceRun(ctx context.Context) DreamResult {
+	return d.Run(ctx)
+}
+
+// indexBullet returns the byte index of the "- " markdown bullet in line,
+// allowing leading whitespace. Returns -1 if not found or if the bullet is
+// not the first non-whitespace content on the line.
+func indexBullet(line string) int {
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if c == ' ' || c == '\t' {
+			continue
+		}
+		if c == '-' && i+1 < len(line) && line[i+1] == ' ' {
+			return i
+		}
+		return -1
+	}
+	return -1
+}
+
+// stripEntryBrackets removes the leading `[timestamp]`, `[category]`, and
+// optional `[expires:YYYY-MM-DD]` brackets that the memory format writes,
+// returning the trimmed entry content. Mirrors the parsing logic in
+// memory.parseMemoryFile so the stale comparison uses the same definition
+// of "content" as reads.
+func stripEntryBrackets(s string) string {
+	s = strings.TrimSpace(s)
+	// [timestamp]
+	s = skipBracket(s)
+	// [category]
+	s = skipBracket(s)
+	// [expires:...] optional
+	if strings.HasPrefix(s, "[expires:") {
+		s = skipBracket(s)
+	}
+	// [meta:...] optional v2 lifecycle metadata — must be peeled so content
+	// comparison (e.g. stale-matching during supersede) sees the bare content.
+	if strings.HasPrefix(s, "[meta:") {
+		s = skipBracket(s)
+	}
+	return strings.TrimSpace(s)
+}
+
+// skipBracket drops a leading `[...]` token and trims surrounding space.
+// Returns the input unchanged if there's no leading bracket group.
+func skipBracket(s string) string {
+	if !strings.HasPrefix(s, "[") {
+		return s
+	}
+	close := strings.Index(s, "]")
+	if close < 0 {
+		return s
+	}
+	return strings.TrimSpace(s[close+1:])
+}
+
 // ── Helpers ──
 
 func normalizeForComparison(s string) string {
-	s = fmt.Sprintf("%s", s) // Ensure string type.
 	// Lowercase and collapse whitespace.
 	var result []byte
 	lastSpace := false
@@ -432,28 +901,42 @@ func normalizeForComparison(s string) string {
 	return string(result)
 }
 
-func containsWord(text, word string) bool {
-	return len(text) > 0 && len(word) > 0 && (len(text) >= len(word)) &&
-		(text == word || // exact match
-			(len(text) > len(word) && text[:len(word)] == word) || // starts with
-			(len(text) > len(word) && text[len(text)-len(word):] == word) || // ends with
-			containsSubstr(text, " "+word) || containsSubstr(text, word+" "))
-}
-
-func containsSubstr(s, sub string) bool {
-	return len(sub) <= len(s) && findSubstr(s, sub) >= 0
-}
-
-func findSubstr(s, sub string) int {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
+// hasSignificantOverlap checks if two strings share enough words in common.
+// contentsNearDuplicate reports whether two memory contents are restatements of
+// the same fact (high token overlap), as opposed to merely sharing a topic. It
+// uses Jaccard similarity over words longer than 3 chars and is robust to word
+// order and an inserted negation. Used to gate destructive supersede on the weak
+// general-negation contradiction signal.
+func contentsNearDuplicate(a, b string) bool {
+	setA := significantWordSet(a)
+	setB := significantWordSet(b)
+	if len(setA) == 0 || len(setB) == 0 {
+		return false
+	}
+	inter := 0
+	for w := range setA {
+		if setB[w] {
+			inter++
 		}
 	}
-	return -1
+	union := len(setA) + len(setB) - inter
+	if union == 0 {
+		return false
+	}
+	return float64(inter)/float64(union) >= 0.6
 }
 
-// hasSignificantOverlap checks if two strings share enough words in common.
+// significantWordSet returns the set of normalized words longer than 3 chars.
+func significantWordSet(s string) map[string]bool {
+	set := make(map[string]bool)
+	for _, w := range splitWords(normalizeForComparison(s)) {
+		if len(w) > 3 {
+			set[w] = true
+		}
+	}
+	return set
+}
+
 func hasSignificantOverlap(a, b string) bool {
 	wordsA := splitWords(a)
 	wordsB := make(map[string]bool)
@@ -503,6 +986,7 @@ func (d *DreamConsolidator) loadState() {
 }
 
 func (d *DreamConsolidator) saveState() {
+	_ = os.MkdirAll(d.stateDir, 0o700) // defensive: ensure dir exists
 	path := filepath.Join(d.stateDir, "dream_state.json")
 	data, _ := json.MarshalIndent(d.state, "", "  ")
 	_ = os.WriteFile(path, data, 0o600)
@@ -513,6 +997,7 @@ func (d *DreamConsolidator) recordResult(result string) {
 	defer d.mu.Unlock()
 	d.state.LastDreamAt = time.Now()
 	d.state.SessionsSince = 0
+	d.state.CompactionsSince = 0
 	d.state.TotalDreams++
 	d.state.LastResult = result
 	d.saveState()

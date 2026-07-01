@@ -57,6 +57,14 @@ type ManagedMCPServerConfig struct {
 
 	// Description is a human-readable description.
 	Description string `yaml:"description" json:"description,omitempty"`
+
+	// OAuth enables OAuth 2.1 (authorization code + PKCE) for http/sse servers.
+	// When set, the HTTP transport attaches a Bearer token obtained via the
+	// `mcp authorize` flow (discovery + dynamic client registration).
+	OAuth bool `yaml:"oauth" json:"oauth,omitempty"`
+
+	// OAuthScope is the optional space-separated scope string for the flow.
+	OAuthScope string `yaml:"oauth_scope" json:"oauth_scope,omitempty"`
 }
 
 // MCPConfig holds all MCP configuration.

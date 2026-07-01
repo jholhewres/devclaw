@@ -199,7 +199,7 @@ type ctxKeyMediaEmitter struct{}
 type MediaEvent struct {
 	ID       string `json:"id"`
 	URL      string `json:"url"`
-	Type     string `json:"type"`               // image, audio, video, document
+	Type     string `json:"type"` // image, audio, video, document
 	MimeType string `json:"mime_type"`
 	Filename string `json:"filename"`
 	Size     int64  `json:"size"`
@@ -304,10 +304,10 @@ func SilentResult(content string) *ToolResult {
 // The actual result will be delivered via callback or follow-up message.
 func AsyncResult(message string) *ToolResult {
 	return &ToolResult{
-		Content:  message,
-		ForLLM:   message,
-		ForUser:  message,
-		IsAsync:  true,
+		Content: message,
+		ForLLM:  message,
+		ForUser: message,
+		IsAsync: true,
 	}
 }
 
@@ -315,10 +315,10 @@ func AsyncResult(message string) *ToolResult {
 func ErrorResult(err error) *ToolResult {
 	errMsg := err.Error()
 	return &ToolResult{
-		Content:  errMsg,
-		ForLLM:   errMsg,
-		ForUser:  "An error occurred. Please try again.",
-		Error:    err,
+		Content: errMsg,
+		ForLLM:  errMsg,
+		ForUser: "An error occurred. Please try again.",
+		Error:   err,
 	}
 }
 
@@ -550,6 +550,17 @@ type ToolExecutor struct {
 	// If nil, tools requiring confirmation are denied.
 	confirmationRequester func(sessionID, callerJID, toolName string, args map[string]any) (approved bool, err error)
 
+	// settingsGet/settingsSet back the `settings` tool, letting the main agent
+	// read and change a whitelisted set of runtime settings (media/model) with
+	// immediate hot-reload. Wired by the Assistant; nil = tool unavailable.
+	settingsGet func() (string, error)
+	settingsSet func(key, value string) (string, error)
+
+	// mcpHandler backs the `mcp` tool, letting the main agent configure,
+	// start, stop and manage external MCP servers at runtime. Wired by the
+	// Assistant; nil = tool unavailable.
+	mcpHandler func(ctx context.Context, action string, args map[string]any) (string, error)
+
 	// hooks holds registered before/after tool execution hooks.
 	hooks []*ToolHook
 
@@ -562,14 +573,14 @@ type ToolExecutor struct {
 // NewToolExecutor creates a new empty tool executor.
 func NewToolExecutor(logger *slog.Logger) *ToolExecutor {
 	return &ToolExecutor{
-		tools:        make(map[string]*registeredTool),
-		timeout:      DefaultToolTimeout,
-		bashTimeout:  5 * time.Minute,
-		logger:       logger.With("component", "tool_executor"),
-		callerLevel:  AccessOwner, // Default to owner for CLI usage.
-		parallel:     true,
-		maxParallel:  5,
-		abortCh:      make(chan struct{}),
+		tools:       make(map[string]*registeredTool),
+		timeout:     DefaultToolTimeout,
+		bashTimeout: 5 * time.Minute,
+		logger:      logger.With("component", "tool_executor"),
+		callerLevel: AccessOwner, // Default to owner for CLI usage.
+		parallel:    true,
+		maxParallel: 5,
+		abortCh:     make(chan struct{}),
 	}
 }
 
@@ -682,6 +693,35 @@ func (e *ToolExecutor) SetConfirmationRequester(fn func(sessionID, callerJID, to
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.confirmationRequester = fn
+}
+
+// SetSettingsHandlers wires the get/set callbacks backing the `settings` tool.
+func (e *ToolExecutor) SetSettingsHandlers(get func() (string, error), set func(key, value string) (string, error)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.settingsGet = get
+	e.settingsSet = set
+}
+
+// settingsHandlers returns the configured get/set callbacks (nil if unset).
+func (e *ToolExecutor) settingsHandlers() (get func() (string, error), set func(key, value string) (string, error)) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.settingsGet, e.settingsSet
+}
+
+// SetMCPHandler wires the callback backing the `mcp` tool.
+func (e *ToolExecutor) SetMCPHandler(fn func(ctx context.Context, action string, args map[string]any) (string, error)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.mcpHandler = fn
+}
+
+// mcpHandlerFn returns the configured `mcp` tool callback (nil if unset).
+func (e *ToolExecutor) mcpHandlerFn() func(ctx context.Context, action string, args map[string]any) (string, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.mcpHandler
 }
 
 // MarkConcurrentSafe marks the named tools as safe for concurrent execution.
@@ -1057,10 +1097,45 @@ func (e *ToolExecutor) Execute(ctx context.Context, calls []ToolCall) []ToolResu
 	maxParallel := e.maxParallel
 	e.mu.RUnlock()
 
+	var results []ToolResult
 	if !parallel || len(calls) <= 1 {
-		return e.executeSequential(ctx, calls)
+		results = e.executeSequential(ctx, calls)
+	} else {
+		results = e.executeStreaming(ctx, calls, maxParallel)
 	}
-	return e.executeStreaming(ctx, calls, maxParallel)
+	recordToolOutcomes(ctx, calls, results)
+	return results
+}
+
+// recordToolOutcomes appends each tool result to the per-turn outcome log
+// attached to ctx, if any. Used by the memory layer's provenance check.
+// memory_* tool calls are skipped so that a fact-save's own outcome
+// cannot influence subsequent provenance decisions within the same batch.
+func recordToolOutcomes(ctx context.Context, calls []ToolCall, results []ToolResult) {
+	log := ToolOutcomeLogFromContext(ctx)
+	if log == nil {
+		return
+	}
+	for i, r := range results {
+		if strings.HasPrefix(r.Name, "memory_") {
+			continue
+		}
+		var args string
+		if i < len(calls) {
+			args = calls[i].Function.Arguments
+		}
+		content := r.Content
+		if len(content) > 500 {
+			content = content[:500]
+		}
+		log.Record(ToolOutcome{
+			Name:      r.Name,
+			Args:      args,
+			Error:     r.Error != nil,
+			Content:   content,
+			Timestamp: time.Now(),
+		})
+	}
 }
 
 // hasSequentialTool returns true if any call targets a serial (non-concurrent-safe) tool.

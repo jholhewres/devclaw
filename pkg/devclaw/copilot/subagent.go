@@ -117,7 +117,13 @@ var DefaultSubagentDeniedTools = []string{
 	// Skill management tools (subagents should not install/remove skills).
 	"skill_init", "skill_edit", "skill_add_script", "skill_list",
 	"skill_test", "skill_install", "skill_defaults_list", "skill_defaults_install", "skill_remove",
-	// Legacy aliases (deprecated, kept for backward compatibility).
+	// Message / media delivery tools. Subagents must return their result as
+	// text; the runtime delivers it back to the user through the announce
+	// callback (see completeRun → Assistant.SetAnnounceCallback). Letting
+	// a subagent self-deliver causes duplicated or out-of-order messages.
+	"send_message", "message", "send_media",
+	// Dispatcher aliases — deny these too so subagents can't bypass the
+	// individual denials above (e.g. memory dispatcher → memory_save).
 	"memory", "scheduler", "skill_manage",
 }
 
@@ -156,6 +162,8 @@ const (
 	DeliveryScopeParent DeliveryScope = "parent"
 	// DeliveryScopeExternal delivers only to the external channel (no parent injection).
 	DeliveryScopeExternal DeliveryScope = "external"
+	// DeliveryScopeDefault is the fallback when no scope is specified.
+	DeliveryScopeDefault DeliveryScope = DeliveryScopeAll
 )
 
 // SubagentRun tracks a single subagent execution.
@@ -567,6 +575,51 @@ type SpawnParams struct {
 	EscalationChecker func(turn int, lastResponse string) *EscalationSignal
 }
 
+// resolveSpawnOrigin determines OriginChannel/OriginTo for a new subagent.
+// Resolution order: (1) explicit params values; (2) derived from
+// ParentSessionID "channel:chatID"; (3) inherited from the parent SubagentRun
+// when ParentSessionID is "subagent:<runID>" (nested spawn). Returns an error
+// when no path produces a non-empty origin — a subagent without origin cannot
+// deliver its result back to the user or parent session.
+func (m *SubagentManager) resolveSpawnOrigin(params SpawnParams) (channel, to string, err error) {
+	channel = params.OriginChannel
+	to = params.OriginTo
+	if channel != "" && to != "" {
+		return channel, to, nil
+	}
+	if strings.HasPrefix(params.ParentSessionID, "subagent:") {
+		parentRunID := strings.TrimPrefix(params.ParentSessionID, "subagent:")
+		// Snapshot the Origin* fields while holding the lock — completeRun
+		// mutates SubagentRun under m.mu.Lock(), so reading after RUnlock
+		// would race.
+		var parentCh, parentTo string
+		m.mu.RLock()
+		if parentRun, ok := m.runs[parentRunID]; ok {
+			parentCh = parentRun.OriginChannel
+			parentTo = parentRun.OriginTo
+		}
+		m.mu.RUnlock()
+		if channel == "" {
+			channel = parentCh
+		}
+		if to == "" {
+			to = parentTo
+		}
+	} else if derivedCh, derivedTo, ok := strings.Cut(params.ParentSessionID, ":"); ok {
+		if channel == "" {
+			channel = derivedCh
+		}
+		if to == "" {
+			to = derivedTo
+		}
+	}
+	if channel == "" || to == "" {
+		return "", "", fmt.Errorf("subagent spawn: origin channel/to not resolvable (parent_session_id=%q, origin_channel=%q, origin_to=%q)",
+			params.ParentSessionID, params.OriginChannel, params.OriginTo)
+	}
+	return channel, to, nil
+}
+
 // Spawn creates and starts a new subagent. Returns the run ID immediately.
 // The subagent executes in a background goroutine.
 func (m *SubagentManager) Spawn(
@@ -593,6 +646,11 @@ func (m *SubagentManager) Spawn(
 		return nil, fmt.Errorf("max spawn depth exceeded (depth=%d, max=%d)", depth, maxDepth)
 	}
 
+	originChannel, originTo, err := m.resolveSpawnOrigin(params)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create the run.
 	runID := uuid.New().String()[:8]
 	timeout := time.Duration(m.cfg.TimeoutSeconds) * time.Second
@@ -604,7 +662,7 @@ func (m *SubagentManager) Spawn(
 
 	deliveryScope := params.DeliveryScope
 	if deliveryScope == "" {
-		deliveryScope = DeliveryScopeAll
+		deliveryScope = DeliveryScopeDefault
 	}
 
 	run := &SubagentRun{
@@ -615,8 +673,8 @@ func (m *SubagentManager) Spawn(
 		Model:           params.Model,
 		ParentSessionID: params.ParentSessionID,
 		SpawnDepth:      depth,
-		OriginChannel:   params.OriginChannel,
-		OriginTo:        params.OriginTo,
+		OriginChannel:   originChannel,
+		OriginTo:        originTo,
 		OriginThreadID:  params.OriginThreadID,
 		DeliveryScope:   deliveryScope,
 		StartedAt:       time.Now(),
@@ -767,6 +825,11 @@ func (m *SubagentManager) SpawnWithExecutor(
 		depth = 1
 	}
 
+	originChannel, originTo, err := m.resolveSpawnOrigin(params)
+	if err != nil {
+		return nil, err
+	}
+
 	runID := uuid.New().String()[:8]
 	timeout := time.Duration(m.cfg.TimeoutSeconds) * time.Second
 	if params.TimeoutSeconds > 0 {
@@ -777,7 +840,7 @@ func (m *SubagentManager) SpawnWithExecutor(
 
 	deliveryScope := params.DeliveryScope
 	if deliveryScope == "" {
-		deliveryScope = DeliveryScopeAll
+		deliveryScope = DeliveryScopeDefault
 	}
 
 	run := &SubagentRun{
@@ -788,8 +851,8 @@ func (m *SubagentManager) SpawnWithExecutor(
 		Model:           llmClient.model,
 		ParentSessionID: params.ParentSessionID,
 		SpawnDepth:      depth,
-		OriginChannel:   params.OriginChannel,
-		OriginTo:        params.OriginTo,
+		OriginChannel:   originChannel,
+		OriginTo:        originTo,
 		OriginThreadID:  params.OriginThreadID,
 		DeliveryScope:   deliveryScope,
 		StartedAt:       time.Now(),
@@ -949,18 +1012,19 @@ func (m *SubagentManager) completeRun(run *SubagentRun, result string, err error
 	// Persist the completed state to SQLite for restart recovery.
 	m.persistRun(run)
 
-	// ── Announce (push) ── Notify parent immediately
-	// instead of requiring poll via wait_subagent.
-	// Respects delivery scope: "parent" suppresses external channel delivery,
-	// "external" suppresses parent injection, "all" does both.
+	m.logger.Debug("subagent announce decision",
+		"run_id", run.ID,
+		"delivery_scope", run.DeliveryScope,
+		"has_callback", cb != nil,
+	)
+
+	// ── Announce (push) ── Fire the callback regardless of DeliveryScope.
+	// The callback inspects run.DeliveryScope and routes to parent inject
+	// (parent/all) and/or direct channel send (external/all). Skipping the
+	// callback for scope=external used to silently drop the run — there is
+	// no other delivery path once the manager returns.
 	if cb != nil {
-		if run.DeliveryScope != DeliveryScopeExternal {
-			// Parent delivery (or both).
-			go cb(run)
-		}
-		// Note: external channel delivery is handled by the announce callback
-		// itself based on OriginChannel/OriginTo fields. When scope is "parent",
-		// the callback should check run.DeliveryScope and skip external delivery.
+		go cb(run)
 	}
 }
 
@@ -1183,6 +1247,14 @@ You are a **subagent** spawned by the main agent for a specific task.
 - When done, provide a concise summary of what you accomplished.
 - For coding tasks: include relevant file paths, changes made, and any issues found.
 
+## Delivery
+- DO NOT try to message the user yourself. No WhatsApp/Telegram/Discord/Slack
+  API calls, no curl to internal messaging endpoints, no message/send_message
+  tool. Just return your final text as the subagent result.
+- The runtime delivers that text to the requester's channel automatically
+  when you finish, based on the configured delivery_scope. Attempting manual
+  delivery only produces duplicates or failures.
+
 ## Persistence
 - Tool errors are hints, not stop signs. Fix the input and retry.
 - NEVER say "I cannot do X" unless you've exhausted every tool available.
@@ -1214,7 +1286,10 @@ func RegisterSubagentTools(
 			"Spawn a subagent to handle a task concurrently. The subagent runs "+
 				"independently with its own context and tools. Use this for parallelizable "+
 				"tasks like: researching multiple topics, running commands while writing code, "+
-				"or handling independent subtasks. Returns immediately with a run_id.",
+				"or handling independent subtasks. Returns immediately with a run_id. "+
+				"After spawning, if you have no other parallel work in this turn, call "+
+				"sessions_yield to release the turn — the subagent result is delivered "+
+				"automatically when it completes, triggering a new turn.",
 			map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -1233,6 +1308,17 @@ func RegisterSubagentTools(
 					"timeout_seconds": map[string]any{
 						"type":        "integer",
 						"description": "Max execution time in seconds. Default: 300 (5 minutes).",
+					},
+					"delivery_scope": map[string]any{
+						"type":    "string",
+						"enum":    []string{"all", "parent", "external"},
+						"default": "all",
+						"description": "Where to deliver the completion result: " +
+							"'all' (default) = notify the parent agent AND the external channel; " +
+							"'parent' = notify only the parent agent (useful for internal tasks where " +
+							"the parent will summarize before replying); " +
+							"'external' = deliver only to the external channel (skip parent injection). " +
+							"When unset and the subagent has no external origin, falls back to 'parent'.",
 					},
 				},
 				"required": []string{"task"},
@@ -1255,37 +1341,44 @@ func RegisterSubagentTools(
 			currentDepth := SpawnDepthFromContext(ctx)
 			childDepth := currentDepth + 1
 
-			// Capture the origin channel/chat from the session context so the
+			// Capture the origin channel/chat from the delivery target so the
 			// completion announcement can be delivered directly to the requester.
-			var originChannel, originTo string
-			if sessionID := SessionIDFromContext(ctx); sessionID != "" {
-				// sessionID has the form "channel:chatID" (may include Telegram
-				// topic suffix, e.g. "telegram:12345678:topic:42").
-				// Split on the first ":" only to get channel name.
-				if idx := strings.IndexByte(sessionID, ':'); idx != -1 {
-					originChannel = sessionID[:idx]
-					originTo = sessionID[idx+1:]
-				}
-			}
+			// SessionID is an opaque hash (MakeSessionID), so channel/chatID
+			// must come from the delivery context — never by splitting the hash.
+			parentSessionID := SessionIDFromContext(ctx)
+			delivery := DeliveryTargetFromContext(ctx)
+			originChannel := delivery.Channel
+			originTo := delivery.ChatID
 
-			// Internal subagents (spawned by tool) default to parent-only delivery
-			// to avoid duplicate announcements in external channels.
-			scope := DeliveryScopeParent
-			if originChannel != "" {
+			// Resolve delivery scope: explicit arg wins (validated against the
+			// allowed enum), otherwise default to 'all' when there is an
+			// external origin to route to, else 'parent'.
+			var scope DeliveryScope
+			if v, _ := args["delivery_scope"].(string); v != "" {
+				switch DeliveryScope(v) {
+				case DeliveryScopeAll, DeliveryScopeParent, DeliveryScopeExternal:
+					scope = DeliveryScope(v)
+				default:
+					return nil, fmt.Errorf("invalid delivery_scope %q (allowed: all, parent, external)", v)
+				}
+			} else if originChannel != "" {
 				scope = DeliveryScopeAll
+			} else {
+				scope = DeliveryScopeParent
 			}
 
 			run, err := manager.Spawn(
 				context.Background(),
 				SpawnParams{
-					Task:           task,
-					Label:          label,
-					Model:          model,
-					TimeoutSeconds: timeoutSec,
-					SpawnDepth:     childDepth,
-					OriginChannel:  originChannel,
-					OriginTo:       originTo,
-					DeliveryScope:  scope,
+					Task:            task,
+					Label:           label,
+					Model:           model,
+					TimeoutSeconds:  timeoutSec,
+					SpawnDepth:      childDepth,
+					ParentSessionID: parentSessionID,
+					OriginChannel:   originChannel,
+					OriginTo:        originTo,
+					DeliveryScope:   scope,
 				},
 				llmClient,
 				executor,
@@ -1389,7 +1482,7 @@ func RegisterSubagentTools(
 				"required": []string{"run_id"},
 			},
 		),
-		func(_ context.Context, args map[string]any) (any, error) {
+		func(ctx context.Context, args map[string]any) (any, error) {
 			runID, _ := args["run_id"].(string)
 			if runID == "" {
 				return nil, fmt.Errorf("run_id is required")
@@ -1400,7 +1493,7 @@ func RegisterSubagentTools(
 				timeoutSec = int(v)
 			}
 
-			waitCtx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
+			waitCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 			defer cancel()
 
 			run, err := manager.Wait(waitCtx, runID)

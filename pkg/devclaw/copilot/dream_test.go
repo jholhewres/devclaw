@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -226,5 +227,314 @@ func TestNormalizeForComparison(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("normalizeForComparison(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+// TestDreamSupersedesContradictionInSQLite is the US-006 write-side health
+// test: a dream run over a contradiction whose entries are resident in SQLite
+// must report contradictions_resolved>0, hard-exclude the losing memory from
+// recall, AND drop it from the in-memory vector cache — without ever appending
+// a "[Contradiction] A vs B" summary entry.
+func TestDreamSupersedesContradictionInSQLite(t *testing.T) {
+	sqlStore := newDreamTestStore(t)
+
+	// Evidence contradiction: an older negative fact and a newer positive fact
+	// about the same topic. The topic fingerprint is the first 60 chars, so both
+	// share an identical prefix (>60 chars) and diverge only in the trailing
+	// negative/positive sentiment word. entryA (loser) = the negative one.
+	prefix := "The staging payments service deployment on the primary cluster is currently "
+	loser := prefix + "down and unavailable."
+	winner := prefix + "working and available now."
+
+	// Seed BOTH into SQLite so the supersede has live chunks to match by content.
+	seedDreamFiles(t, sqlStore, map[string]string{
+		"loser.md":  loser,
+		"winner.md": winner,
+		"filler.md": "Unrelated note about the build pipeline using CGO and the sqlite tag.",
+	})
+
+	tmpDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	older := time.Now().Add(-2 * time.Hour)
+	newer := time.Now()
+	mock := &mockMemoryStore{
+		entries: []memory.Entry{
+			{Content: loser, Category: "fact", Timestamp: older},
+			{Content: winner, Category: "fact", Timestamp: newer},
+			{Content: "Unrelated note about the build pipeline using CGO and the sqlite tag.", Category: "fact", Timestamp: newer},
+		},
+	}
+	d := NewDreamConsolidator(DefaultDreamConfig(), mock, tmpDir, logger).
+		WithSQLiteStore(sqlStore)
+
+	result := d.Run(context.Background())
+	if result.Error != nil {
+		t.Fatalf("dream run error: %v", result.Error)
+	}
+	if result.ContradictionsResolved <= 0 {
+		t.Fatalf("expected contradictions_resolved>0, got %d (found=%d)",
+			result.ContradictionsResolved, result.Contradictions)
+	}
+
+	// The losing memory must be gone from BM25 recall.
+	bm25, err := sqlStore.SearchBM25("staging payments service deployment cluster", 10)
+	if err != nil {
+		t.Fatalf("SearchBM25: %v", err)
+	}
+	for _, h := range bm25 {
+		if strings.Contains(h.Text, "down and unavailable") {
+			t.Fatal("superseded loser still recallable via BM25 after dream")
+		}
+	}
+
+	// And gone from the in-memory vector cache (evicted immediately).
+	vec, err := sqlStore.SearchVector(context.Background(), "staging payments service deployment cluster", 10)
+	if err != nil {
+		t.Fatalf("SearchVector: %v", err)
+	}
+	for _, h := range vec {
+		if strings.Contains(h.Text, "down and unavailable") {
+			t.Fatal("superseded loser still in vector cache after dream")
+		}
+	}
+}
+
+// ── Dream classifier phase tests ─────────────────────────────────────────────
+
+// noopEmbedder satisfies memory.EmbeddingProvider without any model I/O.
+type noopEmbedder struct{}
+
+func (noopEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
+	out := make([][]float32, len(texts))
+	for i := range out {
+		out[i] = make([]float32, 4)
+	}
+	return out, nil
+}
+func (noopEmbedder) Dimensions() int { return 4 }
+func (noopEmbedder) Name() string    { return "noop" }
+func (noopEmbedder) Model() string   { return "noop" }
+
+// newDreamTestStore creates a *memory.SQLiteStore backed by a temp file.
+// The store is closed via t.Cleanup.
+func newDreamTestStore(t *testing.T) *memory.SQLiteStore {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "dream-test-*.db")
+	if err != nil {
+		t.Fatalf("create temp db: %v", err)
+	}
+	f.Close()
+	store, err := memory.NewSQLiteStore(f.Name(), noopEmbedder{}, slog.Default())
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	t.Cleanup(func() { store.Close() })
+	return store
+}
+
+// dreamTestKeywords is a locale-neutral keyword map for classifier tests.
+// Each wing has ≥3 keywords to satisfy ClassifierMinHits=3.
+var dreamTestKeywords = map[string][]string{
+	"alpha": {"foo", "bar", "qux", "corge"},
+	"beta":  {"baz", "grault", "garply", "waldo"},
+}
+
+// seedDreamFiles inserts files+chunks into the store without going through
+// the full indexer (which would require real embeddings). One chunk per file.
+// Content must contain ≥3 matches for a single wing to satisfy ClassifierMinHits.
+func seedDreamFiles(t *testing.T, store *memory.SQLiteStore, files map[string]string) {
+	t.Helper()
+	ctx := context.Background()
+	for fileID, content := range files {
+		chunks := []memory.Chunk{
+			{FileID: fileID, Index: 0, Text: content, Hash: "h-" + fileID},
+		}
+		if err := store.IndexChunks(ctx, fileID, chunks, "fh-"+fileID); err != nil {
+			t.Fatalf("IndexChunks %s: %v", fileID, err)
+		}
+	}
+}
+
+// alphaContent and betaContent have ≥3 keyword matches each to clear
+// ClassifierMinHits=3 and ClassifierDominanceFactor=2.0.
+const alphaContent = "foo bar qux corge alpha-only content with no beta signals here"
+const betaContent = "baz grault garply waldo beta-only content with no alpha signals here"
+
+// newDreamWithSQLite builds a DreamConsolidator backed by both a mock
+// memory.Store (for the existing phases) and a real SQLiteStore (for the
+// classifier phase).
+func newDreamWithSQLite(t *testing.T, sqlStore *memory.SQLiteStore, hierCfg HierarchyConfig) *DreamConsolidator {
+	t.Helper()
+	tmpDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	mock := &mockMemoryStore{
+		entries: []memory.Entry{
+			{Content: "alpha foo bar entry one", Category: "fact", Timestamp: time.Now()},
+			{Content: "alpha foo bar entry two", Category: "fact", Timestamp: time.Now()},
+			{Content: "beta baz qux entry three", Category: "fact", Timestamp: time.Now()},
+			{Content: "gamma unrelated entry four", Category: "fact", Timestamp: time.Now()},
+		},
+	}
+	d := NewDreamConsolidator(DefaultDreamConfig(), mock, tmpDir, logger).
+		WithSQLiteStore(sqlStore).
+		WithHierarchyConfig(hierCfg)
+	return d
+}
+
+// classifiableNullCount runs a real (non-dry) classification pass and returns
+// how many NULL-wing files the pass was able to classify. When the dream cycle
+// already ran, this should return 0 (all classifiable files already labeled).
+// When the dream cycle was skipped/disabled, this returns the number of files
+// that still need classifying.
+func classifiableNullCount(t *testing.T, store *memory.SQLiteStore) int {
+	t.Helper()
+	stats, err := store.RunLegacyClassificationPass(context.Background(), memory.LegacyClassificationConfig{
+		BatchSize: 50,
+		Keywords:  dreamTestKeywords,
+	})
+	if err != nil {
+		t.Fatalf("classifiableNullCount pass: %v", err)
+	}
+	return stats.Classified
+}
+
+// TestDreamClassifierPhaseRunsWhenEnabled verifies that Run() invokes the
+// legacy classifier and labels matched files when hierarchy is enabled.
+// After the dream run, a follow-up classification pass should find 0
+// remaining classifiable NULL-wing files.
+func TestDreamClassifierPhaseRunsWhenEnabled(t *testing.T) {
+	sqlStore := newDreamTestStore(t)
+	seedDreamFiles(t, sqlStore, map[string]string{
+		"file-a.md": alphaContent,
+		"file-b.md": betaContent,
+		"file-c.md": "this file has no matching signals at all",
+	})
+
+	hierCfg := HierarchyConfig{Enabled: true, LegacyKeywords: dreamTestKeywords}
+	d := newDreamWithSQLite(t, sqlStore, hierCfg)
+
+	result := d.Run(context.Background())
+	if result.Error != nil {
+		t.Fatalf("Run returned error: %v", result.Error)
+	}
+
+	// A follow-up pass on the same store should find 0 classifiable NULL files —
+	// the dream cycle already handled them all.
+	remaining := classifiableNullCount(t, sqlStore)
+	if remaining != 0 {
+		t.Errorf("expected 0 remaining classifiable files after dream run, got %d", remaining)
+	}
+}
+
+// TestDreamClassifierPhaseIsIdempotent verifies that a second dream cycle
+// classifies zero additional files (already labelled by the first cycle).
+func TestDreamClassifierPhaseIsIdempotent(t *testing.T) {
+	sqlStore := newDreamTestStore(t)
+	seedDreamFiles(t, sqlStore, map[string]string{
+		"file-a.md": alphaContent,
+		"file-b.md": betaContent,
+	})
+
+	hierCfg := HierarchyConfig{Enabled: true, LegacyKeywords: dreamTestKeywords}
+	d := newDreamWithSQLite(t, sqlStore, hierCfg)
+
+	// First cycle — classifies both files.
+	if r := d.Run(context.Background()); r.Error != nil {
+		t.Fatalf("first Run error: %v", r.Error)
+	}
+
+	// Second cycle — wing IS NULL filter means no additional files found.
+	if r := d.Run(context.Background()); r.Error != nil {
+		t.Fatalf("second Run error: %v", r.Error)
+	}
+
+	// A follow-up manual pass should also find 0 remaining NULL files.
+	remaining := classifiableNullCount(t, sqlStore)
+	if remaining != 0 {
+		t.Errorf("expected 0 classifiable files after two dream runs, got %d", remaining)
+	}
+}
+
+// TestDreamClassifierPhaseDisabledByFlag verifies that when hierarchy is
+// disabled, the classifier phase is skipped and classifiable files remain NULL.
+func TestDreamClassifierPhaseDisabledByFlag(t *testing.T) {
+	sqlStore := newDreamTestStore(t)
+	seedDreamFiles(t, sqlStore, map[string]string{
+		"file-a.md": alphaContent,
+		"file-b.md": betaContent,
+	})
+
+	hierCfg := HierarchyConfig{Enabled: false, LegacyKeywords: dreamTestKeywords}
+	d := newDreamWithSQLite(t, sqlStore, hierCfg)
+
+	result := d.Run(context.Background())
+	if result.Error != nil {
+		t.Fatalf("Run error: %v", result.Error)
+	}
+
+	// With hierarchy disabled the dream phase skipped classification.
+	// A follow-up pass should still find the classifiable files (still NULL).
+	remaining := classifiableNullCount(t, sqlStore)
+	if remaining == 0 {
+		t.Error("expected classifiable NULL files to remain after disabled-flag run")
+	}
+}
+
+// TestDreamClassifierPhaseEmptyKeywordsNoOp verifies that when hierarchy is
+// enabled but LegacyKeywords is nil, the classifier is a no-op with no error.
+func TestDreamClassifierPhaseEmptyKeywordsNoOp(t *testing.T) {
+	sqlStore := newDreamTestStore(t)
+	seedDreamFiles(t, sqlStore, map[string]string{
+		"file-a.md": alphaContent,
+	})
+
+	hierCfg := HierarchyConfig{Enabled: true, LegacyKeywords: nil}
+	d := newDreamWithSQLite(t, sqlStore, hierCfg)
+
+	result := d.Run(context.Background())
+	if result.Error != nil {
+		t.Fatalf("Run error: %v", result.Error)
+	}
+
+	// With no keywords the pass is a no-op — file still has NULL wing.
+	// Verify by running with real keywords; it should find 1 classifiable file.
+	remaining := classifiableNullCount(t, sqlStore)
+	if remaining == 0 {
+		t.Error("expected file to still have NULL wing after no-keyword dream run")
+	}
+}
+
+// TestDreamClassifierPhaseErrorIsolation verifies that when the classifier
+// returns an error (closed store), the dream cycle still completes without
+// panic, and result.Error is nil.
+func TestDreamClassifierPhaseErrorIsolation(t *testing.T) {
+	sqlStore := newDreamTestStore(t)
+	seedDreamFiles(t, sqlStore, map[string]string{
+		"file-a.md": alphaContent,
+	})
+
+	// Close the store before running so the classifier's DB query fails.
+	sqlStore.Close()
+
+	hierCfg := HierarchyConfig{Enabled: true, LegacyKeywords: dreamTestKeywords}
+
+	tmpDir := t.TempDir()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	mock := &mockMemoryStore{
+		entries: []memory.Entry{
+			{Content: "alpha foo bar entry one", Category: "fact", Timestamp: time.Now()},
+			{Content: "alpha foo bar entry two", Category: "fact", Timestamp: time.Now()},
+			{Content: "beta baz qux entry three", Category: "fact", Timestamp: time.Now()},
+			{Content: "gamma unrelated entry four", Category: "fact", Timestamp: time.Now()},
+		},
+	}
+	d := NewDreamConsolidator(DefaultDreamConfig(), mock, tmpDir, logger).
+		WithSQLiteStore(sqlStore).
+		WithHierarchyConfig(hierCfg)
+
+	// Must not panic; dream cycle must complete and return no error.
+	result := d.Run(context.Background())
+	if result.Error != nil {
+		t.Fatalf("dream cycle should succeed even when classifier errors, got: %v", result.Error)
 	}
 }

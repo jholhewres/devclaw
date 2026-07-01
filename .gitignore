@@ -54,6 +54,7 @@ configs/bootstrap/USER.md
 
 # Agent working directory (projects, temp files, generated content)
 /workspace/
+.sisyphus/
 
 # Config with secrets
 config.yaml
@@ -84,3 +85,8 @@ pkg/devclaw/copilot/data/
 devclaw-linux-amd64
 
 workspace-*/
+
+.omc/
+.omx/
+node-compile-cache/
+pkg/devclaw/copilot/memory/testdata/mlm_tokenizer.json

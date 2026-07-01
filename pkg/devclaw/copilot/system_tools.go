@@ -48,10 +48,6 @@ func sanitizeOutput(output string) string {
 	urlCredPattern := regexp.MustCompile(`(https?://)([^:@\s]+):([^@\s]+)@`)
 	output = urlCredPattern.ReplaceAllString(output, "$1[REDACTED]:[REDACTED]@")
 
-	// Sanitize long hex strings that look like secrets (32+ hex chars).
-	hexPattern := regexp.MustCompile(`\b[0-9a-fA-F]{32,}\b`)
-	output = hexPattern.ReplaceAllString(output, "[SANITIZED_HEX]")
-
 	// Sanitize private key patterns.
 	privateKeyPattern := regexp.MustCompile(`-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`)
 	output = privateKeyPattern.ReplaceAllString(output, "[SANITIZED_PRIVATE_KEY]")
@@ -62,13 +58,17 @@ func sanitizeOutput(output string) string {
 // RegisterSystemTools registers all built-in system tools in the executor.
 // These are core tools available regardless of which skills are loaded.
 // If ssrfGuard is non-nil, web_fetch will validate URLs against SSRF rules.
-func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, memStore *memory.FileStore, sqliteStore *memory.SQLiteStore, memCfg MemoryConfig, sched *scheduler.Scheduler, dataDir string, ssrfGuard *security.SSRFGuard, vault *Vault, webSearchCfg WebSearchConfig, skillDB *SkillDB, gatewayCfg GatewayConfig, toolGuardCfg ToolGuardConfig) {
+// contextRouter may be nil; when non-nil it is forwarded to the memory tools
+// so that memory_save can route new memories to palace wings (Sprint 2 Room 2.0b).
+func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, memStore *memory.FileStore, sqliteStore *memory.SQLiteStore, memCfg MemoryConfig, contextRouter *ContextRouter, sched *scheduler.Scheduler, dataDir string, ssrfGuard *security.SSRFGuard, vault *Vault, webSearchCfg WebSearchConfig, skillDB *SkillDB, gatewayCfg GatewayConfig, toolGuardCfg ToolGuardConfig) {
 	registerWebSearchTool(executor, webSearchCfg)
 	registerWebFetchTool(executor, ssrfGuard)
 	registerFileTools(executor, dataDir)
 	RegisterApplyPatchTool(executor)
 	registerBashTool(executor)
 	registerCapabilitiesTool(executor) // Agent self-discovery tool
+	registerSettingsTool(executor)     // Agent self-configuration (media/model)
+	registerMCPManagementTool(executor) // Agent self-management of external MCP servers
 
 	if sandboxRunner != nil {
 		registerExecTool(executor, sandboxRunner)
@@ -76,10 +76,15 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 
 	if memStore != nil {
 		RegisterMemoryTools(executor, MemoryDispatcherConfig{
-			Store:       memStore,
-			SQLiteStore: sqliteStore,
-			Config:      memCfg,
+			Store:         memStore,
+			SQLiteStore:   sqliteStore,
+			Config:        memCfg,
+			ContextRouter: contextRouter,
 		})
+	}
+
+	if sqliteStore != nil {
+		RegisterKGTools(executor, sqliteStore)
 	}
 
 	if sched != nil {
@@ -106,10 +111,13 @@ func RegisterSystemTools(executor *ToolExecutor, sandboxRunner *sandbox.Runner, 
 
 // ---------- Script Preflight Validation ----------
 
+// maxBashOutputChars is the maximum output size for bash and ssh_exec tools.
+const maxBashOutputChars = 50000
+
 // scriptRunners maps script command prefixes to their file extensions.
 var scriptRunners = map[string]string{
 	"python ": ".py", "python3 ": ".py",
-	"node ":   ".js", "npx ":    ".js",
+	"node ": ".js", "npx ": ".js",
 }
 
 // checkScriptPreflight detects when a bash command runs a Python/JS script
@@ -813,12 +821,9 @@ func registerBashTool(executor *ToolExecutor) {
 
 			output = strings.TrimRight(output, "\n ")
 
-			// Sanitize sensitive information from output.
-			output = sanitizeOutput(output)
-
 			// Truncate very long output.
-			if len(output) > 50000 {
-				output = output[:50000] + "\n... [truncated, output too long]"
+			if len(output) > maxBashOutputChars {
+				output = TruncateToolResult(output, maxBashOutputChars)
 			}
 
 			if err != nil {
@@ -905,11 +910,8 @@ func registerBashTool(executor *ToolExecutor) {
 			out, err := cmd.CombinedOutput()
 			output := strings.TrimRight(string(out), "\n ")
 
-			// Sanitize sensitive information from output.
-			output = sanitizeOutput(output)
-
-			if len(output) > 50000 {
-				output = output[:50000] + "\n... [truncated]"
+			if len(output) > maxBashOutputChars {
+				output = TruncateToolResult(output, maxBashOutputChars)
 			}
 
 			if err != nil {
@@ -977,9 +979,6 @@ func registerBashTool(executor *ToolExecutor) {
 
 			out, err := cmd.CombinedOutput()
 			output := strings.TrimRight(string(out), "\n ")
-
-			// Sanitize sensitive information from output.
-			output = sanitizeOutput(output)
 
 			if err != nil {
 				return fmt.Sprintf("SCP error: %v\n%s", err, output), nil
@@ -1619,7 +1618,7 @@ func registerCapabilitiesTool(executor *ToolExecutor) {
 				},
 			},
 		),
-			func(_ context.Context, args map[string]any) (any, error) {
+		func(_ context.Context, args map[string]any) (any, error) {
 			filter, _ := args["filter"].(string)
 			if filter == "" {
 				filter = "all"
@@ -1675,6 +1674,144 @@ type SecurityAuditToolConfig struct {
 	GatewayConfig GatewayConfig
 	AllowSudo     bool
 	EmbeddingCfg  memory.EmbeddingConfig
+}
+
+// ProfileSwitcherConfig holds dependencies for the switch_profile tool.
+type ProfileSwitcherConfig struct {
+	Router       *AgentRouter
+	SessionStore *SessionStore
+}
+
+// RegisterProfileTools registers profile switching tools.
+func RegisterProfileTools(executor *ToolExecutor, cfg ProfileSwitcherConfig) {
+	if cfg.Router == nil {
+		return
+	}
+
+	executor.Register(
+		MakeToolDefinition("switch_profile",
+			"Switch the active profile to change domain context, model, skills, and tool access. "+
+				"Use this when the user wants to work on a different project or context. "+
+				"Available profiles can be listed with action='list'.",
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"profile_id": map[string]any{
+						"type":        "string",
+						"description": "Profile ID to activate (use action='list' to see available IDs). Leave empty with action='switch' to return to the base config.",
+					},
+					"action": map[string]any{
+						"type":        "string",
+						"enum":        []string{"switch", "list", "current"},
+						"description": "'switch' to change profile, 'list' to see all profiles, 'current' to show active profile",
+					},
+				},
+			},
+		),
+		func(ctx context.Context, args map[string]any) (any, error) {
+			action, _ := args["action"].(string)
+			if action == "" {
+				action = "switch"
+			}
+
+			switch action {
+			case "list":
+				var sb strings.Builder
+				sb.WriteString("# Available Profiles\n\n")
+				for _, id := range cfg.Router.ListProfiles() {
+					p := cfg.Router.GetProfile(id)
+					if p == nil {
+						continue
+					}
+					label := p.Label
+					if label == "" {
+						label = p.ID
+					}
+					sb.WriteString(fmt.Sprintf("- **%s** (`%s`)", label, p.ID))
+					if p.Description != "" {
+						sb.WriteString(": " + p.Description)
+					}
+					if p.Model != "" {
+						sb.WriteString(" [model: " + p.Model + "]")
+					}
+					sb.WriteString("\n")
+				}
+				return sb.String(), nil
+
+			case "current":
+				sessionID := SessionIDFromContext(ctx)
+				if sessionID == "" {
+					return "No active session.", nil
+				}
+				profileID := "none (base config)"
+				if cfg.SessionStore != nil {
+					if sess := cfg.SessionStore.GetByID(sessionID); sess != nil {
+						if active := sess.GetConfig().ActiveProfileID; active != "" {
+							p := cfg.Router.GetProfile(active)
+							if p != nil {
+								label := p.Label
+								if label == "" {
+									label = p.ID
+								}
+								profileID = fmt.Sprintf("%s (%s)", label, active)
+							} else {
+								profileID = active + " (not found)"
+							}
+						}
+					}
+				}
+				return fmt.Sprintf("Active profile: %s", profileID), nil
+
+			case "switch":
+				profileID, _ := args["profile_id"].(string)
+				if profileID == "" {
+					sessionID := SessionIDFromContext(ctx)
+					if sessionID == "" {
+						return "No active session.", nil
+					}
+					if cfg.SessionStore != nil {
+						if sess := cfg.SessionStore.GetByID(sessionID); sess != nil {
+							sessConfig := sess.GetConfig()
+							sessConfig.ActiveProfileID = ""
+							sess.SetConfig(sessConfig)
+						}
+					}
+					return "Switched to base configuration.", nil
+				}
+				profile := cfg.Router.GetProfile(profileID)
+				if profile == nil {
+					available := strings.Join(cfg.Router.ListProfiles(), ", ")
+					return fmt.Sprintf("Profile '%s' not found. Available: %s", profileID, available), nil
+				}
+
+				sessionID := SessionIDFromContext(ctx)
+				if sessionID != "" && cfg.SessionStore != nil {
+					if sess := cfg.SessionStore.GetByID(sessionID); sess != nil {
+						sessConfig := sess.GetConfig()
+						sessConfig.ActiveProfileID = profileID
+						sess.SetConfig(sessConfig)
+					}
+				}
+
+				label := profile.Label
+				if label == "" {
+					label = profile.ID
+				}
+				var sb strings.Builder
+				sb.WriteString(fmt.Sprintf("Switched to profile **%s**.", label))
+				if profile.Description != "" {
+					sb.WriteString(" " + profile.Description)
+				}
+				if profile.Model != "" {
+					sb.WriteString(fmt.Sprintf(" Model: %s.", profile.Model))
+				}
+				return sb.String(), nil
+
+			default:
+				return "Unknown action. Use 'switch', 'list', or 'current'.", nil
+			}
+		},
+	)
 }
 
 func registerSecurityAuditTool(executor *ToolExecutor, cfg SecurityAuditToolConfig) {
